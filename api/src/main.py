@@ -13,6 +13,8 @@ from api.src.sales.router import router as sales_router
 from api.src.customers.router import router as customers_router
 from api.src.sifen.router import router as sifen_router
 from api.src.purchases.router import router as purchases_router
+from api.src.payments.router import router as payments_router
+from api.src.currency.router import router as currency_router
 
 app = FastAPI(
     title="InteliMarket API",
@@ -46,3 +48,5 @@ app.include_router(sales_router)
 app.include_router(customers_router)
 app.include_router(sifen_router)
 app.include_router(purchases_router)
+app.include_router(payments_router)
+app.include_router(currency_router)
