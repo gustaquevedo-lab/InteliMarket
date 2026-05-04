@@ -7,6 +7,8 @@ from api.src.config import settings
 from api.src.auth.router import router as auth_router
 from api.src.tenants.router import router as tenants_router
 from api.src.companies.router import router as companies_router
+from api.src.products.router import router as products_router
+from api.src.inventory.router import router as inventory_router
 
 app = FastAPI(
     title="InteliMarket API",
@@ -17,7 +19,6 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins.split(","),
@@ -32,7 +33,8 @@ async def health_check():
     return {"status": "ok", "version": "0.1.0"}
 
 
-# Routers
 app.include_router(auth_router)
 app.include_router(tenants_router)
 app.include_router(companies_router)
+app.include_router(products_router)
+app.include_router(inventory_router)
