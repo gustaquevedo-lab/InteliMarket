@@ -4,6 +4,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.src.config import settings
+from api.src.auth.router import router as auth_router
+from api.src.tenants.router import router as tenants_router
+from api.src.companies.router import router as companies_router
 
 app = FastAPI(
     title="InteliMarket API",
@@ -29,7 +32,7 @@ async def health_check():
     return {"status": "ok", "version": "0.1.0"}
 
 
-# TODO: Registrar routers por módulo
-# from api.src.auth.router import router as auth_router
-# app.include_router(auth_router, prefix="/api/v1/auth")
-# ... etc
+# Routers
+app.include_router(auth_router)
+app.include_router(tenants_router)
+app.include_router(companies_router)
