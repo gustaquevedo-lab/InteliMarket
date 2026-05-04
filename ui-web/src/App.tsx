@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext"
 import Layout from "./components/Layout"
 import Login from "./pages/Login"
 import Dashboard from "./pages/Dashboard"
+import SifenPage from "./pages/SifenPage"
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -41,6 +42,7 @@ function AppRoutes() {
         <Route path="logistics" element={<div className="text-center py-20 text-gray-400">Distribuci\u00f3n — en desarrollo</div>} />
         <Route path="reports" element={<div className="text-center py-20 text-gray-400">Reportes — en desarrollo</div>} />
         <Route path="settings" element={<div className="text-center py-20 text-gray-400">Configuraci\u00f3n — en desarrollo</div>} />
+        <Route path="sifen" element={<SifenPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

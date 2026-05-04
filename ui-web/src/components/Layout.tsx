@@ -16,6 +16,7 @@ import {
   Sun,
   CreditCard,
   FileText,
+  Shield,
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -30,6 +31,7 @@ const navItems = [
   { icon: CreditCard, label: "Compras", path: "/purchases" },
   { icon: Users, label: "Clientes", path: "/customers" },
   { icon: Truck, label: "Distribuci\u00f3n", path: "/logistics" },
+  { icon: Shield, label: "SIFEN", path: "/sifen" },
   { icon: BarChart3, label: "Reportes", path: "/reports" },
   { icon: Settings, label: "Configuraci\u00f3n", path: "/settings" },
 ]
