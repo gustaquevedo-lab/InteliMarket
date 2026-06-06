@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InteliMarket — Roadmap Multi-Vertical | State of the Art</title>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-secondary: #64748b;
+    --primary: #2563eb;
+    --primary-light: #dbeafe;
+    --success: #16a34a;
+    --success-light: #dcfce7;
+    --warning: #d97706;
+    --warning-light: #fef3c7;
+    --danger: #dc2626;
+    --danger-light: #fee2e2;
+    --purple: #7c3aed;
+    --purple-light: #ede9fe;
+    --teal: #0d9488;
+    --teal-light: #ccfbf1;
+    --gray: #6b7280;
+    --gray-light: #f3f4f6;
+    --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --c-retail: #0d9488;
+    --c-distrib: #f59e0b;
+    --c-pharma: #ef4444;
+    --c-super: #7c3aed;
+    --c-services: #3b82f6;
+    --c-boutique: #ec4899;
+  }
+  [data-theme="dark"] {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --border: #334155;
+    --text: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --primary: #3b82f6;
+    --primary-light: #1e3a5f;
+    --success: #22c55e;
+    --success-light: #14532d;
+    --warning: #f59e0b;
+    --warning-light: #451a03;
+    --danger: #ef4444;
+    --danger-light: #450a0a;
+    --purple: #8b5cf6;
+    --purple-light: #2e1065;
+    --teal: #14b8a6;
+    --teal-light: #134e4a;
+    --gray: #9ca3af;
+    --gray-light: #1f2937;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); padding: 24px; transition: background 0.3s, color 0.3s; }
+  .container { max-width: 1500px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; flex-wrap: wrap; gap: 16px; }
+  .header-left h1 { font-size: 32px; font-weight: 800; background: linear-gradient(135deg, #7c3aed 0%, #ec4899 50%, #f59e0b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .header-left p { color: var(--text-secondary); font-size: 14px; margin-top: 4px; }
+  .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .theme-toggle { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; cursor: pointer; font-size: 18px; transition: all 0.2s; }
+  .theme-toggle:hover { border-color: var(--primary); }
+  .last-updated { font-size: 12px; color: var(--text-secondary); background: var(--card); padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); }
+  .summary { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; }
+  .summary h2 { font-size: 18px; margin-bottom: 12px; color: var(--text); }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-top: 12px; }
+  .stat { display: flex; flex-direction: column; gap: 4px; }
+  .stat-label { font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; letter-spacing: 0.5px; }
+  .stat-value { font-size: 28px; font-weight: 800; color: var(--primary); }
+  .stat-done .stat-value { color: var(--success); }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; padding: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+  .filter-label { font-size: 13px; color: var(--text-secondary); font-weight: 600; margin-right: 4px; align-self: center; }
+  .filter-btn { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+  .filter-btn:hover { border-color: var(--primary); }
+  .filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+  .vertical { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+  .vertical-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .vertical-icon { font-size: 32px; }
+  .vertical-title { font-size: 22px; font-weight: 800; }
+  .vertical-desc { color: var(--text-secondary); font-size: 13px; margin-top: 4px; }
+  .vertical-progress { margin-left: auto; font-size: 14px; font-weight: 700; }
+  .phase { margin-bottom: 24px; padding: 16px; background: var(--bg); border-radius: 12px; border: 1px solid var(--border); }
+  .phase-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .phase-weeks { font-size: 11px; color: var(--text-secondary); background: var(--card); padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); margin-left: 8px; }
+  .module { padding: 14px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; transition: all 0.2s; }
+  .module:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  .module-title { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .module-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  .module-badges { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+  .badge-status-done { background: var(--success-light); color: var(--success); }
+  .badge-status-progress { background: var(--warning-light); color: var(--warning); }
+  .badge-status-pending { background: var(--gray-light); color: var(--gray); }
+  .badge-type { background: var(--primary-light); color: var(--primary); }
+  .tasks { margin-top: 10px; }
+  .task { font-size: 12px; padding: 4px 0; color: var(--text-secondary); display: flex; align-items: flex-start; gap: 6px; }
+  .task-done { text-decoration: line-through; color: var(--text-secondary); opacity: 0.7; }
+  .task-checkbox { display: inline-block; width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; flex-shrink: 0; margin-top: 2px; }
+  .task-checkbox.checked { background: var(--success); border-color: var(--success); }
+  .task-checkbox.checked::after { content: '✓'; color: white; font-size: 10px; display: flex; align-items: center; justify-content: center; height: 100%; }
+  .notes-area { margin-top: 12px; }
+  .notes-area textarea { width: 100%; min-height: 80px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 12px; resize: vertical; }
+  .save-status { font-size: 12px; color: var(--success); margin-left: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <h1>InteliMarket — Roadmap Multi-Vertical</h1>
+      <p>Master roadmap para 6 verticales: Retail, Distribución, Farmacia, Supermercado, Servicios, Boutique</p>
+    </div>
+    <div class="header-right">
+      <span class="last-updated" id="lastUpdated">—</span>
+      <button class="theme-toggle" id="themeToggle">🌙</button>
+    </div>
+  </div>
+
+  <div class="summary">
+    <h2>📊 Resumen General</h2>
+    <div class="summary-grid">
+      <div class="stat stat-done"><span class="stat-label">Módulos completados</span><span class="stat-value" id="totalDone">—</span></div>
+      <div class="stat"><span class="stat-label">Módulos en progreso</span><span class="stat-value" id="totalInProgress">—</span></div>
+      <div class="stat"><span class="stat-label">Módulos pendientes</span><span class="stat-value" id="totalPending">—</span></div>
+      <div class="stat"><span class="stat-label">API paths</span><span class="stat-value">1128</span></div>
+      <div class="stat"><span class="stat-label">Tablas DB</span><span class="stat-value">288</span></div>
+      <div class="stat"><span class="stat-label">Alembic head</span><span class="stat-value" style="font-size:14px">20260604000000</span></div>
+    </div>
+  </div>
+
+  <div class="filters">
+    <span class="filter-label">Vertical:</span>
+    <button class="filter-btn active" data-vfilter="all">Todas</button>
+    <button class="filter-btn" data-vfilter="retail">🛒 Retail</button>
+    <button class="filter-btn" data-vfilter="distribucion">🚚 Distribución</button>
+    <button class="filter-btn" data-vfilter="farmacia">💊 Farmacia</button>
+    <button class="filter-btn" data-vfilter="supermercado">🏪 Supermercado</button>
+    <button class="filter-btn" data-vfilter="servicios">🔧 Servicios</button>
+    <button class="filter-btn" data-vfilter="boutique">👗 Boutique</button>
+  </div>
+
+  <div id="verticals"></div>
+
+  <div class="summary" style="margin-top:32px">
+    <h2>📝 Notas de Sesión</h2>
+    <div class="notes-area">
+      <textarea id="roadmapNotes" placeholder="Notas sobre avances, blockers, próximos pasos..."></textarea>
+      <div style="margin-top:8px">
+        <button class="filter-btn" onclick="saveNotes()">💾 Guardar Notas</button>
+        <span class="save-status" id="saveStatus">Los cambios se guardan automáticamente</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = {
+  verticals: [
+    {
+      id: "retail",
+      name: "Retail / Comercios",
+      icon: "🛒",
+      color: "#0d9488",
+      description: "Tiendas, comercios, customer 360, eventos locales, fidelización.",
+      phases: [
+        { id: "retail-fase0", title: "Fase 0 — Dashboard & POS Ultra-Rápido", weeks: "1-2", icon: "⚡", modules: [
+          { id: "retail-f0-dashboard", title: "Dashboard Retail 360°", status: "done", badge: "Backend + Frontend", tech: ["React","FastAPI"], desc: "Heatmap 7×24, top productos, alertas stock, próximos eventos PY.", tasks: ["✅ Heatmap ventas 7×24 con peak hours","✅ Top productos por margen","✅ Alertas stock crítico","✅ Próximos eventos Paraguay (15 eventos)","✅ KPIs en tiempo real","✅ Tendencias semana vs semana"] },
+          { id: "retail-f0-pos-rapido", title: "POS Ultra-Rápido con Atajos", status: "done", badge: "Frontend", tech: ["React","Web Audio"], desc: "POS con F2/F4/F8/F9/F12/Esc, modo kiosko, sonidos, genérico auto.", tasks: ["✅ Atajos teclado F2/F4/F8/F9/F12/Esc","✅ Modo kiosko fullscreen","✅ Sonidos Web Audio API","✅ Sugerencia genérico por defecto","✅ Búsqueda fuzzy con scoring","✅ Cache offline de catálogo"] }
+        ]},
+        { id: "retail-fase1", title: "Fase 1 — Cliente Rápido & Cupones", weeks: "3-4", icon: "👥", modules: [
+          { id: "retail-f1-cliente-rapido", title: "Cliente Rápido con RFM", status: "done", badge: "Frontend + Backend", tech: ["React"], desc: "RFM auto: VIP/Frecuente/Regular/Nuevo. Detect: teléfono/DNI/RUC/QR.", tasks: ["✅ RFM scoring automático","✅ Auto-detect tipo cliente","✅ Búsqueda por DNI/RUC/teléfono","✅ Historial compras con ticket","✅ Notas del cliente","✅ Tags personalizables"] },
+          { id: "retail-f1-cupones-digitales", title: "Cupones Digitales", status: "done", badge: "Frontend", tech: ["React"], desc: "6 tipos: porcentaje/monto_fijo/2x1/regalo/envio_gratis/puntos_dobles.", tasks: ["✅ Cupón VERANO15 (15% off)","✅ Cupón BIENVENIDO10","✅ 6 tipos de cupón","✅ Vigencia con start/end","✅ Topes por cliente","✅ Tracking de uso"] }
+        ]},
+        { id: "retail-fase2", title: "Fase 2 — WhatsApp & Eventos", weeks: "5-6", icon: "📱", modules: [
+          { id: "retail-f2-whatsapp-local", title: "WhatsApp Local", status: "done", badge: "Backend", tech: ["WhatsApp API"], desc: "Mensajería local con plantillas por vertical.", tasks: ["✅ Plantillas pre-aprobadas","✅ Envío masivo segmentado","✅ Opt-in/opt-out","✅ Tracking apertura","✅ Respuestas automáticas","✅ HSM con variables"] },
+          { id: "retail-f2-eventos-locales", title: "Calendario Eventos Paraguay", status: "done", badge: "Frontend", tech: ["React"], desc: "15 eventos PY con PRODUCTOS_POR_EVENTO y lift%.", tasks: ["✅ 15 eventos cargados","✅ PRODUCTOS_POR_EVENTO con lift%","✅ Vista calendario mes","✅ Sugerencias pre-evento","✅ Stock dedicado por evento","✅ Post-evento markdown auto"] }
+        ]},
+        { id: "retail-fase3", title: "Fase 3 — Tienda Online", weeks: "7-8", icon: "🌐", modules: [
+          { id: "retail-f3-tienda-online", title: "E-commerce Tienda Online", status: "done", badge: "Backend + Frontend", tech: ["React","Next.js"], desc: "Tienda pública /retail/public/storefront/{slug} sin auth.", tasks: ["✅ Catálogo público","✅ Carrito con localStorage","✅ Checkout con delivery","✅ Integración Pagopar","✅ SEO meta tags","✅ Tracking conversiones"] }
+        ]}
+      ]
+    },
+    {
+      id: "distribucion",
+      name: "Distribución Mayorista",
+      icon: "🚚",
+      color: "#f59e0b",
+      description: "Distribuidoras, ruta de reparto, flota, control de carga, GPS tracking, optimización TSP.",
+      phases: [
+        { id: "distrib-fase0", title: "Fase 0 — Core", weeks: "1-2", icon: "📦", modules: [
+          { id: "distrib-f0-rutas", title: "Planificación de Rutas", status: "done", badge: "Backend", tech: ["Python","TSP"], desc: "TSP nearest-neighbor + 2-opt con time windows.", tasks: ["✅ Nearest-neighbor seed","✅ 2-opt improvement","✅ Time window constraints","✅ Capacity constraints","✅ Visualización mapa","✅ Re-route dinámico"] },
+          { id: "distrib-f0-carga", title: "Optimización de Carga", status: "done", badge: "Backend", tech: ["Python"], desc: "LIFO/FIFO/zone ordering, zonas de temperatura.", tasks: ["✅ LIFO/FIFO config","✅ Zonas temperatura","✅ Volumen/peso/pallets","✅ Mixed zones warning","✅ Mixed load optimizer","✅ Reporte utilización %"] }
+        ]},
+        { id: "distrib-fase1", title: "Fase 1 — Tracking & ETA", weeks: "3-4", icon: "📍", modules: [
+          { id: "distrib-f1-gps", title: "GPS Tracking Repartidores", status: "done", badge: "Backend", tech: ["GPS API"], desc: "Tracking en tiempo real con haversine × zona × hora.", tasks: ["✅ GPS polling 30s","✅ Map view con markers","✅ Battery optimization","✅ Geofence entrada/salida","✅ Historial trayectoria","✅ Alertas desvío ruta"] },
+          { id: "distrib-f1-eta", title: "ETA Prediction", status: "done", badge: "Backend", tech: ["Python"], desc: "ETA con factores: zona, hora, día, tráfico. 30-95% confidence.", tasks: ["✅ Factor zona (centro 1.4×)","✅ Factor hora (rush 1.3×)","✅ Factor DOW","✅ Haversine distance","✅ Confidence interval","✅ Update dinámico"] }
+        ]}
+      ]
+    },
+    {
+      id: "farmacia",
+      name: "Farmacia / Droguería",
+      icon: "💊",
+      color: "#ef4444",
+      description: "Farmacias y droguerías. Control de lotes, vencimientos, principios activos, sustancias controladas, recetas, obras sociales, compliance DINAVISA.",
+      phases: [
+        { id: "pharma-f0", title: "Fase 0 — Fundación & POS Farma", weeks: "1-2", icon: "💊", modules: [
+          { id: "pharma-f0-pos-dispensacion", title: "POS de Dispensación con Validaciones", status: "done", badge: "Backend + Frontend", tech: ["Python","FastAPI","React","SQLAlchemy","PostgreSQL"], desc: "POS específico para farmacia con búsqueda por principio activo, alerta de interacciones, validación de receta para controlados.", tasks: ["✅ Widget de búsqueda inteligente: por nombre comercial, principio activo, código de barras, o síntoma","✅ Validación obligatoria de receta para sustancias controladas (categorías A/B/C según DINALFA)","✅ Alerta de interacción medicamentosa: al agregar producto, verificar contra historial del paciente","✅ Alerta de duplicidad terapéutica: dos productos con mismo principio activo o familia","✅ Verificación de dosis máximas: según edad/peso del paciente, alertar si excede","✅ Modo 'genérico por defecto': si hay equivalentes genéricos más baratos, sugerir al cajero"] },
+          { id: "pharma-f0-frontend-mgmt", title: "Frontend de Gestión: Medicamentos CRUD", status: "done", badge: "Frontend", tech: ["React","TypeScript","Tailwind"], desc: "Páginas de gestión para medicamentos, equivalentes, alertas de vencimiento, sustancias controladas — cerrar el loop del backend completo.", tasks: ["✅ Página /medications: alta/baja/modificación con forma farmacéutica, vía de administración, principio activo, registro sanitario, laboratorio","✅ Página /equivalents: matching de genérico ↔ marca, precio, sugerencia automática al dispensar","✅ Página /expiration-alerts: listado de productos próximos a vencer, alerta visual por severidad, resolución con acción (liquidar/devolver/destruir)","✅ Página /controlled: registro de movimientos de sustancias controladas con firma digital, número de acta, foto de receta","✅ Página /insurance: gestión de obras sociales con cobertura, copagos, topes, autorización requerida","✅ Migrar los 8 PHARMA_FEATURES (pharma_medications, pharma_equivalents, etc.) a feature gates reales en ALL_FEATURES"] }
+        ]},
+        { id: "pharma-f1", title: "Fase 1 — Recetas, Obras Sociales & Compliance", weeks: "3-5", icon: "📋", modules: [
+          { id: "pharma-f1-recetas-digitales", title: "Recetas Digitales & Dispensación", status: "done", badge: "Backend + Frontend", tech: ["Python","FastAPI","React","OCR","PostgreSQL"], desc: "Carga de recetas médicas con foto/PDF, validación contra médico matriculado, dispensación parcial, archivo digital.", tasks: ["✅ Carga de receta: foto desde celular, escaneo PDF, o selección desde archivo del paciente","✅ OCR de recetas: extraer médico, paciente, productos, dosis, fecha — validar contra padrón de médicos matriculados","✅ Dispensación parcial: si no hay stock completo, dispensar lo disponible, dejar el resto pendiente para reposición","✅ Validación de fecha: alerta si receta tiene más de X días (configurable por ley local)","✅ Archivo digital con búsqueda por paciente/médico/fecha, link desde el ticket de venta","✅ Reporte para auditoría: recetas dispensadas, médicos más frecuentes, principios activos más recetados"] },
+          { id: "pharma-f1-obras-sociales", title: "Obras Sociales, Prepagas & Cobertura", status: "done", badge: "Backend + Frontend", tech: ["Python","FastAPI","React","PostgreSQL"], desc: "Gestión de obras sociales con cobertura diferenciada por plan, topes, autorización previa, facturación mensual agrupada.", tasks: ["✅ CRUD de obras sociales: nombre, RUC, planes, porcentaje de cobertura, tope mensual, requiere autorización","✅ Tabla de cobertura por producto: 'Amitriptilina 25mg bajo IPS cubre 100%, bajo particular 0%'","✅ Cálculo automático al dispensar: precio × (1 - cobertura%) = copago del paciente, registrar como cuenta a cobrar a la OS","✅ Autorización previa: bloquear dispensación si OS requiere autorización y no está cargada","✅ Facturación mensual agrupada por OS: cierre del mes, generar archivo de lote, enviar a la OS","✅ Reporte: total dispensado por OS, monto a cobrar, monto efectivamente cobrado, aging de cuentas"] },
+          { id: "pharma-f1-compliance", title: "Compliance DINALFA & Trazabilidad", status: "done", badge: "Backend + Reportes", tech: ["Python","FastAPI","PostgreSQL","ReportLab/WeasyPrint"], desc: "Libro electrónico de psicotrópicos y estupefacientes, reportes regulatorios automáticos, trazabilidad lote a lote.", tasks: ["✅ Libro electrónico de psicotrópicos: registro de cada movimiento (compra, dispensación, pérdida) con firma digital","✅ Reporte mensual DINALFA: formato oficial, generación automática, archivo PDF firmado digitalmente","✅ Reporte de stock de controlados: arqueo diario vs sistema, alertas de diferencias","✅ Trazabilidad lote a lote: del proveedor al paciente, incluyendo fraccionamiento si aplica","✅ Reporte de sustancias vencidas: protocolo de destrucción con testigos y acta","✅ Reporte anual para SET/PN: cierre fiscal de movimientos de controlados"] }
+        ]},
+        { id: "pharma-f2", title: "Fase 2 — Cadena de Frío & IoT", weeks: "6-7", icon: "❄️", modules: [
+          { id: "pharma-f2-cold-chain-farmacia", title: "Cold Chain Farma con Sensores", status: "done", badge: "Backend + IoT + Frontend", tech: ["Python","FastAPI","React","MQTT","PostgreSQL"], desc: "Sensores de temperatura en heladeras de vacunas/insulinas, alertas vía WhatsApp, logs para auditoría regulatoria.", tasks: ["✅ Sensores por heladera: temperatura, humedad, batería, ubicación","✅ Thresholds diferenciados: vacunas 2-8°C, insulina 2-8°C, otros 15-25°C","✅ Alertas vía WhatsApp: a farmacéutico + dueño cuando hay desvío","✅ Log continuo con intervalo configurable, exportación a Excel/PDF para auditoría","✅ Reporte de excursiones térmicas: cuánto tiempo, qué productos estaban, qué hacer (cuarentena/destruir)","✅ Integración con IoT Cold Chain ya existente en el core (módulo cold_chain)"] }
+        ]},
+        { id: "pharma-f3", title: "Fase 3 — E-commerce & Delivery", weeks: "8-9", icon: "🚚", modules: [
+          { id: "pharma-f3-ecommerce", title: "Tienda Online con Delivery Local", status: "done", badge: "Frontend + Backend", tech: ["React","Python","FastAPI","PostgreSQL"], desc: "E-commerce con catálogo de OTC, delivery en el día, integración con WhatsApp para subir recetas.", tasks: ["✅ Catálogo público: solo productos OTC (sin receta), con foto, prospecto, precio, indicaciones","✅ Carrito + checkout con dirección de delivery, cálculo de costo por zona","✅ Subida de receta por WhatsApp: cliente envía foto, bot responde con link de pago o 'pasá a retirar'","✅ Delivery local: integración con InteliEntregas o moto propia","✅ Pago online (Pagopar/Kuapay) o contra entrega","✅ WhatsApp notifications: pedido recibido, en preparación, despachado, entregado"] }
+        ]}
+      ]
+    },
+    {
+      id: "supermercado",
+      name: "Supermercado / Autoservicio",
+      icon: "🏪",
+      color: "#7c3aed",
+      description: "Supermercados y autoservicios. Producción, perecederos, mermas, forecasting, balanzas, ESL, omnicanal.",
+      phases: [
+        { id: "super-fase0", title: "Fase 0 — Producción, Mermas & Perecederos", weeks: "1-6", icon: "🏗️", modules: [
+          { id: "super-f0-produccion", title: "Producción, Mermas & Perecederos", status: "done", badge: "Backend + Frontend", tech: ["Python","FastAPI","React","SQLAlchemy","PostgreSQL"], desc: "Recetas BOM, órdenes de producción, batches, mermas, perecederos, markdowns, forecasting base.", tasks: ["✅ 16 modelos supermer_*: recetas BOM, órdenes, batches, mermas, perecederos, markdowns, forecasting","✅ CRUD de recetas con items, área, activas/inactivas, factor de cocción","✅ Mermas por área y tipo con costeo","✅ Perecederos: vida útil configurable, markdown automático","✅ Forecasting: promedio por DOW con lookback configurable"] },
+          { id: "super-f0-haccp", title: "HACCP, Auditorías & Equipos", status: "done", badge: "Backend + Frontend", tech: ["Python","React"], desc: "Sistema HACCP, auditorías internas, mantenimiento equipos, no-conformidades.", tasks: ["✅ 4 modelos HACCP","✅ Templates de auditoría","✅ Work orders","✅ Maintenance schedule","✅ Non-conformity tracking","✅ Compliance dashboard"] }
+        ]},
+        { id: "super-fase1", title: "Fase 1 — DSD, Inventory & Replenishment", weeks: "7-12", icon: "🔄", modules: [
+          { id: "super-f1-dsd", title: "DSD, Inventory, Replenishment, Returns", status: "done", badge: "Backend + Frontend", tech: ["Python","React"], desc: "Direct Store Delivery, gestión de inventario, reabastecimiento automático, devoluciones.", tasks: ["✅ 5 modelos DSD","✅ Replenishment rules","✅ Returns management","✅ Auto-reorder con min/max","✅ Cross-docking","✅ Vendor managed inventory"] }
+        ]},
+        { id: "super-fase2", title: "Fase 2 — Pricing, ESL & Promos", weeks: "13-16", icon: "💰", modules: [
+          { id: "super-f2-pricing", title: "Pricing, ESL & Promos", status: "done", badge: "Backend + Frontend", tech: ["Python","React"], desc: "Electronic Shelf Labels, promociones automáticas, dynamic markdown por vida útil.", tasks: ["✅ 5 modelos pricing","✅ ESL integration","✅ Promo engine","✅ Dynamic markdown","✅ Reglas por categoría","✅ A/B testing precios"] }
+        ]},
+        { id: "super-fase3", title: "Fase 3 — Fidelización, PYG, Shrinkage, E-commerce", weeks: "17-24", icon: "🎯", modules: [
+          { id: "super-f3-fideliz", title: "Fidelización, Scan&Go, Customer360", status: "done", badge: "Backend + Frontend", tech: ["Python","React"], desc: "Sistema de puntos, Scan&Go, perfil 360° del cliente.", tasks: ["✅ 6 modelos fidelización","✅ Scan&Go mobile","✅ Customer 360","✅ RFM automático","✅ Segmentación","✅ Campañas por segmento"] },
+          { id: "super-f3-pyg", title: "PYG Diario, Shrinkage & Forecast Avanzado", status: "done", badge: "Backend + Frontend", tech: ["Python","React"], desc: "P&L diario, control de mermas, forecasting avanzado con 3 algoritmos.", tasks: ["✅ 4 modelos PYG","✅ P&L diario automático","✅ Shrinkage tracking","✅ Forecast advanced (3 algoritmos)","✅ Benchmarking vs competencia","✅ E-commerce SM"] }
+        ]}
+      ]
+    },
+    {
+      id: "servicios",
+      name: "Servicios Profesionales",
+      icon: "🔧",
+      color: "#3b82f6",
+      description: "Talleres, servicios técnicos, agendas, contratos recurrentes.",
+      phases: [
+        { id: "serv-fase0", title: "Fase 0 — Core Servicios", weeks: "1-4", icon: "🛠️", modules: [
+          { id: "serv-f0-agenda", title: "Agenda de Servicios", status: "in_progress", badge: "Backend 2/2 ✅ | Frontend 0/2", tech: ["Python","React"], desc: "Agenda por técnico, orden de servicio, repuestos, mano de obra. **Backend completo** con 28 modelos sv_*, 45 endpoints (CRUD + dispatch AI + dashboard + contratos + inventario móvil + facturacion SIFEN).", tasks: ["✅ 28 modelos sv_* (verticales, técnicos, skills, certificaciones, agenda, equipos, cotizaciones, work_orders, contratos, inventario móvil, facturas SIFEN, leads, reviews)","✅ 45 endpoints REST /api/v1/servicios/* (dashboard, dispatch, convert-to-wo, payments, time tracking)","✅ Migration 20260604000000 aplicada - 28 tablas creadas","✅ Seed completo: 15 verticales, 42 skills, 20 técnicos, 80 propiedades, 100 equipos, 30 quotes, 30 WO, 15 contratos + 164 visitas, 7 invoices, 88 inventario móvil","✅ AI dispatch scoring: distancia × conflictos × rating","✅ E2E test: POST /quotes → CT-2026-0A5353 → 200 OK","⏳ Frontend React page ServiciosPage.tsx con tabs (Dashboard/Técnicos/Calendario/Cotizaciones/WO/Contratos/Inventario)"] },
+          { id: "serv-f0-contratos", title: "Contratos Recurrentes", status: "in_progress", badge: "Backend ✅", tech: ["Python"], desc: "Contratos de mantenimiento preventivo mensual/anual. **Backend completo** con auto-generación de visitas, renovación, SLA tracking, dashboard contratos activos.", tasks: ["✅ Modelo ServiceContract con periodicidad (mensual/anual/trimestral)","✅ Auto-generación de ContractVisit (15 contratos con 164 visitas en seed)","✅ SLA: tiempo_respuesta_horas, tiempo_resolucion_horas","✅ Renovación automática + alertas vencimiento","✅ Endpoints: /contracts, /contracts/{id}, /contracts/{id}/generate-visits, /contracts/{id}/visits","✅ Dashboard contratos activos: 9 contratos activos según seed"] }
+        ]}
+      ]
+    },
+    {
+      id: "boutique",
+      name: "Boutique / Indumentaria",
+      icon: "👗",
+      color: "#ec4899",
+      description: "Boutiques, tiendas de ropa, talles, colores, temporada, vitrina virtual.",
+      phases: [
+        { id: "bout-fase0", title: "Fase 0 — Core Boutique", weeks: "1-3", icon: "👚", modules: [
+          { id: "bout-f0-catalogo", title: "Catálogo por Talle y Color", status: "pending", badge: "Backend + Frontend", tech: ["Python","React"], desc: "Variantes por talle/color, temporadas, colecciones.", tasks: ["Modelo ProductVariant (talle, color, stock)","Temporadas: verao/invierno","Colecciones por marca","Vitrina virtual con fotos","Stock por variante","Cross-sell por color similar"] },
+          { id: "bout-f0-ventas", title: "POS Boutique con Probador", status: "pending", badge: "Frontend", tech: ["React"], desc: "POS con gestión de probador y reserva de prendas.", tasks: ["Reserva de prendas en probador","Tiempo límite por probador","Cross-sell complementarios","Gift wrapping","Devoluciones 30 días","Cliente VIP automático"] }
+        ]}
+      ]
+    }
+  ]
+};
+
+const VERTICAL_META = {
+  retail: { name: "Retail / Comercios", icon: "🛒", color: "#0d9488", colorLight: "#ccfbf1" },
+  distribucion: { name: "Distribución Mayorista", icon: "🚚", color: "#f59e0b", colorLight: "#fef3c7" },
+  farmacia: { name: "Farmacia / Droguería", icon: "💊", color: "#ef4444", colorLight: "#fee2e2" },
+  supermercado: { name: "Supermercado / Autoservicio", icon: "🏪", color: "#7c3aed", colorLight: "#ede9fe" },
+  servicios: { name: "Servicios Profesionales", icon: "🔧", color: "#3b82f6", colorLight: "#dbeafe" },
+  boutique: { name: "Boutique / Indumentaria", icon: "👗", color: "#ec4899", colorLight: "#fce7f3" }
+};
+
+const STATE_VERSION = 9;
+const STORAGE_KEY = "intelimarket_roadmap_verticals";
+let state = loadState();
+let currentVFilter = "all";
+
+function defaultState() {
+  const modules = {};
+  const tasks = {};
+  DATA.verticals.forEach(vertical => {
+    vertical.phases.forEach(phase => {
+      phase.modules.forEach(mod => {
+        mod.tasks.forEach((task, i) => {
+          if (task.startsWith("✅")) tasks[`${mod.id}-t${i}`] = "done";
+        });
+        if (mod.status === "done") modules[mod.id] = "done";
+        else if (mod.status === "in-progress") modules[mod.id] = "in-progress";
+      });
+    });
+  });
+  return { version: STATE_VERSION, modules, tasks, notes: "", lastUpdated: new Date().toISOString() };
+}
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.version === STATE_VERSION) return parsed;
+    }
+  } catch(e) {}
+  return defaultState();
+}
+
+function saveState() {
+  state.lastUpdated = new Date().toISOString();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  updateUI();
+}
+
+function findModule(moduleId) {
+  for (const v of DATA.verticals) for (const p of v.phases) for (const m of p.modules) if (m.id === moduleId) return { module: m, phase: p, vertical: v };
+  return null;
+}
+
+function getTaskStatus(taskText) {
+  if (taskText.startsWith("✅")) return "done";
+  return "pending";
+}
+
+function getModuleStatus(mod) {
+  let total = mod.tasks.length, done = 0;
+  mod.tasks.forEach((t, i) => {
+    const key = `${mod.id}-t${i}`;
+    const saved = state.tasks[key];
+    if (saved === "done" || (!saved && getTaskStatus(t) === "done")) done++;
+  });
+  if (total === 0) return state.modules[mod.id] || "pending";
+  if (done === total) return "done";
+  if (done > 0) return "in-progress";
+  return "pending";
+}
+
+function toggleTask(moduleId, taskIndex) {
+  const key = `${moduleId}-t${taskIndex}`;
+  const cur = state.tasks[key] || getTaskStatus(findModule(moduleId).module.tasks[taskIndex]);
+  state.tasks[key] = cur === "done" ? "pending" : "done";
+  saveState();
+}
+
+function render() {
+  const container = document.getElementById("verticals");
+  let html = "";
+  DATA.verticals.forEach(v => {
+    if (currentVFilter !== "all" && v.id !== currentVFilter) return;
+    let totalMods = 0, doneMods = 0;
+    v.phases.forEach(p => p.modules.forEach(m => { totalMods++; if (getModuleStatus(m) === "done") doneMods++; }));
+    html += `<div class="vertical" data-vertical="${v.id}">
+      <div class="vertical-header">
+        <span class="vertical-icon">${v.icon}</span>
+        <div>
+          <div class="vertical-title">${v.name}</div>
+          <div class="vertical-desc">${v.description}</div>
+        </div>
+        <div class="vertical-progress">${doneMods}/${totalMods} módulos</div>
+      </div>`;
+    v.phases.forEach(p => {
+      html += `<div class="phase">
+        <div class="phase-title">${p.icon} ${p.title} <span class="phase-weeks">${p.weeks}</span></div>`;
+      p.modules.forEach(m => {
+        const status = getModuleStatus(m);
+        const statusBadge = `<span class="badge badge-status-${status === 'done' ? 'done' : status === 'in-progress' ? 'progress' : 'pending'}">${status === 'done' ? '✓ Done' : status === 'in-progress' ? '🔄 In Progress' : '⏳ Pending'}</span>`;
+        const typeBadge = `<span class="badge badge-type">${m.badge}</span>`;
+        html += `<div class="module">
+          <div class="module-title">${m.title} ${statusBadge} ${typeBadge}</div>
+          <div class="module-desc">${m.desc}</div>
+          <div class="tasks">`;
+        m.tasks.forEach((t, i) => {
+          const taskStatus = state.tasks[`${m.id}-t${i}`] || getTaskStatus(t);
+          const checked = taskStatus === "done" ? "checked" : "";
+          const taskClass = taskStatus === "done" ? "task task-done" : "task";
+          html += `<div class="${taskClass}"><span class="task-checkbox ${checked}" onclick="toggleTask('${m.id}', ${i})"></span><span>${t.substring(taskStatus === "done" ? 2 : 0)}</span></div>`;
+        });
+        html += `</div></div>`;
+      });
+      html += `</div>`;
+    });
+    html += `</div>`;
+  });
+  container.innerHTML = html;
+  updateStats();
+}
+
+function updateStats() {
+  let total = 0, done = 0, inProgress = 0;
+  DATA.verticals.forEach(v => v.phases.forEach(p => p.modules.forEach(m => {
+    total++;
+    const s = getModuleStatus(m);
+    if (s === "done") done++;
+    else if (s === "in-progress") inProgress++;
+  })));
+  document.getElementById("totalDone").textContent = done;
+  document.getElementById("totalInProgress").textContent = inProgress;
+  document.getElementById("totalPending").textContent = total - done - inProgress;
+  document.getElementById("lastUpdated").textContent = "Actualizado: " + new Date(state.lastUpdated).toLocaleString("es-PY");
+}
+
+function updateUI() { render(); }
+
+function saveNotes() {
+  state.notes = document.getElementById("roadmapNotes").value;
+  saveState();
+  document.getElementById("saveStatus").textContent = "💾 Guardado!";
+  setTimeout(() => { document.getElementById("saveStatus").textContent = "Los cambios se guardan automáticamente"; }, 2000);
+}
+
+document.querySelectorAll(".filter-btn[data-vfilter]").forEach(btn => {
+  btn.addEventListener("click", function() {
+    document.querySelectorAll(".filter-btn[data-vfilter]").forEach(b => b.classList.remove("active"));
+    this.classList.add("active");
+    currentVFilter = this.dataset.vfilter;
+    render();
+  });
+});
+
+document.getElementById("themeToggle").addEventListener("click", function() {
+  const html = document.documentElement;
+  const isDark = html.getAttribute("data-theme") === "dark";
+  html.setAttribute("data-theme", isDark ? "light" : "dark");
+  this.textContent = isDark ? "🌙" : "☀️";
+  localStorage.setItem("intelimarket_theme_verticals", isDark ? "light" : "dark");
+});
+
+const savedTheme = localStorage.getItem("intelimarket_theme_verticals");
+if (savedTheme) {
+  document.documentElement.setAttribute("data-theme", savedTheme);
+  document.getElementById("themeToggle").textContent = savedTheme === "dark" ? "☀️" : "🌙";
+}
+
+document.getElementById("roadmapNotes").value = state.notes || "";
+
+render();
+</script>
+</body>
+</html>
