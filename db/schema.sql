@@ -184,6 +184,26 @@ CREATE TABLE stock (
     UNIQUE(warehouse_id, product_id, variant_id)
 );
 
+-- Lotes de stock para FIFO/LIFO (tracking por costo y fecha)
+CREATE TABLE stock_lots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    warehouse_id UUID NOT NULL REFERENCES warehouses(id),
+    product_id UUID NOT NULL REFERENCES products(id),
+    variant_id UUID REFERENCES product_variants(id),
+    cantidad INTEGER NOT NULL DEFAULT 0,
+    cantidad_disponible INTEGER NOT NULL DEFAULT 0,
+    costo_unitario NUMERIC(15,0) NOT NULL,
+    costo_total NUMERIC(18,0) NOT NULL,
+    referencia VARCHAR(100),  -- nro compra, orden, etc
+    fecha_ingreso TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    fecha_vencimiento TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_stock_lots_product ON stock_lots(product_id);
+CREATE INDEX idx_stock_lots_company ON stock_lots(company_id);
+CREATE INDEX idx_stock_lots_fecha ON stock_lots(fecha_ingreso);
+
 -- Lotes
 CREATE TABLE batches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -886,3 +906,184 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     auto_renovar BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ==========================================
+-- INTEGRATIONS (Webhooks)
+-- ==========================================
+
+-- Configuraciones de integraciones (ecosistema + custom)
+CREATE TABLE integration_configs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id),
+    destino VARCHAR(30) NOT NULL,  -- intelicont, inteliaudit, sueldok, custom
+    url VARCHAR(500) NOT NULL,
+    secret VARCHAR(255),
+    eventos JSONB,  -- ["venta.creada", "pago.recibido", ...]
+    activo BOOLEAN DEFAULT true,
+    creado TIMESTAMPTZ DEFAULT NOW(),
+    actualizado TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Historial de entregas de webhooks
+CREATE TABLE webhook_deliveries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    config_id UUID REFERENCES integration_configs(id),
+    evento VARCHAR(50) NOT NULL,
+    url VARCHAR(500) NOT NULL,
+    status INTEGER,
+    payload_size INTEGER,
+    intento INTEGER DEFAULT 1,
+    creado TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Cuentas por pagar
+CREATE TABLE accounts_payable (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id),
+    supplier_id UUID REFERENCES suppliers(id),
+    purchase_order_id UUID REFERENCES purchase_orders(id),
+    monto NUMERIC(15,0) NOT NULL,
+    saldo NUMERIC(15,0) NOT NULL,
+    fecha_vencimiento DATE,
+    estado VARCHAR(20) DEFAULT 'pendiente',  -- pendiente, pagado, vencido
+    creado TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ==========================================
+-- INTEGRATION TABLES (InteliCont, InteliAudit, SueldOK)
+-- ==========================================
+
+-- InteliCont Sync Configuration
+CREATE TABLE intelicont_sync_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id VARCHAR(100) NOT NULL UNIQUE,
+    enabled BOOLEAN DEFAULT true,
+    auto_sync BOOLEAN DEFAULT false,
+    sync_interval_minutes INTEGER DEFAULT 60,
+    last_sync_at TIMESTAMPTZ,
+    url_base VARCHAR(500) NOT NULL,
+    api_key VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- InteliCont Accounting Entries
+CREATE TABLE intelicont_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    fecha TIMESTAMPTZ NOT NULL,
+    tipo_asiento VARCHAR(30) NOT NULL,  -- venta, compra, cobro, pago, ajuste, cierre
+    descripcion TEXT,
+    referencia_tipo VARCHAR(30) NOT NULL,  -- sale, purchase, payment, session, inventory
+    referencia_id UUID NOT NULL,
+    total_debe NUMERIC(15,0) NOT NULL,
+    total_haber NUMERIC(15,0) NOT NULL,
+    estado VARCHAR(20) DEFAULT 'generado',  -- generado, validado, sincronizado, error
+    sync_status VARCHAR(20) DEFAULT 'pendiente',  -- pendiente, sincronizado, error
+    synced_at TIMESTAMPTZ,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- InteliCont Entry Lines
+CREATE TABLE intelicont_entry_lines (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entry_id UUID NOT NULL REFERENCES intelicont_entries(id) ON DELETE CASCADE,
+    cuenta_codigo VARCHAR(20) NOT NULL,
+    cuenta_nombre VARCHAR(100) NOT NULL,
+    debe NUMERIC(15,0) DEFAULT 0,
+    haber NUMERIC(15,0) DEFAULT 0,
+    descripcion TEXT
+);
+
+CREATE INDEX idx_intelicont_entries_sync ON intelicont_entries(sync_status);
+CREATE INDEX idx_intelicont_entries_referencia ON intelicont_entries(referencia_tipo, referencia_id);
+CREATE INDEX idx_intelicont_entries_fecha ON intelicont_entries(fecha DESC);
+
+-- InteliAudit Sync Configuration
+CREATE TABLE inteliaudit_sync_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id VARCHAR(100) NOT NULL UNIQUE,
+    enabled BOOLEAN DEFAULT true,
+    auto_sync BOOLEAN DEFAULT false,
+    url_base VARCHAR(500) NOT NULL,
+    api_key VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- SueldOK Sync Configuration
+CREATE TABLE sueldok_sync_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id VARCHAR(100) NOT NULL UNIQUE,
+    enabled BOOLEAN DEFAULT true,
+    auto_sync BOOLEAN DEFAULT false,
+    url_base VARCHAR(500) NOT NULL,
+    api_key VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ==========================================
+-- PAGOPAR PAYMENT GATEWAY
+-- ==========================================
+
+CREATE TABLE pagopar_transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    order_id VARCHAR(100) NOT NULL,
+    amount BIGINT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    payment_method VARCHAR(50),
+    card_brand VARCHAR(50),
+    card_last4 VARCHAR(4),
+    customer_email VARCHAR(200) NOT NULL,
+    customer_name VARCHAR(200) NOT NULL,
+    checkout_url TEXT,
+    pagopar_id VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_pagopar_company ON pagopar_transactions(company_id);
+CREATE INDEX idx_pagopar_order ON pagopar_transactions(order_id);
+CREATE INDEX idx_pagopar_status ON pagopar_transactions(status);
+
+-- ==========================================
+-- BACKUPS
+-- ==========================================
+
+CREATE TABLE backups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(id),
+    tenant_slug VARCHAR(100),
+    schema_name VARCHAR(100) NOT NULL,
+    filename VARCHAR(500) NOT NULL,
+    file_size BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    backup_type VARCHAR(20) NOT NULL DEFAULT 'manual',
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_backups_tenant ON backups(tenant_id);
+CREATE INDEX idx_backups_status ON backups(status);
+CREATE INDEX idx_backups_expires ON backups(expires_at);
+
+-- Configuración de programación de backups
+CREATE TABLE backup_schedule_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(id),
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    frequency VARCHAR(20) NOT NULL DEFAULT 'daily',  -- hourly, daily, weekly, monthly
+    hour INTEGER NOT NULL DEFAULT 2,  -- 0-23
+    minute INTEGER NOT NULL DEFAULT 0,  -- 0-59
+    day_of_week INTEGER,  -- 0-6 (0=Monday), used for weekly
+    day_of_month INTEGER,  -- 1-31, used for monthly
+    retention_days INTEGER NOT NULL DEFAULT 30,
+    max_backups INTEGER,  -- null = unlimited
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_backup_schedule_tenant ON backup_schedule_config(tenant_id);

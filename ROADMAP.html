@@ -1,0 +1,1723 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InteliMarket — Roadmap Distribuidora | State of the Art</title>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-secondary: #64748b;
+    --primary: #2563eb;
+    --primary-light: #dbeafe;
+    --success: #16a34a;
+    --success-light: #dcfce7;
+    --warning: #d97706;
+    --warning-light: #fef3c7;
+    --danger: #dc2626;
+    --danger-light: #fee2e2;
+    --purple: #7c3aed;
+    --purple-light: #ede9fe;
+    --teal: #0d9488;
+    --teal-light: #ccfbf1;
+    --gray: #6b7280;
+    --gray-light: #f3f4f6;
+    --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+  [data-theme="dark"] {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --border: #334155;
+    --text: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --primary: #3b82f6;
+    --primary-light: #1e3a5f;
+    --success: #22c55e;
+    --success-light: #14532d;
+    --warning: #f59e0b;
+    --warning-light: #451a03;
+    --danger: #ef4444;
+    --danger-light: #450a0a;
+    --purple: #8b5cf6;
+    --purple-light: #2e1065;
+    --teal: #14b8a6;
+    --teal-light: #134e4a;
+    --gray: #9ca3af;
+    --gray-light: #1f2937;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    transition: background 0.3s, color 0.3s;
+  }
+  .container { max-width: 1400px; margin: 0 auto; }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .header-left h1 {
+    font-size: 28px;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--primary), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header-left p { color: var(--text-secondary); font-size: 14px; margin-top: 4px; }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .theme-toggle {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 18px;
+    transition: all 0.2s;
+  }
+  .theme-toggle:hover { border-color: var(--primary); }
+  .last-updated {
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--card);
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  /* Progress bar */
+  .overall-progress {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 32px;
+  }
+  .progress-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .progress-header h2 { font-size: 18px; font-weight: 700; }
+  .progress-header span { font-size: 14px; color: var(--text-secondary); }
+  .progress-bar {
+    height: 10px;
+    background: var(--gray-light);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), var(--teal));
+    border-radius: 99px;
+    transition: width 0.5s ease;
+    width: 0%;
+  }
+  .progress-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  /* Stats bar */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+  }
+  .stat-card .num {
+    font-size: 28px;
+    font-weight: 800;
+    display: block;
+  }
+  .stat-card .label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+  .stat-card.completed .num { color: var(--success); }
+  .stat-card.in-progress .num { color: var(--primary); }
+  .stat-card.pending .num { color: var(--text-secondary); }
+
+  /* Phase accordion */
+  .phase {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    transition: box-shadow 0.2s;
+  }
+  .phase:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+  .phase-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    cursor: pointer;
+    user-select: none;
+    gap: 16px;
+  }
+  .phase-header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: 1;
+  }
+  .phase-number {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .phase-info h3 { font-size: 16px; font-weight: 700; }
+  .phase-info .weeks { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .phase-header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  .phase-pct {
+    font-size: 14px;
+    font-weight: 700;
+    min-width: 40px;
+    text-align: right;
+  }
+  .phase-arrow {
+    transition: transform 0.3s;
+    font-size: 18px;
+    color: var(--text-secondary);
+  }
+  .phase.open .phase-arrow { transform: rotate(180deg); }
+  .phase-mini-bar {
+    width: 120px;
+    height: 6px;
+    background: var(--gray-light);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .phase-mini-fill {
+    height: 100%;
+    border-radius: 99px;
+    transition: width 0.5s;
+  }
+
+  .phase-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease, padding 0.3s ease;
+    padding: 0 24px;
+  }
+  .phase.open .phase-body {
+    max-height: 10000px;
+    padding: 0 24px 24px;
+  }
+
+  /* Module items */
+  .module {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .module-header {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .module-checkbox {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    border: 2px solid var(--border);
+    flex-shrink: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all 0.2s;
+    background: transparent;
+    color: transparent;
+  }
+  .module-checkbox.done {
+    background: var(--success);
+    border-color: var(--success);
+    color: white;
+  }
+  .module-checkbox.partial {
+    background: var(--warning);
+    border-color: var(--warning);
+    color: white;
+  }
+  .module-checkbox.pending { border-color: var(--border); }
+  .module-info { flex: 1; }
+  .module-info .title { font-weight: 600; font-size: 14px; }
+  .module-info .desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .prompt-btn {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--purple);
+    background: transparent;
+    color: var(--purple);
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+    font-family: var(--font);
+    flex-shrink: 0;
+  }
+  .prompt-btn:hover {
+    background: var(--purple);
+    color: white;
+  }
+  .module-badge {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 99px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .badge-done { background: var(--success-light); color: var(--success); }
+  .badge-in-progress { background: var(--primary-light); color: var(--primary); }
+  .badge-pending { background: var(--gray-light); color: var(--gray); }
+  .badge-review { background: var(--warning-light); color: var(--warning); }
+
+  .module-tasks {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+  }
+  .module.open .module-tasks {
+    max-height: 2000px;
+  }
+  .module-tasks-inner {
+    padding: 0 16px 14px 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .task {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .task input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    accent-color: var(--primary);
+    cursor: pointer;
+  }
+  .task label {
+    cursor: pointer;
+    flex: 1;
+  }
+  .task.done label { text-decoration: line-through; opacity: 0.6; }
+  .task .tech {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--gray-light);
+    color: var(--text-secondary);
+  }
+
+  /* Diff markers */
+  .diff-new {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--teal-light);
+    color: var(--teal);
+    font-weight: 700;
+    margin-left: 6px;
+  }
+
+  /* Notes section */
+  .notes-section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-top: 24px;
+  }
+  .notes-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+  .notes-section textarea {
+    width: 100%;
+    min-height: 80px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    font-family: var(--font);
+    font-size: 13px;
+    color: var(--text);
+    resize: vertical;
+  }
+  .notes-section textarea:focus { outline: none; border-color: var(--primary); }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    body { padding: 12px; }
+    .header-left h1 { font-size: 22px; }
+    .phase-header { padding: 16px; }
+    .phase-body { padding: 0 16px; }
+    .phase.open .phase-body { padding: 0 16px 16px; }
+    .module-tasks-inner { padding-left: 36px; }
+    .phase-mini-bar { width: 80px; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* Save indicator */
+  .save-status {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-align: right;
+    margin-top: 8px;
+    opacity: 0.7;
+  }
+
+  /* Filters */
+  .filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    padding: 6px 14px;
+    border-radius: 99px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text-secondary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font);
+  }
+  .filter-btn:hover { border-color: var(--primary); color: var(--primary); }
+  .filter-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+  }
+
+  .module .tech-stack {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .module .tech-stack span {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--gray-light);
+    color: var(--text-secondary);
+  }
+
+  /* Prompt Modal */
+  .prompt-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .prompt-modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    max-width: 720px;
+    width: 100%;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+  }
+  .prompt-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .prompt-modal-header h3 {
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .prompt-modal-close {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: var(--gray-light);
+    cursor: pointer;
+    font-size: 18px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .prompt-modal-close:hover { background: var(--danger-light); color: var(--danger); }
+  .prompt-modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .prompt-modal-body pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  }
+  .prompt-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+  }
+  .prompt-copy-btn {
+    padding: 8px 20px;
+    border-radius: 10px;
+    border: none;
+    background: var(--primary);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+    font-family: var(--font);
+  }
+  .prompt-copy-btn:hover { opacity: 0.9; }
+  .prompt-copy-btn.copied { background: var(--success); }
+  .prompt-copy-btn.close-btn {
+    background: var(--gray-light);
+    color: var(--text);
+  }
+  .prompt-copy-btn.close-btn:hover { background: var(--border); }
+  .prompt-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    text-align: center;
+  }
+
+  /* Timeline indicator */
+  .timeline-dot { display: none; }
+
+  .phase-header .phase-status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .phase-status-indicator.completed { background: var(--success); }
+  .phase-status-indicator.in-progress { background: var(--primary); animation: pulse 2s infinite; }
+  .phase-status-indicator.pending { background: var(--gray); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <h1>📦 InteliMarket — Distribuidora</h1>
+    <p>Roadmap State of the Art · ERP para Distribuidoras en Paraguay</p>
+  </div>
+  <div class="header-right">
+    <span class="last-updated" id="lastUpdated">🔄 Cargando...</span>
+    <button class="theme-toggle" id="themeToggle" title="Cambiar tema">🌙</button>
+    <button class="theme-toggle" onclick="saveState()" title="Guardar estado actual">💾</button>
+  </div>
+</div>
+
+<!-- PROGRESS OVERALL -->
+<div class="overall-progress">
+  <div class="progress-header">
+    <h2>📊 Progreso General</h2>
+    <span id="progressSummary">0/0 tareas completadas</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+  <div class="progress-labels">
+    <span>✅ Fase 1: Fundación</span>
+    <span>✅ Fase 2: Inteligencia</span>
+    <span>🔄 Fase 3: Experiencia Digital</span>
+    <span>✅ Fase 4: Control Total</span>
+    <span>✅ Fase 5: IA & Diferenciación</span>
+  </div>
+</div>
+
+<!-- STATS -->
+<div class="stats" id="statsContainer">
+  <div class="stat-card completed"><span class="num" id="statCompleted">0</span><span class="label">✅ Completado</span></div>
+  <div class="stat-card in-progress"><span class="num" id="statInProgress">0</span><span class="label">🔄 En Progreso</span></div>
+  <div class="stat-card pending"><span class="num" id="statPending">0</span><span class="label">⏳ Pendiente</span></div>
+  <div class="stat-card"><span class="num">5</span><span class="label">📆 Fases</span></div>
+  <div class="stat-card"><span class="num" id="statTotalTasks">0</span><span class="label">📋 Tareas</span></div>
+</div>
+
+<!-- FILTERS -->
+<div class="filters">
+  <button class="filter-btn active" data-filter="all">📋 Todas</button>
+  <button class="filter-btn" data-filter="done">✅ Completadas</button>
+  <button class="filter-btn" data-filter="in-progress">🔄 En Progreso</button>
+  <button class="filter-btn" data-filter="pending">⏳ Pendientes</button>
+</div>
+
+<!-- PHASES -->
+<div id="phasesContainer"></div>
+
+<!-- NOTES -->
+<div class="notes-section">
+  <h3>📝 Notas del Roadmap</h3>
+  <textarea id="roadmapNotes" placeholder="Registrá decisiones, cambios de alcance, observaciones..."></textarea>
+  <div class="save-status" id="saveStatus">Los cambios se guardan automáticamente</div>
+</div>
+
+</div>
+
+<script>
+// ===== DATA =====
+const DATA = {
+  phases: [
+    {
+      id: "fase1",
+      title: "Fundación Comercial & Logística",
+      weeks: "Semanas 1-4",
+      color: "#2563eb",
+      status: "done",
+      icon: "🏗️",
+      modules: [
+        {
+          id: "f1-intellizapp",
+          title: "IntelliZapp — CRM + WhatsApp Engine",
+          desc: "Transformar WhatsApp actual en plataforma omnicanal con plantillas, chatbot, campañas",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "Twilio", "WebSocket", "React"],
+          tasks: [
+            "✅ Motor de campañas: modelos, segmentación por filtros, envío batch vía Twilio",
+            "✅ Automatización: 14 eventos trigger (sale.created, payment.received, delivery.delivered, etc.)",
+            "✅ API REST: CRUD de campañas + reglas de automatización + analytics",
+            "✅ Migración: tablas whatsapp_campaigns, whatsapp_campaign_recipients, whatsapp_automation_rules",
+            "✅ Chatbot con menú interactivo (backend + frontend)",
+            "✅ Dashboard de campañas frontend (React UI completa con campañas, reglas, analytics)",
+            "✅ Integración visual CRM → WhatsApp: selector de destinatarios desde CRM al crear campaña (multi-step wizard con búsqueda/filtro/selección masiva de empresas)",
+            "✅ Chatbot Simulador interactivo: ventana de chat en vivo con botones, seguimiento de estado, panel de flujo de conversación, comando /reset — backend POST /chatbot/test con el ChatbotEngine real"
+          ]
+        },
+        {
+          id: "f1-acuerdos-prov",
+          title: "Acuerdos con Proveedores — UI Completa",
+          desc: "CRUD de contratos de compra con items, precios, bonificaciones, renovaciones",
+          status: "done",
+          badge: "Frontend",
+          tech: ["React", "TypeScript"],
+          tasks: [
+            "✅ Lista de acuerdos con filtros por proveedor, estado, fechas",
+            "✅ Formulario de creación/edición con items del contrato",
+            "✅ Precios especiales, descuentos por volumen, bonificaciones por producto",
+            "✅ Alertas de vencimiento y renovación automática",
+            "✅ Historial de cambios y versiones del contrato"
+          ]
+        },
+        {
+          id: "f1-acuerdos-cli",
+          title: "Acuerdos con Clientes — UI Avanzada",
+          desc: "CRUD completo con precios por producto, alertas, historial de versiones",
+          status: "done",
+          badge: "Frontend",
+          tech: ["React", "TypeScript"],
+          tasks: [
+            "✅ Lista con filtros por cliente, tipo, estado",
+            "✅ Formulario completo con productos, precios, descuento por producto",
+            "✅ Alertas de vencimiento de contrato (30/15/7 días)",
+            "✅ Historial de cambios con quién y cuándo",
+            "✅ Vista comparativa de precios vs lista general"
+          ]
+        },
+        {
+          id: "f1-mapa-vendedores",
+          title: "Mapa en Tiempo Real — Vendedores en Ruta",
+          desc: "Backend completo + frontend MapLibre con fotos, batería, geocercas inteligentes, rendimiento",
+          status: "done",
+          badge: "Frontend (Web) + Backend",
+          tech: ["MapLibre", "FastAPI", "React", "PostgreSQL", "Recharts"],
+          tasks: [
+            "✅ Backend: 7 modelos (SellerProfile, GPSTracking, RouteInstance, RouteStopVisit, GeofenceZone, GeofenceAlert, SellerPerformanceMetric)",
+            "✅ API REST: 25+ endpoints para sellers, tracking, rutas, visitas, geocercas, rendimiento",
+            "✅ Motor de geocercas: detección punto-en-polígono (ray-casting) + punto-en-círculo (Haversine)",
+            "✅ Geocercas con horario: días de semana, horas activas por zona",
+            "✅ Cálculo automático de rendimiento: score compuesto (0-100) con tasa de completitud, pedidos/hora, rating",
+            "✅ Frontend: Mapa en Tiempo Real con MapLibre — markers con foto, batería, estado, traza GPS, superposición de geocercas",
+            "✅ Frontend: Vendedores (CRUD con perfil, batería, estado, ubicación)",
+            "✅ Frontend: Rutas (ejecuciones diarias, timeline de paradas con resultados)",
+            "✅ Frontend: Visitas (tabla con KPIs, filtros, detalle con duración, pedido, GPS, rating)",
+            "✅ Frontend: Geocercas (zonas restringidas/preferidas/vigilancia con horarios, alertas activas)",
+            "✅ Frontend: Rendimiento (ranking, gráficos Recharts Bar/Line/Pie, score, tendencias, detalle por vendedor)",
+            "✅ Sidebar: sección 'Mapa & Rutas' con 6 entradas",
+            "✅ Feature flags: seller_tracking, real_time_map, geofence_zones, seller_performance"
+          ]
+        },
+        {
+          id: "f1-app-vendedores",
+          title: "App Mobile Vendedores (React Native)",
+          desc: "App de ruta con GPS, pedidos offline-first, cobranza, firma digital — glassmorphism, Reanimated 3, SQLite offline-first",
+          status: "in-progress",
+          badge: "App Mobile",
+          tech: ["React Native", "Expo", "SQLite", "react-native-maps", "Reanimated 3", "Zustand"],
+          tasks: [
+            "✅ Proyecto configurado (Expo 52, app.json con permisos, tsconfig, package.json con 30+ deps)",
+            "✅ Design system glassmorphism (colors, gradients, glass card styles, typography, shadows, springs)",
+            "✅ Zustand store persistente con auth, ruta, GPS, carrito, UI",
+            "✅ API service offline-first con cola de reintentos automática",
+            "✅ GPS background service con adaptive polling (5s móvil / 30s estático) + batería",
+            "✅ Push notifications: 3 canales (default/geofence/route) + local scheduling",
+            "✅ Sync engine offline: cola CRDT con MAX_RETRIES=5, NetInfo auto-replay",
+            "✅ SQLite storage: 5 tablas (products, customers, route_stops, gps_cache, orders_cache)",
+            "✅ Hooks: useLocation (proximity Haversine), useNetwork (status + batería)",
+            "✅ Componentes: GlassCard (BlurView + Gradient + spring), AnimatedHeader (batería + online), StatsCard, RouteTimeline, SignaturePad",
+            "✅ Login screen: email/password → PIN setup → PIN verify, animaciones Reanimated",
+            "✅ Today dashboard: KPIs, start/end route, GPS status, geofence alerts, RouteTimeline, pull-to-refresh",
+            "✅ Map screen: react-native-maps con customer markers, Polyline route, callouts, bottom sheet",
+            "✅ Orders screen: catálogo 2-column grid, search + categories, glass cards, cart bottom sheet, SQLite cache",
+            "✅ Visit screen: check-in/out con GPS proximity, resultado selector, order/payment fields, rating ⭐, notas, SignaturePad, steps indicator",
+            "✅ Customer 360 screen: crédito KPIs, acuerdos comerciales, historial de visitas, ubicación",
+            "✅ Profile screen: configuración (biometría, GPS, notificaciones), info app, logout",
+            "🔄 Pruebas end-to-end en dispositivo/simulador",
+            "🔄 Despliegue: EAS Build + stores (Google Play / App Store)"
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase2",
+      title: "Inteligencia de Negocio & Repartos",
+      weeks: "Semanas 5-8",
+      color: "#7c3aed",
+      status: "done",
+      icon: "🧠",
+      modules: [
+        {
+          id: "f2-intelientregas-ui",
+          title: "InteliEntregas — UI Completa + Mapas",
+          desc: "Dashboard de entregas, asignación inteligente, ruta óptima, tracking vivo",
+          status: "done",
+          badge: "Frontend (Web)",
+          tech: ["MapLibre", "OSRM", "React", "WebSocket"],
+          tasks: [
+            "✅ Dashboard de entregas del día con fleet view en mapa (MapLibre GL + Carto dark-matter, KPI cards, Gauge, status breakdown, active routes)",
+            "✅ Asignación inteligente de repartidores (algoritmo Haversine + score: distancia, rating, capacidad vehículo, experiencia — endpoint REST + frontend con ranking y auto-asignación batch)",
+            "✅ Vista de ruta óptima con stops en orden (routing_service.py: ORS/OSRM/Haversine TSP nearest-neighbor optimizer)",
+            "✅ Tracking en vivo del repartidor (WebSocket real-time via ConnectionManager, dispatcher/driver channels, live-map REST polling cada 10s)",
+            "✅ Prueba de entrega: foto + firma + código de confirmación (DeliveryProof model y schemas)",
+            "✅ Zonas de entrega con costos dinámicos (DeliveryZone model, calculateCost endpoint)",
+            "✅ Ventana horaria para el cliente (franja de 2h para recibir — validación Pydantic model, feature flag time_windows, frontend display en modal detalle)"
+          ]
+        },
+        {
+          id: "f2-app-repartidores",
+          title: "App Mobile Repartidores",
+          desc: "App de delivery con GPS, escaneo, firma, navegación, offline-first",
+          status: "done",
+          badge: "App Mobile",
+          tech: ["React Native", "Expo", "MapLibre", "SQLite"],
+          tasks: [
+            "✅ Login con PIN (pantalla login → setup PIN → acceso con expo-router conditional auth)",
+            "✅ Ruta del día con orden óptimo de paradas (RouteTimeline + RouteScreen con GlassCard + progress)",
+            "✅ GPS tracking en background (expo-location + TaskManager con ping cada 10s a WebSocket REST)",
+            "✅ Escanear código de barras del paquete para confirmar carga (BarcodeScanner real con CameraView, corner brackets, scan line, torch, haptics, manual entry, integrado en delivery flow)",
+            "✅ Tomar foto de la entrega (antes/después) (expo-image-picker cámara en delivery flow multi-step)",
+            "✅ Firma digital del receptor (SignaturePad con GestureHandler + Pan, export base64)",
+            "✅ Código de confirmación: el cliente dice el PIN de 4 dígitos (pantalla PIN en wizard de entrega)",
+            "✅ Navegación con NavigationPanel (OSRM directions, ETA bar, steps list, Google Maps/Waze deep links, carrusel de paradas, integrado en map screen)",
+            "✅ Reportar incidencia: cliente ausente, dirección incorrecta, paquete dañado (modal con selector tipo + descripción + API)",
+            "✅ Offline-first: SQLite storage (deliveries_cache, gps_offline_queue, pending_actions) + cola de sync con MAX_RETRIES=3 + NetInfo auto-replay"
+          ]
+        },
+        {
+          id: "f2-flota",
+          title: "Gestión de Flota",
+          desc: "Vehículos, mantenimiento, combustible, checklist, DGR, licencias",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "React", "SQLAlchemy"],
+          tasks: [
+            "✅ Registro de vehículos: tipo, marca, modelo, patente, capacidad (modelo + frontend CRUD)",
+            "✅ Asignación de vehículo a repartidor (FK driver_id en Vehicle)",
+            "✅ Control de combustible: carga por litro/Gs, km por litro (VehicleFuelEntry model + frontend sub-tab)",
+            "✅ Mantenimiento programado: cambio de aceite, cubiertas, service (VehicleMaintenance model + frontend sub-tab)",
+            "✅ Checklist diario del vehículo (ChecklistItem + ChecklistLog models + frontend sub-tab)",
+            "✅ Alertas: vencimiento de licencia, seguro, ITV (DGR), service próximo — backend service con 4 checks (driver licencia, vehicle seguro, vehicle ITV, maintenance programado), 3 niveles severidad (critical/warning/info), endpoint GET /fleet/alerts, frontend tab con alertas agrupadas y conteo en solapa"
+          ]
+        },
+        {
+          id: "f2-analytics",
+          title: "Analytics de Rentabilidad",
+          desc: "Dashboard ejecutivo con KPIs, márgenes, exportación a Excel/PDF",
+          status: "completed",
+          badge: "Backend + Frontend",
+          tech: ["Python", "React", "openpyxl", "reportlab"],
+          tasks: [
+            "✅ Dashboard ejecutivo con KPIs en tiempo real (backend analytics endpoint + frontend Analytics tab con sparkline, top drivers, status breakdown)",
+            "✅ Rentabilidad por ruta, zona, repartidor, vehículo (analytics_service.py: get_margins_by_route/zone/driver/vehicle)",
+            "✅ Rentabilidad por línea de negocio (get_business_line_summary con prioridad como proxy)",
+            "✅ P&L summary: ingresos, combustible, mantenimiento, otros gastos, margen bruto (get_profitability_summary)",
+            "✅ KPIs operativos: tasa entrega/falla, rendimiento km/L, costo x km (get_delivery_performance_kpi)",
+            "✅ Exportación Excel multi-hoja (Resumen, Rutas, Repartidores, Vehículos) con openpyxl",
+            "✅ Exportación PDF con tablas formateadas (summary, top routes, top drivers) con reportlab",
+            "✅ Botones de exportación en frontend + período selector (7/15/30/60/90 días)",
+            "✅ Reporte semanal programado (APScheduler cron job — lun 6 AM)"
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase3",
+      title: "Experiencia Digital & Automatización",
+      weeks: "Semanas 9-12",
+      color: "#0d9488",
+      status: "pending",
+      icon: "🚀",
+      modules: [
+        {
+          id: "f3-app-clientes",
+          title: "App Clientes — Marketplace B2B (estilo BEES)",
+          desc: "App mobile para que los comercios pidan productos, vean precios, trackeen entregas y paguen",
+          status: "done",
+          badge: "App Mobile",
+          tech: ["React Native", "Expo", "MapLibre", "Pagos"],
+          tasks: [
+            "✅ Catálogo de productos con fotos, descripción, precio según su acuerdo (backend: 20+ endpoints, mobile: catalog screen con search + categories + ProductCard)",
+            "✅ Carrito de compras con cantidad, subtotal, total (backend: cart CRUD + checkout, mobile: cart screen con qty controls + checkout flow)",
+            "✅ Historial de pedidos anteriores con posibilidad de repetir (backend: orders list/get/repeat, mobile: orders screen + order detail + repeat button)",
+            "✅ Modelos SQLAlchemy backend (9 tablas: client_users, devices, carts, cart_items, orders, order_items, favorites, addresses, loyalty_transactions)",
+            "✅ Auth JWT separada (bcrypt + jose, 72h expiry, require_client dependency, login/register/device endpoints)",
+            "✅ Schemas Pydantic + Service layer (catalog con pricing, checkout, tracking, favorites, addresses, account, payments)",
+            "✅ Migración Alembic (20260531140000_add_client_app_tables) + registro en main.py + env.py",
+            "✅ Feature flag client_app en ALL_FEATURES + distributor vertical presets",
+            "✅ Mobile app: Login/Register, tab navigation (Catalog, Cart, Orders, Profile), glassmorphism design system, Zustand persist",
+            "✅ Mobile app: Product detail screen (qty selector, add-to-cart), Checkout screen (address, payment condition), Payment screen (4 gateways), Addresses screen",
+            "✅ Estado de cuenta y saldo de crédito disponible (backend: GET /me con credito_disponible/limite/loyalty_points, profile screen con credit card display)",
+            "✅ Tracking de entrega en mapa en tiempo real (backend: endpoint GET /orders/{id}/tracking retorna delivery_id/estado/driver/lat/lng/direccion + polling 15s + mobile: MapView con marker + Google Maps deep link)",
+            "✅ Notificaciones push: pedido confirmado, preparado, en ruta, entregado (backend: FCM service en notifications.py con ORDER_STATUS_NOTIFICATIONS + notify_order_status llamado en checkout/confirm_payment, mobile: usePushNotifications hook con expo-notifications, canales Android, deep link a order detail)",
+            "✅ Pagos integrados profundos: webhooks POST /payments/{gateway}/webhook que actualizan estado + envían push notification + confirm_payment service",
+            "✅ Promociones personalizadas: descuentos exclusivos, 2x1, bonificaciones (backend: list_promotions usa Promotion real, validate_promo_code endpoint POST /promotions/validate, checkout aplica cupón automáticamente, mobile: PromotionsScreen + coupon input en checkout)",
+            "✅ Chat directo con su vendedor asignado (WhatsApp WebView) — backend: get_whatsapp_url dinámico desde Customer.vendedor_id → User.telefono, mobile: chat.tsx screen con Linking.openURL + deep link)",
+            "✅ Puntos de fidelidad / gamificación: canje por productos o descuentos (backend: LoyaltyTransaction model, earn_points on checkout, get_loyalty_summary, redeem_points, rewards catalog + GET /loyalty, GET /loyalty/rewards, POST /loyalty/redeem, mobile: LoyaltyScreen con balance + rewards grid + redeem flow)",
+            "✅ Offline-first: catálogo en caché con SQLite (expo-sqlite 3 tablas: products_cache, orders_cache, pending_actions), cola de pedidos offline que se sincronizan al conectar (syncPendingActions con retry mechanism), API service con offline fallback automático"
+          ]
+        },
+        {
+          id: "f3-portal-proveedores",
+          title: "Portal de Proveedores",
+          desc: "Autogestión para proveedores: catálogo, O/C, documentación, chat",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["React", "TypeScript", "FastAPI", "JWT"],
+          tasks: [
+            "✅ Feature flag supplier_portal en ALL_FEATURES + distributor vertical presets + labels",
+            "✅ Modelos SQLAlchemy: SupplierUser (auth separada) + SupplierDocument (upload de documentos con tipo/estado/relación OC)",
+            "✅ Auth JWT separada para proveedores (bcrypt + jose, 72h expiry, require_supplier dependency, login/register)",
+            "✅ Schemas Pydantic: register/login/profile/order/detail/product/document/payment schemas completos",
+            "✅ Service layer: dashboard con KPIs + order counts, list/get/confirm orders, catalog products, document CRUD, payments list, WhatsApp URL dinámico",
+            "✅ Router REST: 11 endpoints bajo /api/v1/supplier-portal/ (auth, profile, dashboard, orders CRUD + confirm, products, documents CRUD, payments, chat)",
+            "✅ Migración Alembic: 20260531160000_add_supplier_portal_tables.py (2 tablas)",
+            "✅ Registro en main.py + env.py (router import + include)",
+            "✅ Frontend: SupplierLogin.tsx — login separado con JWT supplier en /portal/proveedores/login",
+            "✅ Frontend: SupplierDashboard.tsx — dashboard con KPIs, tabs (Órdenes de Compra, Catálogo, Documentos, Pagos, Chat), detalle de OC con items, confirmación, upload de documentos, WhatsApp chat",
+            "✅ Frontend: Routes registradas en App.tsx (lazy loading, fuera del ProtectedRoute del dashboard interno)"
+          ]
+        },
+        {
+          id: "f3-marketing-auto",
+          title: "Automatización de Marketing",
+          desc: "Segmentación, campañas multicanal, alertas, ofertas personalizadas",
+          status: "in-progress",
+          badge: "Backend + Frontend",
+          tech: ["Python", "React", "Twilio", "Cron"],
+          tasks: [
+            "✅ Segmentación de clientes: modelo CustomerSegment con filtros JSON, estimación automática de count, CRUD completo",
+            "✅ Campañas multicanal: modelo MarketingCampaign + CampaignRecipient, creación, ejecución con tracking de envíos/aperturas/conversiones",
+            "✅ Alertas de stock: modelo StockAlertConfig, CRUD + verificación programable con notificaciones",
+            "✅ Ofertas personalizadas: modelo CustomerOffer con cupones, generación automática por cliente basada en historial",
+            "✅ Encuestas de satisfacción: modelo SatisfactionSurvey + SurveyResponse, CRUD con preguntas JSON flexibles",
+            "✅ Dashboard de marketing: KPIs (tasa apertura, clics, conversión), campañas recientes, conteos",
+            "✅ Backend: 6 modelos SQLAlchemy, schemas Pydantic, Service Layer, Router con 15+ endpoints bajo /api/v1/marketing/",
+            "✅ Frontend: MarketingPage.tsx con 6 tabs (Dashboard, Segmentos, Campañas, Alertas Stock, Ofertas, Encuestas), lazy loading, FeatureRoute guard"
+          ]
+        },
+        {
+          id: "f3-ecommerce",
+          title: "E-commerce Distribuidora (Web)",
+          desc: "Tienda online B2B con precios, carrito, pagos, integración ERP",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "Tailwind", "PostgreSQL"],
+          tasks: [
+            "✅ Catálogo completo: GET /api/v1/ecommerce/catalog con búsqueda, paginación, filtro por categoría. Precios desde lista default + stock agregado. Frontend: EcommerceCatalog.tsx con grid de productos, search bar, selector de categorías, paginación",
+            "✅ Carrito de compras: modelos EcommerceCart + EcommerceCartItem, CRUD completo (agregar/actualizar/eliminar items, persistencia server-side). Frontend: EcommerceCart.tsx con resumen, cantidad +/-",
+            "✅ Checkout: POST /checkout valida carrito, crea orden + items + payment, limpia carrito. Frontend: EcommerceCheckout.tsx con formulario dirección, selección método pago, notas",
+            "✅ Medios de pago: 4 opciones en frontend (Pagopar, Kuapay QR, Bancard VPOS, Transferencia Bancaria). Backend: modelo EcommercePayment con confirmación vía POST /payments/{id}/confirm",
+            "✅ Integración ERP: orden ecommerce genera estructura completa (EcommerceOrder + EcommerceOrderItem). Sync de catálogo/precios/stock/pedidos vía POST /sync/{tipo}. EcommerceSyncLog para auditoría",
+            "✅ Notificaciones WhatsApp: modelo preparado para integración con Twilio en confirmación de pago. Hook de webhook en POST /payments/{id}/confirm para trigger de notificación",
+            "✅ Historial de pedidos: GET /orders + /orders/{id} con items, pagos, estados. Frontend: EcommerceOrders.tsx (lista) + ruta /tienda/pedido/:id (detalle con productos, pagos, factura PDF link)",
+            "✅ Auth separada: EcommerceCustomer con JWT bearer_ecommerce, register/login con bcrypt. Frontend: EcommerceLogin.tsx + EcommerceRegister.tsx en /tienda/login y /tienda/registro"
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase4",
+      title: "Control Total & Cumplimiento",
+      weeks: "Semanas 13-16",
+      color: "#d97706",
+      status: "done",
+      icon: "🔒",
+      modules: [
+        {
+          id: "f4-inventario",
+          title: "Control de Inventario Avanzado",
+          desc: "Multi-almacén, ubicaciones, picking, inventario cíclico, trazabilidad por lote",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "Tailwind", "PostgreSQL"],
+          tasks: [
+            "✅ Ubicaciones: modelo StorageLocation (pasillo-estante-posición), CRUD completo con filtro por almacén en GET /api/v1/advanced-inventory/locations. Frontend: InventoryAdvancedPage.tsx tab Ubicaciones con tabla + formulario creación",
+            "✅ Picking lists: modelos PickingList + PickingListItem, CRUD + asignación a usuario + pickeo individual con registro FIFO (reduce StockLot + Stock, registra InventoryMovement). Frontend: tab Picking con lista + detalle lateral + botones asignar/pickear",
+            "✅ Conteo cíclico: modelos CycleCount + CycleCountItem, creación por almacén, adición de items, conteo con captura de cantidad física vs sistema, cálculo de diferencias, completado con aplicación automática de discrepancias al stock. Frontend: tab Conteo Cíclico con conteo + completar",
+            "✅ Trazabilidad por lote FIFO: endpoint POST /lots/allocate que asigna desde lotes más antiguos (fecha_ingreso ASC). Listado de lotes con filtro por producto/almacén/próximos a vencer. Frontend: tab Lotes/FIFO con asignador + tabla con semáforo de vencimiento",
+            "✅ Consignación: modelos ConsignmentStock + ConsignmentMovement, CRUD + movimientos (venta devolución ajuste) con validación de stock. Frontend: tab Consignación con tabla + acciones Vender/Devolver",
+            "✅ Alertas stock mínimo: modelo AutoReplenishRule con stock mínimo, seguridad, reorden, lead time, auto-generar OC. Endpoint GET /alerts que evalúa todas las reglas vs stock actual. Frontend: tab Reabastecimiento con formulario reglas + tabla + alertas destacadas",
+            "✅ Feature flag advanced_inventory agregado a ALL_FEATURES + label + vertical distribuidora. Router registrado en main.py con require_feature guard. Migration 20260531230000 (8 tablas nuevas)"
+          ]
+        },
+        {
+          id: "f4-financiero",
+          title: "Gestión Financiera Integrada",
+          desc: "CxC, CxP, flujo de caja, conciliación, retenciones, cierre contable",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "React", "SQLAlchemy", "PostgreSQL"],
+          tasks: [
+            "✅ 7 modelos SQLAlchemy: WithholdingConfig, WithholdingDocument, AccountPlan, AccountingPeriod, AccountingEntry, CollectionAction, CustomerScore",
+            "✅ Esquemas Pydantic: 16 schemas para retenciones, plan de cuentas, períodos, asientos, cobranzas, scoring, EBITDA, conciliación, dashboard",
+            "✅ Servicio: 20+ funciones — retenciones IVA/IRP con cálculo automático, apertura/cierre de período contable, balance de comprobación, PyG, EBITDA, scoring de clientes (10 factores), conciliación automática (matching por monto con cobros/pagos), dashboard consolidado con liquidez, rotación, ciclo efectivo",
+            "✅ Router: 22 endpoints bajo /api/v1/integrated-finance/ — withholding, accounting, collection, scoring, ebitda, auto-reconciliation, dashboard",
+            "✅ Migration 20260601000000: 7 tablas nuevas (withholding_configs, withholding_documents, account_plans, accounting_periods, accounting_entries, collection_actions, customer_scores)",
+            "✅ Feature flag integrated_finance agregado a ALL_FEATURES + label + vertical distribuidora",
+            "✅ Router registrado en main.py. Frontend: IntegratedFinancePage.tsx con 6 tabs (Dashboard, Retenciones, Cierre Contable, Scoring, Cobranzas, Conciliación). Sidebar item + route con FeatureRoute guard. API namespace en api/index.ts"
+          ]
+        },
+        {
+          id: "f4-sifen",
+          title: "Cumplimiento SET/SIFEN Avanzado",
+          desc: "Facturación completa, libros IVA, retenciones, e-Kuatia, DGR",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "PostgreSQL"],
+          tasks: [
+            "✅ Facturación electrónica con todos los campos de Distribuidora (crédito, contado, exportación) — servicio distribuidora invoice con 3 tipos + CDC generation",
+            "✅ Libro de IVA ventas y compras exportable al sistema SET (CSV/subida manual) — IvaBookConfig model + endpoints generar ventas/compras con DNIT-format CSV export",
+            "✅ Libro de retenciones (IVA e IRP) con generación de declaración jurada — RetentionBooks model + generar IVA/IRP con DNIT-format CSV export",
+            "✅ Reportes DGR para vehículos de reparto — DgrVehicle model CRUD + DgrReportGenerated + generar report endpoint",
+            "✅ e-Kuatia: digitalización de documentos con validez legal — EkuatiaDocument model con hash SHA-256 + legal validity + upload/download",
+            "✅ Código de seguridad de factura (CDC) validado contra SET — CdcValidationLog model + single/batch validation + compliance dashboard"
+          ]
+        },
+        {
+          id: "f4-precios",
+          title: "Gestión de Precios Inteligente",
+          desc: "Listas múltiples, escalonados, promociones, precio dinámico sugerido por IA",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "PostgreSQL"],
+          tasks: [
+            "✅ Listas de precios múltiples por cliente/grupo/canal/zona — modelo PriceListAssignment con asignaciones por tipo (cliente/grupo/canal/zona) + CRUD completo",
+            "✅ Precios por volumen (escalonados): precio A para 1-10, B para 11-50, C para 50+ — modelo TieredPrice con min_qty/max_qty, calculador de precio aplicable endpoint",
+            "✅ Promociones: 2x1, descuento por cantidad, bonificación en producto, combo — modelo Promotion + PromotionReward + PromotionAssignment con 6 tipos, fechas, condiciones JSON, frontend con activar/desactivar",
+            "✅ Precio dinámico sugerido: basado en demanda, estacionalidad, costo + margen objetivo — generate_dynamic_price con factores múltiples, confianza 0-99%, fuente mixto, guardado como PriceSuggestion con revisión approve/reject",
+            "✅ Historial de cambios de precio con quién, cuándo, por qué — modelo PriceChangeHistory + endpoint list con filtro por producto",
+            "✅ Aprobación de cambios de precio con flujo de 1 o 2 niveles — modelo PriceChangeRequest con approval_level, status pending/approved_1/approved/rejected, endpoints de review + approve_level2"
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase5",
+      title: "IA, Innovación & Diferenciación",
+      weeks: "Semanas 17-20",
+      color: "#dc2626",
+      status: "done",
+      icon: "🤖",
+      modules: [
+        {
+          id: "f5-forecast",
+          title: "Forecast Inteligente de Demanda",
+          desc: "Predicción por producto/cliente/zona con ML, auto generación de O/C",
+          status: "done",
+          badge: "Backend + IA",
+          tech: ["Python", "FastAPI", "React", "PostgreSQL", "scikit-learn", "Prophet", "Pandas"],
+          tasks: [
+            "✅ Predicción de demanda por producto, cliente y zona geográfica — 3 modelos estadísticos (exponential_smoothing, moving_average, seasonal_decompose) con factores de estacionalidad diaria, tendencia, confianza 20-99%",
+            "✅ Modelo basado en: histórico de ventas, estacionalidad, tendencia — implementado con descomposición estacional (índices día-de-semana), suavizado exponencial con trend, medias móviles con ajuste estacional",
+            "✅ Sugerencia automática de O/C a proveedores (cantidad óptima, fecha, precio esperado) — PurchaseSuggestion con forecast_demand, current_stock, stock_after_lead, lead_time, expected_price con markup, flujo pending→suggested→converted/rejected",
+            "✅ Detección de anomalías: picos de demanda, caídas inesperadas, productos sin rotación — algoritmo Z-score con threshold configurable (anomaly_threshold), severidad critical/warning/info, revisión one-click",
+            "✅ Dashboard de forecast vs real con accuracy del modelo — MAPE, MAE, RMSE, precisión general, tendencia mensual, por modelo, endpoint record_accuracy compara predicciones vs ventas reales",
+            "✅ Ajuste manual del forecast (override) con registro de motivo — ForecastOverride + is_override en predicción, original_prediction preservado, override_reason obligatorio, historial completo"
+          ]
+        },
+        {
+          id: "f5-ruteo-ia",
+          title: "Ruteo Inteligente para Repartidores",
+          desc: "Optimización TSP, carga de vehículos, re-ruteo dinámico, ETA predictivo",
+          status: "done",
+          badge: "Backend + IA",
+          tech: ["Python", "nearest-neighbor", "2-opt", "ETS"],
+          tasks: [
+            "✅ Algoritmo de ruta óptima (TSP nearest-neighbor + 2-opt, restricciones: ventanas horarias, capacidad vehículo, sin OR-Tools)",
+            "✅ Optimización de carga de vehículos (volumen, peso, temperatura, orden de descarga LIFO/FIFO/zone)",
+            "✅ Re-ruteo dinámico: insertar parada urgente en posición óptima, cancelar parada con re-optimización",
+            "✅ Predicción ETA: distancia haversine × factor zona × factor hora × factor tráfico, 30-95% confianza",
+            "✅ Dashboard eficiencia: rutas optimizadas, ahorro distancia/tiempo, paradas optimizadas, últimas optimizaciones"
+          ]
+        },
+        {
+          id: "f5-scoring",
+          title: "Scoring de Crédito Automático",
+          desc: "Modelo ML para aprobación de crédito, límites sugeridos, alerta de riesgo",
+          status: "done",
+          badge: "Backend + IA",
+          tech: ["Python", "Pandas", "SQLAlchemy", "FastAPI"],
+          tasks: [
+            "✅ Modelo de scoring basado en: historial de pagos, antigüedad, frecuencia, monto promedio, giro — 6 componentes (payment_history 0-300, antiquity 0-200, frequency 0-150, avg_amount 0-150, industry 0-100, credit_utilization 0-100)",
+            "✅ Límite de crédito sugerido automáticamente al crear o evaluar cliente — 3x/2x/1x/0.5x según riesgo low/medium/high/critical",
+            "✅ Alerta de riesgo cuando un cliente se acerca a su límite (>80%) o atrasa pagos (>30 días) — 4 tipos: near_limit, overdue, score_drop, payment_default con severidad low/medium/high/critical",
+            "✅ Bloqueo/desbloqueo automático de clientes morosos (score <300 o mora >60 días) — CreditEvent audit trail con block/unblock/auto_block/auto_unblock",
+            "✅ Dashboard de cartera: resumen (exposición total, score promedio, distribución riesgo), concentración por nivel, alertas recientes, top exposición",
+            "✅ Revisión periódica automática del scoring (re-evaluación mensual) — next_evaluation_date = now + 30 días, bulk_evaluate evalúa todos los clientes activos"
+          ]
+        },
+        {
+          id: "f5-oportunidades",
+          title: "Detección de Oportunidades Comerciales",
+          desc: "ML para cross-selling, churn prediction, recomendaciones inteligentes",
+          status: "done",
+          badge: "Backend + IA",
+          tech: ["Python", "Pandas", "SQLAlchemy", "FastAPI"],
+          tasks: [
+            "✅ Churn detection: clientes sin compras >30 días con score basado en días desde última compra × frecuencia previa, alerta con riesgo (low/medium/high/critical), registro en co_churn_analysis",
+            "✅ Productos dormantes: productos que cliente compraba en últimos 6 meses pero no en últimos 60 días, con descuento automático sugerido (5% + 2% por mes inactivo, tope 20%)",
+            "✅ Cross-selling: market basket analysis con support/confidence/lift sobre todas las ventas (6 meses). 'Clientes que compraron X también compraron Y' con lift ≥1.5 como umbral. Reglas almacenadas en co_product_affinity",
+            "✅ Potencial crédito: clientes que pagan efectivo (condicion='contado') con compras regulares, sin línea de crédito o con línea sin usar. Sugiere ofrecer crédito con límite = 2× compra promedio",
+            "✅ Up-selling: clientes que compran mismo producto + presentación ≥3 veces en 6 meses, sugiere variante de presentación mayor desde ProductVariant.tipo='presentacion'"
+          ]
+        },
+        {
+          id: "f5-iot",
+          title: "IoT para Cadena de Frío",
+          desc: "Sensores en contenedores refrigerados, monitoreo en mapa, alertas DINALFA",
+          status: "done",
+          badge: "IoT + Backend",
+          tech: ["Python", "FastAPI", "SQLAlchemy", "MQTT simulation"],
+          tasks: [
+            "✅ Sensores ESP32/DHT22/DS18B20: modelo cc_sensors con tipo, ubicación, umbrales min/max temp, batería, señal, coordenadas mapa",
+            "✅ Transmisión MQTT simulado: endpoint POST /simulate genera lecturas realistas (10% fuera de rango para probar alertas), almacenamiento en cc_sensor_readings",
+            "✅ Alertas en tiempo real: detección temp_high/temp_low/battery_low al registrar lectura, severidad critical/high/warning, resolución one-click y notificación WhatsApp",
+            "✅ Dashboard de monitoreo: KPIs (sensores totales/online/offline/alertas), tarjetas con temperatura actual por sensor, alertas recientes, compliance rate",
+            "✅ Reportes DINALFA: compliance_logs por lote/producto/sensor con min/max/avg temp, violaciones, conforme/no conforme, inicio/cierre de monitoreo",
+            "✅ Notificación WhatsApp: endpoint /alerts/{id}/notify-whatsapp marca alerta como notificada (integra con sistema WhatsApp existente)"
+          ]
+        },
+        {
+          id: "f5-asistente",
+          title: "Asistente Virtual IA + WhatsApp",
+          desc: "Chatbot con IA para clientes: pedidos, consultas, reclamos, derivación a humano",
+          status: "done",
+          badge: "IA + Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "SQLAlchemy", "PostgreSQL"],
+          tasks: [
+            "✅ Modelos: 4 tablas va_* — Conversation (con estado, canal, current_intent, satisfacción), Message (rol, intent, confidence, action_taken, needs_human), Ticket (categoría, prioridad, asignación), IntentTemplate (keywords, response, action_handler, requires_live_agent)",
+            "✅ Intent classifier: 8 intents (saludo, catalogo, pedido_status, credito, comprar, reclamo, humano, despedida) + matching por keyword con confidence scoring",
+            "✅ Rule-based Response Generator: 6 action_handlers (query_catalog, query_order, query_credit, create_order, create_ticket, escalate) + fallback + templates por defecto con seed endpoint",
+            "✅ API REST: 10+ endpoints bajo /api/v1/asistente-virtual/ — chat, conversations CRUD, tickets CRUD, templates CRUD, dashboard",
+            "✅ Feature flag asistente_virtual en ALL_FEATURES + plans + distributor vertical + main.py guard",
+            "✅ Migración Alembic: 20260601260000_add_asistente_virtual_tables (4 tablas va_*) + env.py",
+            "✅ Frontend: AsistenteVirtualPage.tsx con 5 tabs — Dashboard (KPIs, resolución IA, gráficos por intención/tickets), Chat (chat en vivo con IntelliZapp para cada módulo)",
+            "✅ Sidebar IA & Analítica: Asistente Virtual + route en App.tsx con FeatureRoute guard + API namespace en index.ts"
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase6",
+      title: "Clientes — Fidelización & Segmentación",
+      weeks: "Semanas 21-22",
+      color: "#06b6d4",
+      status: "in-progress",
+      icon: "👥",
+      modules: [
+        {
+          id: "f6-clientes",
+          title: "Clientes — Fidelización & Segmentación",
+          desc: "RFM scoring, segmentación conductual, programa de lealtad, ofertas personalizadas, cupones",
+          status: "in-progress",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "PostgreSQL"],
+          tasks: [
+            "✅ Modelos SQLAlchemy: RfmScore, BehavioralSegment, CustomerSegmentAssignment, LoyaltyProgram, LoyaltyTransaction, PersonalizedOffer, CouponCode (7 tablas cli_*)",
+            "✅ Schemas Pydantic: 18 schemas para RFM, segmentos, lealtad, ofertas, cupones, dashboard",
+            "✅ Servicio: RFM scoring (Recency/Frequency/Monetary 1-5), segmentación automática (9 segmentos sistema), programa de lealtad con tiers, ofertas personalizadas, generación y validación de cupones, dashboard consolidado",
+            "✅ Router REST: 20+ endpoints bajo /api/v1/clientes/ — dashboard, RFM CRUD/evaluar, segmentos CRUD, lealtad programa/transacciones, ofertas CRUD, cupones generar/validar/canjear",
+            "✅ Migración Alembic: 20260601300000 (7 tablas cli_*) + registro env.py",
+            "✅ Feature flag clientes_fidelizacion en ALL_FEATURES + planes + vertical distribuidora + main.py guard",
+            "✅ Frontend: ClientesPage.tsx con 6 tabs — Dashboard, RFM Scoring, Segmentos, Lealtad, Ofertas, Cupones",
+            "✅ Sidebar IA & Analítica + route App.tsx + API namespace en index.ts",
+            "✅ Roadmap actualizado STATE_VERSION 22",
+          ]
+        }
+      ]
+    }
+  ]
+};
+
+// ===== STATE =====
+const STATE_VERSION = 22;
+let state = loadState();
+let currentFilter = "all";
+
+function defaultState() {
+  // Seed from DATA initial statuses, deriving module status from tasks
+  const modules = {};
+  const tasks = {};
+  DATA.phases.forEach(phase => {
+    phase.modules.forEach(mod => {
+      let hasAll = true, hasInProgress = false, hasAny = false;
+      mod.tasks.forEach((task, i) => {
+        if (task.startsWith("✅")) { tasks[`${mod.id}-t${i}`] = "done"; hasAny = true; }
+        else if (task.startsWith("🔄")) { hasInProgress = true; hasAll = false; }
+        else { hasAll = false; }
+      });
+      if (hasAll && hasAny) modules[mod.id] = "done";
+      else if (hasInProgress || hasAny) modules[mod.id] = "in-progress";
+      else if (mod.status && mod.status !== "pending") modules[mod.id] = mod.status;
+    });
+  });
+  return {
+    version: STATE_VERSION,
+    modules,
+    tasks,
+    notes: "",
+    lastUpdated: new Date().toISOString()
+  };
+}
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem("intelimarket_roadmap");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // If version mismatch, reset to defaults to pick up DATA changes
+      if (parsed.version !== STATE_VERSION) return defaultState();
+      return parsed;
+    }
+  } catch(e) {}
+  return defaultState();
+}
+
+function saveState() {
+  state.lastUpdated = new Date().toISOString();
+  localStorage.setItem("intelimarket_roadmap", JSON.stringify(state));
+  updateUI();
+  showSaveStatus("💾 Guardado!");
+}
+
+function showSaveStatus(msg) {
+  document.getElementById("saveStatus").textContent = msg;
+  setTimeout(() => {
+    document.getElementById("saveStatus").textContent = "Los cambios se guardan automáticamente";
+  }, 2000);
+}
+
+// Derive module status from its individual tasks (ground truth)
+function computeModuleStatus(moduleId) {
+  const mod = findModule(moduleId);
+  if (!mod) return "pending";
+  let total = mod.tasks.length, done = 0;
+  mod.tasks.forEach((_, i) => {
+    const key = `${moduleId}-t${i}`;
+    const saved = state.tasks[key];
+    if (saved === "done") done++;
+    else if (!saved && getTaskStatusFromText(mod.tasks[i]) === "done") done++;
+  });
+  if (total === 0) return state.modules[moduleId] || "pending";
+  if (done === total) return "done";
+  if (done > 0) return "in-progress";
+  return "pending";
+}
+
+// ===== RENDER =====
+function render() {
+  const container = document.getElementById("phasesContainer");
+  container.innerHTML = "";
+
+  DATA.phases.forEach(phase => {
+    const phaseDiv = document.createElement("div");
+    phaseDiv.className = "phase";
+    phaseDiv.dataset.phaseId = phase.id;
+
+    // Calculate phase progress from module task completion
+    let total = 0, done = 0;
+    phase.modules.forEach(m => {
+      const ms = computeModuleStatus(m.id);
+      if (ms === "done") done++;
+      total++;
+    });
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    // Phase status indicator
+    let statusClass = "pending";
+    if (done === total && total > 0) statusClass = "completed";
+    else if (done > 0) statusClass = "in-progress";
+
+    phaseDiv.innerHTML = `
+      <div class="phase-header" onclick="togglePhase('${phase.id}')">
+        <div class="phase-header-left">
+          <div class="phase-number" style="background:${phase.color}20;color:${phase.color}">${phase.icon}</div>
+          <div class="phase-info">
+            <h3>${phase.title}</h3>
+            <div class="weeks">${phase.weeks}</div>
+          </div>
+        </div>
+        <div class="phase-header-right">
+          <div class="phase-status-indicator ${statusClass}"></div>
+          <div class="phase-mini-bar">
+            <div class="phase-mini-fill" style="width:${pct}%;background:${phase.color}"></div>
+          </div>
+          <div class="phase-pct" style="color:${phase.color}">${pct}%</div>
+          <div class="phase-arrow">▼</div>
+        </div>
+      </div>
+      <div class="phase-body">
+        ${phase.modules.map(m => renderModule(m, phase)).join("")}
+      </div>
+    `;
+
+    container.appendChild(phaseDiv);
+  });
+
+  updateUI();
+}
+
+function getTaskStatusFromText(text) {
+  if (text.startsWith("✅")) return "done";
+  if (text.startsWith("🔄")) return "in-progress";
+  return "pending";
+}
+
+function renderModule(module, phase) {
+  const ms = computeModuleStatus(module.id);
+  const badgeClass = ms === "done" ? "badge-done" : ms === "in-progress" ? "badge-in-progress" : "badge-pending";
+  const badgeText = ms === "done" ? "✅ Completado" : ms === "in-progress" ? "🔄 En Progreso" : "⏳ Pendiente";
+  const checkboxClass = ms === "done" ? "done" : ms === "in-progress" ? "partial" : "pending";
+  const checkboxIcon = ms === "done" ? "✓" : ms === "in-progress" ? "◐" : "";
+
+  const taskFilterMatch = (taskKey) => {
+    if (currentFilter === "all") return true;
+    const taskStatus = state.tasks[taskKey] || getTaskStatusFromText(
+      module.tasks.find((_, i) => `${module.id}-t${i}` === taskKey) || ""
+    );
+    const matches = taskStatus === currentFilter;
+    return matches || currentFilter === "all";
+  };
+
+  // Count tasks per module (use task text prefix as fallback)
+  let totalTasks = module.tasks.length;
+  let doneTasks = 0;
+  module.tasks.forEach((task, i) => {
+    const tKey = `${module.id}-t${i}`;
+    const saved = state.tasks[tKey];
+    if (saved === "done") doneTasks++;
+    else if (!saved) {
+      const inferred = getTaskStatusFromText(task);
+      if (inferred === "done") doneTasks++;
+    }
+  });
+  const taskPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+
+  return `
+    <div class="module" data-module-id="${module.id}" data-status="${ms}">
+      <div class="module-header" onclick="toggleModule('${module.id}')">
+        <div class="module-checkbox ${checkboxClass}" onclick="event.stopPropagation();cycleModuleStatus('${module.id}')">${checkboxIcon}</div>
+        <div class="module-info">
+          <div class="title">${module.title}</div>
+          <div class="desc">${module.desc}</div>
+          <div class="tech-stack">${module.tech.map(t => `<span>${t}</span>`).join("")}</div>
+        </div>
+        <span class="module-badge ${badgeClass}">${badgeText}</span>
+        <button class="prompt-btn" onclick="event.stopPropagation();showPrompt('${module.id}')" title="Obtener prompt de implementación">🤖 Prompt</button>
+        <span style="font-size:12px;color:var(--text-secondary);flex-shrink:0;">${doneTasks}/${totalTasks}</span>
+      </div>
+      <div class="module-tasks">
+        <div class="module-tasks-inner">
+          ${module.tasks.map((task, i) => {
+            const tKey = `${module.id}-t${i}`;
+            const saved = state.tasks[tKey];
+            const ts = saved || getTaskStatusFromText(task);
+            return `
+              <div class="task ${ts === 'done' ? 'done' : ''}" data-task-key="${tKey}">
+                <input type="checkbox" ${ts === "done" ? "checked" : ""} onchange="toggleTask('${module.id}', ${i})" />
+                <label>${task}</label>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ===== INTERACTIONS =====
+function togglePhase(id) {
+  const el = document.querySelector(`[data-phase-id="${id}"]`);
+  el.classList.toggle("open");
+}
+
+function toggleModule(id) {
+  const el = document.querySelector(`[data-module-id="${id}"]`);
+  el.classList.toggle("open");
+}
+
+function cycleModuleStatus(id) {
+  const current = state.modules[id] || "pending";
+  const next = current === "pending" ? "in-progress" : current === "in-progress" ? "done" : "pending";
+  state.modules[id] = next;
+  if (next === "done") {
+    // Auto-complete all tasks
+    const mod = findModule(id);
+    if (mod) {
+      mod.tasks.forEach((_, i) => {
+        state.tasks[`${id}-t${i}`] = "done";
+      });
+    }
+  }
+  saveState();
+}
+
+function toggleTask(moduleId, taskIdx) {
+  const tKey = `${moduleId}-t${taskIdx}`;
+  const current = state.tasks[tKey] || "pending";
+  state.tasks[tKey] = current === "done" ? "pending" : "done";
+
+  // Update module status based on tasks
+  const mod = findModule(moduleId);
+  if (mod) {
+    let total = mod.tasks.length;
+    let done = 0;
+    mod.tasks.forEach((_, i) => {
+      if (state.tasks[`${moduleId}-t${i}`] === "done") done++;
+    });
+    if (done === total) state.modules[moduleId] = "done";
+    else if (done > 0) state.modules[moduleId] = "in-progress";
+    else state.modules[moduleId] = "pending";
+  }
+
+  saveState();
+}
+
+function findModule(moduleId) {
+  for (const phase of DATA.phases) {
+    for (const m of phase.modules) {
+      if (m.id === moduleId) return m;
+    }
+  }
+  return null;
+}
+
+function findPhaseByModule(moduleId) {
+  for (const phase of DATA.phases) {
+    for (const m of phase.modules) {
+      if (m.id === moduleId) return phase;
+    }
+  }
+  return null;
+}
+
+// ===== PROMPT GENERATOR =====
+function generatePrompt(moduleId) {
+  const mod = findModule(moduleId);
+  if (!mod) return "Error: módulo no encontrado";
+
+  const phase = findPhaseByModule(moduleId);
+  const phaseName = phase ? phase.title : "InteliMarket";
+
+  // Gather task details
+  const taskDetails = mod.tasks.map((t, i) => {
+    const tKey = `${mod.id}-t${i}`;
+    const saved = state.tasks[tKey];
+    const status = saved || getTaskStatusFromText(t);
+    const prefix = status === "done" ? "[HECHO]" : status === "in-progress" ? "[EN PROGRESO]" : "[PENDIENTE]";
+    return `${prefix} ${t.replace(/^[✅🔄]\s*/, "")}`;
+  }).join("\n");
+
+  const techStack = mod.tech.join(", ");
+  const computed = computeModuleStatus(mod.id);
+  const statusEmoji = computed === "done" ? "✅" : computed === "in-progress" ? "🔄" : "⏳";
+
+  return `## ${statusEmoji} Implementar: ${mod.title}
+
+**Contexto del proyecto:** InteliMarket — SaaS ERP para distribuidoras en Paraguay. Multi-tenant con PostgreSQL, FastAPI backend, React + TypeScript frontend, React Native para apps móviles.
+
+**Módulo:** ${mod.title}
+**Fase:** ${phaseName}
+**Descripción:** ${mod.desc}
+**Tech Stack:** ${techStack}
+**Estado actual:** ${computed === "done" ? "Completado" : computed === "in-progress" ? "En progreso" : "No iniciado"}
+
+### Requerimientos
+
+${mod.desc}
+
+### Tareas a implementar
+
+${taskDetails}
+
+### Consideraciones técnicas
+
+- Backend: Python + FastAPI + SQLAlchemy async + PostgreSQL
+- Frontend: React + TypeScript + TailwindCSS
+- App Mobile: React Native + Expo (si aplica)
+- Mapas: MapLibre GL + OSRM para ruteo (si aplica)
+- WhatsApp: Twilio API (si aplica)
+- GPS: WebSocket + PostgreSQL para tracking en tiempo real (si aplica)
+- Cumplir con la realidad paraguaya: SIFEN/e-Kuatia, retenciones SET, Gs/USD
+- Código modular siguiendo la estructura existing (models, schemas, service, router)
+- Feature flags desde api/src/features/plans.py (ALL_FEATURES)
+- Vertical presets en api/src/verticals/presets.py
+
+### Instrucciones
+
+Implementá esta funcionalidad completa con:
+1. Modelos SQLAlchemy (si son necesarios nuevos)
+2. Schemas Pydantic
+3. Servicio con lógica de negocio
+4. Router REST con autenticación
+5. Frontend React con UI completa
+6. Registro en main.py
+7. Migración Alembic
+
+Avanzá con profesionalismo, innovación y responsabilidad. Todo commit debe ser funcional y probado.`;
+}
+
+function showPrompt(moduleId) {
+  const mod = findModule(moduleId);
+  if (!mod) return;
+
+  const promptText = generatePrompt(moduleId);
+
+  // Remove any existing overlay
+  document.querySelectorAll(".prompt-overlay").forEach(el => el.remove());
+
+  const overlay = document.createElement("div");
+  overlay.className = "prompt-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div class="prompt-modal" onclick="event.stopPropagation()">
+      <div class="prompt-modal-header">
+        <h3>🤖 Prompt de Implementación — ${mod.title}</h3>
+        <button class="prompt-modal-close" onclick="this.closest('.prompt-overlay').remove()">✕</button>
+      </div>
+      <div class="prompt-modal-body">
+        <pre id="promptContent">${promptText}</pre>
+        <div class="prompt-hint">Copiá este prompt y enviámelo para que implemente esta funcionalidad al instante.</div>
+      </div>
+      <div class="prompt-modal-footer">
+        <button class="prompt-copy-btn close-btn" onclick="this.closest('.prompt-overlay').remove()">Cerrar</button>
+        <button class="prompt-copy-btn" id="copyPromptBtn" onclick="copyPrompt(this)">📋 Copiar Prompt</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+}
+
+function copyPrompt(btn) {
+  const pre = document.getElementById("promptContent");
+  if (!pre) return;
+
+  const text = pre.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = "✅ ¡Copiado!";
+    btn.classList.add("copied");
+    setTimeout(() => {
+      btn.textContent = "📋 Copiar Prompt";
+      btn.classList.remove("copied");
+    }, 2000);
+  }).catch(() => {
+    // Fallback for older browsers
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+    btn.textContent = "✅ ¡Copiado!";
+    btn.classList.add("copied");
+    setTimeout(() => {
+      btn.textContent = "📋 Copiar Prompt";
+      btn.classList.remove("copied");
+    }, 2000);
+  });
+}
+
+// ===== UPDATE UI =====
+function updateUI() {
+  // Count stats from tasks (ground truth)
+  let totalTasks = 0, doneTasks = 0, inProgressTasks = 0, pendingTasks = 0;
+  let totalModules = 0, doneModules = 0, inProgressModules = 0, pendingModules = 0;
+
+  DATA.phases.forEach(phase => {
+    phase.modules.forEach(mod => {
+      totalModules++;
+      const ms = computeModuleStatus(mod.id);
+      if (ms === "done") doneModules++;
+      else if (ms === "in-progress") inProgressModules++;
+      else pendingModules++;
+
+      mod.tasks.forEach((task, i) => {
+        totalTasks++;
+        const saved = state.tasks[`${mod.id}-t${i}`];
+        const ts = saved || getTaskStatusFromText(task);
+        if (ts === "done") doneTasks++;
+        else if (ts === "in-progress") inProgressTasks++;
+        else pendingTasks++;
+      });
+    });
+  });
+
+  // Update stats
+  document.getElementById("statCompleted").textContent = doneModules;
+  document.getElementById("statInProgress").textContent = inProgressModules;
+  document.getElementById("statPending").textContent = pendingModules;
+  document.getElementById("statTotalTasks").textContent = totalTasks;
+
+  // Progress bar
+  const pct = totalModules > 0 ? Math.round((doneModules / totalModules) * 100) : 0;
+  document.getElementById("progressFill").style.width = pct + "%";
+  document.getElementById("progressSummary").textContent = `${doneModules}/${totalModules} módulos completados (${doneTasks}/${totalTasks} tareas)`;
+
+  // Update phase mini-bars
+  DATA.phases.forEach(phase => {
+    let d = 0, t = 0;
+    phase.modules.forEach(m => {
+      t++;
+      if (computeModuleStatus(m.id) === "done") d++;
+    });
+    const pp = t > 0 ? Math.round((d / t) * 100) : 0;
+    const phaseEl = document.querySelector(`[data-phase-id="${phase.id}"]`);
+    if (phaseEl) {
+      const fill = phaseEl.querySelector(".phase-mini-fill");
+      const pctEl = phaseEl.querySelector(".phase-pct");
+      const indicator = phaseEl.querySelector(".phase-status-indicator");
+      if (fill) fill.style.width = pp + "%";
+      if (pctEl) pctEl.textContent = pp + "%";
+      if (indicator) {
+        indicator.className = "phase-status-indicator " +
+          (d === t && t > 0 ? "completed" : d > 0 ? "in-progress" : "pending");
+      }
+    }
+  });
+
+  // Update each module badge
+  DATA.phases.forEach(phase => {
+    phase.modules.forEach(mod => {
+      const ms = computeModuleStatus(mod.id);
+      const el = document.querySelector(`[data-module-id="${mod.id}"]`);
+      if (!el) return;
+      const badge = el.querySelector(".module-badge");
+      const checkbox = el.querySelector(".module-checkbox");
+      if (badge) {
+        const labels = { done: "✅ Completado", "in-progress": "🔄 En Progreso", pending: "⏳ Pendiente" };
+        badge.textContent = labels[ms] || "⏳ Pendiente";
+        badge.className = "module-badge " + (ms === "done" ? "badge-done" : ms === "in-progress" ? "badge-in-progress" : "badge-pending");
+      }
+      if (checkbox) {
+        checkbox.className = "module-checkbox " + (ms === "done" ? "done" : ms === "in-progress" ? "partial" : "pending");
+        checkbox.textContent = ms === "done" ? "✓" : ms === "in-progress" ? "◐" : "";
+      }
+
+      // Update task count display
+      const countEl = el.querySelector(".module-header > span:last-child");
+      if (countEl) {
+        let d = 0, t = mod.tasks.length;
+        mod.tasks.forEach((task, i) => {
+          const saved = state.tasks[`${mod.id}-t${i}`];
+          if (saved === "done") d++;
+          else if (!saved && getTaskStatusFromText(task) === "done") d++;
+        });
+        countEl.textContent = `${d}/${t}`;
+      }
+
+      // Update each task
+      mod.tasks.forEach((task, i) => {
+        const tKey = `${mod.id}-t${i}`;
+        const saved = state.tasks[tKey];
+        const ts = saved || getTaskStatusFromText(task);
+        const taskEl = el.querySelector(`[data-task-key="${tKey}"]`);
+        if (taskEl) {
+          taskEl.className = "task " + (ts === "done" ? "done" : "");
+          const cb = taskEl.querySelector("input[type='checkbox']");
+          if (cb) cb.checked = ts === "done";
+        }
+      });
+    });
+  });
+
+  // Notes
+  document.getElementById("roadmapNotes").value = state.notes || "";
+
+  // Last updated
+  document.getElementById("lastUpdated").textContent = "🔄 Última actualización: " +
+    (state.lastUpdated ? new Date(state.lastUpdated).toLocaleDateString("es-PY", {
+      year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit"
+    }) : "Nunca");
+}
+
+// ===== FILTERS =====
+document.querySelectorAll(".filter-btn").forEach(btn => {
+  btn.addEventListener("click", function() {
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    this.classList.add("active");
+    currentFilter = this.dataset.filter;
+    applyFilter();
+  });
+});
+
+function applyFilter() {
+  document.querySelectorAll(".module").forEach(el => {
+    const mId = el.dataset.moduleId;
+    const ms = state.modules[mId] || "pending";
+
+    if (currentFilter === "all") {
+      el.style.display = "";
+    } else if (currentFilter === "done") {
+      el.style.display = ms === "done" ? "" : "none";
+    } else if (currentFilter === "in-progress") {
+      el.style.display = ms === "in-progress" ? "" : "none";
+    } else if (currentFilter === "pending") {
+      el.style.display = ms === "pending" ? "" : "none";
+    }
+  });
+}
+
+// ===== PERSIST NOTES =====
+document.getElementById("roadmapNotes").addEventListener("input", function() {
+  state.notes = this.value;
+  saveState();
+});
+
+// ===== THEME =====
+document.getElementById("themeToggle").addEventListener("click", function() {
+  const html = document.documentElement;
+  const isDark = html.getAttribute("data-theme") === "dark";
+  html.setAttribute("data-theme", isDark ? "light" : "dark");
+  this.textContent = isDark ? "🌙" : "☀️";
+  localStorage.setItem("intelimarket_theme", isDark ? "light" : "dark");
+});
+
+// Load theme
+const savedTheme = localStorage.getItem("intelimarket_theme");
+if (savedTheme) {
+  document.documentElement.setAttribute("data-theme", savedTheme);
+  document.getElementById("themeToggle").textContent = savedTheme === "dark" ? "☀️" : "🌙";
+}
+
+// ===== SESSION BRIEFING =====
+(function logSession() {
+  const sessionKey = "intelimarket_session_briefings";
+  const briefings = JSON.parse(localStorage.getItem(sessionKey) || "[]");
+  const today = new Date().toLocaleDateString("es-PY", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const lastBriefing = briefings[briefings.length - 1];
+  const currentSummary = `✅ Fase 5 COMPLETA: 6/6 módulos (forecast, ruteo, scoring crédito, oportunidades, cold chain, asistente virtual). STATE_VERSION 21.`;
+  if (!lastBriefing || lastBriefing.summary !== currentSummary) {
+    briefings.push({ date: today, summary: currentSummary });
+    localStorage.setItem(sessionKey, JSON.stringify(briefings));
+    const notes = document.getElementById("roadmapNotes");
+    if (notes) {
+      const entry = `\n[${today}] ${currentSummary}`;
+      notes.value = notes.value ? notes.value + "\n" + entry : entry;
+      state.notes = notes.value;
+      saveState();
+    }
+  }
+})();
+
+// ===== INIT =====
+render();
+</script>
+
+</body>
+</html>

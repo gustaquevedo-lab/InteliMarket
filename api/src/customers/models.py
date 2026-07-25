@@ -1,6 +1,6 @@
 """Customer model"""
 
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
@@ -25,8 +25,12 @@ class Customer(Base):
     email = Column(String(255))
     price_list_id = Column(UUID(as_uuid=True))
     credito_limite = Column(Numeric(15, 0), default=0)
-    credito_usado = Column(Numeric(15, 0), default=0)
+    credito_usado = Column(Numeric(15, 0), default=0, server_default=text("0"))
     pago_default = Column(String(20))
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# Alias expected by some modules (comerciales, credit_scoring, customer360, etc.)
+Partner = Customer

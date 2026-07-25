@@ -8,6 +8,8 @@ import uuid
 from api.src.tenants.models import Tenant, UserTenant
 from api.src.auth.models import User
 from api.src.auth.jwt import hash_password
+from api.src.features.plans import get_plan_features
+from api.src.verticals.presets import get_vertical
 
 
 async def create_tenant_with_schema(
@@ -18,9 +20,13 @@ async def create_tenant_with_schema(
     user_password: str,
     user_nombre: str,
     plan: str = "starter",
+    vertical_slug: str | None = None,
 ) -> Tenant:
     tenant_id = uuid.uuid4()
     schema_name = f"tenant_{tenant_id.hex[:12]}"
+
+    # Build initial config from plan + vertical
+    config = _build_tenant_config(plan, vertical_slug)
 
     tenant = Tenant(
         id=tenant_id,
@@ -29,6 +35,7 @@ async def create_tenant_with_schema(
         plan=plan,
         schema_name=schema_name,
         fecha_inicio=datetime.now(timezone.utc),
+        config=config,
     )
 
     user = User(
@@ -52,7 +59,42 @@ async def create_tenant_with_schema(
     await create_tenant_schema(schema_name)
     await seed_tenant_schema(schema_name)
 
+    # Seed default notification and WhatsApp templates
+    try:
+        from api.src.whatsapp.service import seed_wa_templates
+        await seed_wa_templates(db, tenant_id)
+    except Exception:
+        pass
+    try:
+        from api.src.notifications.service import seed_default_templates as seed_notif_templates
+        await seed_notif_templates(db, tenant_id)
+    except Exception:
+        pass
+
     return tenant
+
+
+def _build_tenant_config(plan: str, vertical_slug: str | None = None) -> dict:
+    """Build initial tenant config from plan and optional vertical."""
+    features = get_plan_features(plan)
+    config_defaults = {}
+    payment_gateways = []
+
+    if vertical_slug:
+        vertical = get_vertical(vertical_slug)
+        if vertical:
+            # Vertical features extend plan features
+            features = list(set(features) | set(vertical.features))
+            config_defaults = dict(vertical.config_defaults)
+            payment_gateways = list(vertical.payment_gateways)
+
+    return {
+        "vertical_slug": vertical_slug,
+        "enabled_features": features,
+        "config_defaults": config_defaults,
+        "payment_gateways": payment_gateways,
+        "custom_features": False,
+    }
 
 
 async def create_tenant_schema(schema_name: str):

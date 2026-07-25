@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InteliMarket — Roadmap a Producción | Casa Gonzalito</title>
+<style>
+  :root {
+    --bg: #f8fafc; --card: #ffffff; --border: #e2e8f0; --text: #0f172a;
+    --text-secondary: #64748b; --primary: #2563eb; --primary-light: #dbeafe;
+    --success: #16a34a; --success-light: #dcfce7; --warning: #d97706;
+    --warning-light: #fef3c7; --danger: #dc2626; --danger-light: #fee2e2;
+    --purple: #7c3aed; --teal: #0d9488;
+    --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  }
+  [data-theme="dark"] {
+    --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #f1f5f9;
+    --text-secondary: #94a3b8; --primary: #3b82f6; --primary-light: #1e3a5f;
+    --success: #22c55e; --success-light: #14532d; --warning: #f59e0b;
+    --warning-light: #451a03; --danger: #ef4444; --danger-light: #450a0a;
+    --purple: #8b5cf6; --teal: #14b8a6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); padding: 24px; transition: .3s; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+  .header h1 { font-size: 26px; letter-spacing: -.02em; }
+  .header .sub { color: var(--text-secondary); margin-top: 6px; font-size: 14px; max-width: 66ch; }
+  .header-right { display: flex; gap: 8px; align-items: center; }
+  .btn { background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px;
+         padding: 8px 12px; cursor: pointer; font-size: 13px; font-family: var(--font); }
+  .btn:hover { border-color: var(--primary); }
+  .progress-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 22px; }
+  .progress-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+  .progress-head h2 { font-size: 16px; } .progress-head .pct { font-size: 22px; font-weight: 700; color: var(--primary); }
+  .progress-bar { height: 12px; background: var(--border); border-radius: 999px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--teal)); width: 0; transition: width .4s; }
+  .progress-meta { display: flex; gap: 18px; margin-top: 10px; font-size: 12.5px; color: var(--text-secondary); flex-wrap: wrap; }
+  .phase { background: var(--card); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 18px; overflow: hidden; }
+  .phase-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px; cursor: pointer; border-left: 5px solid var(--pc, var(--primary)); }
+  .phase-head .icon { font-size: 22px; }
+  .phase-head h3 { font-size: 16.5px; flex: 1; }
+  .phase-head .count { font-size: 12.5px; color: var(--text-secondary); font-family: var(--mono); background: var(--bg); padding: 3px 9px; border-radius: 999px; }
+  .phase-head .chev { color: var(--text-secondary); transition: transform .2s; }
+  .phase.collapsed .chev { transform: rotate(-90deg); }
+  .phase.collapsed .phase-body { display: none; }
+  .phase-body { padding: 6px 20px 14px; }
+  .task { display: flex; gap: 12px; padding: 13px 0; border-top: 1px solid var(--border); align-items: flex-start; }
+  .task:first-child { border-top: none; }
+  .mark { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--border); flex: none; margin-top: 1px;
+          display: grid; place-items: center; font-size: 14px; color: #fff; }
+  .task.done .mark { background: var(--success); border-color: var(--success); }
+  .task.mine .mark { background: var(--primary); border-color: var(--primary); }
+  .task-main { flex: 1; min-width: 0; }
+  .task-title { font-weight: 600; font-size: 14.5px; }
+  .task.done .task-title, .task.mine .task-title { text-decoration: line-through; color: var(--text-secondary); }
+  .task-desc { font-size: 13px; color: var(--text-secondary); margin-top: 3px; }
+  .task-nota { font-size: 12.5px; color: var(--success); margin-top: 5px; background: var(--success-light); padding: 6px 10px; border-radius: 8px; }
+  .task-id { font-family: var(--mono); font-size: 11px; color: var(--text-secondary); background: var(--bg); padding: 1px 6px; border-radius: 5px; }
+  .task-actions { flex: none; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  .prompt-btn { background: var(--primary-light); color: var(--primary); border: none; border-radius: 8px; padding: 7px 11px;
+                cursor: pointer; font-size: 12.5px; font-weight: 600; font-family: var(--font); white-space: nowrap; }
+  .mine-btn { background: none; border: 1px dashed var(--border); color: var(--text-secondary); border-radius: 8px; padding: 3px 8px; cursor: pointer; font-size: 11px; }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+  .overlay.open { display: flex; }
+  .modal { background: var(--card); border: 1px solid var(--border); border-radius: 14px; max-width: 780px; width: 100%; max-height: 85vh; display: flex; flex-direction: column; }
+  .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .modal-head h3 { font-size: 15px; } .modal-head .x { cursor: pointer; border: none; background: none; font-size: 20px; color: var(--text-secondary); }
+  .modal-body { padding: 16px 20px; overflow: auto; }
+  .modal-body pre { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+                    font-family: var(--mono); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .modal-foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+  .copy-btn { background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .copy-btn.ok { background: var(--success); }
+  .ctx { background: var(--warning-light); border: 1px solid var(--warning); color: var(--text); border-radius: 12px; padding: 14px 18px; margin-bottom: 16px; font-size: 13px; }
+  .ctx b { color: var(--warning); }
+  .truth { background: var(--success-light); border: 1px solid var(--success); border-radius: 12px; padding: 12px 18px; margin-bottom: 22px; font-size: 12.5px; }
+  .truth b { color: var(--success); }
+  code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+  .foot { text-align: center; color: var(--text-secondary); font-size: 12px; margin-top: 30px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <h1>🏭 Roadmap a Producción — Intelimarket / Casa Gonzalito</h1>
+      <p class="sub">Corregir la app módulo por módulo hasta dejarla operativa en producción, sobre la base histórica ya migrada. Cada tarea trae un <b>prompt listo</b> para pegar en una sesión de Claude Code.</p>
+    </div>
+    <div class="header-right">
+      <button class="btn" id="themeBtn" title="Tema">🌙</button>
+      <button class="btn" id="expandBtn" title="Expandir/colapsar todo">↕ Todo</button>
+    </div>
+  </div>
+
+  <div class="truth">
+    <b>✔ Estado sincero:</b> lo marcado en <b>verde</b> es lo que Claude ya completó — vive en el campo <code>done</code> de este archivo (versionado, se sincroniza al nodo). Es la fuente de verdad. Vos podés marcar tareas tuyas en <b>azul</b> con "marco yo" (se guarda en este navegador), pero nunca pisa lo que Claude ya dio por hecho.
+  </div>
+
+  <div class="ctx">
+    <b>Contexto fijo del entorno</b> (para todos los prompts) — Nodo: Minisforum (Ubuntu), <code>ssh intellihouse@minisforum-ia</code> (Tailscale). Repo en <code>~/intelimarket</code> (deps con <code>uv</code>). Postgres destino: DB <code>intelimarket</code> (<code>intelimarket</code>/<code>intelimarket_dev</code>). MySQL legacy local: DB <code>columbia</code> (<code>etl</code>/<code>etl</code>). ETL en <code>scripts/migracion_casa_gonzalito/</code>. Esquema definitivo desde modelos ORM con <code>crear_esquema.py</code> (ver <code>docs/ESQUEMA.md</code>). Empresa/tenant: <code>company_id = 00000000-0000-0000-0000-000000000010</code> (hardcodeado en <code>auth/middleware.py</code>). Login: <code>admin@casagonzalito.py</code> / <code>casa1234</code>. Al terminar una tarea: sincronizar (<code>rsync</code>/commit) y poner <code>done:true</code> en la tarea de este archivo.
+  </div>
+
+  <div class="progress-wrap">
+    <div class="progress-head"><h2>📊 Progreso general</h2><span class="pct" id="pct">0%</span></div>
+    <div class="progress-bar"><div class="progress-fill" id="fill"></div></div>
+    <div class="progress-meta">
+      <span>✅ <b id="mDone">0</b> hechas (Claude)</span>
+      <span>🔵 <b id="mMine">0</b> marcadas por vos</span>
+      <span>⏳ <b id="mPend">0</b> pendientes</span>
+      <span>📋 <b id="mTotal">0</b> tareas · 📆 <b id="mPhases">0</b> fases</span>
+    </div>
+  </div>
+
+  <div id="phases"></div>
+  <div class="foot">Intelimarket · Casa Gonzalito · Roadmap a Producción · el estado oficial vive en el campo done de este archivo</div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head"><h3 id="mTitle">Prompt</h3><button class="x" id="mClose">✕</button></div>
+    <div class="modal-body"><pre id="mPrompt"></pre></div>
+    <div class="modal-foot"><button class="copy-btn" id="copyBtn">📋 Copiar prompt</button></div>
+  </div>
+</div>
+
+<script>
+const CONTEXT =
+"CONTEXTO — Casa Gonzalito / Intelimarket (puesta en producción):\n" +
+"- Nodo Minisforum vía Tailscale: ssh intellihouse@minisforum-ia. Repo en ~/intelimarket (deps con uv → correr con 'uv run ...').\n" +
+"- Postgres destino: DB intelimarket (user intelimarket / pass intelimarket_dev, localhost:5432).\n" +
+"- MySQL legacy local (fuente de datos históricos): DB columbia (user etl / pass etl).\n" +
+"- Esquema autoritativo = modelos ORM vía crear_esquema.py (Base.metadata.create_all). NO usar db/schema.sql ni alembic (rotos). Ver docs/ESQUEMA.md.\n" +
+"- ETL y scripts en scripts/migracion_casa_gonzalito/. API: uvicorn api.src.main:app --host 0.0.0.0 --port 8000 (en tmux).\n" +
+"- Empresa/tenant hardcodeado en auth/middleware.py: company_id=00000000-0000-0000-0000-000000000010. Login app: admin@casagonzalito.py / casa1234.\n" +
+"- El código se edita en el repo de la Mac y se sincroniza al nodo con rsync (o git). Objetivo: dejar la app lista para PRODUCCIÓN.\n";
+
+const REMINDER =
+"\n\n--- AL TERMINAR (obligatorio) ---\n" +
+"1) Sincronizá los cambios al nodo (rsync o git) y verificá que la tarea funciona de verdad.\n" +
+"2) Editá ROADMAP_PRODUCCION.html (raíz del repo). IMPORTANTE: modificá SOLO la entrada de ESTA tarea ({ID}) dentro del array DATA — NO toques el resto del JavaScript ni otras funciones (si rompés el script, el roadmap deja de mostrar tareas). En esa entrada:\n" +
+"   • poné  done:true\n" +
+"   • agregá  nota:\"...\"  (comillas dobles con las comillas internas escapadas \\\") con un brief (1–2 frases) de qué se hizo y hallazgos.\n" +
+"3) Si descubriste sub-bugs o trabajo nuevo, agregalos como tareas nuevas al roadmap (con su propio prompt).\n" +
+"Así el roadmap queda sincero y al día automáticamente.";
+
+const DATA = [
+  { id:"f0", icon:"🧱", color:"#2563eb", titulo:"Fase 0 — Cimiento del esquema (fuente de verdad: modelos ORM)",
+    tareas:[
+      { id:"T0.1", done:true, nota:"Hecho: unificado __table_args__ y quitados prefijos public. en whatsapp/models.py.",
+        titulo:"Corregir whatsapp/models.py (doble __table_args__ + FKs public.)",
+        desc:"WhatsAppConversation/Message definían __table_args__ dos veces; el dict {schema:public} lo pisaba la tupla y se perdía el schema, rompiendo create_all.",
+        prompt:"En el repo Intelimarket, corregí api/src/whatsapp/models.py: cada clase tiene __table_args__ definido DOS veces (primero {\"schema\":\"public\"} y después una tupla que lo pisa). Unificá en uno solo; o más simple: quitá schema=\"public\" de todas las clases del archivo y sacá el prefijo 'public.' de todas las FKs/ForeignKeyConstraint (queda en public por defecto). Verificá imports. Objetivo: que create_all no falle por este archivo." },
+      { id:"T0.2", done:true, nota:"Hecho: create_all construye las 450 tablas sin error. Bugs resueltos: quitado schema=public de 6 modelos, dedup de índices y enums→VARCHAR (en crear_esquema.py).",
+        titulo:"Hacer que crear_esquema.py (create_all) construya TODO el esquema sin errores",
+        desc:"Correr create_all en base descartable e ir arreglando cada modelo/FK/índice/enum roto hasta que cree las ~450 tablas.",
+        prompt:"En el nodo: DROP/CREATE DATABASE im_test; cd ~/intelimarket && uv run python crear_esquema.py. Si falla (NoReferencedTableError, DuplicateTable, enum, etc.), corregí la causa raíz (modelo o el propio crear_esquema.py) y volvé a correr. Repetí hasta '✓ Esquema creado: N tablas'. Confirmá el conteo con psql." },
+      { id:"T0.3", done:true, nota:"Hecho: docs/ESQUEMA.md documenta la decisión, el flujo de build y los bugs corregidos.",
+        titulo:"Documentar crear_esquema.py y el flujo de build",
+        desc:"Dejar por escrito que el esquema autoritativo se construye desde los modelos (create_all), no desde schema.sql ni alembic (rotos).",
+        prompt:"Documentá en docs/ESQUEMA.md: el esquema de producción se construye desde los modelos ORM con crear_esquema.py (create_all), porque db/schema.sql está incompleto y las migraciones alembic tienen bugs. Incluí el comando de reconstrucción y los bugs de modelos corregidos." },
+    ]},
+  { id:"f1", icon:"🗄️", color:"#0d9488", titulo:"Fase 1 — Base de producción con datos",
+    tareas:[
+      { id:"T1.1", done:true, nota:"Hecho: base real intelimarket reconstruida con crear_esquema.py — 450 tablas confirmadas.",
+        titulo:"Reconstruir la base real (intelimarket) con create_all",
+        desc:"Aplicar el esquema de modelos a la base real de producción.",
+        prompt:"En el nodo: pará la API; sudo -u postgres psql -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='intelimarket';\"; DROP/CREATE DATABASE intelimarket OWNER intelimarket; cd ~/intelimarket && TARGET_DSN=postgresql+asyncpg://intelimarket:intelimarket_dev@localhost:5432/intelimarket uv run python crear_esquema.py. Verificá ~450 tablas." },
+      { id:"T1.2", done:true, nota:"Hecho: ETL recargado sobre el esquema de modelos (create_all) en 4.4 min y validado — facturación bruta ₲1.003.899.048.511 año por año ✓. Ajustes: price_lists/price_list_items (nombres reales del modelo), server_default global en crear_esquema.py, y cantidad_reservada explícito en el COPY de stock.",
+        titulo:"Correr el ETL sobre el esquema nuevo + validar",
+        desc:"Cargar datos con etl.py SIN --reset (el esquema ya lo hizo create_all). Ajustar si alguna columna no coincide. Validar con validar.py.",
+        prompt:"En scripts/migracion_casa_gonzalito/: corré el ETL SIN --reset (uv run python etl.py) sobre el esquema construido por create_all. Si un COPY falla por columna faltante/NOT NULL sin default, ajustá etl.py. Luego uv run python validar.py y confirmá que todo cuadra (facturación ₲1.003.899.048.511, ~2M ventas, notas, compras, precios por lista)." },
+      { id:"T1.3", done:true, nota:"Hecho: usuario admin@casagonzalito.py recreado, API levantada (uvicorn) sobre el esquema nuevo, y login devuelve access_token (rol super_admin). Fase 1 completa.",
+        titulo:"Crear usuario admin, arrancar API y verificar login + datos",
+        desc:"Recrear usuario, levantar uvicorn en tmux, confirmar login y que un endpoint devuelva datos migrados.",
+        prompt:"En el nodo: cd ~/intelimarket/scripts/migracion_casa_gonzalito && uv run python crear_usuario.py admin@casagonzalito.py casa1234. Arrancá la API en tmux: cd ~/intelimarket && uv run uvicorn api.src.main:app --host 0.0.0.0 --port 8000. Probá login (POST /api/v1/auth/login) y un endpoint de datos. Si algo da error de columna/tabla, es Fase 2/3." },
+    ]},
+  { id:"f2", icon:"🩹", color:"#d97706", titulo:"Fase 2 — Módulos con SQL viejo (stale)",
+    tareas:[
+      { id:"T2.1", done:true, nota:"Hecho: reescrito todo el SQL crudo de reports/service.py a nombres reales (sales, sale_items, products, product_categories, customers) + columnas (total, iva_10, base_gravada_*, customer_id, cantidad_reservada, costo_unitario), anulado→estado<>'cancelado', cuentas por cobrar a customer_accounts. Endpoints /api/reports/* devuelven cifras reales (neto ₲925.132.927.750). Pendiente menor: opción bruto vs neto y unas fechas '1900' del legacy.",
+        titulo:"Corregir reports/service.py (tablas en español → inglés)",
+        desc:"reports/service.py usa raw SQL con ventas, ventas_items, productos, categorias, clientes (no existen). Deben ser sales, sale_items, products, product_categories, customers.",
+        prompt:"Corregí api/src/reports/service.py: reescribí el SQL crudo a los nombres reales: ventas→sales (monto_total→total, monto_iva_10→iva_10, monto_iva_5→iva_5, monto_base_iva_10→base_gravada_10, monto_base_iva_5→base_gravada_5, monto_exento→base_exenta, cliente_id→customer_id, anulado→(estado='cancelado')), ventas_items→sale_items (venta_id→sale_id, producto_id→product_id, precio_total→total), productos→products (categoria_id→category_id), categorias→product_categories, clientes→customers. Probá /api/reports/sales/* e /api/reports/inventory/* con token y verificá cifras reales. NO uses vistas de compatibilidad: corregí el código." },
+      { id:"T2.2", done:true, nota:"Hecho: auditado todo api/src. Único SQL crudo con tablas viejas = reports (ya en T2.1). Único modelo ORM inexistente = 'Venta' importado en financial/service.py → corregido a Sale (total/estado). El resto de coincidencias (categoria_id, costo_promedio, cliente_id en CRM, monto_total_acordado) son columnas propias legítimas de cada modelo.",
+        titulo:"Auditar TODOS los módulos por nombres de tabla viejos en raw SQL",
+        desc:"Buscar en api/src otros módulos con nombres en español en text()/raw SQL y corregirlos.",
+        prompt:"Auditá api/src: grep -rnE \"(FROM|JOIN|INTO|UPDATE)\\s+(ventas|ventas_items|productos|categorias|clientes|compras)\\b\" api/src --include=*.py. Para cada hallazgo, corregí al nombre real (sales, sale_items, products, product_categories, customers, purchase_orders, suppliers). Listá los archivos corregidos." },
+      { id:"T2.3", done:true, nota:"Hecho: reemplazados los 8 Query(regex=...) por pattern= en reports/router.py y distribuidora/tracking_router.py. Sin warnings de deprecation.",
+        titulo:"Limpiar deprecations regex→pattern",
+        desc:"Varios routers usan Query(regex=...) (deprecado) → pattern=. No rompe, ensucia logs.",
+        prompt:"En api/src reemplazá Query(..., regex=\"...\") por Query(..., pattern=\"...\"). grep -rn 'regex=' api/src --include=*.py para hallarlos." },
+    ]},
+  { id:"f3", icon:"🎯", color:"#7c3aed", titulo:"Fase 3 — Endurecer el núcleo distribuidora (endpoint por endpoint)",
+    tareas:[
+      { id:"T3.1", done:true, nota:"Hecho: sweep completo con scripts/test_endpoints.py (142 endpoints, admin@casagonzalito.py). Bugs core corregidos en esta fase: verticals/router.py (Company no tiene columna 'config' → getattr stopgap en GET; PUT sigue roto, ver nota abajo), financial/router.py (ruta /banks/dashboard registrada después de /banks/{account_id} → FastAPI la interceptaba, reordenada), mobile/service.py (NameError: 'UUID' no importado, ahora uuid.UUID(...) en todo el archivo). Los 3 verificados en 200 tras redeploy. Auth/login/me sin 500 desde el inicio.",
+        titulo:"Auth + Dashboard + gerencial",
+        desc:"Login, /me, dashboard/KPIs, gerencial — sin 500.",
+        prompt:"Con la API corriendo y el token de admin@casagonzalito.py, probá auth (/api/v1/auth/login, /me), dashboard/KPIs y gerencial. Para cada 500, mirá el traceback en el log de uvicorn, identificá el bug (columna/tabla/consulta) y corregilo. Repetí hasta que devuelvan datos reales." },
+      { id:"T3.2", done:true, nota:"Hecho: verificado vía sweep — sin 500 en endpoints de clientes. Reportes de ventas por cliente ya corregidos en T2.1 (reports/service.py reescrito con nombres reales de tabla).",
+        titulo:"Clientes (customers) — listado, detalle, cuenta corriente",
+        desc:"Endpoints de clientes y customer_accounts.",
+        prompt:"Probá y corregí los endpoints de clientes (revisá path/método reales en /api/openapi.json): listado, detalle y cuenta corriente (customer_accounts/account_movements). Que muestren los 10.592 clientes y sus saldos. Corregí 500/405 en el código." },
+      { id:"T3.3", done:true, nota:"Hecho: verificado vía sweep. price_lists/schemas.py corregido (id/price_list_id declarados str en vez de uuid.UUID → ResponseValidationError bajo Pydantic v2 estricto). Sin 500 en productos/categorías.",
+        titulo:"Productos + precios (8 listas) + categorías",
+        desc:"products, product_prices (7 niveles + sugerido), product_categories.",
+        prompt:"Probá y corregí endpoints de productos, precios (product_prices — 8 listas: Precio 1..7 + Sugerido) y categorías. Que muestren los 11.355 productos y sus precios por lista. Corregí errores de consulta." },
+      { id:"T3.4", done:true, nota:"Hecho: verificado vía sweep. reports/sales/by-category corregido (TypeError float/Decimal). Todos los /api/reports/export/* corregidos (export_service.py _auto_width crasheaba con MergedCell — reescrito con get_column_letter). Sin 500 en ventas/reportes.",
+        titulo:"Ventas (sales) — listado, detalle, reportes",
+        desc:"sales/sale_items, notas de crédito, reportes de ventas.",
+        prompt:"Probá y corregí endpoints de ventas: listado/detalle (sales/sale_items), notas de crédito (tipo_comprobante='notacredito'), y reportes de ventas (facturación bruta ₲1.003.899.048.511). Corregí en el código." },
+      { id:"T3.5", done:true, nota:"Hecho: verificado vía sweep — sin 500 en compras/proveedores.",
+        titulo:"Compras (purchases) + proveedores",
+        desc:"purchase_orders/items, suppliers.",
+        prompt:"Probá y corregí endpoints de compras (purchase_orders/items — 106.596) y proveedores (suppliers — 2.512). Corregí errores en el código." },
+      { id:"T3.6", done:true, nota:"Hecho: verificado vía sweep — sin 500 en stock/almacenes. mobile/service.py (conteo físico, recepción de remitos) corregido junto con el fix de UUID de T3.1.",
+        titulo:"Inventario / stock + almacenes",
+        desc:"stock, warehouses, inventory reports.",
+        prompt:"Probá y corregí endpoints de inventario: stock por almacén (86.908 filas), almacenes (warehouses), reportes de inventario/valuación. Corregí errores de esquema/consulta." },
+    ]},
+  { id:"f4", icon:"🖥️", color:"#2563eb", titulo:"Fase 4 — Frontend web (ui-web)",
+    tareas:[
+      { id:"T4.1", done:true, nota:"Hecho: vite.config.ts tenía el proxy hardcodeado a http://api:8000 (nombre de servicio docker, no resuelve en el nodo nativo) → cambiado a localhost:8000 (override por VITE_API_PROXY_TARGET), agregado host:true. CORS_ORIGINS en .env del nodo ya incluía http://minisforum-ia:5173. package.json: @eslint/js estaba en ^10.0.1 (incompatible con eslint ^9.7.0, rompía npm install) → bajado a ^9.7.0; faltaba maplibre-gl como dependency (usado por intelientregas/MapaPage, rompía el dev server al arrancar) → agregado. 2 errores de sintaxis JSX ('>' sin escapar) en supermer/PricingTab.tsx y PromosTab.tsx corregidos a &gt; (bloqueaban tsc -b del proyecto entero). npm install OK, dev server levantado en tmux 'ui' (puerto 5173, accesible por Tailscale en http://minisforum-ia:5173), proxy /api verificado con curl (200). NOTA: 'npm run build' (tsc -b completo) todavía falla por ~25 errores de tipos preexistentes en verticales no-distribuidora (sifen-avanzado, supplier-contracts, supplier-portal, supermer, suscripciones, servicios, visitas) — no bloquean el dev server ni el core distribuidora, quedan como deuda técnica para Fase 5.",
+        titulo:"Instalar y buildear ui-web, configurar API URL + CORS",
+        desc:"ui-web usa VITE_API_URL||/api y un proxy a http://api:8000 (docker). En el nodo nativo hay que apuntar a la API local.",
+        prompt:"En el nodo: cd ~/intelimarket/ui-web && npm install. Configurá VITE_API_URL=http://minisforum-ia:8000 en ui-web/.env.local (o ajustá el proxy de vite.config.ts a http://localhost:8000). Asegurá CORS_ORIGINS con http://minisforum-ia:5173. Levantá: npm run dev -- --host 0.0.0.0. Verificá que compila." },
+      { id:"T4.2", titulo:"Navegar el core en el navegador y corregir errores de UI",
+        desc:"Entrar por Tailscale desde la Mac, loguear, recorrer dashboard/clientes/productos/ventas/compras/stock/reportes.",
+        prompt:"Desde el navegador de la Mac (http://minisforum-ia:5173), logueá con admin@casagonzalito.py/casa1234 y recorré el core distribuidora. Para cada pantalla rota, corregí el frontend (ui-web/src) y/o el backend. Objetivo: ver los 14 años de datos en la UI sin errores." },
+    ]},
+  { id:"f5", icon:"🧩", color:"#0d9488", titulo:"Fase 5 — Resto de módulos / otras verticales",
+    tareas:[
+      { id:"T5.1", titulo:"Módulos distribuidora-afines (inventario avanzado, precios inteligentes, forecast, rutas)",
+        desc:"No críticos del día 1, pero suman.",
+        prompt:"Probá y corregí (endpoint por endpoint) los módulos: advanced_inventory, smart_pricing, demand_forecast, intelligent_routing, comerciales, credit_scoring. Para cada uno, probar endpoints con token y corregir bugs de esquema/consulta." },
+      { id:"T5.2", titulo:"Verticales no-distribuidora (farmacia, boutique, supermer, ecommerce…)",
+        desc:"No los usa Casa Gonzalito; solo si querés TODA la app sana. Subdividir por vertical.",
+        prompt:"Si el objetivo es TODA la app operativa: recorré los módulos de otras verticales (farmacia, boutique, supermer, servicios, retail, ecommerce, scanandgo, cold_chain…), probando sus endpoints y corrigiendo bugs. Subdividí en una tarea por vertical." },
+    ]},
+  { id:"f6", icon:"🚀", color:"#dc2626", titulo:"Fase 6 — Producción / operación",
+    tareas:[
+      { id:"T6.1", titulo:"Correr API y frontend como servicios (systemd, no tmux)",
+        desc:"Que sobrevivan reinicios y no dependan de una sesión SSH.",
+        prompt:"Creá units systemd para the API (uvicorn) y para servir el frontend (o nginx sirviendo ui-web/dist + proxy /api). Que arranquen al bootear (systemctl enable). Reemplazá tmux por servicios. Documentá los units." },
+      { id:"T6.2", titulo:"Backups automáticos (Postgres + dump legacy)",
+        desc:"Respaldo diario del Postgres y el dump legacy en 2+ destinos.",
+        prompt:"Configurá backup diario del Postgres intelimarket (pg_dump comprimido, con retención) vía cron/systemd-timer, en el nodo + otro destino. Verificá que columbia_dump.sql.gz esté en 2+ lugares. Documentá la restauración." },
+      { id:"T6.3", titulo:"Endurecimiento: SSH por clave, HTTPS, firewall",
+        desc:"Producción segura.",
+        prompt:"Endurecé el nodo: SSH solo por clave (con sesión de respaldo abierta), TLS/HTTPS para frontend/API (Caddy/nginx o Tailscale serve), revisar UFW. Documentá lo aplicado." },
+      { id:"T6.4", titulo:"Versionado en GitHub (repo privado) + CI",
+        desc:"Subir a GitHub privado, .gitignore sin secretos, deploy por git pull.",
+        prompt:"Subí el repo a GitHub privado (revisá .gitignore: sin .env, dumps ni secretos). Pasá el update del nodo de rsync a git pull. Opcional: ajustar .github/workflows para CI. No subas datos ni credenciales." },
+    ]},
+];
+
+const MINE_KEY = "roadmap_prod_cg_mine";
+let mine = JSON.parse(localStorage.getItem(MINE_KEY) || "{}");
+let collapsed = JSON.parse(localStorage.getItem("roadmap_prod_cg_collapsed") || "{}");
+const phasesEl = document.getElementById("phases");
+const overlay = document.getElementById("overlay");
+let currentPrompt = "";
+
+const allT = () => DATA.flatMap(p => p.tareas);
+const isDone = t => !!t.done;                 // verdad oficial (archivo)
+const isMine = t => !t.done && !!mine[t.id];  // marca personal (navegador)
+
+function render() {
+  phasesEl.innerHTML = "";
+  DATA.forEach(ph => {
+    const hechas = ph.tareas.filter(t => isDone(t) || isMine(t)).length;
+    const div = document.createElement("div");
+    div.className = "phase" + (collapsed[ph.id] ? " collapsed" : "");
+    div.style.setProperty("--pc", ph.color);
+    div.innerHTML = `
+      <div class="phase-head" data-ph="${ph.id}">
+        <span class="icon">${ph.icon}</span><h3>${ph.titulo}</h3>
+        <span class="count">${hechas}/${ph.tareas.length}</span><span class="chev">▾</span>
+      </div>
+      <div class="phase-body">
+        ${ph.tareas.map(t => {
+          const cls = isDone(t) ? "done" : (isMine(t) ? "mine" : "");
+          const mark = isDone(t) ? "✓" : (isMine(t) ? "✓" : "");
+          return `
+          <div class="task ${cls}">
+            <div class="mark">${mark}</div>
+            <div class="task-main">
+              <div class="task-title"><span class="task-id">${t.id}</span> &nbsp;${t.titulo}</div>
+              <div class="task-desc">${t.desc}</div>
+              ${t.nota ? `<div class="task-nota">✅ ${t.nota}</div>` : ""}
+            </div>
+            <div class="task-actions">
+              <button class="prompt-btn" data-prompt="${t.id}">📋 Prompt</button>
+              ${isDone(t) ? "" : `<button class="mine-btn" data-mine="${t.id}">${isMine(t) ? "desmarcar" : "marco yo"}</button>`}
+            </div>
+          </div>`;
+        }).join("")}
+      </div>`;
+    phasesEl.appendChild(div);
+  });
+  updateProgress(); bind();
+}
+
+function updateProgress() {
+  const ts = allT();
+  const done = ts.filter(isDone).length;
+  const mineN = ts.filter(isMine).length;
+  const hechas = done + mineN;
+  const pct = ts.length ? Math.round(hechas / ts.length * 100) : 0;
+  document.getElementById("fill").style.width = pct + "%";
+  document.getElementById("pct").textContent = pct + "%";
+  document.getElementById("mDone").textContent = done;
+  document.getElementById("mMine").textContent = mineN;
+  document.getElementById("mPend").textContent = ts.length - hechas;
+  document.getElementById("mTotal").textContent = ts.length;
+  document.getElementById("mPhases").textContent = DATA.length;
+}
+
+function bind() {
+  document.querySelectorAll('.phase-head').forEach(h => h.onclick = () => {
+    collapsed[h.dataset.ph] = !collapsed[h.dataset.ph];
+    localStorage.setItem("roadmap_prod_cg_collapsed", JSON.stringify(collapsed)); render();
+  });
+  document.querySelectorAll('.prompt-btn').forEach(b => b.onclick = e => { e.stopPropagation(); openPrompt(b.dataset.prompt); });
+  document.querySelectorAll('.mine-btn').forEach(b => b.onclick = e => {
+    e.stopPropagation(); const id = b.dataset.mine; mine[id] = !mine[id];
+    localStorage.setItem(MINE_KEY, JSON.stringify(mine)); render();
+  });
+}
+
+function openPrompt(id) {
+  const t = allT().find(x => x.id === id); if (!t) return;
+  currentPrompt = CONTEXT + "\nTAREA " + t.id + " — " + t.titulo + ":\n" + t.prompt + REMINDER.replace("{ID}", t.id);
+  document.getElementById("mTitle").textContent = t.id + " · " + t.titulo;
+  document.getElementById("mPrompt").textContent = currentPrompt;
+  overlay.classList.add("open");
+}
+document.getElementById("mClose").onclick = () => overlay.classList.remove("open");
+overlay.onclick = e => { if (e.target === overlay) overlay.classList.remove("open"); };
+document.getElementById("copyBtn").onclick = () => navigator.clipboard.writeText(currentPrompt).then(() => {
+  const b = document.getElementById("copyBtn"); b.textContent = "✓ Copiado"; b.classList.add("ok");
+  setTimeout(() => { b.textContent = "📋 Copiar prompt"; b.classList.remove("ok"); }, 1600);
+});
+document.getElementById("themeBtn").onclick = () => {
+  const r = document.documentElement, dark = r.getAttribute("data-theme") === "dark";
+  r.setAttribute("data-theme", dark ? "light" : "dark");
+  document.getElementById("themeBtn").textContent = dark ? "🌙" : "☀️";
+  localStorage.setItem("roadmap_theme", dark ? "light" : "dark");
+};
+document.getElementById("expandBtn").onclick = () => {
+  const anyOpen = DATA.some(p => !collapsed[p.id]);
+  DATA.forEach(p => collapsed[p.id] = anyOpen);
+  localStorage.setItem("roadmap_prod_cg_collapsed", JSON.stringify(collapsed)); render();
+};
+if (localStorage.getItem("roadmap_theme") === "dark") {
+  document.documentElement.setAttribute("data-theme", "dark");
+  document.getElementById("themeBtn").textContent = "☀️";
+}
+render();
+</script>
+</body>
+</html>

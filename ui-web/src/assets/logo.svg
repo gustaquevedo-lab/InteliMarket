@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;800&amp;display=swap');
+    </style>
+  </defs>
+  <!-- Isotype Background -->
+  <rect x="20" y="20" width="160" height="160" rx="40" fill="#104c91" />
+  
+  <!-- "i" dot -->
+  <circle cx="72" cy="65" r="10" fill="#00a651" />
+  
+  <!-- Taller left bar (stem of 'i') -->
+  <rect x="64" y="85" width="16" height="50" rx="8" fill="#ffffff" />
+  
+  <!-- Middle bar -->
+  <rect x="92" y="100" width="16" height="35" rx="8" fill="#ffffff" />
+  
+  <!-- Right bar -->
+  <rect x="120" y="85" width="16" height="50" rx="8" fill="#ffffff" />
+  
+  <!-- Cart bottom connecting them -->
+  <rect x="64" y="119" width="72" height="16" rx="8" fill="#ffffff" />
+  
+  <!-- Cart wheels -->
+  <circle cx="80" cy="150" r="8" fill="#00a651" />
+  <circle cx="116" cy="150" r="8" fill="#00a651" />
+  
+  <!-- Texto -->
+  <text x="210" y="135" font-family="'Inter', sans-serif" font-size="96" letter-spacing="-3">
+    <tspan font-weight="800" fill="#104c91">Inteli</tspan><tspan font-weight="300" fill="#104c91">Market</tspan>
+  </text>
+</svg>

@@ -176,6 +176,17 @@ ALL_FEATURES = [
     "servicios_facturacion",
     "servicios_inventario",
     "servicios_portal",
+    # Boutique / Indumentaria
+    "boutique",
+    "boutique_colecciones",
+    "boutique_matriz_variantes",
+    "boutique_clienteling",
+    "boutique_loyalty",
+    "boutique_markdown_ia",
+    "boutique_ar_tryon",
+    "boutique_eventos",
+    "boutique_gift_wrapping",
+    "boutique_talles_personalizados",
 ]
 
 # Feature labels for UI
@@ -298,6 +309,17 @@ FEATURE_LABELS: dict[str, str] = {
     "servicios_facturacion": "Facturación de Servicios — Auto-invoice al completar WO, pagos parciales, aging, planes de pago, integración SIFEN Paraguay",
     "servicios_inventario": "Inventario Móvil — Truck stock por técnico, movimientos consumo/devolución/merma, alertas de stock mínimo, transferencias",
     "servicios_portal": "Portal Cliente Self-Service — Reserva de citas online, tracking en tiempo real del técnico, calificaciones, historial de servicios",
+    # Boutique
+    "boutique": "Boutique / Indumentaria — Módulo completo: colecciones, talles, colores, matriz variante talle×color, inventario por variante, ventas boutique, devoluciones",
+    "boutique_colecciones": "Colecciones y Temporadas — Gestión de colecciones primavera/verano y otoño/invierno (hemisferio sur), items por colección, estado borrador/activa/cerrada",
+    "boutique_matriz_variantes": "Matriz de Variantes Talle×Color — SKU único por combinación, stock/reservado/mínimo por variante, movimientos de stock, precio sobrecargo por variante",
+    "boutique_clienteling": "Clienteling — Perfiles de cliente con preferencias (talle, color, marca, estilo), historial de interacciones, documentos, medidas corporales, notas de estilista",
+    "boutique_loyalty": "Loyalty Tiers — Programa de lealtad con 4 niveles (Bronce/Plata/Oro/Platino), puntos por Gs., multiplicadores, beneficios escalonados, canje",
+    "boutique_markdown_ia": "Markdown IA — Reglas de descuento progresivo por fin de temporada/exceso de stock, cálculo automático % descuento × días restantes × rotación",
+    "boutique_ar_tryon": "AR Try-On — Metadatos de Realidad Aumentada: modelo 3D, GLB/USDZ, puntos de anclaje, talles disponibles para AR, integrable con Zelig/Google AR Core",
+    "boutique_eventos": "Eventos y Pop-Ups — Lanzamientos, fashion shows, private sales, gestión de invitados, confirmación de asistencia",
+    "boutique_gift_wrapping": "Gift Wrapping — Opciones de empaque de regalo con precio, aplicable por producto o por venta",
+    "boutique_talles_personalizados": "Talles Personalizados / Bespoke — Medidas corporales por cliente, histórico de medidas, notas de alteraciones",
 }
 
 

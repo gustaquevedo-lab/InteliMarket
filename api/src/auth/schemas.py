@@ -31,6 +31,8 @@ class UserResponse(BaseModel):
     telefono: Optional[str] = None
     rol: str
     activo: bool
+    tenant_id: Optional[str] = None
+    tenant_slug: Optional[str] = None
     created_at: datetime
 
     class Config:

@@ -1,0 +1,1 @@
+"""Dinelco module"""

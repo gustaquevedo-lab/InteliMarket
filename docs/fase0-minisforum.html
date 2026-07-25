@@ -1,0 +1,554 @@
+<title>Fase 0 — Setup del Minisforum · Casa Gonzalito</title>
+<style>
+  :root {
+    --bg: #f4f2ee;
+    --surface: #ffffff;
+    --surface-2: #efece6;
+    --ink: #1c1a17;
+    --ink-soft: #55504a;
+    --ink-faint: #8b847b;
+    --line: #e0dbd2;
+    --line-strong: #cec7bb;
+    --amber: #d8621b;
+    --amber-soft: #f6e6d8;
+    --green: #2f7d54;
+    --green-soft: #dfeee5;
+    --console-bg: #1a1714;
+    --console-ink: #e8e2d6;
+    --console-amber: #e8933f;
+    --console-green: #6fce93;
+    --console-faint: #8a827510;
+    --radius: 10px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16130f;
+      --surface: #201c17;
+      --surface-2: #2a251f;
+      --ink: #f0ebe2;
+      --ink-soft: #b7afa3;
+      --ink-faint: #857d70;
+      --line: #322c25;
+      --line-strong: #443c32;
+      --amber: #ef8a3c;
+      --amber-soft: #35281c;
+      --green: #6fce93;
+      --green-soft: #1e2c23;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f2ee; --surface: #ffffff; --surface-2: #efece6; --ink: #1c1a17;
+    --ink-soft: #55504a; --ink-faint: #8b847b; --line: #e0dbd2; --line-strong: #cec7bb;
+    --amber: #d8621b; --amber-soft: #f6e6d8; --green: #2f7d54; --green-soft: #dfeee5;
+  }
+  :root[data-theme="dark"] {
+    --bg: #16130f; --surface: #201c17; --surface-2: #2a251f; --ink: #f0ebe2;
+    --ink-soft: #b7afa3; --ink-faint: #857d70; --line: #322c25; --line-strong: #443c32;
+    --amber: #ef8a3c; --amber-soft: #35281c; --green: #6fce93; --green-soft: #1e2c23;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px 96px; }
+
+  /* ---------- Header ---------- */
+  header.hero {
+    max-width: 860px; margin: 0 auto; padding: 56px 20px 40px;
+  }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--amber); font-weight: 600;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .eyebrow::before {
+    content: ""; width: 22px; height: 2px; background: var(--amber);
+  }
+  h1 {
+    font-size: clamp(30px, 5vw, 46px); line-height: 1.08; margin: 16px 0 14px;
+    letter-spacing: -.02em; text-wrap: balance; font-weight: 700;
+  }
+  h1 .accent { color: var(--amber); }
+  .lede { font-size: 18px; color: var(--ink-soft); max-width: 60ch; margin: 0; }
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px;
+  }
+  .chip {
+    font-family: var(--mono); font-size: 12.5px; padding: 6px 12px;
+    background: var(--surface); border: 1px solid var(--line-strong);
+    border-radius: 999px; color: var(--ink-soft); display: inline-flex; gap: 7px; align-items: center;
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
+
+  /* ---------- Steps ---------- */
+  .step { position: relative; padding: 34px 0 10px; border-top: 1px solid var(--line); }
+  .step:first-of-type { border-top: none; }
+  .step-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+  .num {
+    flex: none; width: 40px; height: 40px; border-radius: 11px;
+    background: var(--ink); color: var(--bg); font-family: var(--mono);
+    font-weight: 600; font-size: 16px; display: grid; place-items: center;
+    letter-spacing: -.02em;
+  }
+  .step-title { margin: 0; font-size: 22px; letter-spacing: -.01em; line-height: 1.2; }
+  .step-sub { margin: 4px 0 0; color: var(--ink-faint); font-size: 14.5px; font-family: var(--mono); }
+  .step-body { padding-left: 56px; }
+  @media (max-width: 560px) { .step-body { padding-left: 0; } }
+
+  p { margin: 0 0 14px; }
+  .step-body p, .step-body li { color: var(--ink-soft); }
+  strong { color: var(--ink); font-weight: 650; }
+  ul.clean { list-style: none; padding: 0; margin: 0 0 16px; display: flex; flex-direction: column; gap: 10px; }
+  ul.clean li { position: relative; padding-left: 26px; }
+  ul.clean li::before {
+    content: ""; position: absolute; left: 4px; top: 9px; width: 8px; height: 8px;
+    border: 2px solid var(--amber); border-radius: 50%;
+  }
+  kbd {
+    font-family: var(--mono); font-size: 12.5px; background: var(--surface-2);
+    border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 6px;
+    padding: 1px 7px; color: var(--ink); white-space: nowrap;
+  }
+
+  /* ---------- Callout ---------- */
+  .callout {
+    display: flex; gap: 13px; padding: 15px 17px; border-radius: var(--radius);
+    background: var(--amber-soft); border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+    margin: 4px 0 18px; font-size: 14.5px;
+  }
+  .callout.warn { }
+  .callout .ic { flex: none; font-family: var(--mono); font-weight: 700; color: var(--amber); }
+  .callout p { margin: 0; color: var(--ink); }
+
+  /* ---------- Download cards ---------- */
+  .dl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 6px 0 8px; }
+  @media (max-width: 640px) { .dl-grid { grid-template-columns: 1fr; } }
+  .dl-card {
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px;
+    padding: 20px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .dl-logo {
+    width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center;
+    font-family: var(--mono); font-weight: 700; font-size: 20px; color: #fff;
+  }
+  .dl-logo.ubuntu { background: linear-gradient(135deg, #dd4814, #a52d0e); }
+  .dl-logo.etcher { background: linear-gradient(135deg, #4a4a8a, #2c2c5a); }
+  .dl-logo.tail { background: linear-gradient(135deg, #2a2a2a, #000); }
+  .dl-card h3 { margin: 0; font-size: 17px; }
+  .dl-card .why { font-size: 13.5px; color: var(--ink-soft); margin: 0; flex: 1; }
+  .dl-card .filetype { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); letter-spacing: .04em; }
+  .dl-btn {
+    display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+    text-decoration: none; font-weight: 600; font-size: 14.5px;
+    background: var(--ink); color: var(--bg); padding: 11px 15px; border-radius: 9px;
+    transition: transform .12s ease, background .12s ease;
+  }
+  .dl-btn:hover { transform: translateY(-1px); background: var(--amber); color: #fff; }
+  .dl-btn .arr { font-family: var(--mono); }
+  .dl-card.primary { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
+
+  /* ---------- Terminal / console mock ---------- */
+  .console {
+    background: var(--console-bg); border-radius: 12px; overflow: hidden;
+    margin: 4px 0 18px; border: 1px solid #000; box-shadow: 0 10px 30px -12px rgba(0,0,0,.5);
+  }
+  .console-bar {
+    display: flex; align-items: center; gap: 7px; padding: 10px 14px;
+    background: #26211b; border-bottom: 1px solid #000;
+  }
+  .console-bar .b { width: 11px; height: 11px; border-radius: 50%; }
+  .console-bar .b:nth-child(1){ background:#f2584f;} .console-bar .b:nth-child(2){ background:#f8bd3a;} .console-bar .b:nth-child(3){ background:#5cc763;}
+  .console-bar .t { margin-left: 8px; font-family: var(--mono); font-size: 12px; color: #8a8175; }
+  .console pre {
+    margin: 0; padding: 16px 18px; font-family: var(--mono); font-size: 13px; line-height: 1.7;
+    color: var(--console-ink); overflow-x: auto;
+  }
+  .console .c { color: var(--console-green); }              /* comment */
+  .console .p { color: var(--console-amber); }              /* prompt / command */
+  .console .k { color: #9db8e6; }                           /* keyword */
+
+  /* ---------- Screen mockups ---------- */
+  .mock { border-radius: 12px; overflow: hidden; margin: 4px 0 6px; border: 1px solid var(--line-strong); }
+  .mock-cap { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); margin: 0 0 18px; padding-left: 2px; }
+
+  /* BIOS mock */
+  .bios { background: #0a1f3c; color: #cfe0f5; font-family: var(--mono); font-size: 13px; }
+  .bios-top { background: #16487a; color: #fff; padding: 8px 14px; font-weight: 600; letter-spacing: .04em; display:flex; justify-content:space-between;}
+  .bios-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 9px; }
+  .bios-row { display: flex; justify-content: space-between; padding: 4px 10px; border-radius: 4px; }
+  .bios-row .v { color: #9db8e6; }
+  .bios-row.sel { background: #d8621b; color: #fff; }
+  .bios-row.sel .v { color: #fff; font-weight: 700; }
+  .bios-foot { border-top: 1px solid #16487a; padding: 8px 14px; color: #7f9bc4; font-size: 11.5px; }
+
+  /* Etcher mock */
+  .etcher { background: #2b2b45; padding: 22px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; align-items: stretch; }
+  @media (max-width: 560px){ .etcher { grid-template-columns: 1fr; } }
+  .etcher-step { background: #363659; border-radius: 10px; padding: 16px 14px; text-align: center; color: #dcdcf0; display:flex; flex-direction:column; gap:8px; align-items:center; }
+  .etcher-step .en { font-family: var(--mono); font-size: 11px; color: #9a9ac8; letter-spacing:.1em; }
+  .etcher-step .glyph { width: 46px; height: 46px; border-radius: 12px; background: #4a4a8a; display:grid; place-items:center; font-size: 22px; }
+  .etcher-step .lbl { font-weight: 600; font-size: 14px; }
+  .etcher-step .hint { font-size: 11.5px; color: #9a9ac8; }
+  .etcher-step.go .glyph { background: var(--amber); }
+
+  /* Installer mock */
+  .inst { background: #300a24; color: #f0e6ee; font-family: var(--sans); }
+  .inst-top { padding: 10px 16px; background: #4a1038; font-size: 13px; letter-spacing:.03em; color:#fff; display:flex; justify-content:space-between; align-items:center; }
+  .inst-top .tag { font-family: var(--mono); font-size: 11px; opacity:.8; }
+  .inst-body { padding: 18px; display: flex; flex-direction: column; gap: 12px; font-size: 13.5px; }
+  .inst-opt { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border: 1px solid #5c2a4c; border-radius: 8px; }
+  .inst-opt.on { border-color: var(--amber); background: #4a1038; }
+  .box { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #a87a98; flex:none; display:grid; place-items:center; font-size: 12px; }
+  .box.checked { background: var(--amber); border-color: var(--amber); color: #fff; }
+  .radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #a87a98; flex:none; position:relative; }
+  .radio.on { border-color: var(--amber); }
+  .radio.on::after { content:""; position:absolute; inset:3px; border-radius:50%; background: var(--amber); }
+  .inst-opt .txt b { color:#fff; } .inst-opt .txt span { color:#c9a8bd; display:block; font-size:12px; }
+
+  /* verify grid */
+  .verify { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 6px; }
+  @media (max-width: 560px){ .verify { grid-template-columns: 1fr; } }
+  .vrow { display: flex; align-items: center; gap: 11px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px; }
+  .vrow .cmd { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+  .vrow .ok { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--green-soft); color: var(--green); display:grid; place-items:center; font-size: 12px; font-weight: 700; }
+  .vrow .exp { margin-left: auto; font-size: 11.5px; color: var(--ink-faint); font-family: var(--mono); }
+
+  /* footer */
+  .end {
+    margin-top: 40px; padding: 26px; border-radius: 14px; background: var(--surface);
+    border: 1px solid var(--line-strong); border-left: 3px solid var(--green);
+  }
+  .end h3 { margin: 0 0 8px; font-size: 18px; }
+  .end p { margin: 0; color: var(--ink-soft); font-size: 15px; }
+  .foot-note { text-align: center; color: var(--ink-faint); font-size: 12.5px; font-family: var(--mono); margin-top: 40px; }
+  a.inline { color: var(--amber); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--amber) 40%, transparent); }
+  a.inline:hover { border-bottom-color: var(--amber); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header class="hero">
+  <span class="eyebrow">Casa Gonzalito · Nodo IA</span>
+  <h1>Fase 0 — Poner en marcha el <span class="accent">Minisforum X1&nbsp;Lite</span></h1>
+  <p class="lede">Guía visual paso a paso para dejar el mini PC como un nodo servidor sólido y a prueba de fallos: Ubuntu Server 26.04 LTS, acceso remoto seguro y todo el stack de trabajo listo.</p>
+  <div class="meta-row">
+    <span class="chip"><span class="dot"></span><b>Ubuntu 26.04 LTS</b> Resolute Raccoon</span>
+    <span class="chip">⏱ <b>≈ medio día</b></span>
+    <span class="chip">🔩 Requiere monitor + teclado solo al inicio</span>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- STEP 0 -->
+  <section class="step">
+    <div class="step-head">
+      <div class="num">0</div>
+      <div>
+        <h2 class="step-title">Materiales, antes de arrancar</h2>
+        <p class="step-sub">lo que tenés que tener sobre la mesa</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <ul class="clean">
+        <li>El <strong>Minisforum X1 Lite</strong>, con monitor y teclado conectados (solo para instalar; después queda headless).</li>
+        <li>Un <strong>pendrive de 8&nbsp;GB o más</strong> — se borra por completo.</li>
+        <li><strong>Cable de red</strong> al switch Unifi. Un nodo servidor va cableado, nunca por WiFi.</li>
+        <li>Ideal: una <strong>UPS pequeña</strong> para el Minisforum y el servidor legacy. Es lo que de verdad te protege ante cortes durante la cosecha de datos.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- STEP 1 - Downloads -->
+  <section class="step">
+    <div class="step-head">
+      <div class="num">1</div>
+      <div>
+        <h2 class="step-title">Descargar las herramientas</h2>
+        <p class="step-sub">hacé clic — se abren en la página oficial de cada una</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="dl-grid">
+        <div class="dl-card primary">
+          <div class="dl-logo ubuntu">U</div>
+          <div>
+            <h3>Ubuntu Server 26.04 LTS</h3>
+            <p class="filetype">.ISO · ~2–3 GB · amd64</p>
+          </div>
+          <p class="why">El sistema operativo del nodo. Bajá el archivo <b>live-server-amd64</b> desde la página oficial de releases.</p>
+          <a class="dl-btn" href="https://releases.ubuntu.com/26.04/" target="_blank" rel="noopener">Ir a la descarga <span class="arr">↗</span></a>
+        </div>
+
+        <div class="dl-card primary">
+          <div class="dl-logo etcher">✦</div>
+          <div>
+            <h3>balenaEtcher</h3>
+            <p class="filetype">App para macOS · grabar el USB</p>
+          </div>
+          <p class="why">Graba la ISO al pendrive de forma segura y a prueba de errores. Instalalo en tu Mac.</p>
+          <a class="dl-btn" href="https://etcher.balena.io/" target="_blank" rel="noopener">Descargar Etcher <span class="arr">↗</span></a>
+        </div>
+      </div>
+      <div class="dl-grid" style="margin-top:2px">
+        <div class="dl-card">
+          <div class="dl-logo tail">T</div>
+          <div>
+            <h3>Tailscale <span style="font-weight:400;color:var(--ink-faint);font-size:13px">· más adelante</span></h3>
+            <p class="filetype">Acceso remoto seguro (Paso 5)</p>
+          </div>
+          <p class="why">Para conectarte al Minisforum desde tu Mac sin abrir puertos. Se instala dentro del nodo, pero dejo el link acá.</p>
+          <a class="dl-btn" href="https://tailscale.com/download" target="_blank" rel="noopener">Ver Tailscale <span class="arr">↗</span></a>
+        </div>
+        <div class="dl-card" style="justify-content:center; background:var(--surface-2); border-style:dashed;">
+          <p class="why" style="margin:0"><b style="color:var(--ink)">Docker, Node, Claude Code y Playwright</b> no se descargan a mano — se instalan con comandos dentro del nodo en el Paso 7. No necesitás bajar nada más.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2 - BIOS -->
+  <section class="step">
+    <div class="step-head">
+      <div class="num">2</div>
+      <div>
+        <h2 class="step-title">Ajustar el BIOS del Minisforum</h2>
+        <p class="step-sub">encendé y presioná <kbd>Supr</kbd> o <kbd>F2</kbd> al arranque</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="mock">
+        <div class="bios">
+          <div class="bios-top"><span>MINISFORUM · BIOS Setup Utility</span><span>Advanced ▸ Power</span></div>
+          <div class="bios-body">
+            <div class="bios-row sel"><span>Restore on AC Power Loss</span><span class="v">[ Power On ] ◄</span></div>
+            <div class="bios-row"><span>SVM Mode (Virtualization)</span><span class="v">[ Enabled ]</span></div>
+            <div class="bios-row"><span>Secure Boot</span><span class="v">[ Enabled ]</span></div>
+            <div class="bios-row"><span>Fan Profile</span><span class="v">[ Performance ]</span></div>
+          </div>
+          <div class="bios-foot">↑↓ Seleccionar · Enter Cambiar · F10 Guardar y salir</div>
+        </div>
+      </div>
+      <p class="mock-cap">Mockup de la pantalla BIOS — los nombres exactos varían un poco por versión.</p>
+      <div class="callout">
+        <span class="ic">!</span>
+        <p><strong>El ajuste más importante es “Restore on AC Power Loss → Power On”.</strong> Hace que el Minisforum se encienda solo después de un corte de luz. Sin esto, no es un nodo a prueba de fallos. Guardá con <kbd>F10</kbd>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 3 - Flash USB -->
+  <section class="step">
+    <div class="step-head">
+      <div class="num">3</div>
+      <div>
+        <h2 class="step-title">Verificar la ISO y grabar el pendrive</h2>
+        <p class="step-sub">en tu Mac, con balenaEtcher</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <p>Primero comprobá que la descarga no esté corrupta. En la Terminal de tu Mac:</p>
+      <div class="console">
+        <div class="console-bar"><span class="b"></span><span class="b"></span><span class="b"></span><span class="t">Terminal — tu Mac</span></div>
+<pre><span class="p">$</span> cd ~/Downloads
+<span class="p">$</span> shasum -a 256 ubuntu-26.04-live-server-amd64.iso
+<span class="c"># comparalo con el valor en el archivo SHA256SUMS de la</span>
+<span class="c"># misma página de descarga — deben ser idénticos</span></pre>
+      </div>
+      <p>Luego abrí <strong>balenaEtcher</strong> y seguí sus tres pasos:</p>
+      <div class="mock">
+        <div class="etcher">
+          <div class="etcher-step">
+            <span class="en">PASO 1</span>
+            <div class="glyph">📄</div>
+            <div class="lbl">Flash from file</div>
+            <div class="hint">elegí la ISO de Ubuntu</div>
+          </div>
+          <div class="etcher-step">
+            <span class="en">PASO 2</span>
+            <div class="glyph">🔌</div>
+            <div class="lbl">Select target</div>
+            <div class="hint">elegí el pendrive</div>
+          </div>
+          <div class="etcher-step go">
+            <span class="en">PASO 3</span>
+            <div class="glyph">⚡</div>
+            <div class="lbl">Flash!</div>
+            <div class="hint">esperá a que termine</div>
+          </div>
+        </div>
+      </div>
+      <p class="mock-cap">Las tres columnas de la ventana de balenaEtcher.</p>
+    </div>
+  </section>
+
+  <!-- STEP 4 - Install -->
+  <section class="step">
+    <div class="step-head">
+      <div class="num">4</div>
+      <div>
+        <h2 class="step-title">Instalar Ubuntu Server 26.04</h2>
+        <p class="step-sub">booteá el Minisforum desde el USB — <kbd>F7</kbd> o <kbd>F11</kbd></p>
+      </div>
+    </div>
+    <div class="step-body">
+      <ul class="clean">
+        <li><strong>Idioma:</strong> English para el sistema · Teclado <strong>Spanish (Latin American)</strong>.</li>
+        <li><strong>Red:</strong> dejá DHCP por ahora (fijamos la IP en el Paso 5).</li>
+        <li><strong>Perfil:</strong> usuario <kbd>gustavo</kbd>, equipo <kbd>minisforum-ia</kbd>, contraseña fuerte (guardala en tu gestor).</li>
+        <li><strong>“Install OpenSSH server”</strong> → marcalo. Esto <b>es</b> lo que habilita conectarte vía SSH después.</li>
+        <li><strong>“Import SSH identity”</strong> → dejalo en <b>No</b>. Es opcional (importa una clave desde GitHub/Launchpad); las claves las configuramos después. La primera vez entrás con usuario + contraseña.</li>
+      </ul>
+      <p>En la pantalla de <strong>almacenamiento</strong>, esta es la elección clave:</p>
+      <div class="mock">
+        <div class="inst">
+          <div class="inst-top"><span>Guided storage configuration</span><span class="tag">Ubuntu Server · Installer</span></div>
+          <div class="inst-body">
+            <div class="inst-opt on">
+              <span class="radio on"></span>
+              <span class="txt"><b>Use an entire disk</b><span>usar el disco completo del Minisforum</span></span>
+            </div>
+            <div class="inst-opt on">
+              <span class="box checked">✓</span>
+              <span class="txt"><b>Set up this disk as an LVM group</b><span>flexibilidad + snapshots para respaldos</span></span>
+            </div>
+            <div class="inst-opt">
+              <span class="box"></span>
+              <span class="txt"><b>Encrypt with LUKS</b><span>dejar SIN marcar — un server headless no debe pedir contraseña en cada reboot</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="mock-cap">Pantalla de almacenamiento del instalador: disco completo + LVM, sin cifrado manual.</p>
+      <p>Confirmá, dejá que instale, elegí <strong>“Reboot Now”</strong> y <strong>quitá el USB</strong>.</p>
+    </div>
+  </section>
+
+  <!-- STEP 5 - Harden -->
+  <section class="step">
+    <div class="step-head">
+      <div class="num">5</div>
+      <div>
+        <h2 class="step-title">Blindaje base del sistema</h2>
+        <p class="step-sub">primer arranque — por SSH o en el propio equipo</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="console">
+        <div class="console-bar"><span class="b"></span><span class="b"></span><span class="b"></span><span class="t">gustavo@minisforum-ia ~</span></div>
+<pre><span class="c"># Actualizar todo el sistema</span>
+<span class="p">$</span> sudo apt update <span class="k">&&</span> sudo apt full-upgrade -y
+
+<span class="c"># Parches de seguridad automáticos (se cura solo)</span>
+<span class="p">$</span> sudo apt install -y unattended-upgrades
+<span class="p">$</span> sudo dpkg-reconfigure --priority=low unattended-upgrades
+
+<span class="c"># Firewall: bloquear todo lo entrante salvo SSH</span>
+<span class="p">$</span> sudo apt install -y ufw
+<span class="p">$</span> sudo ufw default deny incoming
+<span class="p">$</span> sudo ufw default allow outgoing
+<span class="p">$</span> sudo ufw allow OpenSSH
+<span class="p">$</span> sudo ufw enable
+
+<span class="c"># Herramientas base</span>
+<span class="p">$</span> sudo apt install -y git curl wget htop tmux build-essential</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 6 - Network + Tailscale -->
+  <section class="step">
+    <div class="step-head">
+      <div class="num">6</div>
+      <div>
+        <h2 class="step-title">IP fija y acceso remoto</h2>
+        <p class="step-sub">reserva en el Unifi + Tailscale</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <p><strong>IP fija:</strong> en el controlador Unifi → <em>Client Devices</em> → <kbd>minisforum-ia</kbd> → <em>Fixed IP</em> (ej. <kbd>…​.10</kbd>). Reservarla en el Unifi es más robusto que configurarla a mano en el equipo.</p>
+      <div class="console">
+        <div class="console-bar"><span class="b"></span><span class="b"></span><span class="b"></span><span class="t">Instalar Tailscale en el nodo</span></div>
+<pre><span class="p">$</span> curl -fsSL https://tailscale.com/install.sh <span class="k">|</span> sh
+<span class="p">$</span> sudo tailscale up
+<span class="c"># abrí el link que aparece para autenticar</span>
+<span class="c"># después: ssh gustavo@minisforum-ia  desde cualquier lado</span></pre>
+      </div>
+      <div class="callout">
+        <span class="ic">!</span>
+        <p>Cuando Tailscale ya funcione, <strong>avisame</strong> y te paso el endurecimiento final de SSH (solo por clave, sin contraseña). Lo hacemos con cuidado para no dejarte afuera por error.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 7 - Stack -->
+  <section class="step">
+    <div class="step-head">
+      <div class="num">7</div>
+      <div>
+        <h2 class="step-title">Instalar el stack de trabajo</h2>
+        <p class="step-sub">Docker · Python (uv) · Node · Claude Code · Playwright</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="console">
+        <div class="console-bar"><span class="b"></span><span class="b"></span><span class="b"></span><span class="t">gustavo@minisforum-ia ~</span></div>
+<pre><span class="c"># Docker — para levantar un MySQL propio donde restaurar el volcado</span>
+<span class="p">$</span> curl -fsSL https://get.docker.com <span class="k">|</span> sudo sh
+<span class="p">$</span> sudo usermod -aG docker $USER   <span class="c"># reiniciá sesión luego</span>
+
+<span class="c"># Python moderno con uv</span>
+<span class="p">$</span> curl -LsSf https://astral.sh/uv/install.sh <span class="k">|</span> sh
+
+<span class="c"># Node.js LTS (lo usan Claude Code y Playwright)</span>
+<span class="p">$</span> curl -fsSL https://deb.nodesource.com/setup_lts.x <span class="k">|</span> sudo -E bash -
+<span class="p">$</span> sudo apt install -y nodejs
+
+<span class="c"># Claude Code</span>
+<span class="p">$</span> sudo npm install -g @anthropic-ai/claude-code
+
+<span class="c"># Playwright + navegador headless</span>
+<span class="p">$</span> mkdir -p ~/casa-gonzalito <span class="k">&&</span> cd ~/casa-gonzalito
+<span class="p">$</span> uv init <span class="k">&&</span> uv add playwright
+<span class="p">$</span> uv run playwright install --with-deps chromium</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 8 - Verify -->
+  <section class="step">
+    <div class="step-head">
+      <div class="num">8</div>
+      <div>
+        <h2 class="step-title">Verificación final</h2>
+        <p class="step-sub">si los ocho pasan, la Fase 0 está completa</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="verify">
+        <div class="vrow"><span class="ok">✓</span><span class="cmd">lsb_release -a</span><span class="exp">= 26.04</span></div>
+        <div class="vrow"><span class="ok">✓</span><span class="cmd">docker run hello-world</span><span class="exp">Docker</span></div>
+        <div class="vrow"><span class="ok">✓</span><span class="cmd">node -v && npm -v</span><span class="exp">Node</span></div>
+        <div class="vrow"><span class="ok">✓</span><span class="cmd">claude --version</span><span class="exp">Claude Code</span></div>
+        <div class="vrow"><span class="ok">✓</span><span class="cmd">uv run playwright --version</span><span class="exp">Playwright</span></div>
+        <div class="vrow"><span class="ok">✓</span><span class="cmd">sudo ufw status</span><span class="exp">firewall</span></div>
+        <div class="vrow"><span class="ok">✓</span><span class="cmd">tailscale status</span><span class="exp">remoto</span></div>
+        <div class="vrow"><span class="ok">✓</span><span class="cmd">uptime</span><span class="exp">vivo</span></div>
+      </div>
+
+      <div class="end">
+        <h3>✔ Nodo listo — ¿qué sigue?</h3>
+        <p>El Minisforum queda sólido: se enciende solo tras un corte, se parcha solo, es inalcanzable desde afuera salvo por Tailscale, y tiene todo para levantar un MySQL propio. Como el servidor legacy es <strong>físico y tuyo</strong>, el siguiente paso es <strong>obtener el volcado del MySQL directamente de esa máquina</strong> — mucho mejor que scrapear. Avisame cuando el nodo pase la verificación.</p>
+      </div>
+
+      <p class="foot-note">Casa Gonzalito S.R.L. · Intelimarket · Vertical Distribuidora · Fase 0</p>
+    </div>
+  </section>
+
+</div>

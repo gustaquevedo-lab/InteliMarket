@@ -95,3 +95,24 @@ class CashSessionResponse(BaseModel):
 class CashSessionClose(BaseModel):
     monto_cierre_real: Decimal
     observaciones: Optional[str] = None
+
+
+class SaleUpdate(BaseModel):
+    customer_id: Optional[UUID] = None
+    observaciones: Optional[str] = None
+    items: Optional[list[SaleItemInput]] = None
+
+
+class SaleAddPayment(BaseModel):
+    payment_method_id: UUID
+    monto: Decimal = Field(gt=0)
+    referencia: Optional[str] = None
+    user_id: Optional[UUID] = None
+
+
+class SaleLinkQuote(BaseModel):
+    quote_id: UUID
+
+
+class SaleLinkOrder(BaseModel):
+    order_id: UUID

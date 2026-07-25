@@ -1,6 +1,6 @@
-import { useState } from "react"
+﻿import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ShoppingBag, Eye, EyeOff, Loader2 } from "lucide-react"
+import { ShoppingBag, Eye, EyeOff, Loader2, Zap } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 
 export default function Login() {
@@ -12,7 +12,7 @@ export default function Login() {
   const [mode, setMode] = useState<"login" | "register">("login")
   const [nombre, setNombre] = useState("")
   const [tenantNombre, setTenantNombre] = useState("")
-  const { login, register } = useAuth()
+  const { login, register, loginDemo } = useAuth()
   const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,7 +57,7 @@ export default function Login() {
         {/* Card */}
         <div className="card p-8">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">
-            {mode === "login" ? "Iniciar sesi\u00f3n" : "Crear cuenta"}
+            {mode === "login" ? "Iniciar sesión" : "Crear cuenta"}
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -69,7 +69,7 @@ export default function Login() {
                   className="input-field"
                   value={nombre}
                   onChange={(e) => setNombre(e.target.value)}
-                  placeholder="Juan P\u00e9rez"
+                  placeholder="Juan Pérez"
                 />
               </div>
             )}
@@ -87,14 +87,14 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="input-label">Contrase\u00f1a</label>
+              <label className="input-label">Contraseña</label>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
                   className="input-field pr-10"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="M\u00ednimo 6 caracteres"
+                  placeholder="Mínimo 6 caracteres"
                   minLength={6}
                   required
                 />
@@ -135,10 +135,19 @@ export default function Login() {
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : mode === "login" ? (
-                "Iniciar sesi\u00f3n"
+                "Iniciar sesión"
               ) : (
                 "Crear cuenta"
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { loginDemo(); navigate("/") }}
+              className="btn-outline w-full flex items-center justify-center gap-2 border-green-300 dark:border-green-700 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
+            >
+              <Zap className="w-4 h-4" />
+              Acceso directo (demo)
             </button>
           </form>
 
@@ -151,14 +160,14 @@ export default function Login() {
               className="text-sm text-primary hover:text-primary-dark font-medium"
             >
               {mode === "login"
-                ? "\u00bfNo ten\u00e9s cuenta? Registrate"
-                : "\u00bfYa ten\u00e9s cuenta? Iniciar sesi\u00f3n"}
+                ? "¿No tenés cuenta? Registrate"
+                : "¿Ya tenés cuenta? Iniciar sesión"}
             </button>
           </div>
         </div>
 
         <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-6">
-          \u00a9 2026 IntelliHouse Soluciones
+          © 2026 IntelliHouse Soluciones
         </p>
       </div>
     </div>

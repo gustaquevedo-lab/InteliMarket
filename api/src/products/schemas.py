@@ -35,6 +35,7 @@ class ProductCreate(BaseModel):
     nombre: str = Field(min_length=1, max_length=200)
     descripcion: Optional[str] = None
     tipo: str = "producto"
+    tipo_venta: str = "unidad"
     unidad_medida: str = "UN"
     iva_tasa: Decimal = Decimal("10")
     metodo_costeo: str = "promedio"
@@ -44,6 +45,10 @@ class ProductCreate(BaseModel):
     stock_minimo: int = 0
     stock_maximo: Optional[int] = None
     peso_kg: Optional[Decimal] = None
+    precio_venta: Decimal = Decimal("0")
+    costo_promedio: Decimal = Decimal("0")
+    ultimo_costo: Decimal = Decimal("0")
+    costo_landed: Decimal = Decimal("0")
 
 
 class ProductUpdate(BaseModel):
@@ -52,6 +57,7 @@ class ProductUpdate(BaseModel):
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
     tipo: Optional[str] = None
+    tipo_venta: Optional[str] = None
     unidad_medida: Optional[str] = None
     iva_tasa: Optional[Decimal] = None
     metodo_costeo: Optional[str] = None
@@ -62,6 +68,10 @@ class ProductUpdate(BaseModel):
     stock_maximo: Optional[int] = None
     peso_kg: Optional[Decimal] = None
     activo: Optional[bool] = None
+    precio_venta: Optional[Decimal] = None
+    costo_promedio: Optional[Decimal] = None
+    ultimo_costo: Optional[Decimal] = None
+    costo_landed: Optional[Decimal] = None
 
 
 class ProductResponse(BaseModel):
@@ -73,6 +83,7 @@ class ProductResponse(BaseModel):
     nombre: str
     descripcion: Optional[str] = None
     tipo: str
+    tipo_venta: str = "unidad"
     unidad_medida: str
     iva_tasa: Decimal
     metodo_costeo: str
@@ -82,6 +93,10 @@ class ProductResponse(BaseModel):
     stock_minimo: int
     stock_maximo: Optional[int] = None
     peso_kg: Optional[Decimal] = None
+    precio_venta: Decimal = Decimal("0")
+    costo_promedio: Decimal = Decimal("0")
+    ultimo_costo: Decimal = Decimal("0")
+    costo_landed: Decimal = Decimal("0")
     activo: bool
     created_at: datetime
     updated_at: datetime

@@ -6,6 +6,9 @@ interface User {
   email: string
   nombre: string
   rol: string
+  is_superadmin?: boolean
+  tenant_id?: string
+  tenant_slug?: string
 }
 
 interface AuthContextType {
@@ -14,6 +17,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, nombre: string, tenant_nombre: string) => Promise<void>
   logout: () => void
+  loginDemo: () => void
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -24,9 +28,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const token = localStorage.getItem("access_token")
-    const email = localStorage.getItem("user_email")
-    if (token && email) {
-      api.auth.me(email).then(setUser).catch(() => {
+    if (token === "demo-token") {
+      setUser({ id: "00000000-0000-0000-0000-0000000000d1", email: "demo@intelimarket.py", nombre: "Demo", rol: "admin", is_superadmin: true, tenant_id: "00000000-0000-0000-0000-000000000001", tenant_slug: "supermercado-demo" })
+      setLoading(false)
+    } else if (token) {
+      api.auth.me().then((u) => {
+        const claims = decodeToken(token)
+        setUser({
+          id: u.id, email: u.email, nombre: u.nombre, rol: u.rol,
+          is_superadmin: claims.is_superadmin === true,
+          tenant_id: u.tenant_id, tenant_slug: u.tenant_slug,
+        })
+      }).catch(() => {
         localStorage.removeItem("access_token")
         localStorage.removeItem("user_email")
       }).finally(() => setLoading(false))
@@ -35,13 +48,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const decodeToken = (token: string): Record<string, unknown> => {
+    try {
+      const payload = token.split(".")[1]
+      const decoded = atob(payload.replace(/-/g, "+").replace(/_/g, "/"))
+      return JSON.parse(decoded)
+    } catch { return {} }
+  }
+
   const login = async (email: string, password: string) => {
     const data = await api.auth.login({ email, password })
     localStorage.setItem("access_token", data.access_token)
     localStorage.setItem("refresh_token", data.refresh_token)
     localStorage.setItem("user_email", email)
-    const me = await api.auth.me(email)
-    setUser(me)
+    const me = await api.auth.me()
+    const claims = decodeToken(data.access_token)
+    setUser({
+      id: me.id, email: me.email, nombre: me.nombre, rol: me.rol,
+      is_superadmin: claims.is_superadmin === true,
+      tenant_id: me.tenant_id, tenant_slug: me.tenant_slug,
+    })
   }
 
   const register = async (email: string, password: string, nombre: string, tenant_nombre: string) => {
@@ -49,8 +75,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("access_token", data.access_token)
     localStorage.setItem("refresh_token", data.refresh_token)
     localStorage.setItem("user_email", email)
-    const me = await api.auth.me(email)
-    setUser(me)
+    const me = await api.auth.me()
+    const claims = decodeToken(data.access_token)
+    setUser({
+      id: me.id, email: me.email, nombre: me.nombre, rol: me.rol,
+      is_superadmin: claims.is_superadmin === true,
+      tenant_id: me.tenant_id, tenant_slug: me.tenant_slug,
+    })
   }
 
   const logout = () => {
@@ -60,8 +91,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  const loginDemo = () => {
+    localStorage.setItem("access_token", "demo-token")
+    localStorage.setItem("user_email", "demo@intelimarket.py")
+    setUser({ id: "00000000-0000-0000-0000-0000000000d1", email: "demo@intelimarket.py", nombre: "Demo", rol: "admin", tenant_id: "00000000-0000-0000-0000-000000000001", tenant_slug: "supermercado-demo" })
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, loginDemo }}>
       {children}
     </AuthContext.Provider>
   )

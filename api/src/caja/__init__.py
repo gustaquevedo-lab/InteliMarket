@@ -1,0 +1,1 @@
+"""Caja (Cash Register) module"""

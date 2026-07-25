@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # PostgreSQL — Database
+  db:
+    image: postgres:16-alpine
+    container_name: intelimarket-db
+    environment:
+      POSTGRES_USER: intelimarket
+      POSTGRES_PASSWORD: intelimarket_dev
+      POSTGRES_DB: intelimarket
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U intelimarket"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Redis — Cache & Sessions
+  redis:
+    image: redis:7-alpine
+    container_name: intelimarket-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # FastAPI Backend
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: intelimarket-api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://intelimarket:intelimarket_dev@db:5432/intelimarket
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-secret-change-in-production
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+      LOG_LEVEL: debug
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./api:/app/api
+      - ./pyproject.toml:/app/pyproject.toml
+    command: sh -c "pip install 'bcrypt<4.1' -q 2>/dev/null && exec uvicorn api.src.main:app --host 0.0.0.0 --port 8000 --log-level info"
+
+  # React Frontend (Vite)
+  web:
+    build:
+      context: .
+      dockerfile: ui-web/Dockerfile
+    container_name: intelimarket-web
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: /api
+    volumes:
+      - ./ui-web:/app
+      - /app/node_modules
+    depends_on:
+      - api
+    command: sh -c "npm install --legacy-peer-deps && npm run dev -- --host"
+
+volumes:
+  pgdata:
+  redisdata:

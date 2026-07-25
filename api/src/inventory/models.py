@@ -35,6 +35,24 @@ class Stock(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class StockLot(Base):
+    __tablename__ = "stock_lots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    warehouse_id = Column(UUID(as_uuid=True), nullable=False)
+    product_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    variant_id = Column(UUID(as_uuid=True))
+    cantidad = Column(Integer, nullable=False, default=0)
+    cantidad_disponible = Column(Integer, nullable=False, default=0)
+    costo_unitario = Column(Numeric(15, 0), nullable=False)
+    costo_total = Column(Numeric(18, 0), nullable=False)
+    referencia = Column(String(100))
+    fecha_ingreso = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    fecha_vencimiento = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class InventoryMovement(Base):
     __tablename__ = "inventory_movements"
 

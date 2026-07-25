@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InteliMarket — Roadmap Supermercado | State of the Art</title>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-secondary: #64748b;
+    --primary: #2563eb;
+    --primary-light: #dbeafe;
+    --success: #16a34a;
+    --success-light: #dcfce7;
+    --warning: #d97706;
+    --warning-light: #fef3c7;
+    --danger: #dc2626;
+    --danger-light: #fee2e2;
+    --purple: #7c3aed;
+    --purple-light: #ede9fe;
+    --teal: #0d9488;
+    --teal-light: #ccfbf1;
+    --gray: #6b7280;
+    --gray-light: #f3f4f6;
+    --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+  [data-theme="dark"] {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --border: #334155;
+    --text: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --primary: #3b82f6;
+    --primary-light: #1e3a5f;
+    --success: #22c55e;
+    --success-light: #14532d;
+    --warning: #f59e0b;
+    --warning-light: #451a03;
+    --danger: #ef4444;
+    --danger-light: #450a0a;
+    --purple: #8b5cf6;
+    --purple-light: #2e1065;
+    --teal: #14b8a6;
+    --teal-light: #134e4a;
+    --gray: #9ca3af;
+    --gray-light: #1f2937;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    transition: background 0.3s, color 0.3s;
+  }
+  .container { max-width: 1400px; margin: 0 auto; }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .header-left h1 {
+    font-size: 28px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #0d9488, #7c3aed);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header-left p { color: var(--text-secondary); font-size: 14px; margin-top: 4px; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .theme-toggle {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 18px;
+    transition: all 0.2s;
+  }
+  .theme-toggle:hover { border-color: var(--primary); }
+  .last-updated {
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--card);
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .overall-progress {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 32px;
+  }
+  .progress-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .progress-header h2 { font-size: 18px; font-weight: 700; }
+  .progress-header span { font-size: 14px; color: var(--text-secondary); }
+  .progress-bar {
+    height: 10px;
+    background: var(--gray-light);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--teal), var(--purple));
+    border-radius: 99px;
+    transition: width 0.5s ease;
+    width: 0%;
+  }
+  .progress-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+  }
+  .stat-card .num { font-size: 28px; font-weight: 800; display: block; }
+  .stat-card .label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  .stat-card.completed .num { color: var(--success); }
+  .stat-card.in-progress .num { color: var(--primary); }
+  .stat-card.pending .num { color: var(--text-secondary); }
+
+  .phase {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    transition: box-shadow 0.2s;
+  }
+  .phase:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+  .phase-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    cursor: pointer;
+    user-select: none;
+    gap: 16px;
+  }
+  .phase-header-left { display: flex; align-items: center; gap: 16px; flex: 1; }
+  .phase-number {
+    width: 40px; height: 40px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 16px; flex-shrink: 0;
+  }
+  .phase-info h3 { font-size: 16px; font-weight: 700; }
+  .phase-info .weeks { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .phase-header-right { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+  .phase-pct { font-size: 14px; font-weight: 700; min-width: 40px; text-align: right; }
+  .phase-arrow { transition: transform 0.3s; font-size: 18px; color: var(--text-secondary); }
+  .phase.open .phase-arrow { transform: rotate(180deg); }
+  .phase-mini-bar { width: 120px; height: 6px; background: var(--gray-light); border-radius: 99px; overflow: hidden; }
+  .phase-mini-fill { height: 100%; border-radius: 99px; transition: width 0.5s; }
+
+  .phase-body {
+    max-height: 0; overflow: hidden;
+    transition: max-height 0.4s ease, padding 0.3s ease;
+    padding: 0 24px;
+  }
+  .phase.open .phase-body { max-height: 10000px; padding: 0 24px 24px; }
+
+  .phase-status-indicator {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .phase-status-indicator.completed { background: var(--success); }
+  .phase-status-indicator.in-progress { background: var(--primary); animation: pulse 2s infinite; }
+  .phase-status-indicator.pending { background: var(--gray); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .module {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .module:hover { border-color: var(--primary); }
+  .module-header {
+    display: flex; align-items: center;
+    padding: 14px 16px; gap: 12px;
+    cursor: pointer; user-select: none;
+  }
+  .module-checkbox {
+    width: 20px; height: 20px; border-radius: 6px;
+    border: 2px solid var(--border); flex-shrink: 0;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; transition: all 0.2s;
+    background: transparent; color: transparent;
+  }
+  .module-checkbox.done { background: var(--success); border-color: var(--success); color: white; }
+  .module-checkbox.partial { background: var(--warning); border-color: var(--warning); color: white; }
+  .module-checkbox.pending { border-color: var(--border); }
+  .module-info { flex: 1; }
+  .module-info .title { font-weight: 600; font-size: 14px; }
+  .module-info .desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .prompt-btn {
+    font-size: 11px; padding: 4px 10px; border-radius: 8px;
+    border: 1px solid var(--purple); background: transparent;
+    color: var(--purple); cursor: pointer; font-weight: 600;
+    transition: all 0.2s; font-family: var(--font); flex-shrink: 0;
+  }
+  .prompt-btn:hover { background: var(--purple); color: white; }
+  .module-badge {
+    font-size: 11px; padding: 3px 8px; border-radius: 99px;
+    font-weight: 600; flex-shrink: 0;
+  }
+  .badge-done { background: var(--success-light); color: var(--success); }
+  .badge-in-progress { background: var(--primary-light); color: var(--primary); }
+  .badge-pending { background: var(--gray-light); color: var(--gray); }
+
+  .module-tasks { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
+  .module.open .module-tasks { max-height: 2000px; }
+  .module-tasks-inner { padding: 0 16px 14px 48px; display: flex; flex-direction: column; gap: 6px; }
+  .task {
+    display: flex; align-items: flex-start; gap: 8px;
+    font-size: 13px; color: var(--text-secondary);
+  }
+  .task input[type="checkbox"] {
+    width: 16px; height: 16px; border-radius: 4px;
+    accent-color: var(--primary); cursor: pointer; margin-top: 2px;
+  }
+  .task label { cursor: pointer; flex: 1; }
+  .task.done label { text-decoration: line-through; opacity: 0.6; }
+  .task .tech {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: var(--gray-light); color: var(--text-secondary);
+  }
+
+  .module .tech-stack {
+    display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px;
+  }
+  .module .tech-stack span {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: var(--gray-light); color: var(--text-secondary);
+  }
+
+  /* Briefings */
+  .briefings-section {
+    padding: 0 16px 14px 48px;
+  }
+  .briefings-section summary {
+    font-size: 12px; color: var(--text-secondary);
+    cursor: pointer; font-weight: 600; user-select: none;
+    padding: 4px 0;
+  }
+  .briefings-section summary:hover { color: var(--primary); }
+  .briefing-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 8px;
+  }
+  .briefing-item .briefing-date {
+    font-size: 11px; color: var(--teal); font-weight: 600;
+  }
+  .briefing-item .briefing-text {
+    font-size: 12px; color: var(--text); margin-top: 4px; line-height: 1.5;
+  }
+  .briefing-item .briefing-achievements {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+  }
+  .briefing-item .briefing-achievements span {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: var(--success-light); color: var(--success);
+  }
+  .badge-briefing {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: var(--teal-light); color: var(--teal); font-weight: 600;
+  }
+
+  /* Filter & Notes */
+  .filters {
+    display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;
+  }
+  .filter-btn {
+    padding: 6px 14px; border-radius: 99px;
+    border: 1px solid var(--border); background: var(--card);
+    color: var(--text-secondary); font-size: 13px; cursor: pointer;
+    transition: all 0.2s; font-family: var(--font);
+  }
+  .filter-btn:hover { border-color: var(--primary); color: var(--primary); }
+  .filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+  .notes-section {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px; margin-top: 24px;
+  }
+  .notes-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+  .notes-section textarea {
+    width: 100%; min-height: 80px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px;
+    font-family: var(--font); font-size: 13px;
+    color: var(--text); resize: vertical;
+  }
+  .notes-section textarea:focus { outline: none; border-color: var(--primary); }
+  .save-status { font-size: 11px; color: var(--text-secondary); text-align: right; margin-top: 8px; opacity: 0.7; }
+
+  /* Prompt Modal */
+  .prompt-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .prompt-modal {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; max-width: 720px; width: 100%;
+    max-height: 85vh; display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+  }
+  .prompt-modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 24px; border-bottom: 1px solid var(--border);
+  }
+  .prompt-modal-header h3 { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .prompt-modal-close {
+    width: 32px; height: 32px; border-radius: 8px; border: none;
+    background: var(--gray-light); cursor: pointer; font-size: 18px;
+    color: var(--text-secondary); display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .prompt-modal-close:hover { background: var(--danger-light); color: var(--danger); }
+  .prompt-modal-body { padding: 20px 24px; overflow-y: auto; flex: 1; }
+  .prompt-modal-body pre {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+    font-size: 13px; line-height: 1.6; overflow-x: auto;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--text); font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  }
+  .prompt-modal-footer {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 16px 24px; border-top: 1px solid var(--border);
+  }
+  .prompt-copy-btn {
+    padding: 8px 20px; border-radius: 10px; border: none;
+    background: var(--primary); color: white; font-weight: 600;
+    cursor: pointer; font-size: 13px; transition: all 0.2s; font-family: var(--font);
+  }
+  .prompt-copy-btn:hover { opacity: 0.9; }
+  .prompt-copy-btn.copied { background: var(--success); }
+  .prompt-copy-btn.close-btn { background: var(--gray-light); color: var(--text); }
+  .prompt-copy-btn.close-btn:hover { background: var(--border); }
+  .prompt-hint { font-size: 12px; color: var(--text-secondary); margin-top: 8px; text-align: center; }
+
+  @media (max-width: 768px) {
+    body { padding: 12px; }
+    .phase-header { padding: 16px; }
+    .phase-body { padding: 0 16px; }
+    .phase.open .phase-body { padding: 0 16px 16px; }
+    .module-tasks-inner { padding-left: 36px; }
+    .briefings-section { padding-left: 36px; }
+    .phase-mini-bar { width: 80px; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <h1>🛒 InteliMarket — Supermercado / Autoservicio</h1>
+    <p>Roadmap Vertical Supermercado · ERP moderno para supermercados, autoservicios y frescos en Paraguay</p>
+  </div>
+  <div class="header-right">
+    <span class="last-updated" id="lastUpdated">🔄 Cargando...</span>
+    <button class="theme-toggle" id="themeToggle" title="Cambiar tema">🌙</button>
+    <button class="theme-toggle" onclick="saveState()" title="Guardar estado actual">💾</button>
+  </div>
+</div>
+
+<!-- PROGRESS OVERALL -->
+<div class="overall-progress">
+  <div class="progress-header">
+    <h2>📊 Progreso General — Vertical Supermercado</h2>
+    <span id="progressSummary">0/0 módulos completados</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+  <div class="progress-labels">
+    <span>🏗️ Fase 0: Fundación ✅</span>
+    <span>🔬 Fase 1: Operaciones ✅</span>
+    <span>📦 Fase 2: Supply Chain ✅</span>
+    <span>💰 Fase 3: Comercio ✅</span>
+    <span>👥 Fase 4: Clientes 3/3 ✅</span>
+    <span>👷 Fase 5: Personas 3/3 ✅</span>
+    <span>🧠 Fase 6: Analítica 4/4 ✅</span>
+    <span>🌐 Fase 7: Digital 3/3 ✅</span>
+    </div>
+
+<!-- STATS -->
+<div class="stats" id="statsContainer">
+  <div class="stat-card completed"><span class="num" id="statCompleted">0</span><span class="label">✅ Completado</span></div>
+  <div class="stat-card in-progress"><span class="num" id="statInProgress">0</span><span class="label">🔄 En Progreso</span></div>
+  <div class="stat-card pending"><span class="num" id="statPending">0</span><span class="label">⏳ Pendiente</span></div>
+  <div class="stat-card"><span class="num">8</span><span class="label">📆 Fases</span></div>
+  <div class="stat-card"><span class="num" id="statTotalTasks">0</span><span class="label">📋 Tareas</span></div>
+</div>
+
+<!-- FILTERS -->
+<div class="filters">
+  <button class="filter-btn active" data-filter="all">📋 Todas</button>
+  <button class="filter-btn" data-filter="done">✅ Completadas</button>
+  <button class="filter-btn" data-filter="in-progress">🔄 En Progreso</button>
+  <button class="filter-btn" data-filter="pending">⏳ Pendientes</button>
+</div>
+
+<!-- PHASES -->
+<div id="phasesContainer"></div>
+
+<!-- NOTES -->
+<div class="notes-section">
+  <h3>📝 Notas del Roadmap — Supermercado</h3>
+  <textarea id="roadmapNotes" placeholder="Registrá decisiones, cambios de alcance, observaciones..."></textarea>
+  <div class="save-status" id="saveStatus">Los cambios se guardan automáticamente</div>
+</div>
+
+</div>
+
+<script>
+// ===== DATA =====
+const DATA = {
+  phases: [
+    {
+      id: "fase0",
+      title: "Fundación — Operaciones Core",
+      weeks: "Semanas 1-6",
+      color: "#0d9488",
+      status: "done",
+      icon: "🏗️",
+      modules: [
+        {
+          id: "f0-produccion",
+          title: "Producción, Mermas & Perecederos",
+          desc: "Recetas BOM, órdenes de producción, batches, mermas, perecederos, markdowns, forecasting base, sugerencias de compra",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "SQLAlchemy", "PostgreSQL"],
+          tasks: [
+            "✅ 16 modelos SQLAlchemy (supermer_*): ProductionRecipe, ProductionRecipeItem, ProductionOrder, ProductionBatch, WasteLog, PerishableConfig, MarkdownLog, PurchaseForecast, PurchaseSuggestion, ButcheryTemplate, ButcheryTemplateCut, BakeryDailyPlan, BakeryPlanItem, ReceiveBatch, FreshnessAudit, SupplierScorecard",
+            "✅ CRUD de recetas BOM con items, área (carniceria/panaderia/rotiseria/pre_pack/otros), activas/inactivas",
+            "✅ Órdenes de producción: planificada → en_progreso → completada, con generación de batch, rendimiento real, insumos usados",
+            "✅ Mermas por área y tipo (produccion/vencimiento/rotura/merma_natural/devolucion/otros) con costeo",
+            "✅ Perecederos: configuración vida útil, markdown automático por zona (verde/amarillo/rojo), desactivación manual",
+            "✅ Forecasting: promedio por día de la semana con lookback configurable, 30 días horizonte",
+            "✅ Sugerencias de compra: forecast + stock actual + pendiente recibir → cantidad necesaria",
+            "✅ Dashboard con KPIs: órdenes activas, producción hoy, merma, markdowns activos, rendimiento promedio, alertas críticas",
+            "✅ 50+ endpoints REST bajo /api/v1/supermer/, 4 migraciones Alembic (15 tablas supermer_*)",
+            "✅ Frontend SupermerPage.tsx con 11 tabs (Dashboard, Recetas, Carnicería, Panadería, Verdulería, Producción, Mermas, Perecederos, Pronóstico, Licencias, ESL)"
+          ],
+          briefings: [
+            {
+              date: "May 2026 — Semana 1-2",
+              text: "Implementación inicial de todo el backend de supermercado: modelos, servicio con 44+ funciones, router con ~50 endpoints, 4 migraciones de base de datos. Cobertura completa: recetas, producción, mermas, perecederos, markdowns, forecasting, sugerencias, carnicería, panadería, verdulería.",
+              achievements: ["16 modelos SQLAlchemy", "44+ funciones de servicio", "~50 endpoints REST", "15 tablas supermer_*"]
+            },
+            {
+              date: "May 2026 — Semana 2-3",
+              text: "Frontend SupermerPage con 11 tabs, mock data para demo, DesposteWizard para carnicería. Integración de todos los endpoints en api/index.ts. Sidebar y rutas registradas.",
+              achievements: ["SupermerPage.tsx (11 tabs)", "DesposteWizard.tsx", "API namespace completo"]
+            }
+          ]
+        },
+        {
+          id: "f0-balanzas",
+          title: "Básculas & Edge Hardware",
+          desc: "Integración de balanzas comerciales (Toledo, Filizola, Balmak, etc.), PLU sync, etiquetas, agente edge para periféricos POS",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "React", "TCP/Serial", "USB HID"],
+          tasks: [
+            "✅ Backend: ScaleConfig CRUD con protocolos (toledo_p03, filizola, balmak_sdl, rinnert, generic_ascii, usb_hid_pos), conexiones (TCP/serial/WiFi/USB HID)",
+            "✅ Lectura de peso en vivo, tara, cero, test de conexión, detección automática de protocolo",
+            "✅ PLU sync: envío masivo de productos a balanzas con códigos PLU, reporte de sync",
+            "✅ Label templates: 40x30mm, código de barras, precio, peso, campos personalizados",
+            "✅ Print label: envío de etiqueta a balanza para impresión",
+            "✅ Frontend ScalesPage.tsx con 5 tabs (Configs, Weight, PLU, Labels, Logs)",
+            "✅ EdgeAgentPage.tsx: simulación de agente edge para balanza serial (COM3, 9600 bps), impresora ESC/POS, gaveta 24V RJ11, pantalla VFD"
+          ],
+          briefings: [
+            {
+              date: "May 2026 — Semana 3",
+              text: "Backend de básculas con soporte multi-protocolo. Frontend ScalesPage con configuración de balanzas, lectura de peso, PLU sync, etiquetas y logs. Edge Agent simula periféricos POS.",
+              achievements: ["ScaleConfig multi-protocolo", "PLU sync engine", "Edge Agent simulado"]
+            }
+          ]
+        },
+        {
+          id: "f0-selfcheckout",
+          title: "Self-Checkout & Caja Rápida",
+          desc: "Simulación de autopago con escaneo, pesaje de verificación, pago QR, bypass de supervisor",
+          status: "done",
+          badge: "Frontend",
+          tech: ["React", "TypeScript", "Web Audio API"],
+          tasks: [
+            "✅ Flujo 4 pasos: Bienvenida → Escaneo → Pesaje bolsa → Pago",
+            "✅ Verificación de peso: mismatch detectado → bloqueo → PIN supervisor (demo: 1234)",
+            "✅ Simulación de audio beep con Web Audio API",
+            "✅ QR de pago simulado con countdown",
+            "✅ Interfaz dark mode orientada al shopper",
+            "✅ Bóveda Central: gestión de depósitos POS, retiros blindados, historial de movimientos"
+          ],
+          briefings: [
+            {
+              date: "May 2026 — Semana 3-4",
+              text: "Self-checkout funcional con flujo completo de compra, verificación de peso y pago QR. Bóveda Central para gestión de efectivo.",
+              achievements: ["Self-checkout 4-step flow", "Bag weight verification", "BovedaPage"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase1",
+      title: "Operaciones — Calidad & Transformación",
+      weeks: "Semanas 7-10",
+      color: "#2563eb",
+      status: "done",
+      icon: "🔬",
+      modules: [
+    {
+      id: "f1-rotiseria",
+      title: "Rotisería, Deli & Comidas Preparadas",
+      desc: "Módulo de comidas listas para llevar: pollos rotisserie, ensaladería, fiambrería, cocina caliente. Control de porciones, recetas escalables, mermas específicas, HACCP para cocina.",
+      status: "done",
+      badge: "Backend + Frontend",
+      tech: ["Python", "FastAPI", "React", "SQLAlchemy", "PostgreSQL"],
+      tasks: [
+        "✅ 7 modelos SQLAlchemy: RotiseriaRecipe, RotiseriaRecipeItem, RotiseriaProductionPlan, RotiseriaTemperatureLog, RotiseriaLabelBatch, RotiseriaMarkdownSuggestion + enums (CookingMethod, HoldingMethod, ProductionStatus)",
+        "✅ Recetas con factor de cocción (peso crudo → peso cocido), merma térmica, rendimiento real, alérgenos, HACCP integrado (temps de conservación, tiempo máximo exhibición)",
+        "✅ Planes de producción diarios con control de estado (planificada → en_progreso → completada → cancelada)",
+        "✅ Control de temperaturas de mantenimiento (cocción >74°C, baño María >65°C, frío <5°C) con registro conforme/no conforme",
+        "✅ Etiquetado de productos de rotisería con lote, ingredientes, alérgenos, info nutricional, precio",
+        "✅ Sugerencias de markdown automático nocturno para productos próximos a cierre/vencimiento",
+        "✅ Backend: 15+ endpoints en service_rotiseria.py + router + schemas_fase1.py",
+        "✅ Frontend: RotiseriaTab.tsx con 5 sub-tabs (Recetas, Planes, Temperaturas, Etiquetas, Markdown)"
+      ],
+      briefings: [
+        {
+          date: "Junio 2026 — Semana 1",
+          text: "Rotisería completa: modelos (7 tables supermer_rotiseria_*), service con 12+ funciones, router endpoints, schemas, frontend tab con 5 sub-tabs. Recetas con factor de cocción y HACCP embebido.",
+          achievements: ["7 modelos SQLAlchemy", "15+ endpoints", "Frontend RotiseriaTab (5 sub-tabs)", "Etiquetado con lote y alérgenos"]
+        }
+      ]
+    },
+    {
+      id: "f1-haccp",
+      title: "HACCP & Cadena de Frío Integrada",
+      desc: "Sistema de Análisis de Peligros y Puntos Críticos de Control (HACCP) para supermercado. Integración con módulo IoT Cold Chain existente. Temperaturas de cámaras, exhibidores, transporte.",
+      status: "done",
+      badge: "IoT + Backend",
+      tech: ["Python", "IoT", "SQLAlchemy", "React", "Charts"],
+      tasks: [
+        "✅ 4 modelos SQLAlchemy: HaccpPlan, HaccpCriticalPoint (PCC), HaccpMonitoringLog, HaccpCorrectiveAction + enums (RiskLevel, PointType)",
+        "✅ Planes HACCP por área con versión, puntos críticos con límites (inferior/superior), frecuencia de monitoreo, método",
+        "✅ Integración con IoT Cold Chain mediante sensor_ids JSON en CriticalPoint",
+        "✅ Registro manual y automático de monitoreo con conformidad, acción correctiva auto-generada en no conformidad",
+        "✅ Acciones correctivas con disposición (rechazar/reprocesar/liberar bajo condición/destruir), costeo de pérdidas",
+        "✅ Reporte de conformidad HACCP: % cumplimiento, costo total pérdidas, puntos fuera de control por área",
+        "✅ 15+ endpoints en service_haccp.py + router + schemas",
+        "✅ Frontend: HaccpTab.tsx con 5 sub-tabs (Planes HACCP, PCC, Monitoreo, Acciones Correctivas, Reporte)"
+      ],
+      briefings: [
+        {
+          date: "Junio 2026 — Semana 1",
+          text: "HACCP completo: 4 modelos (supermer_haccp_*), service con 12+ funciones, 15+ endpoints. Integración IoT Cold Chain. Frontend con 5 sub-tabs incluyendo monitoreo en tiempo real y acciones correctivas.",
+          achievements: ["4 modelos HACCP", "IoT Cold Chain integration", "Auto-corrective actions on deviation", "Frontend HaccpTab (5 sub-tabs)"]
+        }
+      ]
+    },
+    {
+      id: "f1-auditorias",
+      title: "Auditorías Diarias & Checklists de Tienda",
+      desc: "Checklists digitales para apertura/cierre de tienda, limpieza de áreas, recepción de mercadería, orden y merchandising.",
+      status: "done",
+      badge: "Frontend + Backend",
+      tech: ["Python", "React", "SQLAlchemy", "Mobile-first"],
+      tasks: [
+        "✅ 5 modelos SQLAlchemy: StoreAuditTemplate, AuditTemplateItem, AuditExecution, AuditAnswer + enums (AuditArea, ResponseType, Schedule)",
+        "✅ Plantillas de auditoría con items ponderados, tipo de respuesta configurable (si_no, escala_1_5, temperatura, foto, texto)",
+        "✅ Programación por schedule (apertura/cierre/cada_4h/diario/semanal/mensual)",
+        "✅ Scoring automático con peso porcentual, puntaje mínimo de aprobación configurable por plantilla",
+        "✅ Ejecución desde web con respuestas, foto evidencia, cálculo de score, resultado aprobado/rechazado",
+        "✅ Dashboard de cumplimiento: ejecuciones hoy/semana, promedio %, aprobadas vs rechazadas, por área",
+        "✅ 15+ endpoints en service_audits.py + router + schemas",
+        "✅ Frontend: AuditsTab.tsx con 3 sub-tabs (Plantillas, Ejecuciones, Dashboard)"
+      ],
+      briefings: [
+        {
+          date: "Junio 2026 — Semana 1",
+          text: "Auditorías completo: 5 modelos (supermer_audit_*), service con scoring automático, 15+ endpoints. Frontend con 3 sub-tabs, ejecución de auditorías con foto evidencia.",
+          achievements: ["5 modelos auditoría", "Scoring automático ponderado", "Foto evidencia", "Frontend AuditsTab"]
+        }
+      ]
+    },
+    {
+      id: "f1-equipos",
+      title: "Mantenimiento de Equipos & Activos",
+          desc: "Gestión de mantenimiento preventivo y correctivo de cámaras frigoríficas, hornos, balanzas, POS, exhibidores refrigerados.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "React", "SQLAlchemy"],
+          tasks: [
+            "✅ 4 modelos SQLAlchemy: StoreEquipment (con categoría: refrigeración/horno/balanza/POS/exhibidor/generador), MaintenanceSchedule, WorkOrder, EquipmentAlert",
+            "✅ Equipos con especificaciones técnicas: capacidad, eficiencia energética, consumo kwh, temp min/max operación (IoT threshold)",
+            "✅ Mantenimiento preventivo: programación por equipo con frecuencia en días, tareas checklist, duración estimada",
+            "✅ Órdenes de trabajo correctivas: reporte de falla → asignación → inicio → diagnóstico → reparación con costeo (repuestos + mano de obra) → cierre",
+            "✅ Alertas automáticas: mantenimiento vencido, temperatura fuera de rango, con severidad (baja/media/alta/crítica) y resolución",
+            "✅ Auto-generación de alertas por mantenimiento vencido (check_alerts endpoint)",
+            "✅ Dashboard: total equipos, activos, mantenimientos pendientes, órdenes abiertas, alertas activas, uptime",
+            "✅ 20+ endpoints en service_equipment.py + router + schemas",
+            "✅ Frontend: EquipmentTab.tsx con 5 sub-tabs (Equipos, Mtto. Programado, Órdenes, Alertas, Dashboard)"
+          ],
+          briefings: [
+            {
+              date: "Junio 2026 — Semana 1",
+              text: "Mantenimiento de Equipos completo: 4 modelos (supermer_equipment_*), service con 20+ funciones, 20+ endpoints. Frontend con 5 sub-tabs, auto-alertas por mantenimiento vencido.",
+              achievements: ["4 modelos equipos", "Work order lifecycle completo", "Auto-alertas", "Frontend EquipmentTab (5 sub-tabs)"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase2",
+      title: "Supply Chain — Recepción & Reposición",
+      weeks: "Semanas 11-14",
+      color: "#7c3aed",
+      status: "done",
+      icon: "📦",
+      modules: [
+        {
+          id: "f2-dsd",
+          title: "Receiving DSD & Gestión de Proveedores en Puerta",
+          desc: "Direct Store Delivery: recepción de proveedores en puerta de backroom con verificación de cantidad, calidad, temperatura, lotes y vencimientos.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "React", "Mobile-first", "SQLAlchemy"],
+          tasks: [
+            "✅ Modelos: DsdReceivingSchedule, DsdReceivingLog, DsdReceivingItem, DsdReceivingRejection (4 tablas supermer_dsd_*)",
+            "✅ Agenda de recepciones con ventana horaria, tipo de carga (seco/frío/congelado), muelle, transportista, conductor",
+            "✅ Recepción con verificación por item: cantidad vs OC, temperatura del producto, inspección visual, lote y vencimiento",
+            "✅ Rechazo por item: 7 motivos (temp fuera de rango, dañado, vencido, próximo a vencer, cantidad incorrecta, calidad, otro) con foto evidencia y nota de crédito",
+            "✅ Dashboard de recepción: programadas hoy, en curso, completadas, rechazos por temperatura, próximas programaciones"
+          ],
+          briefings: [
+            {
+              date: "Jun 2026 — Semana 1",
+              text: "DSD Receiving completo: 4 modelos (supermer_dsd_schedules/receivings/receiving_items/rejections), servicio con 12 funciones, 14 endpoints REST. Frontend DsdTab.tsx con 5 sub-tabs (Dashboard, Programación, Recepciones, Items, Rechazos)."
+            }
+          ]
+        },
+        {
+          id: "f2-fisico",
+          title: "Inventario Físico & Conteo Cíclico ABC",
+          desc: "Conteo de inventario completo y cíclico con priorización ABC, soporte para handheld/mobile, análisis de variaciones y ajustes.",
+          status: "done",
+          badge: "Backend + Mobile + Frontend",
+          tech: ["Python", "React Native", "SQLAlchemy", "Mobile"],
+          tasks: [
+            "✅ Modelos: PhysicalCountSession, PhysicalCountItem, CountAdjustment (3 tablas supermer_count_*)",
+            "✅ Sesión de conteo con código, área, ubicación, tipo (completo/cíclico/abc/por_area), clasificación ABC, contadores asignados",
+            "✅ Conteo de items: cantidad sistema vs contada vs verificada, diferencia valorizada, lote, vencimiento, foto evidencia",
+            "✅ Ajustes automáticos: sobrante/faltante, valorizado, flujo pendiente → aprobado/rechazado con aprobación",
+            "✅ Finalización de sesión: calcula total de discrepancias, marca items para ajuste, dashboard con sesiones abiertas y pendientes"
+          ],
+          briefings: [
+            {
+              date: "Jun 2026 — Semana 1",
+              text: "Physical Inventory completo: 3 modelos (supermer_count_sessions/items/adjustments), servicio con 12 funciones, 15 endpoints REST. Frontend InventoryTab.tsx con 4 sub-tabs (Dashboard, Sesiones, Conteo, Ajustes). Sesiones con código, área, tipo, clasificación ABC, doble conteo opcional."
+            }
+          ]
+        },
+        {
+          id: "f2-reposicion",
+          title: "Reposición Automática & Cross-Docking",
+          desc: "Algoritmo de reposición basado en POS data + forecast + stock de seguridad. Cross-docking para productos de alta rotación.",
+          status: "done",
+          badge: "Backend + IA",
+          tech: ["Python", "Pandas", "SQLAlchemy", "FastAPI"],
+          tasks: [
+            "✅ Modelos: ReplenishmentRule, ReplenishmentSuggestion, CrossDockOrder (3 tablas supermer_replenishment_*)",
+            "✅ Reglas por producto: lead time, stock seguridad (días o unidades), lote económico, múltiplo de pedido, punto de pedido",
+            "✅ Algoritmo de reposición: demanda promedio histórica → punto de reorden → cantidad sugerida con redondeo a múltiplo",
+            "✅ Flujo de aprobación: sugerencia pendiente → aprobar/rechazar con revisión por usuario, con costo total estimado",
+            "✅ Cross-docking: orden directa de recepción a góndola/exhibición, con destino y asignación, dashboard con reglas activas y pendientes"
+          ],
+          briefings: [
+            {
+              date: "Jun 2026 — Semana 1",
+              text: "Auto Replenishment completo: 3 modelos (supermer_replenishment_rules/suggestions, supermer_crossdock_orders), servicio con 12 funciones, 11 endpoints REST. Frontend ReplenishmentTab.tsx con 4 sub-tabs (Dashboard, Reglas, Sugerencias, Cross-Dock). Algoritmo de reposición con demanda promedio histórica y redondeo a múltiplo."
+            }
+          ]
+        },
+        {
+          id: "f2-devoluciones",
+          title: "Devoluciones a Proveedor & Backhaul",
+          desc: "Gestión de devoluciones: productos vencidos, dañados, retirados del mercado. Logística inversa con programación de backhaul.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "React", "SQLAlchemy"],
+          tasks: [
+            "✅ Modelos: SupplierReturn, SupplierReturnItem, ReturnAuthorization, BackhaulSchedule (4 tablas supermer_*)",
+            "✅ Devolución por tipo: devolución y recall, con 7 motivos (vencido, dañado, retiro mercado, sobrestock, orden incorrecta, calidad, otro)",
+            "✅ Flujo completo: crear devolución con items → autorizar → completar → nota de crédito, autorización emitida por proveedor",
+            "✅ Backhaul: programación de viaje de retorno con transportista, patente, conductor, ventana horaria, referencias a devoluciones",
+            "✅ Dashboard: devoluciones pendientes/activas/completadas, crédito recibido, backhaul programados y en ruta"
+          ],
+          briefings: [
+            {
+              date: "Jun 2026 — Semana 1",
+              text: "Supplier Returns & Backhaul completo: 4 modelos (supermer_supplier_returns/return_items/return_authorizations/backhaul_schedules), servicio con 14 funciones, 15 endpoints REST. Frontend ReturnsTab.tsx con 4 sub-tabs (Dashboard, Devoluciones, Autorizaciones, Backhaul). Flujo: crear → autorizar → completar con nota de crédito."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase3",
+      title: "Comercio — Precios & Promociones",
+      weeks: "Semanas 15-18",
+      color: "#d97706",
+      status: "done",
+      icon: "💰",
+      modules: [
+        {
+          id: "f3-precios",
+          title: "Precios Multicanal & Competitivos",
+          desc: "Precios por zona/sucursal/canal, price matching, monitoreo de competencia, precios psicológicos, redondeo, etc.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "PostgreSQL"],
+          tasks: [
+            "✅ Modelos: StorePriceZone, CompetitorPrice, PriceAuditLog, PsychologicalPriceRule, PriceChangeApproval (5 tablas sm_pricing_*)",
+            "✅ Precios por sucursal/zona: margen mínimo por categoría, redondeo psicológico (.990 / .000)",
+            "✅ Monitoreo de competencia: CRUD de precios de competidores, historial por producto, alerta de diferencia >5%",
+            "✅ Price matching automático: reglas por categoría con margen mínimo de protección, flag de cambios >10% para aprobación",
+            "✅ Auditoría de cambios: PriceAuditLog con motivo, aprobador, precio anterior/nuevo, cambios >10% requieren approval_level",
+            "✅ Dashboard + frontend: PricingTab.tsx con zonas, competidores, auditoría, reglas psicológicas, price matching"
+          ],
+          briefings: []
+        },
+        {
+          id: "f3-esl",
+          title: "Electronic Shelf Labels (ESL)",
+          desc: "Integración con sistemas de etiquetas electrónicas SES-imagotag, Pricer, Displaydata. Sincronización de precios en tiempo real.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "PostgreSQL"],
+          tasks: [
+            "✅ Modelos: EslDevice, EslZone, EslPriceSync, EslTemplate (4 tablas sm_esl_*)",
+            "✅ CRUD de dispositivos ESL: tipo, zona, estado (online/offline/batería_baja), último sync",
+            "✅ Sincronización: price_sync crea registro con estado (pending/synced/failed), endpoint POST sync-price",
+            "✅ Alerta de dispositivos offline: detecta y marca dispositivos sin sync reciente como offline",
+            "✅ Dashboard ESL: estado de etiquetas, últimas sincronizaciones, tasa de éxito, frontend EslTab.tsx"
+          ],
+          briefings: []
+        },
+        {
+          id: "f3-promociones",
+          title: "Calendario Promocional & Optimización",
+          desc: "Planificación de promociones por temporada, categoría y público objetivo. Optimización de descuentos basada en elasticidad.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "Pandas"],
+          tasks: [
+            "✅ Modelos: PromoCalendar, PromoBudget, PromoEffectiveness (3 tablas sm_promos_*)",
+            "✅ Calendario promocional anual: fechas clave PY, categorías asignadas, presupuesto por período",
+            "✅ Reglas de descuento: por categoría/marca/producto con condiciones (monto mínimo, cantidad, beneficio)",
+            "✅ Análisis ex-post: lift %, canibalización %, ventas incrementales, ROI de la promoción, alerta si canibalización >20%",
+            "✅ Dashboard + frontend: PromosTab.tsx con calendario, efectividad, reglas, ROI"
+          ],
+          briefings: []
+        },
+        {
+          id: "f3-markdown-dinamico",
+          title: "Markdown Dinámico con ML",
+          desc: "Reemplazar markdown por franjas fijas (20%/50%) con optimización dinámica: descuento óptimo = f(días restantes, demanda actual, elasticidad, costo de oportunidad).",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "Pandas"],
+          tasks: [
+            "✅ Modelos: MarkdownRule, MarkdownRecommendation (2 tablas sm_markdown_*)",
+            "✅ Motor de urgencia: score 1-100 basado en días a vencimiento, stock actual, hora del día (post-18h boost), elasticidad de categoría",
+            "✅ Factor elasticidad por categoría: carnes 1.5, verduras 1.3, panadería 1.0, lácteos 0.9, bebidas 0.7",
+            "✅ Factor hora: multiplicador 2.0 para >18h (hora pico de liquidación nocturna)",
+            "✅ Reglas por categoría: umbrales de descuento mínimo/máximo, días críticos configurables",
+            "✅ Dashboard + frontend: DynamicMarkdownTab.tsx con recomendaciones, aplicar en bulk, reglas, eficiencia"
+          ],
+          briefings: [
+            { date: "2026-06-01", text: "Fase 3 completa. Pricing multicanal con zonas, redondeo psicológico, price matching, auditoría. ESL con sync batch/real-time. Promociones con calendario y ROI. Markdown dinámico con urgency score.", achievements: ["StorePriceZone + CompetitorPrice + PriceAuditLog", "ESL sync engine con detección offline", "PromoEffectiveness con lift/canibalización", "Markdown urgency score 1-100", "Migración 20260601290000"] }
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase4",
+      title: "Clientes — Fidelización & Segmentación",
+      weeks: "Semanas 19-22",
+      color: "#16a34a",
+      status: "in-progress",
+      icon: "👥",
+      modules: [
+        {
+          id: "f4-loyalty",
+          title: "Fidelización 2.0 — RFM & Segmentación Conductual",
+          desc: "Programa de lealtad avanzado con segmentación RFM (Recencia, Frecuencia, Monto), canasta analítica, ofertas personalizadas.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "PostgreSQL"],
+          tasks: [
+            "✅ Modelos SQLAlchemy: RfmScore, BehavioralSegment, CustomerSegmentAssignment, LoyaltyProgram, LoyaltyTransaction, PersonalizedOffer, CouponCode (7 tablas cli_*)",
+            "✅ Schemas Pydantic: 18 schemas para RFM, segmentos, lealtad, ofertas, cupones, dashboard",
+            "✅ RFM scoring automático: recency/frequency/monetary 1-5, 5 segmentos base, evaluación individual y bulk",
+            "✅ Segmentación conductual: 9 segmentos sistema (Leales Premium, Leales, Regulares, Ocasionales, Perdidos, En Riesgo, Nuevos, High Value, Promocionales) con asignación automática por reglas RFM",
+            "✅ Ofertas personalizadas: por tipo (descuento/bonificación/combo), target por segmento/cliente/todos, CRUD completo",
+            "✅ Cupones digitales: generación batch, validación en tiempo real, canje con control de usos y vencimiento",
+            "✅ Dashboard: distribución RFM, segmentos, ofertas activas, cupones activos/canjeados",
+            "✅ Feature flag clientes_fidelizacion + registro en plans.py, presets.py, main.py, env.py, migración 20260601300000"
+          ],
+          briefings: [
+            { date: "2026-06-02 06:20", text: "Módulo Clientes — Fidelización & Segmentación completo. 7 modelos, 20+ endpoints, frontend con 6 tabs. Implementado como módulo independiente api/src/clientes/ para reutilización cross-vertical (distribuidora + supermercado).", achievements: ["RFM scoring motor listo", "9 segmentos conductuales automáticos", "Lealtad con tiers Bronze/Silver/Gold/Platinum", "Ofertas personalizadas con targeting", "Cupones con validación y canje", "Dashboard consolidado"] }
+          ]
+        },
+        {
+          id: "f4-scanandgo",
+          title: "Scan&Go — Autopago con el Celular",
+          desc: "App mobile para que el cliente escanee productos con su celular mientras compra y pague sin pasar por caja. Integración con self-checkout.",
+          status: "done",
+          badge: "Mobile App + Backend",
+          tech: ["React Native", "Expo", "Camera", "Payments"],
+          tasks: [
+            "✅ App Scan&Go: login con QR de fidelización, escaneo de código de barras con cámara, carrito en vivo",
+            "✅ Backend: ScanSession (5 modelos sg_*), ScanItem, ScanPayment, ScanAudit, ScanDashboard",
+            "✅ Verificación aleatoria: 10% auditoría automática (re-escanear 3-5 items)",
+            "✅ Pago integrado: Pagopar/Kuapay/SPI + canje puntos lealtad",
+            "✅ Ticket digital: recibo por email/WhatsApp POST /digital-ticket",
+            "✅ Dashboard web: adopción, tasa auditoría, KPI, breakdown horario",
+          ],
+          briefings: [
+            { date: "2026-06-04 12:30", text: "Scan&Go completo. 5 modelos sg_*, 18 endpoints REST, migration 20260601310000. Mobile app con cámara barcode + QR fidelización, carrito, pago con 4 métodos, auditoría aleatoria (10%), ticket digital. Feature flag scanandgo en ALL_FEATURES + plan Pro. Sidebar web, tab mobile.", achievements: ["5 modelos SQLAlchemy (sg_scan_sessions, items, payments, audits, daily_stats)", "18 endpoints REST + lookup producto por código", "Mobile: escaneo cámara, carrito, pago, auditoría", "QR fidelización para inicio de sesión", "Ticket digital email/WhatsApp", "Dashboard web con KPIs y breakdown horario"] }
+          ]
+        },
+        {
+          id: "f4-360",
+          title: "Customer 360 Analytics & Churn Prevention",
+          desc: "Analítica de clientes: canasta promedio, penetración por categoría, predicción de abandono, campañas de recuperación.",
+          status: "done",
+          badge: "Backend + IA",
+          tech: ["Python", "Pandas", "FastAPI", "React", "Recharts"],
+          tasks: [
+            "✅ 5 modelos c360_*: BasketAnalysis, CategoryPenetration, ChurnPrediction, LifecycleStage, RecoveryCampaign",
+            "✅ Canasta analítica: ticket promedio, items por ticket, gasto 30d/90d, día/hora preferido, frecuencia",
+            "✅ Penetración por categoría: gasto por categoría, share of wallet, cross-sell score",
+            "✅ Predicción de abandono: score 0-100 con 4 factores (recencia, ticket, frecuencia, categorías perdidas)",
+            "✅ Campañas de recuperación: trigger automático en churn ≥70%, oferta descuento 15%, notificación + canje",
+            "✅ Dashboard: clientes activos/perdidos/nuevos, LTV, churn rate, penetración, distribución por etapa, tendencia mensual"
+          ],
+          briefings: [
+            { date: "2026-06-04 14:00", text: "Customer 360 Analytics & Churn Prevention completo. Módulo independiente api/src/customer360/ con 5 modelos c360_*. Motor de churn con score 0-100 basado en 4 factores, lifecycle en 6 etapas, campañas de recuperación automáticas. Feature flag customer360 registrado. Frontend con 4 tabs: Dashboard, Riesgo Abandono, Ciclo de Vida, Recuperación.", achievements: ["5 modelos SQLAlchemy (c360_basket_analysis, c360_category_penetration, c360_churn_predictions, c360_lifecycle_stages, c360_recovery_campaigns)", "Algoritmo churn con 4 factores + score breakdown JSON", "Lifecycle: 6 etapas (new→active→regular→loyal→at_risk→lost)", "Recuperación automática con descuento 15% al detectar churn ≥70%", "14 endpoints REST bajo /api/v1/customer360/", "Bulk compute: evalúa todos los clientes en una llamada"] }
+          ]
+        }
+      ]
+    },
+    {
+      id: "fase5",
+      title: "Personas — Workforce & Productividad",
+      weeks: "Semanas 23-26",
+      color: "#dc2626",
+      status: "done",
+      icon: "👷",
+      modules: [
+        {
+          id: "f5-turnos",
+          title: "Gestión de Turnos & Planilla Horaria",
+          desc: "Planificación de turnos por área (carnicería, panadería, cajas, reposición, limpieza). Control horario con reloj digital/mobile.",
+          status: "done",
+          badge: "Backend + Mobile",
+          tech: ["Python", "React", "React Native", "SQLAlchemy"],
+          tasks: [
+            "✅ Modelos: ShiftTemplate (plantilla de turno por área/rol), ShiftPlan (plan semanal), TimeClockEntry (fichada), ShiftSwap (cambio de turno)",
+            "✅ Plantillas de turno: horario, días, área, cantidad de personas requeridas",
+            "✅ Plan semanal: asignar personas a turnos, validar disponibilidad, detectar conflictos y sobrecostos",
+            "✅ Reloj fichar: entrada/salida/almuerzo desde web, mobile o kiosko físico, geolocalización",
+            "✅ Cálculo de horas: normales, extras, nocturnas, feriadas. Reporte semanal para RRHH",
+            "✅ Dashboard de dotación: personas por hora vs planificadas, costo de horas extras, ausentismo por área"
+          ],
+          briefings: []
+        },
+        {
+          id: "f5-productividad",
+          title: "Productividad Laboral por Área",
+          desc: "Métricas de productividad: ventas por hora-hombre, unidades procesadas por hora, eficiencia vs presupuesto.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "Recharts"],
+          tasks: [
+            "✅ Métricas por área: caja (transacciones/hora), carnicería (kg procesados/hora), panadería (unidades/hora), reposición (cajas/hora)",
+            "✅ Eficiencia vs presupuesto: horas reales vs planificadas, % de cumplimiento, variación",
+            "✅ Ranking por empleado: productividad histórica, tendencia, comparativo dentro del área",
+            "✅ Costo por unidad procesada: Gs/kg carnicería, Gs/unidad panadería, Gs/transacción caja",
+            "✅ Dashboard de productividad: KPI por área, top/bottom performers, tendencias semanales"
+          ],
+          briefings: []
+        },
+        {
+          id: "f5-capacitacion",
+          title: "Capacitación & Onboarding Digital",
+          desc: "Módulo de capacitación para empleados de supermercado: cursos cortos, videos, evaluaciones, certificaciones por puesto.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "React", "SQLAlchemy", "Video"],
+          tasks: [
+            "✅ Modelos: TrainingCourse (curso con módulos), TrainingModule (video/texto/evaluación), TrainingAssignment (asignación a empleado), TrainingCertificate",
+            "✅ Contenido precargado: manipulación de alimentos, HACCP básico, atención al cliente, uso del POS, prevención de pérdidas",
+            "✅ Asignación: por puesto (cajero → curso POS + atención), por área (carnicero → curso manipulación carnes)",
+            "✅ Progreso: % completado por curso, nota de evaluación, fecha de certificación, vencimiento y recertificación",
+            "✅ Dashboard de training: empleados certificados vs pendientes, cursos más asignados, cumplimiento por área"
+          ],
+          briefings: []
+        }
+      ]
+    },
+    {
+      id: "fase6",
+      title: "Analítica e Inteligencia",
+      weeks: "Semanas 27-30",
+      color: "#7c3aed",
+      status: "done",
+      icon: "🧠",
+      modules: [
+        {
+          id: "f6-pyl",
+          title: "PyG Diario por Departamento",
+          desc: "Estado de resultados diario por departamento (carnicería, panadería, verdulería, almacén, limpieza, bebidas). Margen bruto real vs teórico.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "Recharts", "Pandas"],
+          tasks: [
+            "✅ Modelos: DailyDepartmentPnl (PyG diario por depto), PnlAdjustment (ajuste manual), PnlBudget (presupuesto)",
+            "✅ Cálculo automático: ventas del día - costo de ventas (FIFO real) → margen bruto real",
+            "✅ Margen teórico vs real: diferencia = merma, robo, error de precio, descuentos no autorizados",
+            "✅ Costos asignables: merma del área, horas de personal del área, depreciación de equipos",
+            "✅ Dashboard PyG: margen por departamento hoy vs ayer vs presupuesto, productos con margen negativo, tendencias"
+          ],
+          briefings: []
+        },
+        {
+          id: "f6-shrinkage",
+          title: "Shrinkage Analysis — Merma + Robo + Error",
+          desc: "Descomposición de la pérdida desconocida: robo externo/interno, error administrativo, merma no registrada, breakage.",
+          status: "done",
+          badge: "Backend + IA",
+          tech: ["Python", "Pandas", "FastAPI", "React", "Recharts"],
+          tasks: [
+            "✅ Modelo de shrinkage: venta teórica (inventario inicial + compras - inventario final) - venta real = pérdida",
+            "✅ Descomposición: robo externo (productos de alto valor, electrónicos), robo interno (turno nocturno, backroom), error precio (diferencia entre precio góndola y POS), merma no registrada",
+            "✅ Alertas de anomalía: desviación >3 desviaciones estándar en shrinkage de una categoría, patrón por día/hora/empleado",
+            "✅ Recomendaciones automáticas: reforzar vigilancia en categoría X, auditar empleado Y, revisar precio de producto Z",
+            "✅ Dashboard: shrinkage total % sobre ventas, por categoría, tendencia diaria/semanal, comparativo vs benchmark (2-3% ideal)"
+          ],
+          briefings: []
+        },
+        {
+          id: "f6-forecast-avanzado",
+          title: "Forecasting Avanzado con Factores Externos",
+          desc: "Reemplazar DOW average con modelo que incorpora feriados, clima, promociones, eventos, estacionalidad de frescos.",
+          status: "done",
+          badge: "Backend + IA",
+          tech: ["Python", "Pandas", "Statsmodels", "FastAPI"],
+          tasks: [
+            "✅ Modelos: HolidayCalendar (feriados PY con peso de impacto), WeatherFactor (clima histórico), EventCalendar (eventos locales), PromotionImpact (lift histórico por promo)",
+            "✅ Factores: feriados (Semana Santa +40% pescado, Día Madre +60% perfume/electro), clima (>35°C +25% helados/bebidas), promociones (lift por tipo de promo), día de semana base",
+            "✅ Modelo: baseline DOW + factor feriado × peso + factor clima × coeficiente + factor promoción × lift histórico",
+            "✅ Por producto/categoría: coeficientes calibrados con datos históricos, actualización semanal",
+            "✅ API: forecast por producto/categoría/departamento, con intervalo de confianza, descomposición de factores"
+          ],
+          briefings: []
+        },
+        {
+          id: "f6-benchmark",
+          title: "Store Benchmarking & KPI Dashboards",
+          desc: "Comparativa entre sucursales, rankings, KPIs gerenciales. Ideal para cadenas con múltiples tiendas.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "Recharts"],
+          tasks: [
+            "✅ KPIs por tienda: ventas/m², margen bruto %, shrinkage %, rotación inventario, ticket promedio, transacciones/día, productividad laboral — 4 tablas sm_benchmark_* (configs, regions, records, scores)",
+            "✅ Rankings automáticos: top/bottom por KPI, tendencia semanal, variación vs período anterior, percentil, trend direction",
+            "✅ Score compuesto: ponderación de KPIs → score general 0-100, semáforo verde/amarillo/rojo, normalización por target o min-max",
+            "✅ Comparativa regional: regiones con branch_ids, mismo KPI agrupado, promedio por región, mejor/peor tienda por región",
+            "✅ Dashboard ejecutivo: score promedio, mejor/peor tienda, mejor/peor KPI, tendencia histórica 8 períodos, rankings, distribución semáforo",
+            "✅ Feature flag benchmarking registrado en ALL_FEATURES + plan Pro + verticals supermercado/distribucion",
+            "✅ Migración 20260601390000 (4 tablas sm_benchmark_*)",
+            "✅ Frontend BenchmarkingPage.tsx con 5 tabs (Dashboard, Rankings, Puntajes, Comparativa, Configuración)"
+          ],
+          briefings: []
+        }
+      ]
+    },
+    {
+      id: "fase7",
+      title: "Digital — E-commerce & Omnicanal",
+      weeks: "Semanas 31-34",
+      color: "#0891b2",
+      status: "done",
+      icon: "🌐",
+      modules: [
+        {
+          id: "f7-ecommerce",
+          title: "E-commerce con Click & Collect + Delivery",
+          desc: "Tienda online con pickup en tienda (click & collect) y delivery. Inventario en tiempo real, picking en pasillo, ventana horaria.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "SQLAlchemy", "PostgreSQL", "Payments"],
+          tasks: [
+            "✅ Catálogo online con stock en tiempo real por sucursal — 9 tablas sm_ecommerce_* (products, orders, order_items, pickup_slots, delivery_zones, delivery_slots, picking_lists, picking_items, payments)",
+            "✅ Click & Collect: seleccionar sucursal → ventana horaria pickup → preparation deadline <2h → slot tracking con contadores",
+            "✅ Delivery: zonas de envío con base_price + price_per_km × distance, free-from-amount configurable, franjas 2h",
+            "✅ Picking en tienda: generación automática desde orden, items ordenados por pasillo (ruta óptima), asignación a empleado",
+            "✅ Pago online: Pagopar, Kuapay, Bancard, SPI. Pago contra entrega con POS inalámbrico",
+            "✅ Dashboard ejecutivo: órdenes hoy/semana, top productos, pickup vs delivery, picking en progreso"
+          ],
+          briefings: [
+            {
+              date: "Jun 2026 — Semana 1",
+              text: "E-commerce omnicanal completo. Módulo separado api/src/ecommerce_sm/ para evitar conflictos con B2B existente. Feature flag ecommerce_sm en plan Pro + verticales supermercado/distribucion. 20+ endpoints REST, migración 20260601400000. Frontend EcommerceSmPage.tsx con 5 tabs (Dashboard, Órdenes, Catálogo, Picking, Config). Sidebar + ruta /ecommerce-sm registradas.",
+              achievements: ["9 tablas sm_ecommerce_*", "20+ endpoints REST", "Click & Collect + Delivery", "Picking por pasillo con ruta óptima", "4 métodos de pago", "Frontend 5 tabs"]
+            }
+          ]
+        },
+        {
+          id: "f7-delivery",
+          title: "Integración con Apps de Delivery (iFood, Rappi, PedidosYa)",
+          desc: "Integración bidireccional con plataformas de delivery: catálogo, precio, stock, recepción de órdenes, actualización de estado.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "SQLAlchemy", "PostgreSQL", "React"],
+          tasks: [
+            "✅ 5 modelos SQLAlchemy (di_*): DeliveryIntegration (config multi-plataforma), DeliveryOrder (órdenes recibidas), DeliveryMenuSync (sync catálogo), DeliveryPlatformLog (actividad), DeliveryDailyStats (agregados diarios)",
+            "✅ Integración configurable: iFood, Rappi, PedidosYa — API key/secret, webhook secret, store ID, auto-accept, commission %, sync toggle",
+            "✅ Órdenes unificadas: recepción vía webhook (order.new/status), historial completo con timestamps por estado, desglose subtotal/delivery_fee/discount/commission/net_amount",
+            "✅ Sincronización de catálogo: trigger manual o automático, log de sync con status/productos_count/error_message",
+            "✅ Webhook engine: procesamiento de eventos inbound, registro de actividad con request/response/status_code/duration_ms",
+            "✅ Dashboard ejecutivo: órdenes hoy/semana, ventas por plataforma, neto después de comisiones, tiempo preparación promedio, tendencia diaria, distribución de estados"
+          ],
+          briefings: [
+            {
+              date: "Jun 2026 — Semana 1-2",
+              text: "Delivery App Integrations completo. Módulo api/src/delivery_integrations/ con 5 tablas di_*, 12+ endpoints REST, migración 20260601410000. Feature flag delivery_integrations registrado en ALL_FEATURES, plan Pro, verticales supermercado/distribucion. Frontend DeliveryIntegrationsPage.tsx con 5 tabs (Dashboard, Órdenes, Configuración, Sync Catálogo, Actividad). Sidebar + ruta /delivery-integrations registradas.",
+              achievements: ["5 modelos di_* (delivery_integrations, orders, menu sync, logs, daily stats)", "12+ endpoints REST", "Webhook engine multi-plataforma", "Dashboard con comisiones y neto", "Frontend 5 tabs"]
+            }
+          ]
+        },
+        {
+          id: "f7-suscripcion",
+          title: "Suscripciones & Órdenes Recurrentes",
+          desc: "Suscripciones de productos de consumo recurrente: lácteos, pan, huevos, bebidas. Órdenes automáticas semanales/quincenales/mensuales.",
+          status: "done",
+          badge: "Backend + Frontend",
+          tech: ["Python", "FastAPI", "React", "SQLAlchemy", "PostgreSQL"],
+          tasks: [
+            "✅ 5 modelos SQLAlchemy (sr_*): SubscriptionPlan (productos/frecuencia/día/dirección/descuento), SubscriptionPlanItem, GeneratedOrder, SubscriptionPayment, SubscriptionLog",
+            "✅ Planes: cliente arma suscripción semanal/quincenal/mensual con productos recurrentes, descuento fidelidad 5-10% configurable, selección de día de entrega",
+            "✅ Generación automática: endpoint /generate-due genera órdenes para todos los planes vencidos, siguiente fecha calculada según frecuencia, auto-incrementa total_generated/total_spent",
+            "✅ Flexibilidad: skip próxima generación, pausar con motivo, reanudar con recálculo de próxima fecha, modificar productos/cantidades/dirección",
+            "✅ Dashboard: MRR, clientes suscriptos, tasa de retención, planes activos/pausados/cancelados, órdenes generadas, próximas generaciones, top productos, distribución por frecuencia"
+          ],
+          briefings: [
+            {
+              date: "Jun 2026 — Semana 1-2",
+              text: "Suscripciones & Órdenes Recurrentes completo. Módulo api/src/suscripciones/ con 5 tablas sr_*, 15+ endpoints REST, migración 20260601420000. Feature flag suscripciones registrado. Frontend SuscripcionesPage.tsx con 5 tabs (Dashboard, Planes, Nuevo Plan, Órdenes, Productos). Sidebar + ruta /suscripciones registradas. Fase 7 completa al 100%.",
+              achievements: ["5 modelos sr_*", "15+ endpoints REST", "MRR y retención automáticos", "Generator bulk de órdenes", "Frontend 5 tabs con selector de productos"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+};
+
+// ===== STATE =====
+const STATE_VERSION = 15;
+let state = loadState();
+let currentFilter = "all";
+
+function defaultState() {
+  const modules = {};
+  const tasks = {};
+  DATA.phases.forEach(phase => {
+    phase.modules.forEach(mod => {
+      let hasAll = true, hasInProgress = false, hasAny = false;
+      mod.tasks.forEach((task, i) => {
+        if (task.startsWith("✅")) { tasks[`${mod.id}-t${i}`] = "done"; hasAny = true; }
+        else if (task.startsWith("🔄")) { hasInProgress = true; hasAll = false; }
+        else { hasAll = false; }
+      });
+      if (hasAll && hasAny) modules[mod.id] = "done";
+      else if (hasInProgress || hasAny) modules[mod.id] = "in-progress";
+      else if (mod.status && mod.status !== "pending") modules[mod.id] = mod.status;
+    });
+  });
+  return {
+    version: STATE_VERSION,
+    modules,
+    tasks,
+    notes: "",
+    lastUpdated: new Date().toISOString()
+  };
+}
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem("intelimarket_roadmap_supermer");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.version !== STATE_VERSION) return defaultState();
+      return parsed;
+    }
+  } catch(e) {}
+  return defaultState();
+}
+
+function saveState() {
+  state.lastUpdated = new Date().toISOString();
+  localStorage.setItem("intelimarket_roadmap_supermer", JSON.stringify(state));
+  updateUI();
+  showSaveStatus("💾 Guardado!");
+}
+
+function showSaveStatus(msg) {
+  document.getElementById("saveStatus").textContent = msg;
+  setTimeout(() => {
+    document.getElementById("saveStatus").textContent = "Los cambios se guardan automáticamente";
+  }, 2000);
+}
+
+function computeModuleStatus(moduleId) {
+  const mod = findModule(moduleId);
+  if (!mod) return "pending";
+  let total = mod.tasks.length, done = 0;
+  mod.tasks.forEach((_, i) => {
+    const key = `${moduleId}-t${i}`;
+    const saved = state.tasks[key];
+    if (saved === "done") done++;
+    else if (!saved && getTaskStatusFromText(mod.tasks[i]) === "done") done++;
+  });
+  if (total === 0) return state.modules[moduleId] || "pending";
+  if (done === total) return "done";
+  if (done > 0) return "in-progress";
+  return "pending";
+}
+
+function getTaskStatusFromText(text) {
+  if (text.startsWith("✅")) return "done";
+  if (text.startsWith("🔄")) return "in-progress";
+  return "pending";
+}
+
+function render() {
+  const container = document.getElementById("phasesContainer");
+  container.innerHTML = "";
+
+  DATA.phases.forEach(phase => {
+    const phaseDiv = document.createElement("div");
+    phaseDiv.className = "phase";
+    phaseDiv.dataset.phaseId = phase.id;
+
+    let total = 0, done = 0;
+    phase.modules.forEach(m => {
+      const ms = computeModuleStatus(m.id);
+      if (ms === "done") done++;
+      total++;
+    });
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    let statusClass = "pending";
+    if (done === total && total > 0) statusClass = "completed";
+    else if (done > 0) statusClass = "in-progress";
+
+    phaseDiv.innerHTML = `
+      <div class="phase-header" onclick="togglePhase('${phase.id}')">
+        <div class="phase-header-left">
+          <div class="phase-number" style="background:${phase.color}20;color:${phase.color}">${phase.icon}</div>
+          <div class="phase-info">
+            <h3>${phase.title}</h3>
+            <div class="weeks">${phase.weeks}</div>
+          </div>
+        </div>
+        <div class="phase-header-right">
+          <div class="phase-status-indicator ${statusClass}"></div>
+          <div class="phase-mini-bar">
+            <div class="phase-mini-fill" style="width:${pct}%;background:${phase.color}"></div>
+          </div>
+          <div class="phase-pct" style="color:${phase.color}">${pct}%</div>
+          <div class="phase-arrow">▼</div>
+        </div>
+      </div>
+      <div class="phase-body">
+        ${phase.modules.map(m => renderModule(m, phase)).join("")}
+      </div>
+    `;
+    container.appendChild(phaseDiv);
+  });
+  updateUI();
+}
+
+function renderModule(module, phase) {
+  const ms = computeModuleStatus(module.id);
+  const badgeClass = ms === "done" ? "badge-done" : ms === "in-progress" ? "badge-in-progress" : "badge-pending";
+  const badgeText = ms === "done" ? "✅ Completado" : ms === "in-progress" ? "🔄 En Progreso" : "⏳ Pendiente";
+  const checkboxClass = ms === "done" ? "done" : ms === "in-progress" ? "partial" : "pending";
+  const checkboxIcon = ms === "done" ? "✓" : ms === "in-progress" ? "◐" : "";
+
+  let totalTasks = module.tasks.length;
+  let doneTasks = 0;
+  module.tasks.forEach((task, i) => {
+    const tKey = `${module.id}-t${i}`;
+    const saved = state.tasks[tKey];
+    if (saved === "done") doneTasks++;
+    else if (!saved && getTaskStatusFromText(task) === "done") doneTasks++;
+  });
+
+  const hasBriefings = module.briefings && module.briefings.length > 0;
+
+  return `
+    <div class="module" data-module-id="${module.id}" data-status="${ms}">
+      <div class="module-header" onclick="toggleModule('${module.id}')">
+        <div class="module-checkbox ${checkboxClass}" onclick="event.stopPropagation();cycleModuleStatus('${module.id}')">${checkboxIcon}</div>
+        <div class="module-info">
+          <div class="title">${module.title} ${hasBriefings ? '<span class="badge-briefing">📋 ' + module.briefings.length + ' sesión(es)</span>' : ''}</div>
+          <div class="desc">${module.desc}</div>
+          <div class="tech-stack">${module.tech.map(t => `<span>${t}</span>`).join("")}</div>
+        </div>
+        <span class="module-badge ${badgeClass}">${badgeText}</span>
+        <button class="prompt-btn" onclick="event.stopPropagation();showPrompt('${module.id}')" title="Obtener prompt de implementación">🤖 Prompt</button>
+        <span style="font-size:12px;color:var(--text-secondary);flex-shrink:0;">${doneTasks}/${totalTasks}</span>
+      </div>
+      <div class="module-tasks">
+        <div class="module-tasks-inner">
+          ${module.tasks.map((task, i) => {
+            const tKey = `${module.id}-t${i}`;
+            const saved = state.tasks[tKey];
+            const ts = saved || getTaskStatusFromText(task);
+            return `
+              <div class="task ${ts === 'done' ? 'done' : ''}" data-task-key="${tKey}">
+                <input type="checkbox" ${ts === "done" ? "checked" : ""} onchange="toggleTask('${module.id}', ${i})" />
+                <label>${task}</label>
+              </div>
+            `;
+          }).join("")}
+        </div>
+        ${hasBriefings ? `
+        <details class="briefings-section">
+          <summary>📋 Bitácora de Sesiones (${module.briefings.length})</summary>
+          ${module.briefings.map(b => `
+            <div class="briefing-item">
+              <div class="briefing-date">📅 ${b.date}</div>
+              <div class="briefing-text">${b.text}</div>
+              ${b.achievements ? `
+              <div class="briefing-achievements">
+                ${b.achievements.map(a => `<span>✅ ${a}</span>`).join("")}
+              </div>` : ''}
+            </div>
+          `).join("")}
+        </details>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// ===== INTERACTIONS =====
+function togglePhase(id) {
+  const el = document.querySelector(`[data-phase-id="${id}"]`);
+  el.classList.toggle("open");
+}
+
+function toggleModule(id) {
+  const el = document.querySelector(`[data-module-id="${id}"]`);
+  el.classList.toggle("open");
+}
+
+function cycleModuleStatus(id) {
+  const current = state.modules[id] || "pending";
+  const next = current === "pending" ? "in-progress" : current === "in-progress" ? "done" : "pending";
+  state.modules[id] = next;
+  if (next === "done") {
+    const mod = findModule(id);
+    if (mod) {
+      mod.tasks.forEach((_, i) => { state.tasks[`${id}-t${i}`] = "done"; });
+    }
+  }
+  saveState();
+}
+
+function toggleTask(moduleId, taskIdx) {
+  const tKey = `${moduleId}-t${taskIdx}`;
+  const current = state.tasks[tKey] || "pending";
+  state.tasks[tKey] = current === "done" ? "pending" : "done";
+
+  const mod = findModule(moduleId);
+  if (mod) {
+    let total = mod.tasks.length, done = 0;
+    mod.tasks.forEach((_, i) => {
+      if (state.tasks[`${moduleId}-t${i}`] === "done") done++;
+    });
+    if (done === total) state.modules[moduleId] = "done";
+    else if (done > 0) state.modules[moduleId] = "in-progress";
+    else state.modules[moduleId] = "pending";
+  }
+  saveState();
+}
+
+function findModule(moduleId) {
+  for (const phase of DATA.phases) {
+    for (const m of phase.modules) {
+      if (m.id === moduleId) return m;
+    }
+  }
+  return null;
+}
+
+function findPhaseByModule(moduleId) {
+  for (const phase of DATA.phases) {
+    for (const m of phase.modules) {
+      if (m.id === moduleId) return phase;
+    }
+  }
+  return null;
+}
+
+// ===== PROMPT GENERATOR =====
+function generatePrompt(moduleId) {
+  const mod = findModule(moduleId);
+  if (!mod) return "Error: módulo no encontrado";
+  const phase = findPhaseByModule(moduleId);
+  const phaseName = phase ? phase.title : "InteliMarket Supermercado";
+
+  const taskDetails = mod.tasks.map((t, i) => {
+    const tKey = `${mod.id}-t${i}`;
+    const saved = state.tasks[tKey];
+    const status = saved || getTaskStatusFromText(t);
+    const prefix = status === "done" ? "[HECHO]" : status === "in-progress" ? "[EN PROGRESO]" : "[PENDIENTE]";
+    return `${prefix} ${t.replace(/^[✅🔄]\s*/, "")}`;
+  }).join("\n");
+
+  const techStack = mod.tech.join(", ");
+  const computed = computeModuleStatus(mod.id);
+  const statusEmoji = computed === "done" ? "✅" : computed === "in-progress" ? "🔄" : "⏳";
+
+  return `## ${statusEmoji} Implementar: ${mod.title}
+
+**Contexto del proyecto:** InteliMarket — Vertical Supermercado. SaaS ERP para supermercados y autoservicios en Paraguay. Multi-tenant con PostgreSQL, FastAPI backend, React + TypeScript frontend, React Native para apps mobile.
+
+**Módulo:** ${mod.title}
+**Fase:** ${phaseName}
+**Descripción:** ${mod.desc}
+**Tech Stack:** ${techStack}
+**Estado actual:** ${computed === "done" ? "Completado" : computed === "in-progress" ? "En progreso" : "No iniciado"}
+
+### Requerimientos
+
+${mod.desc}
+
+### Tareas a implementar
+
+${taskDetails}
+
+### Consideraciones técnicas
+
+- Backend: Python + FastAPI + SQLAlchemy async + PostgreSQL
+- Frontend: React + TypeScript + TailwindCSS
+- App Mobile: React Native + Expo (si aplica)
+- Tablas con prefijo supermer_ o sm_ según el submódulo
+- Feature flags desde api/src/features/plans.py (ALL_FEATURES)
+- Ubicar modelos/schemas/service/router bajo api/src/supermer/ o crear submódulo separado si es complejo
+- FEATURE_LABELS y vertical presets en api/src/verticals/presets.py
+- Frontend: agregar tab en SupermerPage.tsx o página independiente según tamaño
+- Sidebar Layout.tsx si la funcionalidad merece acceso directo
+
+### Instrucciones
+
+Implementá esta funcionalidad completa con:
+1. Modelos SQLAlchemy (prefijo sm_)
+2. Schemas Pydantic
+3. Servicio con lógica de negocio
+4. Router REST con autenticación
+5. Frontend React con UI completa
+6. Registro en main.py + env.py
+7. Migración Alembic
+8. Feature flag y vertical presets
+9. API namespace en frontend
+10. Sidebar y ruta si aplica
+
+Avanzá con profesionalismo, innovación y responsabilidad. Todo commit debe ser funcional y probado.`;
+}
+
+function showPrompt(moduleId) {
+  const mod = findModule(moduleId);
+  if (!mod) return;
+  const promptText = generatePrompt(moduleId);
+  document.querySelectorAll(".prompt-overlay").forEach(el => el.remove());
+
+  const overlay = document.createElement("div");
+  overlay.className = "prompt-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="prompt-modal" onclick="event.stopPropagation()">
+      <div class="prompt-modal-header">
+        <h3>🤖 Prompt de Implementación — ${mod.title}</h3>
+        <button class="prompt-modal-close" onclick="this.closest('.prompt-overlay').remove()">✕</button>
+      </div>
+      <div class="prompt-modal-body">
+        <pre id="promptContent">${promptText}</pre>
+        <div class="prompt-hint">Copiá este prompt y enviámelo para que implemente esta funcionalidad al instante.</div>
+      </div>
+      <div class="prompt-modal-footer">
+        <button class="prompt-copy-btn close-btn" onclick="this.closest('.prompt-overlay').remove()">Cerrar</button>
+        <button class="prompt-copy-btn" id="copyPromptBtn" onclick="copyPrompt(this)">📋 Copiar Prompt</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function copyPrompt(btn) {
+  const pre = document.getElementById("promptContent");
+  if (!pre) return;
+  const text = pre.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = "✅ ¡Copiado!";
+    btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = "📋 Copiar Prompt"; btn.classList.remove("copied"); }, 2000);
+  }).catch(() => {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+    btn.textContent = "✅ ¡Copiado!";
+    btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = "📋 Copiar Prompt"; btn.classList.remove("copied"); }, 2000);
+  });
+}
+
+// ===== UPDATE UI =====
+function updateUI() {
+  let totalTasks = 0, doneTasks = 0, inProgressTasks = 0, pendingTasks = 0;
+  let totalModules = 0, doneModules = 0, inProgressModules = 0, pendingModules = 0;
+
+  DATA.phases.forEach(phase => {
+    phase.modules.forEach(mod => {
+      totalModules++;
+      const ms = computeModuleStatus(mod.id);
+      if (ms === "done") doneModules++;
+      else if (ms === "in-progress") inProgressModules++;
+      else pendingModules++;
+
+      mod.tasks.forEach((task, i) => {
+        totalTasks++;
+        const saved = state.tasks[`${mod.id}-t${i}`];
+        const ts = saved || getTaskStatusFromText(task);
+        if (ts === "done") doneTasks++;
+        else if (ts === "in-progress") inProgressTasks++;
+        else pendingTasks++;
+      });
+    });
+  });
+
+  document.getElementById("statCompleted").textContent = doneModules;
+  document.getElementById("statInProgress").textContent = inProgressModules;
+  document.getElementById("statPending").textContent = pendingModules;
+  document.getElementById("statTotalTasks").textContent = totalTasks;
+
+  const pct = totalModules > 0 ? Math.round((doneModules / totalModules) * 100) : 0;
+  document.getElementById("progressFill").style.width = pct + "%";
+  document.getElementById("progressSummary").textContent = `${doneModules}/${totalModules} módulos completados (${doneTasks}/${totalTasks} tareas)`;
+
+  DATA.phases.forEach(phase => {
+    let d = 0, t = 0;
+    phase.modules.forEach(m => { t++; if (computeModuleStatus(m.id) === "done") d++; });
+    const pp = t > 0 ? Math.round((d / t) * 100) : 0;
+    const phaseEl = document.querySelector(`[data-phase-id="${phase.id}"]`);
+    if (phaseEl) {
+      const fill = phaseEl.querySelector(".phase-mini-fill");
+      const pctEl = phaseEl.querySelector(".phase-pct");
+      const indicator = phaseEl.querySelector(".phase-status-indicator");
+      if (fill) fill.style.width = pp + "%";
+      if (pctEl) pctEl.textContent = pp + "%";
+      if (indicator) {
+        indicator.className = "phase-status-indicator " + (d === t && t > 0 ? "completed" : d > 0 ? "in-progress" : "pending");
+      }
+    }
+  });
+
+  DATA.phases.forEach(phase => {
+    phase.modules.forEach(mod => {
+      const ms = computeModuleStatus(mod.id);
+      const el = document.querySelector(`[data-module-id="${mod.id}"]`);
+      if (!el) return;
+      const badge = el.querySelector(".module-badge");
+      const checkbox = el.querySelector(".module-checkbox");
+      if (badge) {
+        const labels = { done: "✅ Completado", "in-progress": "🔄 En Progreso", pending: "⏳ Pendiente" };
+        badge.textContent = labels[ms] || "⏳ Pendiente";
+        badge.className = "module-badge " + (ms === "done" ? "badge-done" : ms === "in-progress" ? "badge-in-progress" : "badge-pending");
+      }
+      if (checkbox) {
+        checkbox.className = "module-checkbox " + (ms === "done" ? "done" : ms === "in-progress" ? "partial" : "pending");
+        checkbox.textContent = ms === "done" ? "✓" : ms === "in-progress" ? "◐" : "";
+      }
+
+      const countEl = el.querySelector(".module-header > span:last-child");
+      if (countEl) {
+        let d = 0, t = mod.tasks.length;
+        mod.tasks.forEach((task, i) => {
+          const saved = state.tasks[`${mod.id}-t${i}`];
+          if (saved === "done") d++;
+          else if (!saved && getTaskStatusFromText(task) === "done") d++;
+        });
+        countEl.textContent = `${d}/${t}`;
+      }
+
+      mod.tasks.forEach((task, i) => {
+        const tKey = `${mod.id}-t${i}`;
+        const saved = state.tasks[tKey];
+        const ts = saved || getTaskStatusFromText(task);
+        const taskEl = el.querySelector(`[data-task-key="${tKey}"]`);
+        if (taskEl) {
+          taskEl.className = "task " + (ts === "done" ? "done" : "");
+          const cb = taskEl.querySelector("input[type='checkbox']");
+          if (cb) cb.checked = ts === "done";
+        }
+      });
+    });
+  });
+
+  document.getElementById("roadmapNotes").value = state.notes || "";
+  document.getElementById("lastUpdated").textContent = "🔄 Última actualización: " +
+    (state.lastUpdated ? new Date(state.lastUpdated).toLocaleDateString("es-PY", {
+      year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+    }) : "Nunca");
+}
+
+// ===== FILTERS =====
+document.querySelectorAll(".filter-btn").forEach(btn => {
+  btn.addEventListener("click", function() {
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    this.classList.add("active");
+    currentFilter = this.dataset.filter;
+    applyFilter();
+  });
+});
+
+function applyFilter() {
+  document.querySelectorAll(".module").forEach(el => {
+    const mId = el.dataset.moduleId;
+    const ms = state.modules[mId] || "pending";
+    if (currentFilter === "all") el.style.display = "";
+    else if (currentFilter === "done") el.style.display = ms === "done" ? "" : "none";
+    else if (currentFilter === "in-progress") el.style.display = ms === "in-progress" ? "" : "none";
+    else if (currentFilter === "pending") el.style.display = ms === "pending" ? "" : "none";
+  });
+}
+
+// ===== PERSIST NOTES =====
+document.getElementById("roadmapNotes").addEventListener("input", function() {
+  state.notes = this.value;
+  saveState();
+});
+
+// ===== THEME =====
+document.getElementById("themeToggle").addEventListener("click", function() {
+  const html = document.documentElement;
+  const isDark = html.getAttribute("data-theme") === "dark";
+  html.setAttribute("data-theme", isDark ? "light" : "dark");
+  this.textContent = isDark ? "🌙" : "☀️";
+  localStorage.setItem("intelimarket_theme_supermer", isDark ? "light" : "dark");
+});
+
+const savedTheme = localStorage.getItem("intelimarket_theme_supermer");
+if (savedTheme) {
+  document.documentElement.setAttribute("data-theme", savedTheme);
+  document.getElementById("themeToggle").textContent = savedTheme === "dark" ? "☀️" : "🌙";
+}
+
+// ===== SESSION BRIEFING =====
+(function logSession() {
+  const sessionKey = "intelimarket_supermer_briefings";
+  const briefings = JSON.parse(localStorage.getItem(sessionKey) || "[]");
+  const today = new Date().toLocaleDateString("es-PY", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const lastBriefing = briefings[briefings.length - 1];
+  const currentSummary = `🎯 STATE_VERSION 15. Fase 7 Digital 3/3 ✅ COMPLETA: E-commerce omnicanal + Delivery Apps + Suscripciones Recurrentes. Fase 7 completada al 100%. Próximo: Fase 8 (por definir) o continuar con Fase 3 (B2B/Portal/E-commerce/Marketing Automation).`;
+  if (!lastBriefing || lastBriefing.summary !== currentSummary) {
+    briefings.push({ date: today, summary: currentSummary });
+    localStorage.setItem(sessionKey, JSON.stringify(briefings));
+    const notes = document.getElementById("roadmapNotes");
+    if (notes) {
+      const entry = `\n[${today}] ${currentSummary}`;
+      notes.value = notes.value ? notes.value + "\n" + entry : entry;
+      state.notes = notes.value;
+      saveState();
+    }
+  }
+})();
+
+// ===== INIT =====
+render();
+</script>
+
+</body>
+</html>

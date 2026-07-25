@@ -1,0 +1,1 @@
+"""SueldOK integration — payroll sync"""

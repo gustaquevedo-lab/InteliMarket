@@ -1,5 +1,6 @@
 """Database connection and session management"""
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
@@ -19,14 +20,15 @@ async_session_factory = async_sessionmaker(
     expire_on_commit=False,
 )
 
-Base = DeclarativeBase()
+
+class Base(DeclarativeBase):
+    pass
 
 
 async def get_db() -> AsyncSession:
     async with async_session_factory() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise
@@ -36,10 +38,9 @@ async def get_db() -> AsyncSession:
 
 async def get_tenant_db(schema_name: str) -> AsyncSession:
     async with async_session_factory() as session:
-        await session.execute(f"SET search_path TO {schema_name}, public")
+        await session.execute(text("SET search_path TO :schema, public"), {"schema": schema_name})
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise

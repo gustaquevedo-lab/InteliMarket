@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "InteliClient",
+    "slug": "inteliclient",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "inteliclient",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#1E40AF"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "py.intelimarket.client"
+    },
+    "android": {
+      "package": "py.intelimarket.client",
+      "adaptiveIcon": { "backgroundColor": "#1E40AF" }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ]
+  }
+}

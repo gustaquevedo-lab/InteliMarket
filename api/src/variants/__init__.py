@@ -1,0 +1,1 @@
+"""Product variants module"""

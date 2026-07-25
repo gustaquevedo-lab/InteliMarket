@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="120" fill="#104c91" />
+  
+  <!-- "i" dot -->
+  <circle cx="180" cy="160" r="32" fill="#00a651" />
+  
+  <!-- Taller left bar (stem of 'i' and back of the cart/M) -->
+  <rect x="156" y="220" width="48" height="150" rx="24" fill="#ffffff" />
+  
+  <!-- Middle bar (forms the M) -->
+  <rect x="236" y="260" width="48" height="110" rx="24" fill="#ffffff" />
+  
+  <!-- Right bar (front of cart and right leg of M) -->
+  <rect x="316" y="220" width="48" height="150" rx="24" fill="#ffffff" />
+  
+  <!-- Cart bottom connecting them -->
+  <rect x="156" y="322" width="208" height="48" rx="24" fill="#ffffff" />
+  
+  <!-- Cart wheels -->
+  <circle cx="200" cy="410" r="24" fill="#00a651" />
+  <circle cx="320" cy="410" r="24" fill="#00a651" />
+</svg>

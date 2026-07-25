@@ -9,7 +9,6 @@ from api.src.db import Base
 
 class Tenant(Base):
     __tablename__ = "tenants"
-    __table_args__ = {"schema": "public"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     nombre = Column(String(100), nullable=False)
@@ -26,7 +25,6 @@ class Tenant(Base):
 
 class UserTenant(Base):
     __tablename__ = "user_tenants"
-    __table_args__ = {"schema": "public"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     user_id = Column(UUID(as_uuid=True), nullable=False)

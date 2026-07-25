@@ -1,96 +1,99 @@
 # InteliMarket
 
-**SaaS ERP verticalizable para comercios y distribuidores en Paraguay**
-
-Parte del ecosistema **IntelliHouse Soluciones** — integrándose con InteliCont (contabilidad), InteliAudit (auditoría impositiva), y SueldOK (recursos humanos).
-
-[![Status](https://img.shields.io/badge/status-planning-blue)]()
-[![Python](https://img.shields.io/badge/python-3.12+-blue.svg)]()
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)]()
-[![React](https://img.shields.io/badge/React-18-blue.svg)]()
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue.svg)]()
-
----
-
-## Features
-
-- **Facturación electrónica SIFEN** — e-Kuatia nativo con CDC automático
-- **POS offline-first** — PWA que funciona sin internet
-- **Inventario completo** — Multi-almacén, FIFO/promedio, lotes, series
-- **Multimoneda** — PYG, USD + configurables con tasas BCP
-- **Cobros flexibles** — Efectivo, tarjetas, transferencia, cheques, wallet, crédito, financiamiento
-- **Pasarelas Paraguay** — Pagopar, Kuapay
-- **Compliance DNIT** — Libros IVA, RG 90, retenciones automáticas
-- **Ecosistema integrado** — InteliCont, InteliAudit, SueldOK
-
-## Verticales
-
-| Vertical | Estado | Descripción |
-|----------|--------|-------------|
-| Retail / Tiendas | MVP | POS, inventario, facturación, caja |
-| Distribución / Mayorista | MVP | Compras, pedidos, rutas, CRM B2B |
-| Restaurantes | Roadmap | Mesas, comandas, recetas, delivery |
-| Servicios | Roadmap | Turnos, proyectos, horas facturables |
-| Manufactura | Roadmap | BOM, producción, materia prima |
+SaaS ERP verticalizable para comercios y distribuidores en Paraguay. Multi-moneda, compliance SIFEN/e-Kuatia, integrado con InteliCont, InteliAudit y SueldOK.
 
 ## Stack
 
-- **Backend:** Python 3.12, FastAPI, SQLAlchemy, Celery, Redis
-- **Frontend:** React 18, TypeScript, Vite, TailwindCSS, Zustand
-- **Database:** PostgreSQL 16 (schema por tenant)
-- **Infra:** Docker, Nginx
+- **Frontend:** React + Vite + Tailwind CSS + lucide-react
+- **Backend:** Python + FastAPI + PostgreSQL
+- **Infra:** Docker Compose, Redis (cache)
+- **Multi-tenancy:** Schema per tenant
 
-## Documentación
+## Quick Start
 
-- [Arquitectura](docs/ARCHITECTURE.md) — Diseño técnico completo
-- [PRD](docs/PRD.md) — Product Requirements Document
-- [Integraciones](docs/INTEGRATIONS.md) — Contratos con ecosistema
-- [Reglas fiscales Paraguay](docs/FISCAL_PY_RULES.md) — Compliance
-- [Roadmap](docs/ROADMAP.md) — Plan de desarrollo
-- [Backlog](docs/BACKLOG.md) — Tareas detalladas
-
-## Inicio rápido
-
-### Backend
+### Local (sin Docker)
 
 ```bash
-# Crear entorno virtual
-python -m venv .venv
-source .venv/bin/activate  # o .venv\Scripts\activate en Windows
-
-# Instalar dependencias
-pip install -e ".[dev]"
-
-# Configurar variables
-cp .env.example .env
-
-# Levantar infraestructura
-docker compose up -d postgres redis
-
-# Migrar BD
-alembic upgrade head
-
-# Iniciar API
+# Backend
+cd api
+pip install -e .
 uvicorn api.src.main:app --reload
-```
 
-### Frontend
-
-```bash
+# Frontend
 cd ui-web
 npm install
 npm run dev
 ```
 
-## Planes SaaS
+### Docker
 
-| Feature | Starter | Professional | Business | Enterprise |
-|---------|---------|-------------|----------|------------|
-| Precio mensual (PYG) | 250.000 | 750.000 | 2.000.000 | A convenir |
-| Sucursales | 1 | 3 | 10 | ∞ |
-| POS | 1 | 3 | 10 | ∞ |
-| Facturas/mes | 500 | 5,000 | 50,000 | ∞ |
+```bash
+docker compose up -d
+```
 
-## Licencia
+- API: http://localhost:8000
+- Docs: http://localhost:8000/api/docs
+- Web: http://localhost:5173
 
-Copyright © 2026 IntelliHouse Soluciones. Todos los derechos reservados.
+## Ecosystem
+
+| Servicio | Puerto | Descripción |
+|----------|--------|-------------|
+| InteliMarket | 8000/5173 | ERP principal |
+| InteliCont | — | Contabilidad |
+| InteliAudit | — | Auditoría |
+| SueldOK | — | Nómina |
+
+## Módulos
+
+- **Auth** — JWT, MFA, multi-tenant
+- **Companies** — Empresas, sucursales, puntos de expedición
+- **Products** — SKU, código de barra, categorías, precios, variantes
+- **Inventory** — Stock, almacenes, transferencias, ajustes, lotes, seriales, FIFO/Promedio
+- **Sales** — Ventas, cotizaciones, cálculo automático IVA (10/5/0), deducción de stock
+- **Customers** — Clientes (física/jurídica), RUC/CI, cuentas corrientes, límites de crédito
+- **Purchases** — Órdenes de compra, recepciones, proveedores, actualización de stock
+- **Payments** — Split payments, wallet, crédito rotativo, financiamiento en cuotas
+- **SIFEN** — e-Kuatia, CDC, timbrados, envío XML a SET
+- **Currency** — Tipos de cambio BCP, multi-moneda (PYG/USD/BRL)
+- **Reports** — Ventas, inventario, libros fiscales, financiero
+- **Integrations** — Webhooks para InteliCont, InteliAudit, SueldOK
+
+## Fiscal (Paraguay)
+
+- IVA: 10%, 5%, 0% (exento)
+- CDC: 44 dígitos (SHA256)
+- e-Kuatia: XML con firma digital
+- Timbrado: gestión de rangos y vencimientos
+- RUC: validación de formato
+
+## Estructura
+
+```
+├── api/src/
+│   ├── auth/          # JWT, MFA
+│   ├── tenants/       # Multi-tenant provisioning
+│   ├── companies/     # Empresas y sucursales
+│   ├── products/      # Productos y categorías
+│   ├── inventory/     # Stock y almacenes
+│   ├── sales/         # Ventas y cotizaciones
+│   ├── customers/     # Clientes
+│   ├── purchases/     # Compras
+│   ├── payments/      # Pagos y cobros
+│   ├── sifen/         # Facturación electrónica
+│   ├── currency/      # Tipos de cambio
+│   ├── reports/       # Reportes
+│   └── integrations/  # Webhooks ecosystem
+├── ui-web/src/
+│   ├── pages/         # Páginas principales
+│   ├── components/    # Componentes reutilizables
+│   └── context/       # Auth y Theme
+├── db/
+│   └── schema.sql     # Schema maestro
+├── docs/              # Documentación técnica
+└── docker-compose.yml
+```
+
+## License
+
+MIT

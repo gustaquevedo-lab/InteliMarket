@@ -13,6 +13,7 @@ from api.src.inventory.models import (
 from api.src.inventory.schemas import (
     WarehouseCreate, MovementCreate, TransferCreate, AdjustmentCreate,
 )
+from api.src.products.models import Product
 
 
 async def create_warehouse(db: AsyncSession, data: WarehouseCreate) -> Warehouse:
@@ -44,14 +45,12 @@ async def get_stock_by_warehouse(db: AsyncSession, warehouse_id: str) -> list[St
 
 async def get_low_stock(db: AsyncSession, company_id: str) -> list[dict]:
     result = await db.execute(
-        select(Stock, "p.nombre", "p.stock_minimo", "p.sku")
-        .select_from(Stock)
-        .join("products p", "Stock.product_id = p.id")
+        select(Stock, Product.nombre, Product.stock_minimo, Product.sku)
+        .join(Product, Stock.product_id == Product.id)
         .where(
-            Stock.cantidad <= "p.stock_minimo",
-            "p.company_id = :company_id",
+            Stock.cantidad <= Product.stock_minimo,
+            Product.company_id == company_id,
         )
-        .params(company_id=company_id)
     )
     rows = result.fetchall()
     return [

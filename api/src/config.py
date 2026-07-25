@@ -60,12 +60,22 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: str = ""
 
+    # Conector Ñemuha (ConceptoComercial/FlexPDV) — legacy MySQL del cliente, vía VM puente
+    nemuha_mysql_host: str = ""
+    nemuha_mysql_port: int = 3306
+    nemuha_mysql_user: str = ""
+    nemuha_mysql_password: str = ""
+    nemuha_mysql_database: str = ""
+
     # Email
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = "noreply@intelimarket.py"
+
+    # Logging
+    log_level: str = "INFO"
 
     # CORS
     cors_origins: str = "http://localhost:5173,http://localhost:3000"

@@ -84,6 +84,8 @@ from api.src.mobile.router import router as mobile_router
 from api.src.ecommerce.router import router as ecommerce_router
 from api.src.data_migration.router import router as data_migration_router
 from api.src.financial.router import router as financial_router
+from api.src.finance_agent.router import router as finance_agent_router
+from api.src.nemuha_connector.router import router as nemuha_connector_router
 from api.src.fiscal.router import router as fiscal_router
 from api.src.distribuidora.router import router as distribuidora_router
 from api.src.distribuidora.tracking_router import router as distribuidora_tracking_router
@@ -92,7 +94,6 @@ from api.src.client_app.router import router as client_app_router
 from api.src.supplier_portal.router import router as supplier_portal_router
 from api.src.marketing.router import router as marketing_router
 from api.src.retail.router import router as retail_router
-from api.src.ecommerce.router import router as ecommerce_router
 from api.src.advanced_inventory.router import router as advanced_inventory_router
 from api.src.integrated_finance.router import router as integrated_finance_router
 from api.src.sifen_avanzado.router import router as sifen_avanzado_router
@@ -259,12 +260,15 @@ app.include_router(ecommerce_sm_router)
 app.include_router(delivery_integrations_router)
 app.include_router(suscripciones_router)
 app.include_router(financial_router)
+app.include_router(finance_agent_router)
+app.include_router(nemuha_connector_router)
 app.include_router(marketing_router)
 app.include_router(data_migration_router)
 app.include_router(distribuidora_router)
 app.include_router(distribuidora_tracking_router)
 app.include_router(intelientregas_fase2_router)
 app.include_router(client_app_router)
+app.include_router(supplier_portal_router)
 app.include_router(retail_router)
 app.include_router(servicios_router)
 

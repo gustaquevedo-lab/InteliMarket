@@ -49,16 +49,7 @@
     @apply shadow-lg shadow-primary/5 -translate-y-0.5 border-primary/20;
   }
 
-  /* KPI Cards */
-  .kpi-card {
-    @apply card p-5;
-  }
-  .kpi-value {
-    @apply text-2xl font-bold text-gray-900 dark:text-white;
-  }
-  .kpi-label {
-    @apply text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 mt-1;
-  }
+
 
   /* Inputs */
   .input-field {

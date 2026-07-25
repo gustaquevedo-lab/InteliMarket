@@ -1,0 +1,1 @@
+"""InteliCont integration — accounting sync"""

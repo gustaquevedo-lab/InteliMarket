@@ -1,0 +1,76 @@
+{
+  "expo": {
+    "name": "InteliSeller",
+    "slug": "inteliseller",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "inteliseller",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#0a0a1a"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.intelimarket.seller",
+      "infoPlist": {
+        "UIBackgroundModes": ["location", "fetch", "remote-notification"],
+        "NSLocationWhenInUseUsageDescription": "Precisamos tu ubicación para registrar tus visitas a clientes.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Usamos tu ubicación en segundo plano para tracking en ruta.",
+        "NSCameraUsageDescription": "Necesitamos acceso a la cámara para fotos de comprobantes.",
+        "NSPhotoLibraryUsageDescription": "Para adjuntar imágenes de comprobantes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#0a0a1a"
+      },
+      "package": "com.intelimarket.seller",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE_LOCATION",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "SCHEDULE_EXACT_ALARM"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": ""
+        }
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location",
+      "expo-notifications",
+      "expo-secure-store",
+      "expo-sqlite",
+      [
+        "expo-camera",
+        { "cameraPermission": "Necesitamos acceso a la cámara para fotos de comprobantes." }
+      ],
+      [
+        "expo-task-manager",
+        { "ios": { "backgroundModes": ["location", "fetch"] } }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiUrl": "https://api.intelimarket.py/api/v1",
+      "gpsPingIntervalMs": 15000,
+      "gpsMinDistanceMeters": 10,
+      "offlineQueueMax": 500
+    }
+  }
+}

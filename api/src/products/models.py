@@ -1,6 +1,6 @@
 """Product and category models"""
 
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, Text, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, Text, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -35,15 +35,24 @@ class Product(Base):
     tipo = Column(String(20), nullable=False, default="producto")
     unidad_medida = Column(String(10), default="UN")
     iva_tasa = Column(Numeric(5, 2), default=10)
-    metodo_costeo = Column(String(10), default="promedio")
-    tiene_lotes = Column(Boolean, default=False)
-    tiene_vencimiento = Column(Boolean, default=False)
-    tiene_serial = Column(Boolean, default=False)
-    stock_minimo = Column(Integer, default=0)
+    metodo_costeo = Column(String(10), default="promedio", server_default="promedio")
+    tipo_venta = Column(String(20), default="unidad", server_default="unidad")
+    tiene_lotes = Column(Boolean, default=False, server_default=text("false"))
+    tiene_vencimiento = Column(Boolean, default=False, server_default=text("false"))
+    tiene_serial = Column(Boolean, default=False, server_default=text("false"))
+    stock_minimo = Column(Integer, default=0, server_default=text("0"))
     stock_maximo = Column(Integer)
+    costo_promedio = Column(Numeric(15, 2), default=0, server_default=text("0"), comment="Costo promedio ponderado (en moneda local)")
+    ultimo_costo = Column(Numeric(15, 2), default=0, server_default=text("0"), comment="Último costo de compra/importación (en moneda local)")
+    costo_landed = Column(Numeric(15, 2), default=0, server_default=text("0"), comment="Costo landed total por unidad (importados)")
+    precio_venta = Column(Numeric(15, 2), default=0, server_default=text("0"), comment="Precio de venta al público")
     peso_kg = Column(Numeric(10, 3))
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     category = relationship("ProductCategory")
+
+
+# Alias expected by some modules (customer360, etc.)
+Category = ProductCategory
