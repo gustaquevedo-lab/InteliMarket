@@ -14,6 +14,10 @@ reales (nunca asumidos):
         (tipo="control_caja_chica") cuando VL_DIFERENCA_* != 0 — el legacy ya
         calcula el sobrante/faltante de cada cierre, solo hay que sacarlo a la luz.
     - bs_moeda: 1=PYG, 2=USD, 3=BRL — tabla de 3 filas, verificada, estable.
+    - ven_venda + ven_item_venda + est_produto -> consulta de ticket para
+        IntelliZapp (get_ticket_detail). Lookup puntual en vivo, sin sync/caché.
+        CD_VENDA = número de venta interno (verificado único: 116392 filas,
+        116392 distintos) — NO confundir con NR_FATURA, que es el número fiscal.
 
 Deliberadamente FUERA de esta versión:
     - fin_pagamento / fin_recebimento (detalle de pagos y cobros) — se usa por
@@ -473,3 +477,58 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
     await db.commit()
     await db.refresh(run)
     return run
+
+
+# ── Consulta de ticket para IntelliZapp (segmentación de marketing) ────────────
+# Lectura en vivo contra la base legacy — no hay sync/caché, es un lookup puntual
+# por CD_VENDA (número de venta interno, verificado único contra datos reales).
+# ven_venda.CD_VENDA -> numero_ticket que maneja IntelliZapp (NO es NR_FATURA,
+# que es el número fiscal/SIFEN — confirmado con Gustavo).
+
+async def get_ticket_detail(numero_ticket: str) -> dict | None:
+    ventas = await _fetch(
+        """
+        SELECT v.ID_VENDA, v.CD_VENDA, v.DT_VENDA, v.VL_TOTAL, v.BO_CANCELADO,
+               p.NOME, p.RUC, p.CELULAR, p.TELEFONE, p.EMAIL
+        FROM ven_venda v
+        LEFT JOIN bs_pessoa p ON p.ID_PESSOA = v.ID_PESSOA
+        WHERE v.CD_VENDA = %s
+        """,
+        (numero_ticket,),
+    )
+    if not ventas:
+        return None
+    v = ventas[0]
+
+    items = await _fetch(
+        """
+        SELECT iv.ID_PRODUTO, pr.DS_PRODUTO, iv.QUANTIDADE, iv.VL_PRECO_VENDA, iv.VL_TOTAL
+        FROM ven_item_venda iv
+        JOIN est_produto pr ON pr.ID_PRODUTO = iv.ID_PRODUTO
+        WHERE iv.ID_VENDA = %s AND iv.BO_DEVOLVIDO = 0
+        """,
+        (v["ID_VENDA"],),
+    )
+
+    return {
+        "numero_ticket": str(v["CD_VENDA"]),
+        "fecha": v["DT_VENDA"].isoformat(),
+        "monto_total": float(v["VL_TOTAL"]),
+        "cancelado": bool(v["BO_CANCELADO"]),
+        "cliente": {
+            "documento": v["RUC"],
+            "nombre": v["NOME"],
+            "telefono": v["CELULAR"] or v["TELEFONE"],
+            "email": v["EMAIL"],
+        },
+        "productos": [
+            {
+                "id_producto": p["ID_PRODUTO"],
+                "descripcion": p["DS_PRODUTO"],
+                "cantidad": float(p["QUANTIDADE"]),
+                "precio_unitario": float(p["VL_PRECO_VENDA"]),
+                "subtotal": float(p["VL_TOTAL"]),
+            }
+            for p in items
+        ],
+    }

@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     nemuha_mysql_password: str = ""
     nemuha_mysql_database: str = ""
 
+    # Consulta de tickets para IntelliZapp (segmentación de marketing)
+    intellizapp_api_key: str = ""
+
     # Email
     smtp_host: str = ""
     smtp_port: int = 587
