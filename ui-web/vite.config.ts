@@ -55,7 +55,7 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
-    allowedHosts: ['minisforum-ia', 'localhost', '.ts.net'],
+    allowedHosts: ['minisforum-ia', 'intelimarket-ia', 'localhost', '.ts.net'],
     watch: {
       usePolling: true,
     },
