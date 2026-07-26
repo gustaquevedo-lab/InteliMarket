@@ -968,12 +968,13 @@ async def get_financial_ratios(db: AsyncSession, company_id: str) -> dict:
     )
     ap_val = Decimal(str(ap_total.scalar() or "0"))
 
-    from api.src.accounts_receivable.models import CreditAccount
+    from sqlalchemy import text as _text
     ar_total = await db.execute(
-        select(func.coalesce(func.sum(CreditAccount.saldo), 0)).where(
-            CreditAccount.company_id == cid,
-            CreditAccount.saldo > 0,
-        )
+        _text("""
+            SELECT COALESCE(SUM(saldo_pendiente), 0) FROM accounts_receivable
+            WHERE company_id = :company_id AND estado = 'pendiente'
+        """),
+        {"company_id": str(cid)},
     )
     ar_val = Decimal(str(ar_total.scalar() or "0"))
 
