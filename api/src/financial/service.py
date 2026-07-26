@@ -914,11 +914,11 @@ async def get_financial_dashboard(db: AsyncSession, company_id: str) -> dict:
     ap = await get_ap_dashboard(db, company_id)
     cash_flow = await get_cash_flow_dashboard(db, company_id)
 
-    from api.src.accounts_receivable.models import CreditAccount
+    from api.src.accounts_receivable.models import Account as ARAccount
     ar_result = await db.execute(
-        select(func.coalesce(func.sum(CreditAccount.saldo), 0)).where(
-            CreditAccount.company_id == uuid.UUID(company_id),
-            CreditAccount.saldo > 0,
+        select(func.coalesce(func.sum(ARAccount.saldo), 0)).where(
+            ARAccount.company_id == uuid.UUID(company_id),
+            ARAccount.saldo > 0,
         )
     )
     ar_total = Decimal(str(ar_result.scalar() or "0"))
