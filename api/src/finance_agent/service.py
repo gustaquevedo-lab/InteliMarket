@@ -161,7 +161,7 @@ async def run_diagnosis(db: AsyncSession, company_id: str) -> FinanceAgentRun:
         else:
             parsed = _call_anthropic(user_content)
 
-        run.contexto = context
+        run.contexto = json.loads(context_json)  # ya pasó por _json_default (Decimal -> float)
         run.respuesta_cruda = parsed
         run.diagnostico = parsed["diagnostico"]
         run.status = "completed"
