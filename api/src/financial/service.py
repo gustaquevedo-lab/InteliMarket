@@ -914,7 +914,6 @@ async def get_financial_dashboard(db: AsyncSession, company_id: str) -> dict:
     ap = await get_ap_dashboard(db, company_id)
     cash_flow = await get_cash_flow_dashboard(db, company_id)
 
-    from api.src.accounts_receivable.service import get_ar_summary as get_ar_summary_raw
     from api.src.accounts_receivable.models import CreditAccount
     ar_result = await db.execute(
         select(func.coalesce(func.sum(CreditAccount.saldo), 0)).where(
