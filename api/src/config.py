@@ -57,8 +57,10 @@ class Settings(BaseSettings):
     sueldok_api_url: str = "https://api.sueldok.com"
     sueldok_api_key: str = ""
 
-    # Anthropic
+    # LLM del Gerente Financiero IA — "gemini" (default, más económico) o "anthropic"
+    llm_provider: str = "gemini"
     anthropic_api_key: str = ""
+    gemini_api_key: str = ""
 
     # Conector Ñemuha (ConceptoComercial/FlexPDV) — legacy MySQL del cliente, vía VM puente
     nemuha_mysql_host: str = ""

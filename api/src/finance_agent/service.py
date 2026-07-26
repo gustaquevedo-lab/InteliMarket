@@ -12,7 +12,6 @@ import json
 from datetime import datetime, date
 from decimal import Decimal
 
-import anthropic
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,8 +20,13 @@ from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.financial import service as financial_service
 from api.src.accounts_receivable import service as ar_service
 
-MODEL = "claude-opus-4-8"
+# Proveedor de LLM intercambiable vía settings.llm_provider ("gemini" | "anthropic").
+# Gemini es el default por costo; Anthropic queda listo para reactivar con solo
+# cambiar LLM_PROVIDER en el .env, sin tocar código.
+ANTHROPIC_MODEL = "claude-opus-4-8"
+GEMINI_MODEL = "gemini-2.5-flash"
 
+# Dialecto JSON Schema estándar — usado por Anthropic.
 RECOMMENDATION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -48,6 +52,30 @@ RECOMMENDATION_SCHEMA = {
     },
     "required": ["diagnostico", "recomendaciones"],
     "additionalProperties": False,
+}
+
+# Mismo contenido en dialecto OpenAPI/Gemini (nullable en vez de type: [x, null],
+# sin additionalProperties — Gemini no soporta esa palabra clave).
+GEMINI_RECOMMENDATION_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "diagnostico": {"type": "STRING"},
+        "recomendaciones": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "tipo": {"type": "STRING", "enum": ["cobranza", "pago_proveedor", "alerta_presupuesto", "otro"]},
+                    "titulo": {"type": "STRING"},
+                    "descripcion": {"type": "STRING"},
+                    "entidad_relacionada": {"type": "STRING", "nullable": True},
+                    "monto_relacionado": {"type": "STRING", "nullable": True},
+                },
+                "required": ["tipo", "titulo", "descripcion"],
+            },
+        },
+    },
+    "required": ["diagnostico", "recomendaciones"],
 }
 
 SYSTEM_PROMPT = """Sos el Gerente Financiero IA de InteliMarket para un supermercado en Paraguay.
@@ -81,30 +109,57 @@ async def _gather_context(db: AsyncSession, company_id: str) -> dict:
     }
 
 
+def _call_anthropic(user_content: str) -> dict:
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    response = client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=4096,
+        thinking={"type": "adaptive"},
+        system=SYSTEM_PROMPT,
+        output_config={"format": {"type": "json_schema", "schema": RECOMMENDATION_SCHEMA}},
+        messages=[{"role": "user", "content": user_content}],
+    )
+    text_block = next(b.text for b in response.content if b.type == "text")
+    return json.loads(text_block)
+
+
+def _call_gemini(user_content: str) -> dict:
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=settings.gemini_api_key)
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=user_content,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=GEMINI_RECOMMENDATION_SCHEMA,
+        ),
+    )
+    return json.loads(response.text)
+
+
+def _current_model_name() -> str:
+    return GEMINI_MODEL if settings.llm_provider == "gemini" else ANTHROPIC_MODEL
+
+
 async def run_diagnosis(db: AsyncSession, company_id: str) -> FinanceAgentRun:
-    run = FinanceAgentRun(company_id=company_id, model=MODEL, status="running")
+    run = FinanceAgentRun(company_id=company_id, model=_current_model_name(), status="running")
     db.add(run)
     await db.flush()
 
     try:
         context = await _gather_context(db, company_id)
         context_json = json.dumps(context, default=_json_default, ensure_ascii=False)
+        user_content = f"Estado financiero actual (JSON):\n\n{context_json}\n\nDiagnosticá y recomendá."
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            thinking={"type": "adaptive"},
-            system=SYSTEM_PROMPT,
-            output_config={"format": {"type": "json_schema", "schema": RECOMMENDATION_SCHEMA}},
-            messages=[{
-                "role": "user",
-                "content": f"Estado financiero actual (JSON):\n\n{context_json}\n\nDiagnosticá y recomendá.",
-            }],
-        )
-
-        text_block = next(b.text for b in response.content if b.type == "text")
-        parsed = json.loads(text_block)
+        if settings.llm_provider == "gemini":
+            parsed = _call_gemini(user_content)
+        else:
+            parsed = _call_anthropic(user_content)
 
         run.contexto = context
         run.respuesta_cruda = parsed
