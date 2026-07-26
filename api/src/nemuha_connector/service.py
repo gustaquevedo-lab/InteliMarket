@@ -9,6 +9,11 @@ reales (nunca asumidos):
     - bc_operacao_banco             -> financial.BankTransaction
         TP_OPERACAO decodificado en hex: 0x45='E' (Entrada/crédito, 6699 casos),
         0x53='S' (Saída/débito, 1523 casos) — confirmado contra datos reales.
+        bc_conta_banco NO trae saldo propio (DESCRIBE confirmado, sin columna
+        de saldo) — sync_bank_balances recalcula saldo_actual sumando las
+        transacciones ya sincronizadas. Asume que bc_operacao_banco tiene el
+        historial completo desde la apertura; si no, falta un saldo inicial
+        que solo el cliente puede confirmar contra su extracto bancario real.
     - fin_gasto                     -> petty_cash.Expense (caja chica)
     - fin_fechamento_caixa_chica    -> finance_agent.FinanceRecommendation
         (tipo="control_caja_chica") cuando VL_DIFERENCA_* != 0 — el legacy ya
@@ -39,7 +44,7 @@ from uuid import UUID
 
 import pymysql
 import pymysql.cursors
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.config import settings
@@ -333,6 +338,33 @@ async def sync_bank_transactions(db: AsyncSession, company_id: str, since: date 
     return count
 
 
+# bc_conta_banco no trae un saldo propio en el legacy — se recalcula sumando las
+# transacciones ya sincronizadas (crédito suma, débito resta). Asume que
+# bc_operacao_banco tiene el historial completo desde la apertura de cada cuenta;
+# si no es así, falta un saldo inicial que solo el cliente puede confirmar
+# (ver pendiente de conciliación bancaria con el cliente).
+async def sync_bank_balances(db: AsyncSession, company_id: str, since: date | None) -> int:
+    accounts = (
+        await db.execute(select(BankAccount).where(BankAccount.company_id == company_id))
+    ).scalars().all()
+
+    count = 0
+    for acc in accounts:
+        row = await db.execute(
+            select(
+                func.coalesce(func.sum(case((BankTransaction.tipo == "credito", BankTransaction.monto), else_=0)), 0),
+                func.coalesce(func.sum(case((BankTransaction.tipo == "debito", BankTransaction.monto), else_=0)), 0),
+            ).where(BankTransaction.bank_account_id == acc.id)
+        )
+        creditos, debitos = row.one()
+        acc.saldo_actual = acc.saldo_inicial + Decimal(str(creditos)) - Decimal(str(debitos))
+        db.add(acc)
+        count += 1
+
+    await db.flush()
+    return count
+
+
 # ── Caja chica: gastos (fin_gasto) y control de cierres (fin_fechamento_caixa_chica) ──
 
 async def sync_petty_cash_expenses(db: AsyncSession, company_id: str, since: date | None) -> int:
@@ -459,6 +491,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("accounts_receivable", sync_accounts_receivable),
         ("bank_accounts", sync_bank_accounts),
         ("bank_transactions", sync_bank_transactions),
+        ("bank_balances", sync_bank_balances),
         ("petty_cash_expenses", sync_petty_cash_expenses),
         ("petty_cash_control", sync_petty_cash_control),
     ):
