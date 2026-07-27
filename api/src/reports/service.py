@@ -450,10 +450,17 @@ async def get_financial_summary(db: AsyncSession, fecha_desde: Optional[date] = 
 
     ingresos = (await _exec(db, f"SELECT COALESCE(SUM(total), 0) as total FROM sales WHERE {where}", params)).first()
     egresos = (await _exec(db, "SELECT COALESCE(SUM(total), 0) as total FROM purchase_orders")).first()
-    # customer_accounts está vacía/huérfana (0 filas) — la fuente real y poblada
-    # de cuentas por cobrar es accounts_receivable (saldo_pendiente/estado), la
-    # misma que usa el resto del código (ver financial/service.py).
-    por_cobrar = (await _exec(db, "SELECT COALESCE(SUM(saldo_pendiente), 0) as total FROM accounts_receivable WHERE estado = 'pendiente'")).first()
+    # Cuentas por cobrar: el modelo de AR difiere por vertical/ETL. Algunos
+    # tenants (ej. conector Ñemuha) pueblan accounts_receivable a nivel
+    # documento; otros (ej. migración Casa Gonzalito) solo agregan el saldo
+    # en customer_accounts.saldo_actual y dejan accounts_receivable vacía.
+    # Se suman ambas fuentes — en la práctica solo una está poblada por tenant.
+    por_cobrar = (await _exec(db, """
+        SELECT
+            COALESCE((SELECT SUM(saldo_pendiente) FROM accounts_receivable WHERE estado = 'pendiente'), 0)
+            + COALESCE((SELECT SUM(saldo_actual) FROM customer_accounts WHERE saldo_actual > 0), 0)
+        AS total
+    """)).first()
     r_ap = await db.execute(
         select(func.coalesce(func.sum(SupplierInvoice.saldo_pendiente), 0))
         .where(SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]))
