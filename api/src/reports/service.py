@@ -30,7 +30,7 @@ async def get_sales_summary(db: AsyncSession, fecha_desde: Optional[date] = None
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND v.fecha < :fecha_hasta + interval '1 day'"
+        where += " AND v.fecha < :fecha_hasta::date + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
     if branch_id:
         where += " AND v.branch_id = :branch_id"
@@ -66,7 +66,7 @@ async def get_sales_by_period(db: AsyncSession, agrupar_por: str = "dia", fecha_
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND v.fecha < :fecha_hasta + interval '1 day'"
+        where += " AND v.fecha < :fecha_hasta::date + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
     if branch_id:
         where += " AND v.branch_id = :branch_id"
@@ -110,7 +110,7 @@ async def get_sales_by_category(db: AsyncSession, fecha_desde: Optional[date] = 
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND v.fecha < :fecha_hasta + interval '1 day'"
+        where += " AND v.fecha < :fecha_hasta::date + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
 
     query = f"""
@@ -146,7 +146,7 @@ async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = N
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND v.fecha < :fecha_hasta + interval '1 day'"
+        where += " AND v.fecha < :fecha_hasta::date + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
 
     query = f"""
@@ -185,7 +185,7 @@ async def get_sales_by_client(db: AsyncSession, fecha_desde: Optional[date] = No
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND v.fecha < :fecha_hasta + interval '1 day'"
+        where += " AND v.fecha < :fecha_hasta::date + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
 
     query = f"""
@@ -339,7 +339,7 @@ async def get_fiscal_book(db: AsyncSession, tipo_libro: str = "ventas", fecha_de
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND v.fecha < :fecha_hasta + interval '1 day'"
+        where += " AND v.fecha < :fecha_hasta::date + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
 
     if tipo_libro == "ventas":
@@ -411,7 +411,7 @@ async def get_fiscal_summary(db: AsyncSession, tipo_libro: str = "ventas", fecha
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND v.fecha < :fecha_hasta + interval '1 day'"
+        where += " AND v.fecha < :fecha_hasta::date + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
 
     query = f"""
@@ -445,7 +445,7 @@ async def get_financial_summary(db: AsyncSession, fecha_desde: Optional[date] = 
         where += " AND fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND fecha < :fecha_hasta + interval '1 day'"
+        where += " AND fecha < :fecha_hasta::date + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
 
     ingresos = (await _exec(db, f"SELECT COALESCE(SUM(total), 0) as total FROM sales WHERE {where}", params)).first()
@@ -480,7 +480,7 @@ async def get_financial_by_day(db: AsyncSession, fecha_desde: Optional[date] = N
         where += " AND fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND fecha < :fecha_hasta + interval '1 day'"
+        where += " AND fecha < :fecha_hasta::date + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
 
     query = f"""
