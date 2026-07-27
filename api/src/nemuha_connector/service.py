@@ -639,6 +639,10 @@ def _iva_monto(total: Decimal, tasa: Decimal) -> Decimal:
 
 
 async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> int:
+    # /sales/{id}/items no trae join con products — se guarda el nombre real acá
+    # mismo en descripcion para que el frontend no caiga a un fallback genérico.
+    nombre_por_producto = {r["ID_PRODUTO"]: r["DS_PRODUTO"] for r in await _fetch("SELECT ID_PRODUTO, DS_PRODUTO FROM est_produto")}
+
     sql = "SELECT * FROM ven_venda WHERE 1=1"
     params: tuple = ()
     if since:
@@ -684,6 +688,7 @@ async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> i
             product_id = await _resolve_producto(db, company_id, it["ID_PRODUTO"], it["CODIGO_BARRA"], tasa)
             sale_items.append(SaleItem(
                 product_id=product_id,
+                descripcion=nombre_por_producto.get(it["ID_PRODUTO"]),
                 cantidad=Decimal(str(it["QUANTIDADE"])),
                 precio_unitario=Decimal(str(it["VL_PRECO_VENDA"])),
                 descuento_monto=Decimal(str(it["VL_DESCONTO"] or 0)),
