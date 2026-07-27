@@ -631,6 +631,10 @@ export const api = {
     approve: (id: string, approved_by: string, comments?: string) => client.post<SalesRecommendation>(`/v1/sales-agent/recommendations/${id}/approve`, { approved_by, comments }),
     reject: (id: string, approved_by: string, comments?: string) => client.post<SalesRecommendation>(`/v1/sales-agent/recommendations/${id}/reject`, { approved_by, comments }),
   },
+  generalAgent: {
+    chat: (message: string, history: { role: "user" | "assistant"; content: string }[]) =>
+      client.post<{ reply: string }>("/v1/general-agent/chat", { company_id: COMPANY_ID, message, history }),
+  },
   accountsReceivable: {
     list: (params?: { estado?: string }) => client.get<AccountsReceivable[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable`, params),
     get: (id: string) => client.get<AccountsReceivable>(`/v1/accounts-receivable/${id}`),

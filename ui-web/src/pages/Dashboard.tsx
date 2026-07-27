@@ -3,12 +3,14 @@ import {
   TrendingUp, DollarSign, ShoppingCart, Package, AlertTriangle, Wallet,
   Clock, RefreshCw, ChevronRight, CreditCard, Percent, Ban as Banknote,
 } from "lucide-react"
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
 import { api, type StockItem, type CreditAccount, type SaleItem } from "../api"
 import { KPICard } from "../components/KPICard"
 import { Widget } from "../components/Widget"
 import { AnimatedPage } from "../components/AnimatedPage"
 import { formatPYG } from "../utils/format"
 import { useSSE } from "../hooks/useSSE"
+import { GeneralAgentChat } from "../components/GeneralAgentChat"
 
 interface ActivityEvent {
   id: string
@@ -261,12 +263,6 @@ export default function Dashboard() {
     if (feedRef.current) feedRef.current.scrollTop = 0
   }, [recentActivity])
 
-  const maxWeekMonto = weekData.length > 0 ? Math.max(...weekData.map(d => Math.max(d.monto, d.monto_prev))) : 1
-  const avgWeek = weekData.length > 0 ? weekData.reduce((s, d) => s + d.monto, 0) / weekData.length : 0
-
-  const chartTooltipRef = useRef<HTMLDivElement>(null)
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; monto: number; monto_prev: number; label: string } | null>(null)
-
   return (
     <AnimatedPage className="space-y-6">
       {/* Header */}
@@ -353,71 +349,26 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* Gerente General IA */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        <GeneralAgentChat />
+      </div>
+
       {/* Widgets Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Ventas últimos 7 días */}
         <Widget title="Ventas últimos 7 días" subtitle="Comparativa vs semana anterior" size="md" loading={loadingWeek} error={errorWeek}>
-          <div className="relative">
-            <div className="h-64 flex items-end gap-1.5 justify-between pt-4">
-              {weekData.map((d, i) => {
-                const hCurrent = (d.monto / maxWeekMonto) * 180
-                const hPrev = (d.monto_prev / maxWeekMonto) * 180
-                return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
-                    {/* Previous week bar (dashed) */}
-                    <div
-                      className="w-full max-w-[28px] bg-primary/20 rounded-t border border-dashed border-primary/40 transition-all cursor-pointer"
-                      style={{ height: `${Math.max(hPrev, 4)}px` }}
-                      onMouseEnter={(e) => {
-                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                        setTooltip({ x: rect.left, y: rect.top - 8, monto: d.monto, monto_prev: d.monto_prev, label: d.label })
-                      }}
-                      onMouseLeave={() => setTooltip(null)}
-                    />
-                    {/* Current week bar (gradient) */}
-                    <div
-                      className="w-full max-w-[28px] bg-gradient-to-t from-primary to-primary-light rounded-t transition-all duration-500 cursor-pointer group-hover:opacity-80"
-                      style={{ height: `${Math.max(hCurrent, 4)}px` }}
-                      onMouseEnter={(e) => {
-                        const bar = (e.currentTarget as HTMLElement)
-                        const rect = bar.getBoundingClientRect()
-                        setTooltip({ x: rect.left + rect.width / 2, y: rect.top - 8, monto: d.monto, monto_prev: d.monto_prev, label: d.label })
-                      }}
-                      onMouseLeave={() => setTooltip(null)}
-                    />
-                    {/* Trend line (average) */}
-                    {i === 0 && (
-                      <div className="absolute left-0 right-0 border-t border-dashed border-green-400/60 pointer-events-none" style={{ bottom: `${(avgWeek / maxWeekMonto) * 180 + 28}px` }} />
-                    )}
-                    <span className="text-[10px] text-gray-400 mt-1">{d.label}</span>
-                  </div>
-                )
-              })}
-            </div>
-            {/* Tooltip */}
-            {tooltip && (
-              <div
-                ref={chartTooltipRef}
-                className="absolute z-10 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg px-3 py-2 pointer-events-none whitespace-nowrap"
-                style={{ left: `${tooltip.x}px`, top: `${tooltip.y}px`, transform: "translate(-50%, -100%)" }}
-              >
-                <p className="font-semibold mb-1">{tooltip.label}</p>
-                <p className="text-green-400">Esta sem: {formatPYG(tooltip.monto)}</p>
-                <p className="text-gray-400">Sem pasada: {formatPYG(tooltip.monto_prev)}</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">
-                  {tooltip.monto > tooltip.monto_prev
-                    ? `↑ +${((tooltip.monto - tooltip.monto_prev) / tooltip.monto_prev * 100).toFixed(0)}%`
-                    : `↓ ${((tooltip.monto_prev - tooltip.monto) / tooltip.monto_prev * 100).toFixed(0)}%`}
-                </p>
-              </div>
-            )}
-            {/* Average legend */}
-            <div className="flex items-center gap-4 mt-2 text-[10px] text-gray-400">
-              <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-primary rounded" /> Esta semana</span>
-              <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-primary/40 border border-dashed border-primary/60" /> Semana anterior</span>
-              <span className="flex items-center gap-1"><span className="w-3 h-0.5 border-t border-dashed border-green-400/60" /> Promedio</span>
-            </div>
-          </div>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={weekData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} vertical={false} />
+              <XAxis dataKey="label" fontSize={11} tickLine={false} axisLine={false} />
+              <YAxis fontSize={11} tickLine={false} axisLine={false} width={0} />
+              <Tooltip formatter={(v: number) => formatPYG(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} formatter={(v) => v === "monto" ? "Esta semana" : "Semana anterior"} />
+              <Bar dataKey="monto" fill="#104c91" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="monto_prev" fill="#104c9155" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </Widget>
 
         {/* Top 5 Productos */}
