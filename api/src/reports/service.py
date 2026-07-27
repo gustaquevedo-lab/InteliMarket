@@ -449,7 +449,16 @@ async def get_financial_summary(db: AsyncSession, fecha_desde: Optional[date] = 
         params["fecha_hasta"] = fecha_hasta
 
     ingresos = (await _exec(db, f"SELECT COALESCE(SUM(total), 0) as total FROM sales WHERE {where}", params)).first()
-    egresos = (await _exec(db, "SELECT COALESCE(SUM(total), 0) as total FROM purchase_orders")).first()
+    # Egresos debe respetar el mismo rango de fechas que ingresos — antes sumaba
+    # TODO purchase_orders sin filtro, lo que quedaba oculto con poco volumen pero
+    # rompe por completo el resumen apenas hay historico real cargado (ej. el
+    # conector incremental de Casa Gonzalito trae ~106K ordenes historicas).
+    where_po = "estado <> 'cancelado'"
+    if fecha_desde:
+        where_po += " AND fecha >= :fecha_desde"
+    if fecha_hasta:
+        where_po += " AND fecha < CAST(:fecha_hasta AS date) + interval '1 day'"
+    egresos = (await _exec(db, f"SELECT COALESCE(SUM(total), 0) as total FROM purchase_orders WHERE {where_po}", params)).first()
     # Cuentas por cobrar: el modelo de AR difiere por vertical/ETL. Algunos
     # tenants (ej. conector Ñemuha) pueblan accounts_receivable a nivel
     # documento; otros (ej. migración Casa Gonzalito) solo agregan el saldo

@@ -6,6 +6,24 @@ from sqlalchemy import select, text, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+# Algunos tenants (ej. conector Gonzalito) no pueblan accounts_receivable a nivel
+# documento: su legacy solo da un saldo agregado por cliente, sin fecha de
+# vencimiento ni número de documento. Cuando ese es el caso, estas funciones caen
+# a customer_accounts.saldo_actual. Como no hay fecha de vencimiento real, todo el
+# saldo se reporta como "Al dia" (dias_mora=0) en vez de inventar una mora falsa.
+
+async def _customer_accounts_fallback_rows(db: AsyncSession, company_id: str):
+    query = text("""
+        SELECT ca.id, ca.customer_id, c.razon_social as customer_name, ca.saldo_actual
+        FROM customer_accounts ca
+        JOIN customers c ON c.id = ca.customer_id
+        WHERE c.company_id = :company_id AND ca.saldo_actual > 0
+        ORDER BY ca.saldo_actual DESC
+    """)
+    result = await db.execute(query, {"company_id": company_id})
+    return result.fetchall()
+
+
 async def get_aging_report(db: AsyncSession, company_id: str) -> dict:
     today = date.today()
     query = text("""
@@ -34,6 +52,37 @@ async def get_aging_report(db: AsyncSession, company_id: str) -> dict:
     """)
     result = await db.execute(query, {"company_id": company_id, "today": today})
     rows = result.fetchall()
+
+    if not rows:
+        fallback = await _customer_accounts_fallback_rows(db, company_id)
+        total_pendiente = sum((Decimal(str(r.saldo_actual)) for r in fallback), Decimal("0"))
+        total = total_pendiente or Decimal("1")
+        buckets = [
+            {"rango": "Al dia", "monto": total_pendiente, "cantidad": len(fallback), "porcentaje": (total_pendiente / total * 100).quantize(Decimal("1")) if fallback else Decimal("0")},
+            {"rango": "1-30 dias", "monto": Decimal("0"), "cantidad": 0, "porcentaje": Decimal("0")},
+            {"rango": "31-60 dias", "monto": Decimal("0"), "cantidad": 0, "porcentaje": Decimal("0")},
+            {"rango": "61-90 dias", "monto": Decimal("0"), "cantidad": 0, "porcentaje": Decimal("0")},
+            {"rango": "+90 dias", "monto": Decimal("0"), "cantidad": 0, "porcentaje": Decimal("0")},
+        ]
+        por_clientes = [
+            {
+                "customer_id": str(r.customer_id),
+                "customer_name": r.customer_name or "N/A",
+                "saldo_total": Decimal(str(r.saldo_actual)),
+                "current": Decimal(str(r.saldo_actual)),
+                "days_1_30": Decimal("0"), "days_31_60": Decimal("0"),
+                "days_61_90": Decimal("0"), "days_91_plus": Decimal("0"),
+                "total_documentos": 1,
+            }
+            for r in fallback
+        ]
+        return {
+            "total_pendiente": total_pendiente,
+            "cantidad_documentos": len(fallback),
+            "buckets": buckets,
+            "por_clientes": por_clientes,
+            "fecha": today,
+        }
 
     total_pendiente = Decimal("0")
     current = Decimal("0")
@@ -132,7 +181,35 @@ async def get_accounts_receivable(
 
     result = await db.execute(query, params)
     rows = result.fetchall()
-    return [dict(row._mapping) for row in rows]
+    if rows:
+        return [dict(row._mapping) for row in rows]
+
+    if estado and estado != "pendiente":
+        return []
+
+    fallback = await _customer_accounts_fallback_rows(db, company_id)
+    if customer_id:
+        fallback = [r for r in fallback if str(r.customer_id) == customer_id]
+    fallback = fallback[offset:offset + limit]
+    return [
+        {
+            "id": str(r.id),
+            "company_id": company_id,
+            "customer_id": str(r.customer_id),
+            "customer_name": r.customer_name or "N/A",
+            "sale_id": None,
+            "numero_documento": None,
+            "fecha_emision": None,
+            "fecha_vencimiento": None,
+            "moneda": "PYG",
+            "monto_original": r.saldo_actual,
+            "saldo_pendiente": r.saldo_actual,
+            "tipo": "saldo_cuenta",
+            "estado": "pendiente",
+            "dias_mora": 0,
+        }
+        for r in fallback
+    ]
 
 
 async def create_accounts_receivable_for_sale(
@@ -218,7 +295,16 @@ async def get_receivable_summary(db: AsyncSession, company_id: str) -> dict:
     """)
     result = await db.execute(query, {"company_id": company_id, "today": today})
     row = result.fetchone()
-    return dict(row._mapping) if row else {
-        "total": 0, "total_pendiente": 0, "pagados": 0,
-        "pendientes": 0, "vencidos": 0, "monto_vencido": 0,
+    if row and row.total:
+        return dict(row._mapping)
+
+    fallback = await _customer_accounts_fallback_rows(db, company_id)
+    total_pendiente = sum((Decimal(str(r.saldo_actual)) for r in fallback), Decimal("0"))
+    return {
+        "total": len(fallback),
+        "total_pendiente": total_pendiente,
+        "pagados": 0,
+        "pendientes": len(fallback),
+        "vencidos": 0,
+        "monto_vencido": 0,
     }
