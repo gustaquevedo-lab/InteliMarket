@@ -706,7 +706,7 @@ async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> i
             tipo_comprobante="factura" if facturado else "ticket",
             condicion="credito" if v["ID_CONTA_RECEBER"] is not None else "contado",
             moneda="PYG",
-            estado="cancelada" if cancelado else "completada",
+            estado="cancelado" if cancelado else "confirmado",  # valores reales usados por sales/service.py — no "cancelada"/"completada"
             subtotal=subtotal,
             descuento_total=Decimal(str(v["VL_DESCONTO"] or 0)),
             base_gravada_10=base_10,
