@@ -45,6 +45,11 @@ reales (nunca asumidos):
         reales verificadas: 0% (7 ítems, exento), 5% (145.669), 10% (510.826).
         condicion="credito" cuando ID_CONTA_RECEBER está poblado (5.451/116.889
         ventas no canceladas — coincide con lo ya sincronizado en accounts_receivable).
+    - view_estoque_catalogo -> inventory.Warehouse / inventory.Stock (sync_stock).
+        Vista del legacy con la cantidad ACTUAL real por producto y filial
+        (qtdAtual) — no hace falta recalcular desde movimientos. Verificado:
+        10.761 filas, una sola filial (idFilial=1). stock_minimo real también
+        se sincroniza (est_produto.QTD_MINIMA_EM_ESTOQUE) en _resolve_producto.
 
 Deliberadamente FUERA de esta versión:
     - fin_pagamento / fin_recebimento (detalle de pagos y cobros) — se usa por
@@ -81,6 +86,7 @@ from api.src.petty_cash.models import Expense
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
 from api.src.sales.models import Sale, SaleItem
+from api.src.inventory.models import Warehouse, Stock
 
 MONEDA_MAP = {1: "PYG", 2: "USD", 3: "BRL"}  # bs_moeda — verificado contra datos reales
 SYSTEM_RUN_MODEL = "system:nemuha-controles-automaticos"
@@ -189,9 +195,10 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
     if existing:
         return existing
 
-    rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO, UNIDADE_MEDIDA FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
+    rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO, UNIDADE_MEDIDA, QTD_MINIMA_EM_ESTOQUE FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
     nombre = rows[0]["DS_PRODUTO"] if rows else f"Producto legacy #{id_produto}"
     unidad_medida = UNIDAD_MEDIDA_MAP.get(rows[0]["UNIDADE_MEDIDA"], "UN") if rows else "UN"
+    stock_minimo = int(rows[0]["QTD_MINIMA_EM_ESTOQUE"] or 0) if rows else 0
 
     product = Product(
         company_id=company_id,
@@ -200,6 +207,7 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
         nombre=nombre,
         iva_tasa=iva_tasa,
         unidad_medida=unidad_medida,
+        stock_minimo=stock_minimo,
     )
     db.add(product)
     await db.flush()
@@ -739,6 +747,65 @@ async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> i
     return count
 
 
+# ── Stock (view_estoque_catalogo) ───────────────────────────────────────────────
+#
+# view_estoque_catalogo es una vista del legacy que ya trae la cantidad ACTUAL
+# real por producto y filial (qtdAtual) — no hace falta recalcular desde
+# movimientos. Verificado: 10.761 filas, una sola filial (idFilial=1).
+# Stock.cantidad es Integer en el modelo — las cantidades fraccionarias de
+# productos por KG se redondean al sincronizar (limitación del schema actual,
+# no de este conector).
+
+async def _resolve_deposito(db: AsyncSession, company_id: str, id_filial: int) -> UUID:
+    existing = await _get_mapped_target(db, company_id, "bs_filial:warehouse", id_filial)
+    if existing:
+        return existing
+
+    warehouse = Warehouse(
+        company_id=company_id,
+        codigo=str(id_filial),
+        nombre=f"Depósito principal (filial {id_filial})",
+        tipo="principal",
+    )
+    db.add(warehouse)
+    await db.flush()
+    await _save_map(db, company_id, "bs_filial:warehouse", id_filial, "warehouses", warehouse.id)
+    return warehouse.id
+
+
+async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> int:
+    rows = await _fetch("SELECT * FROM view_estoque_catalogo WHERE produtoAtivo = 1")
+
+    count = 0
+    warehouse_cache: dict[int, UUID] = {}
+    for r in rows:
+        id_filial = r["idFilial"]
+        if id_filial not in warehouse_cache:
+            warehouse_cache[id_filial] = await _resolve_deposito(db, company_id, id_filial)
+        warehouse_id = warehouse_cache[id_filial]
+
+        tasa_iva = Decimal("10")  # no crítico para stock — placeholder si hay que crear el producto acá
+        product_id = await _resolve_producto(db, company_id, r["idProduto"], r["codigoBarra"], tasa_iva)
+
+        result = await db.execute(
+            select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id)
+        )
+        stock = result.scalar_one_or_none()
+        cantidad = round(Decimal(str(r["qtdAtual"])))
+        costo = Decimal(str(r["vlCustoMedioGs"] or 0))
+
+        if stock:
+            stock.cantidad = cantidad
+            stock.costo_unitario = costo
+        else:
+            db.add(Stock(warehouse_id=warehouse_id, product_id=product_id, cantidad=cantidad, costo_unitario=costo))
+
+        count += 1
+
+    await db.flush()
+    return count
+
+
 # ── Orquestador ──────────────────────────────────────────────────────────────
 
 async def run_sync(db: AsyncSession, company_id: str, since: date | None = None) -> NemuhaSyncRun:
@@ -759,6 +826,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("cash_register_arqueo", sync_cash_register_arqueo),
         ("cash_deposit_gaps", sync_cash_deposit_gaps),
         ("sales", sync_sales),
+        ("stock", sync_stock),
     ):
         try:
             rows_synced[name] = await fn(db, company_id, since)

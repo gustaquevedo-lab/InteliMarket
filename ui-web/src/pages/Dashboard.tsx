@@ -4,7 +4,7 @@ import {
   Clock, RefreshCw, ChevronRight, CreditCard, Percent, Ban as Banknote,
 } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
-import { api, type StockItem, type CreditAccount, type SaleItem } from "../api"
+import { api, type StockItem, type CreditAccount } from "../api"
 import { KPICard } from "../components/KPICard"
 import { Widget } from "../components/Widget"
 import { AnimatedPage } from "../components/AnimatedPage"
@@ -21,11 +21,12 @@ interface ActivityEvent {
 }
 
 interface TopProduct {
-  product_id: string
-  nombre: string
+  producto: string
   sku: string
+  unidad_medida: string
   cantidad: number
-  total: number
+  monto: number
+  margen: number
 }
 
 interface IVASummary {
@@ -172,24 +173,13 @@ export default function Dashboard() {
       setLoadingWeek(false)
     }
 
-    // Top products
+    // Top products — vía reports.salesByProduct (agregado real en el backend,
+    // con unidad de medida real y sin el N+1 de traer cada venta + sus ítems)
     setLoadingTop(true)
     setErrorTop(null)
     try {
-      const salesList = await api.sales.list({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY })
-      const itemsPromises = salesList.map(s => api.sales.items(s.id).catch(() => [] as SaleItem[]))
-      const allItems = (await Promise.allSettled(itemsPromises))
-        .flatMap(r => r.status === "fulfilled" ? r.value : [])
-      const agg = new Map<string, { nombre: string; sku: string; cantidad: number; total: number }>()
-      for (const item of allItems) {
-        const key = item.product_id || ""
-        const cur = agg.get(key) || { nombre: item.product?.nombre || item.descripcion || "Producto", sku: item.product?.sku || "", cantidad: 0, total: 0 }
-        cur.cantidad += (item.cantidad || 0)
-        cur.total += (item.total || 0)
-        agg.set(key, cur)
-      }
-      const sorted = Array.from(agg.entries()).sort((a, b) => b[1].total - a[1].total).slice(0, 5)
-      setTopProducts(sorted.map(([product_id, p]) => ({ product_id, ...p })))
+      const top = await api.reports.salesByProduct({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY, limit: 10 })
+      setTopProducts(top)
     } catch {
       setErrorTop("No se pudieron cargar los productos")
       setTopProducts([])
@@ -371,17 +361,19 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </Widget>
 
-        {/* Top 5 Productos */}
-        <Widget title="Top 5 Productos" subtitle="Más vendidos (7 días)" size="sm" loading={loadingTop} error={errorTop}>
+        {/* Top 10 Productos */}
+        <Widget title="Top 10 Productos" subtitle="Más vendidos (7 días)" size="sm" loading={loadingTop} error={errorTop}>
           {topProducts.length === 0 ? (
             <div className="text-sm text-gray-400 py-4 text-center">Sin ventas en los últimos 7 días</div>
           ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
             {topProducts.map((p, i) => {
-              const maxTotal = topProducts.length > 0 ? Math.max(...topProducts.map(t => t.total)) : 1
-              const pct = (p.total / maxTotal) * 100
+              const maxMonto = topProducts.length > 0 ? Math.max(...topProducts.map(t => t.monto)) : 1
+              const pct = Math.min((p.monto / maxMonto) * 100, 100)
+              const esKg = p.unidad_medida === "KG"
+              const cantidadFmt = esKg ? `${p.cantidad.toFixed(2)} kg` : `${Math.round(p.cantidad)} uds`
               return (
-                <div key={p.product_id} className="group cursor-default">
+                <div key={`${p.sku}-${i}`} className="group cursor-default">
                   <div className="flex items-start gap-2 mb-1">
                     <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 ${
                       i === 0 ? "bg-amber-500" : i === 1 ? "bg-gray-400" : i === 2 ? "bg-amber-700" : "bg-gray-500/50"
@@ -389,16 +381,18 @@ export default function Dashboard() {
                       {i + 1}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{p.nombre}</p>
-                      <p className="text-[10px] text-gray-400 font-mono">{p.sku} · {p.cantidad} uds</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{p.producto}</p>
+                      <p className="text-[10px] text-gray-400 font-mono">{p.sku} · {cantidadFmt}</p>
                     </div>
-                    <p className="text-sm font-bold text-primary flex-shrink-0">{formatPYG(p.total)}</p>
+                    <p className="text-sm font-bold text-primary flex-shrink-0">{formatPYG(p.monto)}</p>
                   </div>
-                  <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700/50 rounded-full overflow-hidden ml-7">
-                    <div
-                      className="h-full bg-gradient-to-r from-primary to-primary-light rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%` }}
-                    />
+                  <div className="pl-7">
+                    <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700/50 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-primary to-primary-light rounded-full transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
                   </div>
                 </div>
               )
