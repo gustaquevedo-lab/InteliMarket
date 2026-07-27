@@ -178,14 +178,20 @@ async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol
 
 
 # ── Resolución de productos (est_produto) ───────────────────────────────────────
+#
+# UNIDADE_MEDIDA real: solo 2 valores en toda la base — UNIDAD (10463 productos)
+# y KILOGRAMOS (489) — verificado contra datos reales, no asumido.
+UNIDAD_MEDIDA_MAP = {"UNIDAD": "UN", "KILOGRAMOS": "KG"}
+
 
 async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, codigo_barra: str | None, iva_tasa: Decimal) -> UUID:
     existing = await _get_mapped_target(db, company_id, "est_produto", id_produto)
     if existing:
         return existing
 
-    rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
+    rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO, UNIDADE_MEDIDA FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
     nombre = rows[0]["DS_PRODUTO"] if rows else f"Producto legacy #{id_produto}"
+    unidad_medida = UNIDAD_MEDIDA_MAP.get(rows[0]["UNIDADE_MEDIDA"], "UN") if rows else "UN"
 
     product = Product(
         company_id=company_id,
@@ -193,6 +199,7 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
         codigo_barra=codigo_barra or None,
         nombre=nombre,
         iva_tasa=iva_tasa,
+        unidad_medida=unidad_medida,
     )
     db.add(product)
     await db.flush()
