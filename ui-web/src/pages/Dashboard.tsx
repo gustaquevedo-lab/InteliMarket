@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import {
   TrendingUp, DollarSign, ShoppingCart, Package, AlertTriangle, Wallet,
   Clock, RefreshCw, ChevronRight, CreditCard, Percent, Ban as Banknote,
-  Apple, Beef, Croissant, AlertCircle, Utensils, Sparkles, Check, CheckCircle, Trash2
 } from "lucide-react"
 import { api, type StockItem, type CreditAccount, type SaleItem } from "../api"
 import { KPICard } from "../components/KPICard"
@@ -10,8 +9,6 @@ import { Widget } from "../components/Widget"
 import { AnimatedPage } from "../components/AnimatedPage"
 import { formatPYG } from "../utils/format"
 import { useSSE } from "../hooks/useSSE"
-import { useToast } from "../context/ToastContext"
-import { useFeatures } from "../context/FeatureContext"
 
 interface ActivityEvent {
   id: string
@@ -59,14 +56,6 @@ function relativeTime(dateStr: string): string {
   return `hace ${Math.floor(hours / 24)}d`
 }
 
-const MOCK_TOP_PRODUCTS: TopProduct[] = [
-  { product_id: "1", nombre: "Coca Cola 2L", sku: "BEB-001", cantidad: 142, total: 1846000 },
-  { product_id: "2", nombre: "Arroz 1kg", sku: "ALI-045", cantidad: 98, total: 784000 },
-  { product_id: "3", nombre: "Leche Entera 1L", sku: "LAC-012", cantidad: 76, total: 456000 },
-  { product_id: "4", nombre: "Pan Frances", sku: "PAN-001", cantidad: 65, total: 325000 },
-  { product_id: "5", nombre: "Aceite 900ml", sku: "ALI-023", cantidad: 54, total: 972000 },
-]
-
 interface LowStockItem {
   product_id: string
   warehouse_id: string
@@ -78,84 +67,9 @@ interface LowStockItem {
   costo_unitario: number
 }
 
-const MOCK_LOW_STOCK: LowStockItem[] = [
-  { product_id: "1", warehouse_id: "w1", nombre: "Coca Cola 2L", sku: "BEB-001", cantidad: 3, stock_minimo: 10, stock_maximo: 100, costo_unitario: 8500 },
-  { product_id: "2", warehouse_id: "w1", nombre: "Arroz 1kg", sku: "ALI-045", cantidad: 5, stock_minimo: 20, stock_maximo: 200, costo_unitario: 4500 },
-  { product_id: "3", warehouse_id: "w1", nombre: "Leche Entera 1L", sku: "LAC-012", cantidad: 8, stock_minimo: 15, stock_maximo: 80, costo_unitario: 3200 },
-  { product_id: "4", warehouse_id: "w1", nombre: "Pan Frances", sku: "PAN-001", cantidad: 0, stock_minimo: 30, stock_maximo: 150, costo_unitario: 1500 },
-  { product_id: "5", warehouse_id: "w1", nombre: "Azúcar 1kg", sku: "ALI-031", cantidad: 12, stock_minimo: 25, stock_maximo: 120, costo_unitario: 3800 },
-]
-
 export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const toast = useToast()
-  const { hasFeature } = useFeatures()
-  const [rescues, setRescues] = useState([
-    {
-      id: "r1",
-      producto: "Tomate Perita",
-      area: "Verdulería",
-      cantidad: "45 kg",
-      motivo: "Firmeza Baja (Madurez Avanzada)",
-      tipo: "transformar",
-      propuesta: "Derivar a Rotisería para Salsa Bolognesa Casera (30 Litros)",
-      ahorro: "Gs 240.000",
-      icon: Apple,
-      color: "from-red-500/10 to-red-600/5 border-red-500/20 text-red-600 dark:text-red-400"
-    },
-    {
-      id: "r2",
-      producto: "Peceto Vacuno Bovina",
-      area: "Carnicería",
-      cantidad: "12 kg",
-      motivo: "Próximo a Vencer (24 hs restantes)",
-      tipo: "transformar",
-      propuesta: "Elaborar Milanesas de Peceto Preparadas (Empanado Pre-pack)",
-      ahorro: "Gs 450.000",
-      icon: Beef,
-      color: "from-amber-500/10 to-amber-600/5 border-amber-500/20 text-amber-600 dark:text-amber-400"
-    },
-    {
-      id: "r3",
-      producto: "Pan Felipe Tradicional",
-      area: "Panadería",
-      cantidad: "18 kg",
-      motivo: "Excedente de Producción (Remanente de ayer)",
-      tipo: "transformar",
-      propuesta: "Moler para empaquetar Pan Rallado de la Casa (36 Bolsas)",
-      ahorro: "Gs 110.000",
-      icon: Croissant,
-      color: "from-yellow-500/10 to-yellow-600/5 border-yellow-500/20 text-yellow-600 dark:text-yellow-400"
-    },
-    {
-      id: "r4",
-      producto: "Pechuga de Pollo Fresca",
-      area: "Carnicería",
-      cantidad: "8 kg",
-      motivo: "Pérdida de Frío (Góndola C a 9.5°C por >2 horas)",
-      tipo: "descarte",
-      propuesta: "Descarte Sanitario Obligatorio (Inocuidad Alimentaria)",
-      ahorro: "Bloqueo POS Activo",
-      icon: AlertCircle,
-      color: "from-slate-500/10 to-slate-600/5 border-slate-500/20 text-slate-600 dark:text-slate-400"
-    }
-  ])
-
-  const handleAction = (id: string, actionType: "transform" | "discard", productName: string, propuesta: string) => {
-    setRescues(prev => prev.filter(r => r.id !== id))
-    if (actionType === "transform") {
-      toast.success(
-        "¡Rescate Autorizado!", 
-        `Se han transferido los insumos y se creó la Orden de Producción para: "${propuesta}".`
-      )
-    } else {
-      toast.error(
-        "Descarte Sanitario Registrado", 
-        `Lote bloqueado en el inventario general y en el POS por protocolo de seguridad alimentaria.`
-      )
-    }
-  }
 
   // KPI state
   const [salesSummary, setSalesSummary] = useState<{ total_ventas: number; monto_total: number; ticket_promedio: number; total_items: number } | null>(null)
@@ -205,8 +119,6 @@ export default function Dashboard() {
 
   const loadAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
-    const isDemo = localStorage.getItem("access_token") === "demo-token"
-
     // KPIs
     try {
       const [sales, inventory, fin, creditAccs] = await Promise.allSettled([
@@ -215,42 +127,13 @@ export default function Dashboard() {
         api.reports.financialSummary(),
         api.creditAccounts.list({ activo: true }),
       ])
-      if (sales.status === "fulfilled") {
-        setSalesSummary(sales.value)
-        setMarginAvg(sales.value.ticket_promedio > 0 && sales.value.total_items > 0
-          ? Math.round((sales.value.monto_total / sales.value.total_items) * 0.25) : null)
-      }
+      if (sales.status === "fulfilled") setSalesSummary(sales.value)
       if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
       if (fin.status === "fulfilled") setFinancial(fin.value)
       if (creditAccs.status === "fulfilled") {
         setCreditUsed(creditAccs.value.reduce((s: number, a: CreditAccount) => s + (a.saldo_utilizado || 0), 0))
       }
-    } catch { /* fallback handled below */ }
-
-    if (isDemo) {
-      setSalesSummary({ total_ventas: 47, monto_total: 14500000, ticket_promedio: 308510, total_items: 156 })
-      setInventorySummary({ bajo_stock: 18, sin_stock: 3 })
-      setFinancial({ cuentas_por_cobrar: 45600000 })
-      setCreditUsed(12300000)
-      setMarginAvg(35000)
-      const now = new Date()
-      const fallbackWeek: WeekDay[] = []
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(now); d.setDate(d.getDate() - i)
-        fallbackWeek.push({
-          label: dayLabels[d.getDay()], fecha: d.toISOString().slice(0, 10),
-          monto: [3200000, 4100000, 2800000, 1800000, 5100000, 3900000, 2600000][6 - i],
-          monto_prev: [2900000, 3800000, 3100000, 2200000, 4500000, 3600000, 2400000][6 - i],
-        })
-      }
-      setWeekData(fallbackWeek); setLoadingWeek(false)
-      setTopProducts(MOCK_TOP_PRODUCTS); setLoadingTop(false)
-      setLowStock(MOCK_LOW_STOCK); setLoadingStock(false)
-      setIvaSummary({ base_10: 13181800, base_5: 0, exenta: 320000, iva_10: 1318180, iva_5: 0, total_iva: 1318180 }); setLoadingIVA(false)
-      setAgingData({ total_pendiente: 45600000, buckets: [{ rango: "Al día", monto: 18500000, cantidad: 12, porcentaje: 40.6 },{ rango: "1-30 días", monto: 12800000, cantidad: 8, porcentaje: 28.1 },{ rango: "31-60 días", monto: 8200000, cantidad: 5, porcentaje: 18.0 },{ rango: "61-90 días", monto: 4100000, cantidad: 3, porcentaje: 9.0 },{ rango: "+90 días", monto: 2000000, cantidad: 2, porcentaje: 4.4 }] }); setLoadingAging(false)
-      setLoading(false)
-      return
-    }
+    } catch { /* errores por widget ya se manejan abajo */ }
 
     // Week chart
     setLoadingWeek(true)
@@ -411,7 +294,6 @@ export default function Dashboard() {
           value={salesSummary ? formatPYG(salesSummary.monto_total) : "₲ 0"}
           sublabel={salesSummary ? `${salesSummary.total_ventas} transacciones` : undefined}
           color="green"
-          trend={salesSummary ? { direction: "up", value: "+12%" } : undefined}
           loading={loading && !salesSummary}
         />
         <KPICard
@@ -419,7 +301,6 @@ export default function Dashboard() {
           label="Transacciones"
           value={salesSummary?.total_ventas ?? 0}
           color="blue"
-          trend={salesSummary ? { direction: "up", value: "+8%" } : undefined}
           loading={loading && !salesSummary}
         />
         <KPICard
@@ -427,7 +308,6 @@ export default function Dashboard() {
           label="Ticket Promedio"
           value={salesSummary ? formatPYG(salesSummary.ticket_promedio) : "₲ 0"}
           color="primary"
-          trend={salesSummary ? { direction: salesSummary.ticket_promedio > 300000 ? "up" : "down", value: "+5%" } : undefined}
           loading={loading && !salesSummary}
         />
         <KPICard
@@ -447,7 +327,6 @@ export default function Dashboard() {
           label="Cuentas x Cobrar"
           value={financial ? formatPYG(financial.cuentas_por_cobrar) : "₲ 0"}
           color="indigo"
-          trend={{ direction: financial && financial.cuentas_por_cobrar > 10000000 ? "down" : "up", value: "-3%" }}
           loading={loading}
         />
         <KPICard
@@ -456,7 +335,6 @@ export default function Dashboard() {
           value={inventorySummary?.bajo_stock ?? 0}
           sublabel={inventorySummary?.sin_stock ? `${inventorySummary.sin_stock} sin stock` : undefined}
           color="red"
-          trend={inventorySummary && inventorySummary.bajo_stock > 10 ? { direction: "up", value: "+2" } : { direction: "down", value: "-1" }}
           loading={loading}
         />
         <KPICard
@@ -474,92 +352,6 @@ export default function Dashboard() {
           loading={loading}
         />
       </div>
-
-      {/* Dynamic Waste-to-Margin AI Rescue Widget — supermarket-only, gated by tenant vertical feature */}
-      {hasFeature("supermercado") && (
-      <div className="bg-white dark:bg-slate-800 rounded-3xl border border-gray-100 dark:border-gray-700 p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-          <div>
-            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/10 dark:bg-blue-400/15 text-blue-600 dark:text-blue-400 text-xs font-bold uppercase tracking-wider mb-2">
-              <Sparkles className="w-3.5 h-3.5" /> Asistente IA Activo
-            </div>
-            <h2 className="text-2xl font-extrabold text-gray-900 dark:text-white flex items-center gap-2">
-              <Utensils className="w-6 h-6 text-primary" />
-              Asistente de Rescate de Inventario (Anti-Merma)
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Detección de productos de baja rotación o frescura decreciente sugeridos para transformación de alto margen o descarte seguro.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {rescues.length === 0 ? (
-            <div className="col-span-full py-12 text-center bg-gray-50 dark:bg-slate-900/30 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
-              <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-              <h4 className="text-lg font-bold text-gray-900 dark:text-white">¡Todo el inventario está seguro!</h4>
-              <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mx-auto mt-1">
-                No hay alertas de frescura crítica ni lotes próximos a vencer pendientes de acción de rescate.
-              </p>
-            </div>
-          ) : (
-            rescues.map(r => (
-              <div key={r.id} className={`flex flex-col md:flex-row gap-5 p-5 rounded-2xl border bg-gradient-to-br transition-all duration-300 hover:shadow-md ${r.color}`}>
-                <div className="flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-xl bg-white dark:bg-slate-800 shadow-sm self-start">
-                  <r.icon className="w-7 h-7" />
-                </div>
-                <div className="flex-1 space-y-3">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-extrabold uppercase tracking-widest bg-white/50 dark:bg-slate-800/80 px-2 py-0.5 rounded-md">{r.area}</span>
-                      <span className="text-xs text-gray-400 font-semibold">•</span>
-                      <span className="text-xs font-bold text-red-500 dark:text-red-400 flex items-center gap-1">
-                        <AlertTriangle className="w-3.5 h-3.5" /> {r.motivo}
-                      </span>
-                    </div>
-                    <h3 className="text-lg font-extrabold text-gray-900 dark:text-white mt-1">
-                      {r.producto} <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">({r.cantidad})</span>
-                    </h3>
-                  </div>
-
-                  <div className="p-3.5 bg-white/70 dark:bg-slate-800/50 rounded-xl border border-black/5 dark:border-white/5">
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Acción Propuesta por IA</p>
-                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{r.propuesta}</p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
-                    <div className="flex items-center gap-1 text-xs">
-                      <span className="text-gray-400 font-medium">Recuperación estimada:</span>
-                      <span className="font-extrabold text-green-600 dark:text-green-400 font-mono text-sm">{r.ahorro}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {r.tipo === "transformar" ? (
-                        <>
-                          <button 
-                            onClick={() => handleAction(r.id, "transform", r.producto, r.propuesta)}
-                            className="btn-primary text-xs px-3.5 py-1.5 flex items-center gap-1 rounded-xl"
-                          >
-                            <Check className="w-3.5 h-3.5" /> Autorizar Rescate
-                          </button>
-                        </>
-                      ) : (
-                        <button 
-                          onClick={() => handleAction(r.id, "discard", r.producto, r.propuesta)}
-                          className="text-xs font-bold bg-red-600 hover:bg-red-700 text-white px-3.5 py-1.5 flex items-center gap-1 rounded-xl shadow-md transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" /> Confirmar Descarte Sanitario
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-      )}
 
       {/* Widgets Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
