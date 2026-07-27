@@ -153,6 +153,7 @@ async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = N
         SELECT
             p.nombre as producto,
             p.sku,
+            p.unidad_medida,
             SUM(vi.cantidad) as cantidad,
             SUM(vi.total) as monto,
             SUM(vi.costo_unitario * vi.cantidad) as costo
@@ -160,7 +161,7 @@ async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = N
         JOIN sale_items vi ON vi.sale_id = v.id
         JOIN products p ON p.id = vi.product_id
         WHERE {where}
-        GROUP BY p.nombre, p.sku
+        GROUP BY p.nombre, p.sku, p.unidad_medida
         ORDER BY monto DESC
         LIMIT :limit
     """
@@ -169,7 +170,11 @@ async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = N
         {
             "producto": r["producto"],
             "sku": r["sku"],
-            "cantidad": int(r["cantidad"]),
+            "unidad_medida": r["unidad_medida"] or "UN",
+            # cantidad NO se trunca a int — productos por KG (verdulería, carnicería)
+            # tienen cantidades fraccionarias reales (ej. 5.08 kg), truncar a int
+            # los muestra mal (perdía la parte decimal).
+            "cantidad": float(r["cantidad"]),
             "monto": float(r["monto"]),
             "costo": float(r["costo"] or 0),
             "margen": round(((float(r["monto"]) - float(r["costo"] or 0)) / max(float(r["monto"]), 1)) * 100, 1),
