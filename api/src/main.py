@@ -85,6 +85,7 @@ from api.src.ecommerce.router import router as ecommerce_router
 from api.src.data_migration.router import router as data_migration_router
 from api.src.financial.router import router as financial_router
 from api.src.finance_agent.router import router as finance_agent_router
+from api.src.sales_agent.router import router as sales_agent_router
 from api.src.nemuha_connector.router import router as nemuha_connector_router
 from api.src.fiscal.router import router as fiscal_router
 from api.src.distribuidora.router import router as distribuidora_router
@@ -261,6 +262,7 @@ app.include_router(delivery_integrations_router)
 app.include_router(suscripciones_router)
 app.include_router(financial_router)
 app.include_router(finance_agent_router)
+app.include_router(sales_agent_router)
 app.include_router(nemuha_connector_router)
 app.include_router(marketing_router)
 app.include_router(data_migration_router)

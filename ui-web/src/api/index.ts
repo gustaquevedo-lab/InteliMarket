@@ -67,6 +67,8 @@ export interface PurchaseReceipt { id: string; company_id?: string; orden_id?: s
 export interface PurchaseReceiptItem { id?: string; recibo_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; lote?: string; fecha_vencimiento?: string; created_at?: string }
 export interface FinanceAgentRun { id: string; company_id: string; started_at: string; finished_at?: string; model?: string; status: string; diagnostico?: string; error_message?: string }
 export interface FinanceRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
+export interface SalesAgentRun { id: string; company_id: string; started_at: string; finished_at?: string; model?: string; status: string; diagnostico?: string; error_message?: string }
+export interface SalesRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
 export interface Supplier { id: string; company_id?: string; ruc?: string; razon_social?: string; nombre_fantasia?: string; direccion?: string; telefono?: string; email?: string; contacto?: string; contacto_nombre?: string; contacto_telefono?: string; plazo_pago_dias?: number; tipo?: string; activo?: boolean; created_at?: string; updated_at?: string }
 export interface Quote { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_vencimiento?: string; valido_hasta?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; observaciones?: string; condiciones_pago?: string; descuento_total?: number; iva_10?: number; iva_5?: number; sale_id?: string; items?: QuoteItem[]; created_at?: string; updated_at?: string }
 export interface QuoteItem { id?: string; cotizacion_id?: string; producto_id?: string; producto?: Product; product?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; descripcion?: string; created_at?: string }
@@ -622,6 +624,12 @@ export const api = {
     recommendations: (status?: string) => client.get<FinanceRecommendation[]>("/v1/finance-agent/recommendations", { company_id: COMPANY_ID, status }),
     approve: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/approve`, { approved_by, comments }),
     reject: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/reject`, { approved_by, comments }),
+  },
+  salesAgent: {
+    run: () => client.post<SalesAgentRun>("/v1/sales-agent/run", { company_id: COMPANY_ID }),
+    recommendations: (status?: string) => client.get<SalesRecommendation[]>("/v1/sales-agent/recommendations", { company_id: COMPANY_ID, status }),
+    approve: (id: string, approved_by: string, comments?: string) => client.post<SalesRecommendation>(`/v1/sales-agent/recommendations/${id}/approve`, { approved_by, comments }),
+    reject: (id: string, approved_by: string, comments?: string) => client.post<SalesRecommendation>(`/v1/sales-agent/recommendations/${id}/reject`, { approved_by, comments }),
   },
   accountsReceivable: {
     list: (params?: { estado?: string }) => client.get<AccountsReceivable[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable`, params),

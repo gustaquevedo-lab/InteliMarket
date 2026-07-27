@@ -39,6 +39,7 @@ const navGroups: NavGroup[] = [
   {
     title: "Ventas",
     items: [
+      { icon: TrendingUp, label: "Gerente de Ventas IA", path: "/sales-agent" },
       { icon: MonitorSmartphone, label: "Punto de Venta", path: "/pos", feature: "pos" },
       { icon: Receipt, label: "Facturación", path: "/sales" },
       { icon: ClipboardList, label: "Pedidos", path: "/sales-orders" },

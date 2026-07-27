@@ -40,6 +40,7 @@ const DiscountsPage = lazy(() => import("./pages/discounts/DiscountsPage"))
 const CommissionsPage = lazy(() => import("./pages/commissions/CommissionsPage"))
 const AccountsReceivablePage = lazy(() => import("./pages/accounts-receivable/AccountsReceivablePage"))
 const FinanceAgentPage = lazy(() => import("./pages/finance-agent/FinanceAgentPage"))
+const SalesAgentPage = lazy(() => import("./pages/sales-agent/SalesAgentPage"))
 const RbacPage = lazy(() => import("./pages/rbac/RbacPage"))
 const CrmPage = lazy(() => import("./pages/crm/CrmPage"))
 const WhatsAppPage = lazy(() => import("./pages/whatsapp/WhatsAppPage"))
@@ -212,6 +213,7 @@ function AppRoutes() {
           ["commissions", <CommissionsPage />],
           ["accounts-receivable", <AccountsReceivablePage />],
           ["finance-agent", <FinanceAgentPage />],
+          ["sales-agent", <SalesAgentPage />],
           ["notifications", <NotificationsPage />],
           ["intelicont", <InteliContPage />],
           ["integrations", <IntegrationsPage />],

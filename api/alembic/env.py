@@ -69,6 +69,7 @@ import api.src.ecommerce.models
 import api.src.data_migration.models
 import api.src.financial.models
 import api.src.finance_agent.models
+import api.src.sales_agent.models
 import api.src.nemuha_connector.models
 import api.src.client_app.models
 import api.src.distribuidora.models
