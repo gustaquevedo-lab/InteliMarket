@@ -14,10 +14,26 @@ reales (nunca asumidos):
         transacciones ya sincronizadas. Asume que bc_operacao_banco tiene el
         historial completo desde la apertura; si no, falta un saldo inicial
         que solo el cliente puede confirmar contra su extracto bancario real.
-    - fin_gasto                     -> petty_cash.Expense (caja chica)
+        Categoría real por movimiento según qué FK trae poblada bc_operacao_banco
+        (verificado contra datos reales, 8167 movimientos confirmados):
+        deposito_caja (6039, vía ID_FECHAMENTO_CAIXA_CHICA), pago_cheque (368,
+        vía ID_PAGAMENTO_COM_CHEQUE — contraparte resuelta contra bs_pessoa),
+        transferencia_interna (206, vía ID_TRANSFERENCIA_CONTA), retiro (539,
+        vía ID_RETIRADA), ingreso_caja (8, vía ID_ENTRADA_CAIXA), otro (el resto).
+    - fin_gasto                     -> petty_cash.Expense (esto SÍ es caja chica:
+        gastos menores pagados en efectivo — fletes, limpieza, reposición)
     - fin_fechamento_caixa_chica    -> finance_agent.FinanceRecommendation
-        (tipo="control_caja_chica") cuando VL_DIFERENCA_* != 0 — el legacy ya
-        calcula el sobrante/faltante de cada cierre, solo hay que sacarlo a la luz.
+        (tipo="arqueo_caja") cuando VL_DIFERENCA_* != 0 — el legacy ya calcula
+        el sobrante/faltante de cada cierre, solo hay que sacarlo a la luz.
+        OJO: pese al nombre "caixa_chica" en el legacy, esto NO es caja chica —
+        es el cierre de la caja registradora real del POS (fin_caixa, la tabla
+        que debería ser "la caja principal", casi no se usa: 2 filas en total).
+        Cada una de las 116.392 ventas está vinculada a un cierre de estos vía
+        ven_venda.ID_CAIXA_CHICA — es el arqueo de caja real del negocio.
+    - fin_fechamento_caixa_chica -> finance_agent.FinanceRecommendation
+        (tipo="deposito_pendiente") cuando un cierre con efectivo contado no
+        tiene NINGÚN movimiento bancario vinculado (sync_cash_deposit_gaps) —
+        conciliación caja->banco, el paso del tesorero que antes no se controlaba.
     - bs_moeda: 1=PYG, 2=USD, 3=BRL — tabla de 3 filas, verificada, estable.
     - ven_venda + ven_item_venda + est_produto -> consulta de ticket para
         IntelliZapp (get_ticket_detail). Lookup puntual en vivo, sin sync/caché.
@@ -28,8 +44,11 @@ Deliberadamente FUERA de esta versión:
     - fin_pagamento / fin_recebimento (detalle de pagos y cobros) — se usa por
       ahora solo el saldo pendiente ya calculado en la cabecera (VL_APAGAR / VL_ARECEBER)
     - con_nota_faturada (fiscal/SIFEN) — pendiente, se diseña junto al módulo sifen
-    - bc_pagamento_com_cheque / bc_transferencia_conta — detalle de cheques y
-      transferencias entre cuentas propias, se agrega en una segunda pasada
+    - bc_pagamento_com_cheque: no se sincroniza como entidad propia — su efecto
+      ya se ve reflejado en bc_operacao_banco (categoria="pago_cheque") con la
+      contraparte resuelta. No se trackean números de cheque individuales
+      porque el legacy tampoco los guarda (confirmado: sin columna NR_CHEQUE
+      en ninguna tabla relacionada).
 
 No inventar columnas para tablas nuevas — correr DESCRIBE + valores reales
 contra la base real antes de extender este archivo.
@@ -56,7 +75,7 @@ from api.src.petty_cash.models import Expense
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 
 MONEDA_MAP = {1: "PYG", 2: "USD", 3: "BRL"}  # bs_moeda — verificado contra datos reales
-SYSTEM_RUN_MODEL = "system:nemuha-caja-chica-control"
+SYSTEM_RUN_MODEL = "system:nemuha-controles-automaticos"
 
 
 def _legacy_connect() -> pymysql.connections.Connection:
@@ -297,6 +316,18 @@ async def sync_bank_transactions(db: AsyncSession, company_id: str, since: date 
     cuentas = await _fetch("SELECT ID_CONTA, ID_MOEDA FROM bc_conta_banco")
     moneda_por_conta = {c["ID_CONTA"]: MONEDA_MAP.get(c["ID_MOEDA"], "PYG") for c in cuentas}
 
+    # Proveedor real por cada pago con cheque — vía bc_item_pagamento_com_cheque ->
+    # fin_conta_pagar -> bs_pessoa. Un mismo cheque puede saldar varias facturas del
+    # mismo proveedor; nos alcanza con el primero para identificar la contraparte.
+    proveedor_por_cheque_rows = await _fetch("""
+        SELECT ip.ID_PAGAMENTO_COM_CHEQUE, p.NOME
+        FROM bc_item_pagamento_com_cheque ip
+        JOIN fin_conta_pagar cp ON cp.ID_CONTA_PAGAR = ip.ID_CONTA_PAGAR
+        JOIN bs_pessoa p ON p.ID_PESSOA = cp.ID_PESSOA
+        GROUP BY ip.ID_PAGAMENTO_COM_CHEQUE
+    """)
+    proveedor_por_cheque = {r["ID_PAGAMENTO_COM_CHEQUE"]: r["NOME"] for r in proveedor_por_cheque_rows}
+
     sql = "SELECT * FROM bc_operacao_banco WHERE BO_CANCELADO IS NULL OR BO_CANCELADO = 0"
     params: tuple = ()
     if since:
@@ -319,6 +350,29 @@ async def sync_bank_transactions(db: AsyncSession, company_id: str, since: date 
         tipo_op = tipo_op.decode() if isinstance(tipo_op, (bytes, bytearray)) else tipo_op
         tipo = "credito" if tipo_op == "E" else "debito"  # E=Entrada, S=Saída — verificado contra datos reales
 
+        # Categoría real según qué FK trae poblada bc_operacao_banco — verificado
+        # contra datos reales: 74% de los movimientos (6039/8167) enlazan a un
+        # cierre de caja puntual vía ID_FECHAMENTO_CAIXA_CHICA.
+        categoria = "otro"
+        descripcion = r["OBSERVACAO"]
+        contraparte = None
+        if r.get("ID_FECHAMENTO_CAIXA_CHICA") is not None:
+            categoria = "deposito_caja"
+            descripcion = descripcion or f"Depósito de cierre de caja del {r['DT_OPERACAO']}"
+        elif r.get("ID_PAGAMENTO_COM_CHEQUE") is not None:
+            categoria = "pago_cheque"
+            contraparte = proveedor_por_cheque.get(r["ID_PAGAMENTO_COM_CHEQUE"])
+            descripcion = descripcion or "Pago a proveedor por cheque"
+        elif r.get("ID_TRANSFERENCIA_CONTA") is not None:
+            categoria = "transferencia_interna"
+            descripcion = descripcion or "Transferencia entre cuentas propias"
+        elif r.get("ID_RETIRADA") is not None:
+            categoria = "retiro"
+            descripcion = descripcion or "Retiro de efectivo"
+        elif r.get("ID_ENTRADA_CAIXA") is not None:
+            categoria = "ingreso_caja"
+            descripcion = descripcion or "Ingreso de caja"
+
         txn = BankTransaction(
             company_id=company_id,
             bank_account_id=bank_account_id,
@@ -326,9 +380,10 @@ async def sync_bank_transactions(db: AsyncSession, company_id: str, since: date 
             tipo=tipo,
             monto=Decimal(str(r["VL_DOCUMENTO"])),
             moneda=moneda_por_conta.get(r["ID_CONTA"], "PYG"),
-            descripcion=r["OBSERVACAO"],
+            descripcion=descripcion,
             referencia=r["NR_DOCUMENTO"],
-            categoria="conciliacion_pendiente",
+            contraparte=contraparte,
+            categoria=categoria,
         )
         db.add(txn)
         await db.flush()
@@ -365,7 +420,11 @@ async def sync_bank_balances(db: AsyncSession, company_id: str, since: date | No
     return count
 
 
-# ── Caja chica: gastos (fin_gasto) y control de cierres (fin_fechamento_caixa_chica) ──
+# ── Gastos menores (fin_gasto, sí es caja chica de verdad) y arqueo de caja
+# (fin_fechamento_caixa_chica — esto NO es caja chica, es el cierre de la caja
+# registradora real: fin_caixa casi no se usa (2 filas en toda la base), es
+# fin_caixa_chica la que de hecho opera como caja del POS — cada una de las
+# 116.392 ventas está vinculada a un cierre vía ven_venda.ID_CAIXA_CHICA) ──
 
 async def sync_petty_cash_expenses(db: AsyncSession, company_id: str, since: date | None) -> int:
     sql = "SELECT * FROM fin_gasto WHERE BO_CANCELADO = 0"
@@ -416,13 +475,13 @@ async def _get_or_create_system_run(db: AsyncSession, company_id: str) -> Financ
     run = result.scalar_one_or_none()
     if run:
         return run
-    run = FinanceAgentRun(company_id=company_id, model=SYSTEM_RUN_MODEL, status="completed", diagnostico="Control automático de cierres de caja chica")
+    run = FinanceAgentRun(company_id=company_id, model=SYSTEM_RUN_MODEL, status="completed", diagnostico="Controles automáticos del sistema (arqueo de caja, depósitos bancarios)")
     db.add(run)
     await db.flush()
     return run
 
 
-async def sync_petty_cash_control(db: AsyncSession, company_id: str, since: date | None) -> int:
+async def sync_cash_register_arqueo(db: AsyncSession, company_id: str, since: date | None) -> int:
     sql = "SELECT * FROM fin_fechamento_caixa_chica WHERE BO_CANCELADO IS NULL OR BO_CANCELADO = 0"
     params: tuple = ()
     if since:
@@ -458,10 +517,10 @@ async def sync_petty_cash_control(db: AsyncSession, company_id: str, since: date
         rec = FinanceRecommendation(
             company_id=company_id,
             run_id=system_run.id,
-            tipo="control_caja_chica",
-            titulo=f"Diferencia en cierre de caja chica del {r['DT_FECHAMENTO']}",
+            tipo="arqueo_caja",
+            titulo=f"Diferencia en arqueo de caja del {r['DT_FECHAMENTO']}",
             descripcion=(
-                f"El cierre registrado por {r['USUARIO']} el {r['DT_FECHAMENTO']} "
+                f"El cierre de caja registrado por {r['USUARIO']} el {r['DT_FECHAMENTO']} "
                 f"presenta diferencia entre lo esperado y lo contado: {detalle}. "
                 f"Dato calculado por el propio sistema legacy en el momento del cierre."
             ),
@@ -471,6 +530,63 @@ async def sync_petty_cash_control(db: AsyncSession, company_id: str, since: date
         db.add(rec)
         await db.flush()
         await _save_map(db, company_id, "fin_fechamento_caixa_chica", r["ID_FECHAMENTO_CAIXA_CHICA"], "finance_recommendations", rec.id)
+        count += 1
+
+    return count
+
+
+# ── Conciliación caja -> banco: cierres con efectivo contado pero sin ningún
+# depósito bancario enlazado (vía ID_FECHAMENTO_CAIXA_CHICA en bc_operacao_banco).
+# Esto es el paso del tesorero que hoy no tiene ningún control: cuánto se contó
+# en caja vs. cuánto efectivamente llegó al banco. No exige que el monto calce
+# exacto (un depósito puede consolidar varios cierres) — solo flagea cierres que
+# no tienen NINGÚN depósito vinculado, que es la señal más clara de un problema.
+async def sync_cash_deposit_gaps(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = """
+        SELECT f.ID_FECHAMENTO_CAIXA_CHICA, f.DT_FECHAMENTO, f.USUARIO, f.VL_FECHAMENTO_GUARANI
+        FROM fin_fechamento_caixa_chica f
+        LEFT JOIN bc_operacao_banco o
+          ON o.ID_FECHAMENTO_CAIXA_CHICA = f.ID_FECHAMENTO_CAIXA_CHICA
+          AND (o.BO_CANCELADO IS NULL OR o.BO_CANCELADO = 0)
+        WHERE (f.BO_CANCELADO IS NULL OR f.BO_CANCELADO = 0)
+          AND f.VL_FECHAMENTO_GUARANI > 0
+        GROUP BY f.ID_FECHAMENTO_CAIXA_CHICA
+        HAVING COUNT(o.ID_OPERACAO) = 0
+    """
+    rows = await _fetch(sql)
+    # since se filtra en Python, no en SQL — la cláusula ya tiene GROUP BY/HAVING
+    # y agregar un AND ahí complicaría la query sin necesidad real.
+    if since:
+        rows = [r for r in rows if r["DT_FECHAMENTO"].date() >= since]
+
+    count = 0
+    system_run = None
+    for r in rows:
+        existing_id = await _get_mapped_target(db, company_id, "fin_fechamento_caixa_chica:deposito", r["ID_FECHAMENTO_CAIXA_CHICA"])
+        if existing_id:
+            continue
+
+        if system_run is None:
+            system_run = await _get_or_create_system_run(db, company_id)
+
+        monto = Decimal(str(r["VL_FECHAMENTO_GUARANI"]))
+        rec = FinanceRecommendation(
+            company_id=company_id,
+            run_id=system_run.id,
+            tipo="deposito_pendiente",
+            titulo=f"Cierre de caja del {r['DT_FECHAMENTO']} sin depósito bancario registrado",
+            descripcion=(
+                f"El cierre de caja registrado por {r['USUARIO']} el {r['DT_FECHAMENTO']} "
+                f"contó {monto:,.2f} PYG en efectivo, pero no hay ningún movimiento bancario "
+                f"vinculado a ese cierre. Verificar si el efectivo fue depositado bajo otro "
+                f"cierre consolidado, o si sigue pendiente de depositar."
+            ),
+            entidad_relacionada=r["USUARIO"],
+            monto_relacionado=f"{monto:,.2f} PYG",
+        )
+        db.add(rec)
+        await db.flush()
+        await _save_map(db, company_id, "fin_fechamento_caixa_chica:deposito", r["ID_FECHAMENTO_CAIXA_CHICA"], "finance_recommendations", rec.id)
         count += 1
 
     return count
@@ -493,7 +609,8 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("bank_transactions", sync_bank_transactions),
         ("bank_balances", sync_bank_balances),
         ("petty_cash_expenses", sync_petty_cash_expenses),
-        ("petty_cash_control", sync_petty_cash_control),
+        ("cash_register_arqueo", sync_cash_register_arqueo),
+        ("cash_deposit_gaps", sync_cash_deposit_gaps),
     ):
         try:
             rows_synced[name] = await fn(db, company_id, since)

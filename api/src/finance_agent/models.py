@@ -36,7 +36,7 @@ class FinanceRecommendation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     run_id = Column(UUID(as_uuid=True), ForeignKey("finance_agent_runs.id"), nullable=False, index=True)
-    tipo = Column(String(30), nullable=False)  # cobranza, pago_proveedor, alerta_stock, presupuesto, otro
+    tipo = Column(String(30), nullable=False)  # cobranza, pago_proveedor, alerta_presupuesto, otro (generadas por IA) | arqueo_caja, deposito_pendiente (generadas por reglas del sistema)
     titulo = Column(String(200), nullable=False)
     descripcion = Column(Text, nullable=False)
     entidad_relacionada = Column(String(200))  # ej. nombre del cliente/proveedor involucrado

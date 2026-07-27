@@ -9,7 +9,8 @@ const TIPO_LABEL: Record<string, string> = {
   cobranza: "Cobranza",
   pago_proveedor: "Pago a proveedor",
   alerta_presupuesto: "Presupuesto",
-  control_caja_chica: "Control de caja chica",
+  arqueo_caja: "Arqueo de caja",
+  deposito_pendiente: "Depósito pendiente",
   otro: "Otro",
 }
 
