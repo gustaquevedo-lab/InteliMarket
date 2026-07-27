@@ -27,7 +27,7 @@ class Product(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    category_id = Column(UUID(as_uuid=True), ForeignKey("product_categories.id"))
+    categoria_id = Column(UUID(as_uuid=True), ForeignKey("product_categories.id"))  # nombre real de la columna en la tabla (antes mapeada como category_id, que no existe)
     sku = Column(String(50), nullable=False)
     codigo_barra = Column(String(50), index=True)
     nombre = Column(String(200), nullable=False)
