@@ -39,6 +39,12 @@ reales (nunca asumidos):
         IntelliZapp (get_ticket_detail). Lookup puntual en vivo, sin sync/caché.
         CD_VENDA = número de venta interno (verificado único: 116392 filas,
         116392 distintos) — NO confundir con NR_FATURA, que es el número fiscal.
+    - ven_venda + ven_item_venda + est_produto -> sales.Sale / sales.SaleItem /
+        products.Product (sync_sales). IVA incluido en el precio (estándar POS
+        Paraguay) — iva_monto retrocalculado desde el total del ítem. Tasas
+        reales verificadas: 0% (7 ítems, exento), 5% (145.669), 10% (510.826).
+        condicion="credito" cuando ID_CONTA_RECEBER está poblado (5.451/116.889
+        ventas no canceladas — coincide con lo ya sincronizado en accounts_receivable).
 
 Deliberadamente FUERA de esta versión:
     - fin_pagamento / fin_recebimento (detalle de pagos y cobros) — se usa por
@@ -73,6 +79,8 @@ from api.src.customers.models import Customer
 from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction
 from api.src.petty_cash.models import Expense
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
+from api.src.products.models import Product
+from api.src.sales.models import Sale, SaleItem
 
 MONEDA_MAP = {1: "PYG", 2: "USD", 3: "BRL"}  # bs_moeda — verificado contra datos reales
 SYSTEM_RUN_MODEL = "system:nemuha-controles-automaticos"
@@ -167,6 +175,29 @@ async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol
     await db.flush()
     await _save_map(db, company_id, source_table, id_pessoa, target_table, entity.id)
     return entity.id
+
+
+# ── Resolución de productos (est_produto) ───────────────────────────────────────
+
+async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, codigo_barra: str | None, iva_tasa: Decimal) -> UUID:
+    existing = await _get_mapped_target(db, company_id, "est_produto", id_produto)
+    if existing:
+        return existing
+
+    rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
+    nombre = rows[0]["DS_PRODUTO"] if rows else f"Producto legacy #{id_produto}"
+
+    product = Product(
+        company_id=company_id,
+        sku=str(id_produto),
+        codigo_barra=codigo_barra or None,
+        nombre=nombre,
+        iva_tasa=iva_tasa,
+    )
+    db.add(product)
+    await db.flush()
+    await _save_map(db, company_id, "est_produto", id_produto, "products", product.id)
+    return product.id
 
 
 # ── Cuentas por pagar (fin_conta_pagar) ─────────────────────────────────────────
@@ -592,6 +623,110 @@ async def sync_cash_deposit_gaps(db: AsyncSession, company_id: str, since: date 
     return count
 
 
+# ── Ventas (ven_venda + ven_item_venda) ─────────────────────────────────────────
+#
+# IVA incluido en el precio (estándar POS Paraguay) — se retrocalcula:
+# iva_monto = total - total / (1 + tasa/100). Tasas reales verificadas en
+# ven_item_venda.IVA: 0 (7 casos, exento), 5% (145.669 casos), 10% (510.826 casos).
+# condicion="credito" cuando ID_CONTA_RECEBER está poblado (5.451 casos sobre
+# 116.889 ventas no canceladas — coincide con lo ya sincronizado en accounts_receivable).
+# numero_ticket = CD_VENDA (verificado único), NO el número fiscal NR_FATURA.
+
+def _iva_monto(total: Decimal, tasa: Decimal) -> Decimal:
+    if tasa == 0:
+        return Decimal("0")
+    return total - (total / (Decimal("1") + tasa / Decimal("100")))
+
+
+async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = "SELECT * FROM ven_venda WHERE 1=1"
+    params: tuple = ()
+    if since:
+        sql += " AND DT_VENDA >= %s"
+        params = (since,)
+    ventas = await _fetch(sql, params)
+
+    count = 0
+    for v in ventas:
+        existing_id = await _get_mapped_target(db, company_id, "ven_venda", v["ID_VENDA"])
+        if existing_id:
+            count += 1
+            continue
+
+        customer_id = await _resolve_pessoa(db, company_id, v["ID_PESSOA"], "customer")
+
+        items_rows = await _fetch(
+            "SELECT * FROM ven_item_venda WHERE ID_VENDA = %s AND BO_DEVOLVIDO = 0",
+            (v["ID_VENDA"],),
+        )
+
+        subtotal = Decimal("0")
+        base_10 = base_5 = base_exenta = Decimal("0")
+        iva_10 = iva_5 = Decimal("0")
+        sale_items = []
+        for it in items_rows:
+            tasa = Decimal(str(it["IVA"]))
+            total_item = Decimal(str(it["VL_TOTAL"]))
+            iva_monto = _iva_monto(total_item, tasa)
+            base = total_item - iva_monto
+
+            if tasa == 10:
+                base_10 += base
+                iva_10 += iva_monto
+            elif tasa == 5:
+                base_5 += base
+                iva_5 += iva_monto
+            else:
+                base_exenta += total_item
+
+            subtotal += base
+
+            product_id = await _resolve_producto(db, company_id, it["ID_PRODUTO"], it["CODIGO_BARRA"], tasa)
+            sale_items.append(SaleItem(
+                product_id=product_id,
+                cantidad=Decimal(str(it["QUANTIDADE"])),
+                precio_unitario=Decimal(str(it["VL_PRECO_VENDA"])),
+                descuento_monto=Decimal(str(it["VL_DESCONTO"] or 0)),
+                iva_tasa=tasa,
+                iva_monto=iva_monto,
+                total=total_item,
+                costo_unitario=Decimal(str(it["VL_CUSTO_MOEDA_BASE"])) if it["VL_CUSTO_MOEDA_BASE"] is not None else None,
+            ))
+
+        cancelado = bool(v["BO_CANCELADO"])
+        facturado = bool(v["BO_FATURADO"])
+        recibido = bool(v["BO_RECEBIDO"])
+        total = Decimal(str(v["VL_TOTAL"]))
+
+        sale = Sale(
+            company_id=company_id,
+            customer_id=customer_id,
+            numero=str(v["CD_VENDA"]),
+            fecha=v["DT_VENDA"],
+            tipo_comprobante="factura" if facturado else "ticket",
+            condicion="credito" if v["ID_CONTA_RECEBER"] is not None else "contado",
+            moneda="PYG",
+            estado="cancelada" if cancelado else "completada",
+            subtotal=subtotal,
+            descuento_total=Decimal(str(v["VL_DESCONTO"] or 0)),
+            base_gravada_10=base_10,
+            base_gravada_5=base_5,
+            base_exenta=base_exenta,
+            iva_10=iva_10,
+            iva_5=iva_5,
+            total=total,
+            total_pagado=total if recibido else Decimal("0"),
+            saldo=Decimal("0") if recibido else total,
+        )
+        sale.items = sale_items
+        db.add(sale)
+        await db.flush()
+        await _save_map(db, company_id, "ven_venda", v["ID_VENDA"], "sales", sale.id)
+        count += 1
+
+    return count
+
+
 # ── Orquestador ──────────────────────────────────────────────────────────────
 
 async def run_sync(db: AsyncSession, company_id: str, since: date | None = None) -> NemuhaSyncRun:
@@ -611,6 +746,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("petty_cash_expenses", sync_petty_cash_expenses),
         ("cash_register_arqueo", sync_cash_register_arqueo),
         ("cash_deposit_gaps", sync_cash_deposit_gaps),
+        ("sales", sync_sales),
     ):
         try:
             rows_synced[name] = await fn(db, company_id, since)
