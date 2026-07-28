@@ -10,6 +10,7 @@ from api.src.sales.models import Sale, SaleItem
 from api.src.caja.models import CashRegister, CashSession
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment, CashSessionCreate, CashSessionClose
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
+from api.src.customers.models import Customer
 
 
 def calculate_taxes(item: dict) -> dict:
@@ -210,7 +211,13 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
 
 async def get_sale(db: AsyncSession, sale_id: str) -> Sale | None:
     result = await db.execute(select(Sale).where(Sale.id == uuid.UUID(sale_id)))
-    return result.scalar_one_or_none()
+    sale = result.scalar_one_or_none()
+    if sale and sale.customer_id:
+        cust_result = await db.execute(select(Customer).where(Customer.id == sale.customer_id))
+        sale.customer = cust_result.scalar_one_or_none()
+    elif sale:
+        sale.customer = None
+    return sale
 
 
 async def list_sales(
@@ -234,7 +241,24 @@ async def list_sales(
         query = query.where(Sale.fecha <= fecha_hasta)
     query = query.order_by(Sale.fecha.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    sales = list(result.scalars().all())
+
+    # No hay relacion ORM customer<->sale (customer_id es un UUID suelto, sin
+    # FK mapeada) — sin esto, SaleResponse.customer siempre queda None y el
+    # frontend cae al fallback "Consumidor Final" para TODAS las ventas, aunque
+    # el customer_id real este cargado (verificado: 99.998% de las ventas de
+    # Casa Gonzalito tienen cliente real asignado).
+    customer_ids = {s.customer_id for s in sales if s.customer_id}
+    if customer_ids:
+        cust_result = await db.execute(select(Customer).where(Customer.id.in_(customer_ids)))
+        customers_by_id = {c.id: c for c in cust_result.scalars().all()}
+        for s in sales:
+            s.customer = customers_by_id.get(s.customer_id) if s.customer_id else None
+    else:
+        for s in sales:
+            s.customer = None
+
+    return sales
 
 
 async def get_sales_today(db: AsyncSession, company_id: str) -> dict:

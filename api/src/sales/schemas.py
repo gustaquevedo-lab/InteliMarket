@@ -32,11 +32,21 @@ class SaleCreate(BaseModel):
     user_id: Optional[UUID] = None
 
 
+class CustomerBrief(BaseModel):
+    id: UUID
+    razon_social: str
+    ruc: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class SaleResponse(BaseModel):
     id: UUID
     company_id: UUID
     branch_id: Optional[UUID] = None
     customer_id: Optional[UUID] = None
+    customer: Optional[CustomerBrief] = None
     numero: str
     fecha: datetime
     tipo_comprobante: str

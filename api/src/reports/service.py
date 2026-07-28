@@ -42,6 +42,8 @@ async def get_sales_summary(db: AsyncSession, fecha_desde: Optional[date] = None
             COALESCE(SUM(v.total), 0) as monto_total,
             COALESCE(SUM(v.iva_10), 0) as monto_iva_10,
             COALESCE(SUM(v.iva_5), 0) as monto_iva_5,
+            COALESCE(SUM(v.total_pagado), 0) as total_pagado,
+            COALESCE(SUM(v.saldo), 0) as saldo_pendiente,
             COALESCE((SELECT SUM(vi.cantidad) FROM sale_items vi JOIN sales v2 ON v2.id = vi.sale_id WHERE {where.replace('v.', 'v2.')}), 0) as total_items
         FROM sales v
         WHERE {where}
@@ -56,6 +58,8 @@ async def get_sales_summary(db: AsyncSession, fecha_desde: Optional[date] = None
         "monto_exento": float((result["monto_total"] or 0) - (result["monto_iva_10"] or 0) - (result["monto_iva_5"] or 0)),
         "ticket_promedio": float((result["monto_total"] or 0) / max(result["total_ventas"], 1)),
         "total_items": int(result["total_items"] or 0),
+        "total_pagado": float(result["total_pagado"] or 0),
+        "saldo_pendiente": float(result["saldo_pendiente"] or 0),
     }
 
 

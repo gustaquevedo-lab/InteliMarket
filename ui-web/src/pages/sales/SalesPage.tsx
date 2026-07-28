@@ -9,8 +9,18 @@ import { formatPYG, formatDate } from "../../utils/format"
 
 type TabType = "todas" | "pendientes" | "pagadas" | "canceladas"
 
+interface SalesSummary {
+  total_ventas: number
+  monto_total: number
+  monto_iva_10: number
+  monto_iva_5: number
+  total_pagado: number
+  saldo_pendiente: number
+}
+
 export default function SalesPage() {
   const [sales, setSales] = useState<Sale[]>([])
+  const [summary, setSummary] = useState<SalesSummary | null>(null)
   const [tab, setTab] = useState<TabType>("todas")
   const [search, setSearch] = useState("")
   const [dateFrom, setDateFrom] = useState("")
@@ -32,15 +42,25 @@ export default function SalesPage() {
   const toast = useToast()
   const confirm = useConfirm()
 
+  // El listado siempre trae como maximo 500 filas (limite del backend) —
+  // las tarjetas de totales NO pueden salir de sumar esas filas locales,
+  // porque con volumen real (millones de ventas historicas) esas 500 no son
+  // representativas del periodo filtrado. Se piden por separado al agregado
+  // real del backend (api.reports.salesSummary), que suma TODO el periodo.
   const fetchData = async () => {
     setLoading(true)
     try {
-      const data = await api.sales.list({
-        desde: dateFrom || undefined,
-        hasta: dateTo || undefined,
-      })
+      const [data, sum] = await Promise.all([
+        api.sales.list({
+          fecha_desde: dateFrom || undefined,
+          fecha_hasta: dateTo || undefined,
+          limit: 500,
+        }),
+        api.reports.salesSummary({ fecha_desde: dateFrom || undefined, fecha_hasta: dateTo || undefined }),
+      ])
       setSales(data)
-    } catch { setSales([]) }
+      setSummary(sum)
+    } catch { setSales([]); setSummary(null) }
     finally { setLoading(false) }
   }
 
@@ -55,10 +75,11 @@ export default function SalesPage() {
   })
 
   const active = sales.filter(s => s.estado !== "cancelado" && s.estado !== "devuelto")
-  const totalVentas = active.reduce((a, b) => a + (b.total ?? 0), 0)
-  const totalCobrado = active.reduce((a, b) => a + (b.total_pagado || 0), 0)
-  const totalSaldo = active.reduce((a, b) => a + (b.saldo || 0), 0)
-  const totalIva = active.reduce((a, b) => a + (b.iva_10 || 0) + (b.iva_5 || 0), 0)
+  const totalVentas = summary?.monto_total ?? 0
+  const totalCobrado = summary?.total_pagado ?? 0
+  const totalSaldo = summary?.saldo_pendiente ?? 0
+  const totalIva = (summary?.monto_iva_10 ?? 0) + (summary?.monto_iva_5 ?? 0)
+  const totalTransacciones = summary?.total_ventas ?? active.length
 
   const handleViewSale = async (sale: Sale) => {
     setViewingSale(sale)
@@ -152,7 +173,10 @@ export default function SalesPage() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-primary" />Ventas</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{sales.length} ventas · {totalVentas > 0 ? `${formatPYG(totalVentas)} en total` : "sin datos"}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            {totalTransacciones} ventas en el período · {totalVentas > 0 ? `${formatPYG(totalVentas)} en total` : "sin datos"}
+            {sales.length >= 500 && <span className="text-amber-500"> · mostrando las 500 más recientes, filtrá por fecha para acotar</span>}
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={handleExportCSV} className="btn-outline flex items-center gap-2"><Download className="w-4 h-4" />CSV</button>
@@ -167,7 +191,7 @@ export default function SalesPage() {
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1"><ShoppingCart className="w-4 h-4 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Transacciones</span></div>
-          <p className="text-xl font-bold text-gray-900 dark:text-white">{active.length}</p>
+          <p className="text-xl font-bold text-gray-900 dark:text-white">{totalTransacciones}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1"><TrendingUp className="w-4 h-4 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Por Cobrar</span></div>
