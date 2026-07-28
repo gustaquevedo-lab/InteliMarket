@@ -68,63 +68,17 @@ export default function InventoryPage() {
         api.products.list(),
       ])
 
+      // Antes, si algun fetch fallaba o venia vacio, esta pantalla inyectaba
+      // datos de demo de carniceria/verduleria (plantillas de desposte de
+      // media res, lotes de tomate/lechuga) como si fueran reales — para
+      // una distribuidora de bebidas y almacen, ademas de ser mock, ni
+      // siquiera tenia sentido de dominio. Ahora simplemente refleja lo que
+      // el backend devolvio (vacio si fallo, real si no).
       if (wh.status === "fulfilled") setWarehouses(wh.value)
       if (st.status === "fulfilled") setStock(st.value)
       if (btch.status === "fulfilled") setBatches(btch.value)
       if (tmpl.status === "fulfilled") setButcheryTemplates(tmpl.value)
       if (prods.status === "fulfilled") setProducts(prods.value)
-
-      // Inject beautiful demo data if empty/fails
-      if (tmpl.status === "rejected" || !tmpl.value || tmpl.value.length === 0) {
-        setButcheryTemplates([
-          {
-            id: "beef-std",
-            nombre: "Media Res Bovina Standard",
-            especie: "Bovino",
-            peso_promedio_kg: 180,
-            cuts: [
-              { producto_id: "p1", producto_nombre: "Tapa de Cuadril (Picaña)", rendimiento_porcentual: 2.5, precio_ponderado: 65000 },
-              { producto_id: "p2", producto_nombre: "Costilla de Primera", rendimiento_porcentual: 18.0, precio_ponderado: 28000 },
-              { producto_id: "p3", producto_nombre: "Vacío", rendimiento_porcentual: 8.5, precio_ponderado: 38000 },
-              { producto_id: "p4", producto_nombre: "Peceto", rendimiento_porcentual: 3.5, precio_ponderado: 48000 },
-              { producto_id: "p5", producto_nombre: "Lomito", rendimiento_porcentual: 1.8, precio_ponderado: 75000 },
-              { producto_id: "p6", producto_nombre: "Carnaza Negra", rendimiento_porcentual: 22.0, precio_ponderado: 32000 },
-              { producto_id: "p7", producto_nombre: "Grasa y Mermas (Subproducto)", rendimiento_porcentual: 43.7, precio_ponderado: 2000, es_subproducto: true },
-            ]
-          },
-          {
-            id: "pork-std",
-            nombre: "Media Res Porcina Standard",
-            especie: "Porcino",
-            peso_promedio_kg: 90,
-            cuts: [
-              { producto_id: "p8", producto_nombre: "Bondiola de Cerdo", rendimiento_porcentual: 6.0, precio_ponderado: 42000 },
-              { producto_id: "p9", producto_nombre: "Costillita de Cerdo", rendimiento_porcentual: 20.0, precio_ponderado: 35000 },
-              { producto_id: "p10", producto_nombre: "Panceta", rendimiento_porcentual: 12.0, precio_ponderado: 38000 },
-              { producto_id: "p11", producto_nombre: "Pernil de Cerdo", rendimiento_porcentual: 25.0, precio_ponderado: 28000 },
-              { producto_id: "p12", producto_nombre: "Grasa e Insumos procesados", rendimiento_porcentual: 37.0, precio_ponderado: 1500, es_subproducto: true },
-            ]
-          }
-        ])
-      }
-
-      if (btch.status === "rejected" || !btch.value || btch.value.length === 0) {
-        setBatches([
-          { id: "b1", producto_id: "p1", producto_nombre: "Tomate Especial en Góndola", cantidad_obtenida: 120, fecha_produccion: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), fecha_vencimiento: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(), lote_codigo: "TOM-2805-A", costo_unitario: 4500 },
-          { id: "b2", producto_id: "p2", producto_nombre: "Lechuga Orgánica Hidropónica", cantidad_obtenida: 50, fecha_produccion: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), fecha_vencimiento: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(), lote_codigo: "LECH-2905-C", costo_unitario: 2200 },
-          { id: "b3", producto_id: "p3", producto_nombre: "Lomito Bovino Envasado", cantidad_obtenida: 30, fecha_produccion: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(), fecha_vencimiento: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), lote_codigo: "LOM-2405", costo_unitario: 58000 },
-          { id: "b4", producto_id: "p4", producto_nombre: "Queso Paraguay Fresco", cantidad_obtenida: 80, fecha_produccion: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), fecha_vencimiento: new Date(Date.now() + 12 * 24 * 60 * 60 * 1000).toISOString(), lote_codigo: "QPAR-2705", costo_unitario: 29000 },
-        ])
-      }
-
-      if (prods.status === "rejected" || !prods.value || prods.value.length === 0) {
-        setProducts([
-          { id: "p1", nombre: "Tomate Especial en Góndola", sku: "TOM-FRESCO", codigo_barra: "789001" },
-          { id: "p2", nombre: "Lechuga Orgánica Hidropónica", sku: "LECH-ORG", codigo_barra: "789002" },
-          { id: "p3", nombre: "Lomito Bovino Envasado", sku: "LOM-BOV", codigo_barra: "789003" },
-          { id: "p4", nombre: "Queso Paraguay Fresco", sku: "QUESO-PY", codigo_barra: "789004" },
-        ])
-      }
     } catch {
       toast.error("Error", "No se pudo cargar el inventario")
     } finally {

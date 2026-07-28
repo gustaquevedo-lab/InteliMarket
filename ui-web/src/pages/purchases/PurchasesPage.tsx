@@ -99,110 +99,10 @@ const urgencyMap: Record<string, string> = {
 }
 
 
-﻿const mockSuppliers: Supplier[] = [
-  { id: "s1", company_id: "", ruc: "80012345-6", razon_social: "Distribuidora ABC S.A.", nombre_fantasia: "ABC Distribucion", direccion: "Av. Espana 1234", telefono: "021 123 456", email: "ventas@abc.com", contacto: "Juan Perez", activo: true, created_at: "2024-01-01", updated_at: "2024-01-01" },
-  { id: "s2", company_id: "", ruc: "80067890-1", razon_social: "Importadora XYZ S.R.L.", nombre_fantasia: "XYZ Import", direccion: "Calle Palma 567", telefono: "021 789 012", email: "info@xyz.com", contacto: "Maria Lopez", activo: true, created_at: "2024-01-01", updated_at: "2024-01-01" },
-  { id: "s3", company_id: "", ruc: "80011122-3", razon_social: "Mayorista del Sur S.A.", nombre_fantasia: "Sur Mayorista", direccion: "Ruta 2 Km 15", telefono: "021 345 678", email: "ventas@sursa.com", contacto: "Carlos Gomez", activo: true, created_at: "2024-01-01", updated_at: "2024-01-01" },
-  { id: "s4", company_id: "", ruc: "80033344-5", razon_social: "Alimentos del Norte", nombre_fantasia: "Norte Foods", direccion: "Av. Mcal. Lopez 890", telefono: "021 567 890", email: "info@nortefoods.com", contacto: "Ana Martinez", activo: false, created_at: "2024-01-01", updated_at: "2024-01-01" },
-  { id: "s5", company_id: "", ruc: "80055566-7", razon_social: "Tecnologia PY S.A.", nombre_fantasia: "TecnoPY", direccion: "Av. San Martin 345", telefono: "021 901 234", email: "ventas@tecnopy.com", contacto: "Pedro Silva", activo: true, created_at: "2024-01-01", updated_at: "2024-01-01" },
-]
-
-const mockProducts: Product[] = Array.from({ length: 50 }, (_, i) => ({
-  id: "p" + (i + 1),
-  company_id: "",
-  category_id: null,
-  sku: "SKU-" + String(i + 1).padStart(4, "0"),
-  codigo_barra: "78456789" + String(i + 1).padStart(5, "0"),
-  nombre: "Producto " + (i + 1) + (i % 3 === 0 ? " (Importado)" : i % 3 === 1 ? " Nacional" : " Premium"),
-  descripcion: null,
-  tipo: "producto",
-  unidad_medida: "UNIDAD",
-  iva_tasa: i % 5 === 0 ? 5 : i % 10 === 0 ? 0 : 10,
-  metodo_costeo: "promedio",
-  stock_minimo: 10,
-  stock_maximo: 500,
-  activo: true,
-  created_at: "2024-01-01",
-  updated_at: "2024-01-01",
-  precio: [5000, 12000, 8500, 22000, 3500, 15000, 28000, 9500, 18000, 4200, 6500, 31000, 7800, 14500, 9200][i % 15],
-  categoria: { id: "c" + ((i % 8) + 1), nombre: ["Lacteos", "Bebidas", "Almacen", "Limpieza", "Carnes", "Frutas", "Congelados", "Panificados"][i % 8] },
-  stock: Math.floor(Math.random() * 200),
-}))
-
-const mockCategories = [
-  { id: "c1", nombre: "Lacteos" }, { id: "c2", nombre: "Bebidas" }, { id: "c3", nombre: "Almacen" },
-  { id: "c4", nombre: "Limpieza" }, { id: "c5", nombre: "Carnes" }, { id: "c6", nombre: "Frutas" },
-  { id: "c7", nombre: "Congelados" }, { id: "c8", nombre: "Panificados" },
-]
-
-const mockContracts: ContractItem[] = [
-  { id: "ct1", numero: "CT-2024-001", nombre: "Contrato anual distribucion", supplier_id: "s1", proveedor: "Distribuidora ABC S.A.", fecha_inicio: "2024-01-01", fecha_fin: "2024-12-31", monto: 500000000, activo: true },
-  { id: "ct2", numero: "CT-2024-002", nombre: "Importacion trimestral", supplier_id: "s2", proveedor: "Importadora XYZ S.R.L.", fecha_inicio: "2024-03-01", fecha_fin: "2025-02-28", monto: 350000000, activo: true },
-  { id: "ct3", numero: "CT-2024-003", nombre: "Proveedor exclusivo", supplier_id: "s3", proveedor: "Mayorista del Sur S.A.", fecha_inicio: "2024-06-01", fecha_fin: "2024-11-30", monto: 200000000, activo: false },
-]
-
-const mockEvals: SupplierEval[] = [
-  { id: "e1", supplier_id: "s1", proveedor: "Distribuidora ABC S.A.", fecha: "2024-07-15", calidad: 9, entrega: 8, precio: 7, total: 8.0, comentarios: "Buena calidad, entregas puntuales" },
-  { id: "e2", supplier_id: "s2", proveedor: "Importadora XYZ S.R.L.", fecha: "2024-08-01", calidad: 8, entrega: 6, precio: 8, total: 7.3, comentarios: "Buena relacion calidad/precio, demora en entrega" },
-  { id: "e3", supplier_id: "s3", proveedor: "Mayorista del Sur S.A.", fecha: "2024-06-20", calidad: 7, entrega: 9, precio: 6, total: 7.3, comentarios: "Excelente entrega, precio mejorable" },
-  { id: "e4", supplier_id: "s5", proveedor: "Tecnologia PY S.A.", fecha: "2024-09-10", calidad: 10, entrega: 9, precio: 8, total: 9.0, comentarios: "Productos de primera calidad" },
-]
-
-const mockSuggestions: Suggestion[] = [
-  { id: "sg1", product_id: "p3", product_name: "Producto 3 Premium", sku: "SKU-0003", stock_actual: 5, stock_seguridad: 20, demanda_diaria: 3.5, dias_cobertura: 1.4, cantidad_sugerida: 85, precio_estimado: 8500, total_estimado: 722500, supplier_id: "s1", proveedor_sugerido: "Distribuidora ABC S.A.", urgencia: "alta", confianza: 92, estado: "pendiente" },
-  { id: "sg2", product_id: "p7", product_name: "Producto 7 Premium", sku: "SKU-0007", stock_actual: 12, stock_seguridad: 15, demanda_diaria: 2.1, dias_cobertura: 5.7, cantidad_sugerida: 40, precio_estimado: 28000, total_estimado: 1120000, supplier_id: "s3", proveedor_sugerido: "Mayorista del Sur S.A.", urgencia: "media", confianza: 78, estado: "pendiente" },
-  { id: "sg3", product_id: "p12", product_name: "Producto 12 Nacional", sku: "SKU-0012", stock_actual: 3, stock_seguridad: 25, demanda_diaria: 4.2, dias_cobertura: 0.7, cantidad_sugerida: 120, precio_estimado: 31000, total_estimado: 3720000, supplier_id: "s2", proveedor_sugerido: "Importadora XYZ S.R.L.", urgencia: "alta", confianza: 95, estado: "pendiente" },
-  { id: "sg4", product_id: "p15", product_name: "Producto 15 Nacional", sku: "SKU-0015", stock_actual: 45, stock_seguridad: 10, demanda_diaria: 0.8, dias_cobertura: 56.3, cantidad_sugerida: 0, precio_estimado: 9200, total_estimado: 0, supplier_id: "s5", proveedor_sugerido: "Tecnologia PY S.A.", urgencia: "baja", confianza: 45, estado: "pendiente" },
-  { id: "sg5", product_id: "p9", product_name: "Producto 9 Nacional", sku: "SKU-0009", stock_actual: 8, stock_seguridad: 18, demanda_diaria: 2.8, dias_cobertura: 2.9, cantidad_sugerida: 60, precio_estimado: 18000, total_estimado: 1080000, supplier_id: "s1", proveedor_sugerido: "Distribuidora ABC S.A.", urgencia: "alta", confianza: 88, estado: "aplicada" },
-  { id: "sg6", product_id: "p6", product_name: "Producto 6 Premium", sku: "SKU-0006", stock_actual: 20, stock_seguridad: 12, demanda_diaria: 1.5, dias_cobertura: 13.3, cantidad_sugerida: 25, precio_estimado: 15000, total_estimado: 375000, supplier_id: "s3", proveedor_sugerido: "Mayorista del Sur S.A.", urgencia: "media", confianza: 72, estado: "descartada" },
-]
-
-const mockWarehouses = [
-  { id: "w1", nombre: "Deposito Central" },
-  { id: "w2", nombre: "Deposito Sucursal 1" },
-]
-
-
-﻿function generateMockPOs(): PurchaseOrder[] {
-  return Array.from({ length: 25 }, (_, i) => ({
-    id: "po" + (i + 1),
-    company_id: "",
-    supplier_id: "s" + ((i % 5) + 1),
-    numero: "PO-2024-" + String(i + 1).padStart(4, "0"),
-    fecha: new Date(2024, 0, i + 1).toISOString(),
-    fecha_entrega_estimada: i % 3 === 0 ? new Date(2024, 0, i + 15).toISOString() : null,
-    estado: ["borrador", "confirmado", "enviado", "parcial", "completado", "cancelado"][i % 6],
-    moneda: i % 4 === 0 ? "USD" : "PYG",
-    tipo_cambio: i % 4 === 0 ? 7500 : 1,
-    subtotal: (i + 1) * 1000000,
-    descuento_total: i % 5 === 0 ? (i + 1) * 50000 : 0,
-    iva_10: (i + 1) * 100000,
-    iva_5: i % 3 === 0 ? (i + 1) * 50000 : 0,
-    total: (i + 1) * 1000000 + (i + 1) * 100000 - (i % 5 === 0 ? (i + 1) * 50000 : 0) + (i % 3 === 0 ? (i + 1) * 50000 : 0),
-    observaciones: i % 4 === 0 ? "Entrega urgente" : null,
-    user_id: null,
-    created_at: new Date(2024, 0, i + 1).toISOString(),
-    updated_at: new Date(2024, 0, i + 1).toISOString(),
-    supplier: mockSuppliers[i % 5],
-  }))
-}
-
-const mockPOs = generateMockPOs()
-
-const mockReceipts: PurchaseReceipt[] = Array.from({ length: 15 }, (_, i) => ({
-  id: "rc" + (i + 1),
-  company_id: "",
-  order_id: i < 12 ? "po" + (i + 1) : null,
-  supplier_id: "s" + ((i % 5) + 1),
-  numero: "RCP-2024-" + String(i + 1).padStart(4, "0"),
-  fecha: new Date(2024, 0, i + 5).toISOString(),
-  total: (i + 1) * 900000,
-  observaciones: null,
-  user_id: null,
-  created_at: new Date(2024, 0, i + 5).toISOString(),
-  supplier: mockSuppliers[i % 5],
-}))
-
+// El bloque de datos ficticios (proveedores, productos, contratos,
+// evaluaciones, sugerencias de compra, ordenes y remitos inventados) que
+// estaba acá se eliminó — ninguno se usa mas, todo viene de datos
+// reales (o arranca vacío cuando no hay endpoint conectado).
 
 ﻿function BarChart({ data, maxKey, labelKey, colorKey }: {
   data: any[]
@@ -343,7 +243,7 @@ export default function PurchasesPage() {
   const [supplierSearch, setSupplierSearch] = useState("")
   const [supplierFilter, setSupplierFilter] = useState<SupplierStatus>("todos")
   const [generatingSuggestions, setGeneratingSuggestions] = useState(false)
-  const [suggestions, setSuggestions] = useState<Suggestion[]>(mockSuggestions)
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
 
   const [contractSupplier, setContractSupplier] = useState("")
   const [contractNombre, setContractNombre] = useState("")
@@ -366,19 +266,22 @@ export default function PurchasesPage() {
         api.products.list(),
         api.warehouses.list(),
       ])
+      // Las URLs reales de compras/proveedores ya estan arregladas (antes
+      // pegaban a /v1/purchases/* que no existe) — si igual falla algo, no
+      // hay que tapar el error con datos inventados, mejor una lista vacia.
       if (pos.status === "fulfilled") setPurchaseOrders(pos.value)
-      else setPurchaseOrders(mockPOs)
+      else setPurchaseOrders([])
       if (recs.status === "fulfilled") setReceipts(recs.value)
-      else setReceipts(mockReceipts)
+      else setReceipts([])
       if (sups.status === "fulfilled") setSuppliers(sups.value)
-      else setSuppliers(mockSuppliers)
+      else setSuppliers([])
       if (prods.status === "fulfilled") setProducts(prods.value)
-      else setProducts(mockProducts)
+      else setProducts([])
       if (wares.status === "fulfilled") setWarehouses(wares.value)
-      else setWarehouses(mockWarehouses)
+      else setWarehouses([])
     } catch {
-      setPurchaseOrders(mockPOs); setReceipts(mockReceipts)
-      setSuppliers(mockSuppliers); setProducts(mockProducts); setWarehouses(mockWarehouses)
+      setPurchaseOrders([]); setReceipts([])
+      setSuppliers([]); setProducts([]); setWarehouses([])
     } finally { setLoading(false) }
   }, [])
   useEffect(() => { fetchAll() }, [fetchAll])
@@ -517,17 +420,32 @@ export default function PurchasesPage() {
   }
   const handleRemovePOItem = (index: number) => setPoFormItems(prev => prev.filter((_, i) => i !== index))
 
-  const handleSelectPOforReceipt = (poId: string) => {
+  const handleSelectPOforReceipt = async (poId: string) => {
     setReceiptPO(poId)
     const po = purchaseOrders.find(p => p.id === poId)
-    if (po) {
-      setReceiptSupplier(po.supplier_id ?? "")
-      const items: ReceiptItem[] = []
-      for (let i = 0; i < 3; i++) {
-        const prod = products[i] || mockProducts[i]
-        items.push({ product_id: prod.id, nombre: prod.nombre, sku: prod.sku || "", cantidad_ordenada: 10 + i * 5, cantidad_recibir: 10 + i * 5, costo_unitario: prod.precio || 0, lote: "", fecha_vencimiento: "" })
-      }
+    if (!po) return
+    setReceiptSupplier(po.supplier_id ?? "")
+    // Antes fabricaba 3 items inventados con productos al azar del catalogo,
+    // ignorando por completo que fue realmente pedido en esta orden. Ahora
+    // trae los items reales de la orden.
+    try {
+      const full = await api.purchases.getOrder(poId) as any
+      const items: ReceiptItem[] = (full.items || []).map((it: any) => {
+        const prod = products.find(p => p.id === it.product_id)
+        return {
+          product_id: it.product_id,
+          nombre: prod?.nombre || it.descripcion || it.product_id,
+          sku: prod?.sku || "",
+          cantidad_ordenada: Number(it.cantidad) || 0,
+          cantidad_recibir: Number(it.cantidad) - Number(it.cantidad_recibida || 0),
+          costo_unitario: Number(it.precio_unitario) || 0,
+          lote: "",
+          fecha_vencimiento: "",
+        }
+      })
       setReceiptItems(items)
+    } catch {
+      setReceiptItems([])
     }
   }
 
@@ -604,12 +522,12 @@ export default function PurchasesPage() {
     toast.success(sup.activo ? "Desactivado" : "Activado", sup.razon_social)
   }
 
+  // No hay endpoint real conectado para sugerencias de compra en este modulo
+  // (existe uno bajo demand-forecast, con otro modelo de datos) — antes esto
+  // esperaba 1.5s con un spinner falso y mostraba 6 sugerencias inventadas
+  // como si vinieran de un calculo real de demanda/stock.
   const handleGenerateSuggestions = async () => {
-    setGeneratingSuggestions(true)
-    await new Promise(r => setTimeout(r, 1500))
-    setSuggestions(mockSuggestions)
-    setGeneratingSuggestions(false)
-    toast.success("Sugerencias generadas", "Basadas en demanda historica y stock actual")
+    toast.info("No disponible", "El motor de sugerencias de compra todavia no esta conectado en este modulo.")
   }
 
   const handleApplySuggestion = (s: Suggestion) => {
@@ -700,7 +618,7 @@ export default function PurchasesPage() {
         onNewSupplier={() => { resetSupplierForm(); setEditingSupplier(null); setShowSupplierModal(true) }}
         onEditSupplier={openEditSupplier}
         onToggleSupplier={handleToggleSupplier}
-        contracts={mockContracts} evals={mockEvals}
+        contracts={[]} evals={[]}
         onNewContract={() => setShowContractModal(true)}
         onNewEval={() => setShowEvalModal(true)}
       />}
@@ -964,7 +882,7 @@ export default function PurchasesPage() {
               <label className="label-field">Almacen destino</label>
               <select className="input-field" value={receiptWarehouse} onChange={(e) => setReceiptWarehouse(e.target.value)}>
                 <option value="">Seleccionar...</option>
-                {(warehouses.length > 0 ? warehouses : mockWarehouses).map((w: any) => <option key={w.id} value={w.id}>{w.nombre}</option>)}
+                {warehouses.map((w: any) => <option key={w.id} value={w.id}>{w.nombre}</option>)}
               </select>
             </div>
             <div>

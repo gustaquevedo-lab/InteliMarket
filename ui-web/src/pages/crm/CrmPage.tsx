@@ -22,64 +22,12 @@ interface ClubMember {
   coupons: { id: string; code: string; label: string; value: number; type: "percent" | "fixed"; targetCategory: string }[]
 }
 
-const MOCK_MEMBERS: ClubMember[] = [
-  {
-    id: "c1",
-    nombre: "Juan Pérez",
-    ci: "4444444",
-    telefono: "0981-123-456",
-    tier: "Platino",
-    points: 4200,
-    cashback: 15000,
-    comprasCount: 28,
-    ultimaCompra: "2026-05-26",
-    coupons: [
-      { id: "cp1", code: "MIL-20", label: "20% en Lácteos", value: 20, type: "percent", targetCategory: "almacen" },
-      { id: "cp2", code: "PAN-5", label: "Gs 5.000 Regalo en Panadería", value: 5000, type: "fixed", targetCategory: "panaderia" }
-    ]
-  },
-  {
-    id: "c2",
-    nombre: "María Rodríguez",
-    ci: "5555555",
-    telefono: "0972-987-654",
-    tier: "Gold Elite",
-    points: 8500,
-    cashback: 35000,
-    comprasCount: 45,
-    ultimaCompra: "2026-05-27",
-    coupons: [
-      { id: "cp3", code: "MEAT-15", label: "15% en Carnes (Costilla)", value: 15, type: "percent", targetCategory: "carnes" },
-      { id: "cp4", code: "FRU-3", label: "Gs 10.000 Regalo en Verdulería", value: 10000, type: "fixed", targetCategory: "fruver" }
-    ]
-  },
-  {
-    id: "c3",
-    nombre: "Carlos Maidana",
-    ci: "3214567",
-    telefono: "0983-555-777",
-    tier: "Plata",
-    points: 1200,
-    cashback: 4000,
-    comprasCount: 12,
-    ultimaCompra: "2026-05-20",
-    coupons: [
-      { id: "cp5", code: "ALM-10", label: "10% Almacén General", value: 10, type: "percent", targetCategory: "almacen" }
-    ]
-  },
-  {
-    id: "c4",
-    nombre: "Leticia Benítez",
-    ci: "6543210",
-    telefono: "0994-333-222",
-    tier: "General",
-    points: 350,
-    cashback: 0,
-    comprasCount: 4,
-    ultimaCompra: "2026-05-18",
-    coupons: []
-  }
-]
+// No hay backend real para el club de fidelizacion (ni tabla migrada ni
+// endpoint API — api.crm.* es leads/oportunidades/actividades, un modelo
+// totalmente distinto). Antes esta pantalla mostraba 4 socios inventados
+// con compras y cupones ficticios como si fueran reales. Arranca vacia
+// hasta que exista una fuente de datos real.
+const MOCK_MEMBERS: ClubMember[] = []
 
 const CATEGORIES = [
   { key: "all", label: "Todo el Supermercado" },
