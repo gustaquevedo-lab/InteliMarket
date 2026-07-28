@@ -18,9 +18,9 @@ class CreditAccountUpdate(BaseModel):
 
 
 class CreditAccountResponse(BaseModel):
-    id: str
-    company_id: str
-    customer_id: str
+    id: uuid.UUID
+    company_id: uuid.UUID
+    customer_id: uuid.UUID
     limite_credito: float
     saldo_disponible: float
     saldo_utilizado: float
@@ -39,16 +39,16 @@ class CreditPayment(BaseModel):
 
 
 class CreditMovementResponse(BaseModel):
-    id: str
-    company_id: str
-    credit_account_id: str
-    customer_id: str
+    id: uuid.UUID
+    company_id: uuid.UUID
+    credit_account_id: uuid.UUID
+    customer_id: uuid.UUID
     tipo: str
     monto: float
     saldo_anterior: float
     saldo_nuevo: float
     referencia_type: Optional[str]
-    referencia_id: Optional[str]
+    referencia_id: Optional[uuid.UUID]
     observaciones: Optional[str]
     created_at: datetime
 
