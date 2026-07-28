@@ -21,6 +21,7 @@ dependencies = [
     # Auth
     "python-jose[cryptography]>=3.3",
     "passlib[bcrypt]>=1.7",
+    "bcrypt<4.1",
     "cryptography>=42.0",
     # Tasks & cache
     "celery>=5.3",
