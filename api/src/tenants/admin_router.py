@@ -72,7 +72,7 @@ async def list_tenants(
             "estado": t.estado,
             "schema_name": t.schema_name,
             "fecha_inicio": t.fecha_inicio,
-            "fecha_fin": t.fecha_fin,
+            "fecha_fin": t.fecha_vencimiento,
             "config": t.config,
             "created_at": t.created_at,
         }
