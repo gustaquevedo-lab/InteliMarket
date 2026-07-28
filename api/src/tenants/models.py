@@ -17,7 +17,9 @@ class Tenant(Base):
     schema_name = Column(String(100), unique=True, nullable=False)
     estado = Column(String(20), nullable=False, default="activo")
     fecha_inicio = Column(DateTime(timezone=True), nullable=False)
-    fecha_fin = Column(DateTime(timezone=True))
+    fecha_vencimiento = Column(DateTime(timezone=True))  # nombre real de la columna (antes mapeada como fecha_fin, que no existe)
+    contacto_email = Column(String(255))  # existía en la tabla real, no estaba mapeado acá
+    contacto_phone = Column(String(30))  # existía en la tabla real, no estaba mapeado acá
     config = Column(JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
