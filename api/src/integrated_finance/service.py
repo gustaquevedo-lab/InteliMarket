@@ -1,4 +1,4 @@
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import select, func, and_, text, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
@@ -809,22 +809,18 @@ async def get_consolidated_dashboard(db: AsyncSession, company_id: str) -> dict:
     for row in ar_aging_q:
         ar_aging.append({"customer_id": str(row[0]), "estado": row[1], "monto": float(row[2] or 0)})
 
+    ap_aging_case = case(
+        (SupplierInvoice.fecha_vencimiento < today, "vencido"),
+        else_="por_vencer"
+    )
     ap_aging_q = await db.execute(
         select(
-            func.case(
-                (SupplierInvoice.fecha_vencimiento < today, "vencido"),
-                else_="por_vencer"
-            ),
+            ap_aging_case,
             func.sum(SupplierInvoice.saldo_pendiente),
         ).where(
             SupplierInvoice.company_id == cid,
             SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
-        ).group_by(
-            func.case(
-                (SupplierInvoice.fecha_vencimiento < today, "vencido"),
-                else_="por_vencer"
-            ),
-        )
+        ).group_by(ap_aging_case)
     )
     ap_aging = []
     for row in ap_aging_q:
