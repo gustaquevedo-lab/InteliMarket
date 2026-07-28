@@ -8,6 +8,7 @@ import uuid
 
 from api.src.credit_accounts.models import CreditAccount, CreditMovement
 from api.src.credit_accounts.schemas import CreditAccountCreate, CreditAccountUpdate, CreditPayment
+from api.src.customers.models import Customer
 
 
 async def create_credit_account(db: AsyncSession, data: CreditAccountCreate) -> CreditAccount:
@@ -25,12 +26,19 @@ async def create_credit_account(db: AsyncSession, data: CreditAccountCreate) -> 
 
 
 async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Optional[bool] = None) -> list[CreditAccount]:
-    query = select(CreditAccount).where(CreditAccount.company_id == company_id)
+    query = select(CreditAccount, Customer.razon_social, Customer.ruc).join(
+        Customer, Customer.id == CreditAccount.customer_id, isouter=True
+    ).where(CreditAccount.company_id == company_id)
     if activo is not None:
         query = query.where(CreditAccount.activo == activo)
     query = query.order_by(CreditAccount.saldo_utilizado.desc())
     result = await db.execute(query)
-    return list(result.scalars().all())
+    accounts = []
+    for account, razon_social, ruc in result.all():
+        account.customer_nombre = razon_social
+        account.customer_ruc = ruc
+        accounts.append(account)
+    return accounts
 
 
 async def get_credit_account(db: AsyncSession, account_id: str) -> CreditAccount | None:

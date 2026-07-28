@@ -21,6 +21,8 @@ class CreditAccountResponse(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     customer_id: uuid.UUID
+    customer_nombre: Optional[str] = None
+    customer_ruc: Optional[str] = None
     limite_credito: float
     saldo_disponible: float
     saldo_utilizado: float
