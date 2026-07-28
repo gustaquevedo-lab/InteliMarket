@@ -55,10 +55,10 @@ export default function SalesPage() {
   })
 
   const active = sales.filter(s => s.estado !== "cancelado" && s.estado !== "devuelto")
-  const totalVentas = active.reduce((a, b) => a + (b.total ?? 0), 0)
-  const totalCobrado = active.reduce((a, b) => a + (b.total_pagado || 0), 0)
-  const totalSaldo = active.reduce((a, b) => a + (b.saldo || 0), 0)
-  const totalIva = active.reduce((a, b) => a + (b.iva_10 || 0) + (b.iva_5 || 0), 0)
+  const totalVentas = active.reduce((a, b) => a + Number(b.total ?? 0), 0)
+  const totalCobrado = active.reduce((a, b) => a + Number(b.total_pagado || 0), 0)
+  const totalSaldo = active.reduce((a, b) => a + Number(b.saldo || 0), 0)
+  const totalIva = active.reduce((a, b) => a + Number(b.iva_10 || 0) + Number(b.iva_5 || 0), 0)
 
   const handleViewSale = async (sale: Sale) => {
     setViewingSale(sale)

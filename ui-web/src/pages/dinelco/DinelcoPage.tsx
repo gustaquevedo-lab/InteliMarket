@@ -53,8 +53,8 @@ export default function DinelcoPage() {
     (t.sale_id && t.sale_id.toLowerCase().includes(search.toLowerCase()))
   )
 
-  const totalApproved = transactions.filter(t => t.estado === "aprobado" || t.estado === "approved").reduce((a, b) => a + (b.monto || 0), 0)
-  const totalPending = transactions.filter(t => t.estado === "pendiente" || t.estado === "pending").reduce((a, b) => a + (b.monto || 0), 0)
+  const totalApproved = transactions.filter(t => t.estado === "aprobado" || t.estado === "approved").reduce((a, b) => a + Number(b.monto || 0), 0)
+  const totalPending = transactions.filter(t => t.estado === "pendiente" || t.estado === "pending").reduce((a, b) => a + Number(b.monto || 0), 0)
 
   const handleCheckout = async () => {
     if (!checkoutForm.monto || !checkoutForm.order_id) {

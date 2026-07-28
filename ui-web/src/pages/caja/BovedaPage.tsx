@@ -29,7 +29,7 @@ export default function BovedaPage() {
 
   useEffect(() => { load() }, [])
 
-  const saldoTotalPYG = banks.filter(b => b.moneda === "PYG").reduce((s, b) => s + (b.saldo_actual || 0), 0)
+  const saldoTotalPYG = banks.filter(b => b.moneda === "PYG").reduce((s, b) => s + Number(b.saldo_actual || 0), 0)
   const bankName = (id?: string) => banks.find(b => b.id === id)?.banco || "—"
 
   if (loading) {

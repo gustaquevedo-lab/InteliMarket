@@ -384,7 +384,7 @@ export default function PurchasesPage() {
   useEffect(() => { fetchAll() }, [fetchAll])
 
   const activePOs = useMemo(() => purchaseOrders.filter(p => p.estado !== "cancelado"), [purchaseOrders])
-  const totalPOValue = useMemo(() => activePOs.reduce((a, b) => a + (b.total || 0), 0), [activePOs])
+  const totalPOValue = useMemo(() => activePOs.reduce((a, b) => a + Number(b.total || 0), 0), [activePOs])
   const activeSuppliers = useMemo(() => suppliers.filter(s => s.activo), [suppliers])
 
   const poByStatus = useMemo(() => {
@@ -1153,7 +1153,7 @@ function DashboardTab({ purchaseOrders, activePOs, totalPOValue, suppliers, acti
   const completedPOs = purchaseOrders.filter(p => p.estado === "completado").length
   const totalPOs = purchaseOrders.filter(p => p.estado !== "cancelado").length
   const cumplimiento = totalPOs > 0 ? Math.round((completedPOs / totalPOs) * 100) : 0
-  const monthlySpend = activePOs.reduce((a, b) => a + (b.total || 0), 0)
+  const monthlySpend = activePOs.reduce((a, b) => a + Number(b.total || 0), 0)
   const prevMonthSpend = Math.round(monthlySpend * 0.85)
 
   return (
@@ -1346,7 +1346,7 @@ function RecepcionesTab({ receipts, loading, onNewReceipt }: { receipts: Purchas
   const total = receipts.length
   const pendientesQC = receipts.filter(r => !r.order_id).length
   const completadas = receipts.length
-  const totalUnits = receipts.reduce((a, b) => a + Math.round((b.total || 0) / 10000), 0)
+  const totalUnits = receipts.reduce((a, b) => a + Math.round(Number(b.total || 0) / 10000), 0)
 
   return (
     <div className="space-y-5">
@@ -1400,7 +1400,7 @@ function ProveedoresTab({ suppliers, filteredSuppliers, supplierSearch, setSuppl
 }) {
   const activos = suppliers.filter(s => s.activo).length
   const conContrato = contracts.filter(c => c.activo).length
-  const avgRating = evals.length > 0 ? (evals.reduce((a, b) => a + b.total, 0) / evals.length) : 0
+  const avgRating = evals.length > 0 ? (evals.reduce((a, b) => a + Number(b.total), 0) / evals.length) : 0
 
   return (
     <div className="space-y-5">
@@ -1541,7 +1541,7 @@ function SugerenciasTab({ suggestions, generating, onGenerate, onApply, onDiscar
   const pendientes = suggestions.filter(s => s.estado === "pendiente").length
   const aplicadas = suggestions.filter(s => s.estado === "aplicada").length
   const descartadas = suggestions.filter(s => s.estado === "descartada").length
-  const ahorroPotencial = suggestions.filter(s => s.estado === "pendiente").reduce((a, b) => a + b.total_estimado, 0)
+  const ahorroPotencial = suggestions.filter(s => s.estado === "pendiente").reduce((a, b) => a + Number(b.total_estimado), 0)
 
   return (
     <div className="space-y-5">
@@ -1626,7 +1626,7 @@ function ReportesTab({ purchaseOrders, suppliers, products, reportTab, setReport
   else if (reportPeriod === "12") cutoff.setFullYear(cutoff.getFullYear() - 1)
   const filtered = purchaseOrders.filter(p => new Date(p.fecha ?? "") >= cutoff && p.estado !== "cancelado")
 
-  const totalGasto = filtered.reduce((a, b) => a + (b.total || 0), 0)
+  const totalGasto = filtered.reduce((a, b) => a + Number(b.total || 0), 0)
   const avgPO = filtered.length > 0 ? totalGasto / filtered.length : 0
   const supConCompras = new Set(filtered.map(p => p.supplier_id)).size
 

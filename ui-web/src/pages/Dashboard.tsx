@@ -134,7 +134,7 @@ export default function Dashboard() {
       if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
       if (fin.status === "fulfilled") setFinancial(fin.value)
       if (creditAccs.status === "fulfilled") {
-        setCreditUsed(creditAccs.value.reduce((s: number, a: CreditAccount) => s + (a.saldo_utilizado || 0), 0))
+        setCreditUsed(creditAccs.value.reduce((s: number, a: CreditAccount) => s + Number(a.saldo_utilizado || 0), 0))
       }
     } catch { /* errores por widget ya se manejan abajo */ }
 

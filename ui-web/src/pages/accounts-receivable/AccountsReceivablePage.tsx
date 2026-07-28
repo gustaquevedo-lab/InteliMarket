@@ -75,7 +75,7 @@ export default function AccountsReceivablePage() {
     vencido: "badge-danger",
   }
 
-  const totalSaldo = docs.reduce((a, b) => a + (b.saldo_pendiente || 0), 0)
+  const totalSaldo = docs.reduce((a, b) => a + Number(b.saldo_pendiente || 0), 0)
 
   return (
     <div className="space-y-6">
