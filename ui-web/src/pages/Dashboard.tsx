@@ -163,6 +163,10 @@ export default function Dashboard() {
   const [financial, setFinancial] = useState<{ cuentas_por_cobrar: number } | null>(null)
   const [creditUsed, setCreditUsed] = useState(0)
   const [marginAvg, setMarginAvg] = useState<number | null>(null)
+  // creditUsed arranca en 0 y para muchos tenants (ej. Casa Gonzalito, que no
+  // usa el modulo de credit_accounts) el valor real TAMBIEN es 0 para siempre
+  // — no sirve usar "!creditUsed" como señal de "todavia no cargo".
+  const [kpisLoaded, setKpisLoaded] = useState(false)
 
   // Widget state
   const [weekData, setWeekData] = useState<WeekDay[]>([])
@@ -226,6 +230,7 @@ export default function Dashboard() {
         setCreditUsed(creditAccs.value.reduce((s: number, a: CreditAccount) => s + (a.saldo_utilizado || 0), 0))
       }
     } catch { /* fallback handled below */ }
+    setKpisLoaded(true)
 
     if (isDemo) {
       setSalesSummary({ total_ventas: 47, monto_total: 14500000, ticket_promedio: 308510, total_items: 156 })
@@ -233,6 +238,7 @@ export default function Dashboard() {
       setFinancial({ cuentas_por_cobrar: 45600000 })
       setCreditUsed(12300000)
       setMarginAvg(35000)
+      setKpisLoaded(true)
       const now = new Date()
       const fallbackWeek: WeekDay[] = []
       for (let i = 6; i >= 0; i--) {
@@ -252,117 +258,125 @@ export default function Dashboard() {
       return
     }
 
-    // Week chart
-    setLoadingWeek(true)
-    setErrorWeek(null)
-    try {
-      const periods: { periodo: string; monto: number }[] = await api.reports.salesByPeriod({
-        agrupar_por: "dia",
-        fecha_desde: FOURTEEN_DAYS_AGO,
-        fecha_hasta: TODAY,
-      })
-      const last7: WeekDay[] = []
-      const now = new Date()
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(now)
-        d.setDate(d.getDate() - i)
-        const fechaKey = d.toISOString().slice(0, 10)
-        const current = periods.find(p => p.periodo === fechaKey)
-        const prevD = new Date(now)
-        prevD.setDate(prevD.getDate() - i - 7)
-        const prevKey = prevD.toISOString().slice(0, 10)
-        const previous = periods.find(p => p.periodo === prevKey)
-        last7.push({
-          label: dayLabels[d.getDay()],
-          fecha: fechaKey,
-          monto: current?.monto ?? 0,
-          monto_prev: previous?.monto ?? 0,
+    // Las 5 secciones de abajo son independientes entre si — antes se
+    // esperaban una detras de otra (await secuencial), sumando sus tiempos
+    // en vez de superponerse. Ahora corren en paralelo: el tiempo total de
+    // carga pasa a ser el de la mas lenta, no la suma de todas.
+    setLoadingWeek(true); setErrorWeek(null)
+    setLoadingTop(true); setErrorTop(null)
+    setLoadingStock(true); setErrorStock(null)
+    setLoadingIVA(true); setErrorIVA(null)
+    setLoadingAging(true); setErrorAging(null)
+
+    const loadWeek = async () => {
+      try {
+        const periods: { periodo: string; monto: number }[] = await api.reports.salesByPeriod({
+          agrupar_por: "dia",
+          fecha_desde: FOURTEEN_DAYS_AGO,
+          fecha_hasta: TODAY,
         })
+        const last7: WeekDay[] = []
+        const now = new Date()
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now)
+          d.setDate(d.getDate() - i)
+          const fechaKey = d.toISOString().slice(0, 10)
+          const current = periods.find(p => p.periodo === fechaKey)
+          const prevD = new Date(now)
+          prevD.setDate(prevD.getDate() - i - 7)
+          const prevKey = prevD.toISOString().slice(0, 10)
+          const previous = periods.find(p => p.periodo === prevKey)
+          last7.push({
+            label: dayLabels[d.getDay()],
+            fecha: fechaKey,
+            monto: current?.monto ?? 0,
+            monto_prev: previous?.monto ?? 0,
+          })
+        }
+        setWeekData(last7)
+      } catch {
+        setErrorWeek("No se pudieron cargar las ventas")
+        setWeekData([])
+      } finally {
+        setLoadingWeek(false)
       }
-      setWeekData(last7)
-    } catch {
-      setErrorWeek("No se pudieron cargar las ventas")
-      setWeekData([])
-    } finally {
-      setLoadingWeek(false)
     }
 
     // Top products — agregado en el backend (antes hacia una consulta HTTP
     // por cada venta de los ultimos 7 dias, decenas de requests en cadena
     // que con volumen real de datos dejaban el spinner girando por minutos)
-    setLoadingTop(true)
-    setErrorTop(null)
-    try {
-      const byProduct = await api.reports.salesByProduct({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY, limit: 5 })
-      setTopProducts(byProduct.map((p: any) => ({
-        product_id: p.sku || p.producto,
-        nombre: p.producto,
-        sku: p.sku,
-        cantidad: p.cantidad,
-        total: p.monto,
-      })))
-    } catch {
-      setErrorTop("No se pudieron cargar los productos")
-      setTopProducts([])
-    } finally {
-      setLoadingTop(false)
+    const loadTop = async () => {
+      try {
+        const byProduct = await api.reports.salesByProduct({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY, limit: 5 })
+        setTopProducts(byProduct.map((p: any) => ({
+          product_id: p.sku || p.producto,
+          nombre: p.producto,
+          sku: p.sku,
+          cantidad: p.cantidad,
+          total: p.monto,
+        })))
+      } catch {
+        setErrorTop("No se pudieron cargar los productos")
+        setTopProducts([])
+      } finally {
+        setLoadingTop(false)
+      }
     }
 
-    // Low stock
-    setLoadingStock(true)
-    setErrorStock(null)
-    try {
-      const low = await api.stock.lowStock()
-      const mapped: LowStockItem[] = low.map((s: StockItem) => ({
-        product_id: s.product_id || "",
-        warehouse_id: s.warehouse_id || "",
-        nombre: (s as any).nombre || s.product?.nombre || "Producto",
-        sku: (s as any).sku || s.product?.sku || "",
-        cantidad: s.cantidad || 0,
-        stock_minimo: (s as any).stock_minimo || 10,
-        stock_maximo: (s as any).stock_maximo || 100,
-        costo_unitario: s.costo_unitario || 0,
-      }))
-      setLowStock(mapped.slice(0, 6))
-    } catch {
-      setErrorStock("No se pudieron cargar los stocks")
-      setLowStock([])
-    } finally {
-      setLoadingStock(false)
+    const loadStock = async () => {
+      try {
+        const low = await api.stock.lowStock()
+        const mapped: LowStockItem[] = low.map((s: StockItem) => ({
+          product_id: s.product_id || "",
+          warehouse_id: s.warehouse_id || "",
+          nombre: (s as any).nombre || s.product?.nombre || "Producto",
+          sku: (s as any).sku || s.product?.sku || "",
+          cantidad: s.cantidad || 0,
+          stock_minimo: (s as any).stock_minimo || 10,
+          stock_maximo: (s as any).stock_maximo || 100,
+          costo_unitario: s.costo_unitario || 0,
+        }))
+        setLowStock(mapped.slice(0, 6))
+      } catch {
+        setErrorStock("No se pudieron cargar los stocks")
+        setLowStock([])
+      } finally {
+        setLoadingStock(false)
+      }
     }
 
-    // IVA
-    setLoadingIVA(true)
-    setErrorIVA(null)
-    try {
-      const iva = await api.reports.salesSummary({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY })
-      setIvaSummary({
-        base_10: iva.monto_iva_10 * 10,
-        base_5: iva.monto_iva_5 * 20,
-        exenta: iva.monto_exento,
-        iva_10: iva.monto_iva_10,
-        iva_5: iva.monto_iva_5,
-        total_iva: iva.monto_iva_10 + iva.monto_iva_5,
-      })
-    } catch {
-      setErrorIVA("No se pudo cargar el resumen IVA")
-      setIvaSummary(null)
-    } finally {
-      setLoadingIVA(false)
+    const loadIVA = async () => {
+      try {
+        const iva = await api.reports.salesSummary({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY })
+        setIvaSummary({
+          base_10: iva.monto_iva_10 * 10,
+          base_5: iva.monto_iva_5 * 20,
+          exenta: iva.monto_exento,
+          iva_10: iva.monto_iva_10,
+          iva_5: iva.monto_iva_5,
+          total_iva: iva.monto_iva_10 + iva.monto_iva_5,
+        })
+      } catch {
+        setErrorIVA("No se pudo cargar el resumen IVA")
+        setIvaSummary(null)
+      } finally {
+        setLoadingIVA(false)
+      }
     }
 
-    // Aging
-    setLoadingAging(true)
-    setErrorAging(null)
-    try {
-      const aging = await api.accountsReceivable.aging()
-      setAgingData({ total_pendiente: aging.total_pendiente, buckets: aging.buckets })
-    } catch {
-      setErrorAging("No se pudieron cargar las cuentas")
-      setAgingData(null)
-    } finally {
-      setLoadingAging(false)
+    const loadAging = async () => {
+      try {
+        const aging = await api.accountsReceivable.aging()
+        setAgingData({ total_pendiente: aging.total_pendiente, buckets: aging.buckets })
+      } catch {
+        setErrorAging("No se pudieron cargar las cuentas")
+        setAgingData(null)
+      } finally {
+        setLoadingAging(false)
+      }
     }
+
+    await Promise.allSettled([loadWeek(), loadTop(), loadStock(), loadIVA(), loadAging()])
 
     setLoading(false)
     if (isRefresh) setTimeout(() => setRefreshing(false), 400)
@@ -444,7 +458,7 @@ export default function Dashboard() {
           value={financial ? formatPYG(financial.cuentas_por_cobrar) : "₲ 0"}
           color="indigo"
           trend={{ direction: financial && financial.cuentas_por_cobrar > 10000000 ? "down" : "up", value: "-3%" }}
-          loading={loading}
+          loading={!kpisLoaded}
         />
         <KPICard
           icon={AlertTriangle}
@@ -453,21 +467,21 @@ export default function Dashboard() {
           sublabel={inventorySummary?.sin_stock ? `${inventorySummary.sin_stock} sin stock` : undefined}
           color="red"
           trend={inventorySummary && inventorySummary.bajo_stock > 10 ? { direction: "up", value: "+2" } : { direction: "down", value: "-1" }}
-          loading={loading}
+          loading={!kpisLoaded}
         />
         <KPICard
           icon={Wallet}
           label="Crédito Usado"
           value={formatPYG(creditUsed)}
           color="amber"
-          loading={loading}
+          loading={!kpisLoaded}
         />
         <KPICard
           icon={Percent}
           label="Margen Promedio"
           value={marginAvg !== null ? formatPYG(marginAvg) : "—"}
           color="green"
-          loading={loading}
+          loading={!kpisLoaded}
         />
       </div>
 
