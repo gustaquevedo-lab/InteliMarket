@@ -349,7 +349,7 @@ async def get_tenant_by_slug(db: AsyncSession, slug: str) -> Tenant | None:
 
 
 async def get_user_tenants(db: AsyncSession, user_id: uuid.UUID) -> list[UserTenant]:
-    result = await db.execute(select(UserTenant).where(UserTenant.user_id == user_id, UserTenant.activo == True))
+    result = await db.execute(select(UserTenant).where(UserTenant.user_id == user_id))
     return list(result.scalars().all())
 
 
