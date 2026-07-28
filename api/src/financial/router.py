@@ -94,6 +94,26 @@ async def get_bank_dashboard(company_id: str = Query(), db: AsyncSession = Depen
     return await service.get_bank_dashboard(db, company_id)
 
 
+@router.get("/banks/transactions", response_model=list[BankTransactionResponse])
+async def list_all_bank_transactions(
+    company_id: str = Query(),
+    categoria: str | None = Query(None),
+    conciliado: bool | None = Query(None),
+    desde: date | None = Query(None),
+    hasta: date | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Movimientos bancarios de todas las cuentas de la empresa, sin filtrar por cuenta.
+
+    Registrada antes de /banks/{account_id} — Starlette resuelve rutas en orden
+    de registro, y "transactions" caía en ese account_id (ValueError: badly
+    formed hexadecimal UUID string) cuando este endpoint estaba más abajo.
+    """
+    return await service.list_bank_transactions(db, company_id, None, conciliado, desde, hasta, categoria, limit, offset)
+
+
 @router.get("/banks/{account_id}", response_model=BankAccountResponse)
 async def get_bank_account(account_id: str, db: AsyncSession = Depends(get_db)):
     account = await service.get_bank_account(db, account_id)
@@ -116,25 +136,6 @@ async def delete_bank_account(account_id: str, db: AsyncSession = Depends(get_db
     if not deleted:
         raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada")
     return {"message": "Cuenta bancaria eliminada"}
-
-
-@router.get("/banks/transactions", response_model=list[BankTransactionResponse])
-async def list_all_bank_transactions(
-    company_id: str = Query(),
-    categoria: str | None = Query(None),
-    conciliado: bool | None = Query(None),
-    desde: date | None = Query(None),
-    hasta: date | None = Query(None),
-    limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
-):
-    """Movimientos bancarios de todas las cuentas de la empresa, sin filtrar por cuenta.
-
-    Registrada antes de /banks/{account_id}/transactions para que "transactions"
-    no se interprete como un account_id.
-    """
-    return await service.list_bank_transactions(db, company_id, None, conciliado, desde, hasta, categoria, limit, offset)
 
 
 @router.get("/banks/{account_id}/transactions", response_model=list[BankTransactionResponse])
