@@ -88,7 +88,7 @@ from api.src.financial.models import SupplierInvoice, BankAccount, BankTransacti
 from api.src.petty_cash.models import Expense
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
-from api.src.sales.models import Sale, SaleItem
+from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.inventory.models import Warehouse, Stock
 from api.src.credit_accounts.models import CreditAccount
 
@@ -751,6 +751,55 @@ async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> i
     return count
 
 
+# ── Medios de pago (fin_recebimento + fin_forma_recebimento) ───────────────────
+#
+# fin_operacao_pos tiene el detalle de marca de tarjeta pero datos corruptos
+# (montos con digitos de mas en varias filas de MASTERCARD DEBIT). fin_recebimento
+# es la fuente confiable: recibos reales de cobro de venta, con ID_FORMA_RECEBIMENTO
+# resuelto contra el catalogo fin_forma_recebimento (EFECTIVO, TARJETA CREDITO,
+# TARJETA DEBITO, QR CODE, PIX, TRANF. BANCARIA, CHEQUES, etc.). Usa VL_RECEBIDO
+# (VL_RECEBIMENTO viene NULL en la mayoria de las filas).
+
+async def sync_sale_payments(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = """
+        SELECT r.ID_RECEBIMENTO, r.ID_VENDA, r.VL_RECEBIDO, r.DT_RECEBIMENTO,
+               COALESCE(f.DS_FORMA_RECEBIMENTO, 'DESCONOCIDO') AS forma_pago
+        FROM fin_recebimento r
+        LEFT JOIN fin_forma_recebimento f ON f.ID_FORMA_RECEBIMENTO = r.ID_FORMA_RECEBIMENTO
+        WHERE r.ID_VENDA IS NOT NULL
+    """
+    params: tuple = ()
+    if since:
+        sql += " AND r.DT_RECEBIMENTO >= %s"
+        params = (since,)
+    recibos = await _fetch(sql, params)
+
+    count = 0
+    for r in recibos:
+        existing_id = await _get_mapped_target(db, company_id, "fin_recebimento", r["ID_RECEBIMENTO"])
+        if existing_id:
+            count += 1
+            continue
+
+        sale_id = await _get_mapped_target(db, company_id, "ven_venda", r["ID_VENDA"])
+        if not sale_id:
+            continue
+
+        payment = SalePayment(
+            company_id=company_id,
+            sale_id=sale_id,
+            forma_pago=r["forma_pago"].strip(),
+            monto=Decimal(str(r["VL_RECEBIDO"])),
+            fecha=r["DT_RECEBIMENTO"],
+        )
+        db.add(payment)
+        await db.flush()
+        await _save_map(db, company_id, "fin_recebimento", r["ID_RECEBIMENTO"], "sale_payments", payment.id)
+        count += 1
+
+    return count
+
+
 # ── Stock (view_estoque_catalogo) ───────────────────────────────────────────────
 #
 # view_estoque_catalogo es una vista del legacy que ya trae la cantidad ACTUAL
@@ -876,6 +925,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("cash_register_arqueo", sync_cash_register_arqueo),
         ("cash_deposit_gaps", sync_cash_deposit_gaps),
         ("sales", sync_sales),
+        ("sale_payments", sync_sale_payments),
         ("stock", sync_stock),
         ("credit_accounts", sync_credit_accounts),
     ):

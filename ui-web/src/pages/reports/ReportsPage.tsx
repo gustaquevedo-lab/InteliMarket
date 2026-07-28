@@ -160,6 +160,7 @@ export default function ReportsPage() {
   const [financialSummary, setFinancialSummary] = useState<FinancialSummary | null>(null)
   const [salesByCategory, setSalesByCategory] = useState<{ categoria: string; monto: number }[]>([])
   const [salesByPeriod, setSalesByPeriod] = useState<{ periodo: string; monto: number }[]>([])
+  const [salesByPaymentMethod, setSalesByPaymentMethod] = useState<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>([])
   const [fifoData, setFifoData] = useState<any[]>([])
   const [lifoData, setLifoData] = useState<any[]>([])
   const [costComparison, setCostComparison] = useState<any[]>([])
@@ -169,18 +170,20 @@ export default function ReportsPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [sales, inventory, financial, category, period] = await Promise.allSettled([
+      const [sales, inventory, financial, category, period, paymentMethod] = await Promise.allSettled([
         api.reports.salesSummary(),
         api.reports.inventorySummary(),
         api.reports.financialSummary(),
         api.reports.salesByCategory(),
         api.reports.salesByPeriod({ agrupar_por: "dia" }),
+        api.reports.salesByPaymentMethod(),
       ])
       if (sales.status === "fulfilled") setSalesSummary(sales.value)
       if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
       if (financial.status === "fulfilled") setFinancialSummary(financial.value)
       if (category.status === "fulfilled") setSalesByCategory(category.value)
       if (period.status === "fulfilled") setSalesByPeriod(period.value)
+      if (paymentMethod.status === "fulfilled") setSalesByPaymentMethod(paymentMethod.value)
       if (sales.status === "rejected") toast.info("Datos demo", "Conectá el backend para ver datos reales")
     } catch {
       toast.error("Error", "No se pudieron cargar los reportes")
@@ -326,6 +329,28 @@ export default function ReportsPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Medios de pago */}
+          <div className="card p-6">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white mb-4">Ventas por medio de pago</h3>
+            {salesByPaymentMethod.length > 0 ? (
+              <div className="space-y-3">
+                {salesByPaymentMethod.map((d, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300 w-40 flex-shrink-0 truncate">{d.forma_pago}</span>
+                    <div className="flex-1 h-6 bg-gray-100 dark:bg-gray-800 rounded-md overflow-hidden">
+                      <div className={`h-full ${catColors[i % catColors.length]} rounded-md transition-all flex items-center justify-end px-2`} style={{ width: `${Math.max(d.porcentaje, 4)}%` }}>
+                        <span className="text-[10px] font-bold text-white">{d.porcentaje}%</span>
+                      </div>
+                    </div>
+                    <span className="text-xs font-mono text-gray-500 w-28 text-right flex-shrink-0">{formatPYG(d.monto)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-center py-8 text-gray-400">Sin datos de medios de pago todavía</p>
+            )}
           </div>
 
           {/* FIFO/LIFO Costing */}

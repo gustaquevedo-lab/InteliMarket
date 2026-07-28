@@ -68,3 +68,18 @@ class SaleItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     sale = relationship("Sale", back_populates="items")
+
+
+class SalePayment(Base):
+    """Desglose de medios de pago por venta (efectivo, tarjeta, QR, PIX, etc.)"""
+    __tablename__ = "sale_payments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    sale_id = Column(UUID(as_uuid=True), ForeignKey("sales.id"), nullable=False, index=True)
+    forma_pago = Column(String(30), nullable=False)
+    monto = Column(Numeric(15, 0), nullable=False)
+    fecha = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    sale = relationship("Sale")

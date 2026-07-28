@@ -31,6 +31,11 @@ async def sales_by_category(fecha_desde: date | None = Query(None), fecha_hasta:
     return await service.get_sales_by_category(db, fecha_desde, fecha_hasta)
 
 
+@router.get("/sales/by-payment-method")
+async def sales_by_payment_method(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.get_sales_by_payment_method(db, fecha_desde, fecha_hasta)
+
+
 @router.get("/sales/by-product")
 async def sales_by_product(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), limit: int = Query(50, le=200), db: AsyncSession = Depends(get_db)):
     return await service.get_sales_by_product(db, fecha_desde, fecha_hasta, limit)

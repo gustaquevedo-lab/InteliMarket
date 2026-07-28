@@ -139,6 +139,39 @@ async def get_sales_by_category(db: AsyncSession, fecha_desde: Optional[date] = 
     ]
 
 
+async def get_sales_by_payment_method(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    params = {}
+    where = "1=1"
+    if fecha_desde:
+        where += " AND sp.fecha >= :fecha_desde"
+        params["fecha_desde"] = fecha_desde
+    if fecha_hasta:
+        where += " AND sp.fecha < CAST(:fecha_hasta AS date) + interval '1 day'"
+        params["fecha_hasta"] = fecha_hasta
+
+    query = f"""
+        SELECT
+            sp.forma_pago as forma_pago,
+            COUNT(*) as cantidad,
+            SUM(sp.monto) as monto
+        FROM sale_payments sp
+        WHERE {where}
+        GROUP BY sp.forma_pago
+        ORDER BY monto DESC
+    """
+    results = (await _exec(db, query, params)).all()
+    total = float(sum(r["monto"] for r in results)) or 1
+    return [
+        {
+            "forma_pago": r["forma_pago"],
+            "cantidad": int(r["cantidad"]),
+            "monto": float(r["monto"]),
+            "porcentaje": round((float(r["monto"]) / total) * 100, 1),
+        }
+        for r in results
+    ]
+
+
 async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, limit: int = 50) -> list:
     params = {"limit": limit}
     where = "v.estado <> 'cancelado'"
