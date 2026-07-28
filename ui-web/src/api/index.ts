@@ -356,7 +356,7 @@ export const api = {
   },
   stock: {
     lowStock: () => client.get<StockItem[]>(`/v1/companies/${COMPANY_ID}/low-stock`),
-    list: () => client.get<StockItem[]>("/v1/stock"),
+    list: () => client.get<StockItem[]>(`/v1/companies/${COMPANY_ID}/stock`),
     transfer: (data: { warehouse_origen_id: string; warehouse_destino_id: string; items: { product_id: string; cantidad: number }[] }) => client.post<any>("/v1/stock/transfer", data),
   },
   caja: {
@@ -483,24 +483,27 @@ export const api = {
     seed: () => client.post<void>("/v1/rbac/seed"),
   },
   purchases: {
-    orders: () => client.get<PurchaseOrder[]>("/v1/purchases/orders"),
-    listPOs: () => client.get<PurchaseOrder[]>("/v1/purchases/orders"),
-    getOrder: (id: string) => client.get<PurchaseOrder>(`/v1/purchases/orders/${id}`),
-    createOrder: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchases/orders", data),
-    createPO: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchases/orders", data),
-    updateOrder: (id: string, data: Partial<PurchaseOrder>) => client.patch<PurchaseOrder>(`/v1/purchases/orders/${id}`, data),
-    confirmOrder: (id: string) => client.post<PurchaseOrder>(`/v1/purchases/orders/${id}/confirm`),
-    confirmPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchases/orders/${id}/confirm`),
-    receipts: () => client.get<PurchaseReceipt[]>("/v1/purchases/receipts"),
-    listReceipts: () => client.get<PurchaseReceipt[]>("/v1/purchases/receipts"),
-    getReceipt: (id: string) => client.get<PurchaseReceipt>(`/v1/purchases/receipts/${id}`),
-    createReceipt: (data: Partial<PurchaseReceipt>) => client.post<PurchaseReceipt>("/v1/purchases/receipts", data),
-    suppliers: () => client.get<Supplier[]>("/v1/purchases/suppliers"),
-    listSuppliers: () => client.get<Supplier[]>("/v1/purchases/suppliers"),
-    getSupplier: (id: string) => client.get<Supplier>(`/v1/purchases/suppliers/${id}`),
-    createSupplier: (data: Partial<Supplier>) => client.post<Supplier>("/v1/purchases/suppliers", data),
-    updateSupplier: (id: string, data: Partial<Supplier>) => client.patch<Supplier>(`/v1/purchases/suppliers/${id}`, data),
-    deleteSupplier: (id: string) => client.delete<void>(`/v1/purchases/suppliers/${id}`),
+    // Los paths reales del backend van bajo /companies/{company_id}/... para
+    // los listados y sin prefijo "/purchases" para el resto — no
+    // "/v1/purchases/*", que no existe (daba 404 en todos estos).
+    orders: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
+    listPOs: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
+    getOrder: (id: string) => client.get<PurchaseOrder>(`/v1/purchase-orders/${id}`),
+    createOrder: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", data),
+    createPO: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", data),
+    updateOrder: (id: string, data: Partial<PurchaseOrder>) => client.patch<PurchaseOrder>(`/v1/purchase-orders/${id}`, data),
+    confirmOrder: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/confirm`),
+    confirmPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/confirm`),
+    receipts: () => client.get<PurchaseReceipt[]>(`/v1/companies/${COMPANY_ID}/purchase-receipts`),
+    listReceipts: () => client.get<PurchaseReceipt[]>(`/v1/companies/${COMPANY_ID}/purchase-receipts`),
+    getReceipt: (id: string) => client.get<PurchaseReceipt>(`/v1/purchase-receipts/${id}`),
+    createReceipt: (data: Partial<PurchaseReceipt>) => client.post<PurchaseReceipt>("/v1/purchase-receipts", data),
+    suppliers: () => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`),
+    listSuppliers: () => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`),
+    getSupplier: (id: string) => client.get<Supplier>(`/v1/suppliers/${id}`),
+    createSupplier: (data: Partial<Supplier>) => client.post<Supplier>("/v1/suppliers", data),
+    updateSupplier: (id: string, data: Partial<Supplier>) => client.patch<Supplier>(`/v1/suppliers/${id}`, data),
+    deleteSupplier: (id: string) => client.delete<void>(`/v1/suppliers/${id}`),
   },
   sifen: {
     timbrados: {
@@ -587,14 +590,14 @@ export const api = {
     summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/commissions/summary`),
   },
   discounts: {
-    list: () => client.get<Discount[]>("/v1/discounts"),
+    list: () => client.get<Discount[]>(`/v1/companies/${COMPANY_ID}/discounts`),
     get: (id: string) => client.get<Discount>(`/v1/discounts/${id}`),
     create: (data: Partial<Discount>) => client.post<Discount>("/v1/discounts", data),
     update: (id: string, data: Partial<Discount>) => client.patch<Discount>(`/v1/discounts/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/discounts/${id}`),
   },
   quotes: {
-    list: (params?: { estado?: string }) => client.get<Quote[]>("/v1/quotes", params as any),
+    list: (params?: { estado?: string }) => client.get<Quote[]>(`/v1/companies/${COMPANY_ID}/quotes`, params as any),
     get: (id: string) => client.get<Quote>(`/v1/quotes/${id}`),
     create: (data: Partial<Quote>) => client.post<Quote>("/v1/quotes", data),
     update: (id: string, data: Partial<Quote>) => client.patch<Quote>(`/v1/quotes/${id}`, data),
@@ -604,7 +607,7 @@ export const api = {
     expire: () => client.post<{expiradas: number}>("/v1/quotes/expire"),
   },
   returns: {
-    list: (params?: { estado?: string }) => client.get<Return[]>("/v1/returns", params as any),
+    list: (params?: { estado?: string }) => client.get<Return[]>(`/v1/companies/${COMPANY_ID}/returns`, params as any),
     get: (id: string) => client.get<Return>(`/v1/returns/${id}`),
     create: (data: Partial<Return>) => client.post<Return>("/v1/returns", data),
     update: (id: string, data: Partial<Return>) => client.patch<Return>(`/v1/returns/${id}`, data),
@@ -615,7 +618,7 @@ export const api = {
     reject: (id: string, motivo?: string) => client.post<Return>(`/v1/returns/${id}/reject`, { motivo }),
   },
   salesOrders: {
-    list: (params?: { estado?: string }) => client.get<SalesOrder[]>("/v1/sales-orders", params as any),
+    list: (params?: { estado?: string }) => client.get<SalesOrder[]>(`/v1/companies/${COMPANY_ID}/sales-orders`, params as any),
     get: (id: string) => client.get<SalesOrder>(`/v1/sales-orders/${id}`),
     create: (data: Partial<SalesOrder>) => client.post<SalesOrder>("/v1/sales-orders", data),
     update: (id: string, data: Partial<SalesOrder>) => client.patch<SalesOrder>(`/v1/sales-orders/${id}`, data),
@@ -1490,7 +1493,11 @@ export const api = {
   },
 
   // ===== FASE 2 SUPERMER — Physical Inventory =====
-  inventory: {
+  // Renombrado de "inventory" a "supermerInventory": pisaba en silencio la
+  // definicion core de mas arriba (misma clave repetida en el object
+  // literal) — api.inventory.transfers() quedaba undefined para todo el
+  // mundo, no solo supermer.
+  supermerInventory: {
     sessions: {
       list: (params?: { area?: string; estado?: string }) => client.get<any[]>("/v1/supermer/inventory/sessions", params),
       get: (id: string) => client.get<any>(`/v1/supermer/inventory/sessions/${id}`),
@@ -1539,7 +1546,10 @@ export const api = {
   },
 
   // ===== FASE 2 SUPERMER — Supplier Returns =====
-  returns: {
+  // Renombrado de "returns" a "supplierReturns": pisaba la definicion core
+  // de mas arriba — ReturnsPage.tsx (core, devoluciones de venta) pegaba
+  // sin saberlo a /v1/supermer/returns (devoluciones a proveedor).
+  supplierReturns: {
     list: (params?: { estado?: string; proveedor_id?: string }) => client.get<any[]>("/v1/supermer/returns", params),
     get: (id: string) => client.get<any>(`/v1/supermer/returns/${id}`),
     create: (data: any) => client.post<any>("/v1/supermer/returns", data),

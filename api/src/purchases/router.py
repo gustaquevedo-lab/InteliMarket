@@ -119,9 +119,11 @@ async def list_purchase_orders(
     company_id: str,
     supplier_id: str | None = Query(None),
     estado: str | None = Query(None),
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_purchase_orders(db, company_id, supplier_id, estado)
+    return await service.list_purchase_orders(db, company_id, supplier_id, estado, limit=limit, offset=offset)
 
 
 @router.get("/purchase-orders/{po_id}", response_model=POWithItems)

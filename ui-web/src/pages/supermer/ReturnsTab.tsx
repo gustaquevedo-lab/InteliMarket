@@ -47,16 +47,16 @@ export default function ReturnsTab() {
     setLoading(true)
     try {
       const p: Promise<any>[] = []
-      if (subTab === "returns") p.push(api.returns.list().then(setReturns))
+      if (subTab === "returns") p.push(api.supplierReturns.list().then(setReturns))
       if (subTab === "backhaul") p.push(api.backhaul.list().then(setBackhauls))
-      if (subTab === "dashboard") p.push(api.returns.dashboard().then(setDashData))
+      if (subTab === "dashboard") p.push(api.supplierReturns.dashboard().then(setDashData))
       await Promise.all(p.map(p => p.catch(() => {})))
     } finally { setLoading(false) }
   }
 
   const loadAuthorizations = async (returnId: string) => {
     try {
-      const data = await api.returns.authorizations.list(returnId)
+      const data = await api.supplierReturns.authorizations.list(returnId)
       setAuthorizations(prev => ({ ...prev, [returnId]: data }))
     } catch {}
   }
@@ -64,7 +64,7 @@ export default function ReturnsTab() {
   const handleAuthorize = async (id: string) => {
     setSaving(true)
     try {
-      const res = await api.returns.authorize(id)
+      const res = await api.supplierReturns.authorize(id)
       setReturns(prev => prev.map(r => r.id === id ? { ...r, ...res } : r))
       toast.success("Devolución autorizada")
     } catch (e: any) { toast.error(e.message) } finally { setSaving(false) }
@@ -73,7 +73,7 @@ export default function ReturnsTab() {
   const handleComplete = async (id: string) => {
     setSaving(true)
     try {
-      const res = await api.returns.complete(id)
+      const res = await api.supplierReturns.complete(id)
       setReturns(prev => prev.map(r => r.id === id ? { ...r, ...res } : r))
       toast.success("Devolución completada")
     } catch (e: any) { toast.error(e.message) } finally { setSaving(false) }

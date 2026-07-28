@@ -46,10 +46,10 @@ export default function InventoryTab() {
     setLoading(true)
     try {
       const p: Promise<any>[] = []
-      if (subTab === "sessions") p.push(api.inventory.sessions.list().then(setSessions))
-      if (subTab === "items" && selectedSession) p.push(api.inventory.sessions.items.list(selectedSession).then(d => setCountItems(prev => ({ ...prev, [selectedSession]: d }))))
-      if (subTab === "adjustments" && selectedSession) p.push(api.inventory.sessions.adjustments.list(selectedSession).then(setAdjustments))
-      if (subTab === "dashboard") p.push(api.inventory.dashboard().then(setDashData))
+      if (subTab === "sessions") p.push(api.supermerInventory.sessions.list().then(setSessions))
+      if (subTab === "items" && selectedSession) p.push(api.supermerInventory.sessions.items.list(selectedSession).then(d => setCountItems(prev => ({ ...prev, [selectedSession]: d }))))
+      if (subTab === "adjustments" && selectedSession) p.push(api.supermerInventory.sessions.adjustments.list(selectedSession).then(setAdjustments))
+      if (subTab === "dashboard") p.push(api.supermerInventory.dashboard().then(setDashData))
       await Promise.all(p.map(p => p.catch(() => {})))
     } finally { setLoading(false) }
   }
@@ -57,7 +57,7 @@ export default function InventoryTab() {
   const handleCompleteSession = async (id: string) => {
     setSaving(true)
     try {
-      const res = await api.inventory.sessions.complete(id)
+      const res = await api.supermerInventory.sessions.complete(id)
       setSessions(prev => prev.map(s => s.id === id ? { ...s, ...res } : s))
       toast.success("Sesión completada exitosamente")
     } catch (e: any) { toast.error(e.message) } finally { setSaving(false) }
@@ -65,7 +65,7 @@ export default function InventoryTab() {
 
   const handleApproveAdjustment = async (id: string) => {
     try {
-      const res = await api.inventory.adjustments.approve(id)
+      const res = await api.supermerInventory.adjustments.approve(id)
       setAdjustments(prev => prev.map(a => a.id === id ? { ...a, ...res } : a))
       toast.success("Ajuste aprobado")
     } catch (e: any) { toast.error(e.message) }

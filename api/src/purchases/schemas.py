@@ -73,13 +73,18 @@ class SupplierResponse(BaseModel):
     ciudad: Optional[str] = None
     telefono: Optional[str] = None
     email: Optional[str] = None
-    plazo_pago_dias: int
+    # Optional en vez de required-con-default: un default de Pydantic solo
+    # aplica cuando el atributo esta AUSENTE, no cuando el ORM lo trae en
+    # None explicito (que es el caso real para los 2.514 proveedores
+    # migrados de Casa Gonzalito) — con estos como required, GET /suppliers
+    # tiraba 500 para todos.
+    plazo_pago_dias: Optional[int] = None
     activo: bool
-    tipo_proveedor: str = "nacional"
+    tipo_proveedor: Optional[str] = "nacional"
     grupo: Optional[str] = None
     categoria_ids: Optional[list[UUID]] = None
-    moneda_default: str = "PYG"
-    plazo_entrega_promedio: int = 0
+    moneda_default: Optional[str] = "PYG"
+    plazo_entrega_promedio: Optional[int] = None
     rating: Optional[Decimal] = None
     notas: Optional[str] = None
     contacto_nombre: Optional[str] = None
@@ -88,8 +93,8 @@ class SupplierResponse(BaseModel):
     banco: Optional[str] = None
     cuenta_bancaria: Optional[str] = None
     tipo_contribuyente: Optional[str] = None
-    retencion_irp: bool = False
-    retencion_iva: bool = False
+    retencion_irp: Optional[bool] = None
+    retencion_iva: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
 
@@ -159,7 +164,9 @@ class POResponse(BaseModel):
     fecha_entrega_estimada: Optional[date] = None
     estado: str
     moneda: str
-    tipo_cambio: Decimal
+    # NULL en las 106.726 ordenes migradas de Casa Gonzalito (el legacy no
+    # maneja tipo de cambio) — required tiraba 500 en TODA la lista.
+    tipo_cambio: Optional[Decimal] = None
     subtotal: Optional[Decimal] = None
     descuento_total: Optional[Decimal] = None
     iva_10: Optional[Decimal] = None

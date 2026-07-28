@@ -228,13 +228,17 @@ async def list_purchase_orders(
     company_id: str,
     supplier_id: str | None = None,
     estado: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[PurchaseOrder]:
     query = select(PurchaseOrder).where(PurchaseOrder.company_id == uuid.UUID(company_id))
     if supplier_id:
         query = query.where(PurchaseOrder.supplier_id == uuid.UUID(supplier_id))
     if estado:
         query = query.where(PurchaseOrder.estado == estado)
-    query = query.order_by(PurchaseOrder.fecha.desc())
+    # Sin limit/offset esto devolvia las 106.726 ordenes de Casa Gonzalito de
+    # una sola vez.
+    query = query.order_by(PurchaseOrder.fecha.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 

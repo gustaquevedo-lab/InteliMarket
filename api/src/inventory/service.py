@@ -43,6 +43,34 @@ async def get_stock_by_warehouse(db: AsyncSession, warehouse_id: str) -> list[St
     return list(result.scalars().all())
 
 
+async def get_company_stock(db: AsyncSession, company_id: str) -> list[dict]:
+    """Stock de TODOS los almacenes de la empresa, con nombre/sku reales.
+    No existia un endpoint company-wide — el frontend pegaba a /v1/stock
+    (sin company_id, 404) y la pagina de Almacenes no mostraba nada, pese a
+    tener stock real cargado en la migracion."""
+    result = await db.execute(
+        select(Stock, Product.nombre, Product.sku, Product.stock_minimo)
+        .join(Product, Stock.product_id == Product.id)
+        .where(Product.company_id == company_id)
+        .order_by(Product.nombre)
+    )
+    rows = result.fetchall()
+    return [
+        {
+            "id": str(row[0].id),
+            "product_id": str(row[0].product_id),
+            "warehouse_id": str(row[0].warehouse_id),
+            "nombre": row[1],
+            "sku": row[2],
+            "cantidad": row[0].cantidad,
+            "cantidad_reservada": row[0].cantidad_reservada,
+            "stock_minimo": row[3],
+            "costo_unitario": float(row[0].costo_unitario) if row[0].costo_unitario else None,
+        }
+        for row in rows
+    ]
+
+
 async def get_low_stock(db: AsyncSession, company_id: str) -> list[dict]:
     result = await db.execute(
         select(Stock, Product.nombre, Product.stock_minimo, Product.sku)

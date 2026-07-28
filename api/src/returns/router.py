@@ -13,6 +13,11 @@ async def create_return(body: ReturnCreate, db: AsyncSession = Depends(get_db)):
     return await service.create_return(db, body)
 
 
+@router.get("/returns/motivos")
+async def list_motivos():
+    return service.RETURN_MOTIVOS
+
+
 @router.get("/returns/{return_id}", response_model=ReturnWithItems)
 async def get_return(return_id: str, db: AsyncSession = Depends(get_db)):
     result = await service.get_return_with_items(db, return_id)
@@ -50,8 +55,3 @@ async def reject_return(
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo rechazar la devolución")
     return result
-
-
-@router.get("/returns/motivos")
-async def list_motivos():
-    return service.RETURN_MOTIVOS

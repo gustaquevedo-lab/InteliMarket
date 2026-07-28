@@ -31,6 +31,11 @@ async def get_warehouse_stock(warehouse_id: str, db: AsyncSession = Depends(get_
     return await service.get_stock_by_warehouse(db, warehouse_id)
 
 
+@router.get("/companies/{company_id}/stock")
+async def get_company_stock(company_id: str, db: AsyncSession = Depends(get_db)):
+    return await service.get_company_stock(db, company_id)
+
+
 @router.get("/companies/{company_id}/low-stock")
 async def get_low_stock(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_low_stock(db, company_id)
