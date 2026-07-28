@@ -32,5 +32,4 @@ class UserTenant(Base):
     user_id = Column(UUID(as_uuid=True), nullable=False)
     tenant_id = Column(UUID(as_uuid=True), nullable=False)
     rol = Column(String(30), nullable=False, default="operador")
-    activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -63,7 +63,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     # Get user's primary tenant
     ut_result = await db.execute(
         select(UserTenant)
-        .where(UserTenant.user_id == user.id, UserTenant.activo == True)
+        .where(UserTenant.user_id == user.id)
         .order_by(UserTenant.rol.desc())
         .limit(1)
     )
