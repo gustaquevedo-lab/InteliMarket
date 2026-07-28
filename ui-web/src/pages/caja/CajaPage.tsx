@@ -57,7 +57,7 @@ export default function CajaPage() {
 
   const totalRegisters = registers.length
   const openSessions = sessions.filter(s => s.estado === "abierta").length
-  const totalApertura = sessions.reduce((a, s) => a + (s.monto_apertura || 0), 0)
+  const totalApertura = sessions.reduce((a, s) => a + Number(s.monto_apertura || 0), 0)
 
   const handleOpenSession = async () => {
     if (!selectedRegister) {

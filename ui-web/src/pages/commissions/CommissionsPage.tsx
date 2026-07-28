@@ -78,9 +78,9 @@ export default function CommissionsPage() {
     !search || (c.vendedor_id?.toLowerCase().includes(search.toLowerCase()) ?? false)
   )
 
-  const totalComisiones = commissions.reduce((a, c) => a + (c.monto_comision || 0), 0)
-  const pendientes = commissions.filter(c => c.estado === "pendiente").reduce((a, c) => a + (c.monto_comision || 0), 0)
-  const pagadas = commissions.filter(c => c.estado === "pagada").reduce((a, c) => a + (c.monto_comision || 0), 0)
+  const totalComisiones = commissions.reduce((a, c) => a + Number(c.monto_comision || 0), 0)
+  const pendientes = commissions.filter(c => c.estado === "pendiente").reduce((a, c) => a + Number(c.monto_comision || 0), 0)
+  const pagadas = commissions.filter(c => c.estado === "pagada").reduce((a, c) => a + Number(c.monto_comision || 0), 0)
 
   const handleSubmitRule = async () => {
     if (!ruleForm.nombre || ruleForm.porcentaje == null) {

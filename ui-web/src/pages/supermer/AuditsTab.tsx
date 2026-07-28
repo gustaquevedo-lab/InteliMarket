@@ -698,7 +698,7 @@ function EjecucionesTab({ data, templates, search, setSearch, fetchAll, toast }:
 
 function DashboardTab({ data }: { data: AuditDashboard }) {
   const totalAprobadas = data.por_area.reduce((s, a) => s + a.aprobadas, 0)
-  const totalGlobal = data.por_area.reduce((s, a) => s + a.total, 0)
+  const totalGlobal = data.por_area.reduce((s, a) => s + Number(a.total), 0)
 
   const cards = [
     { label: "Ejecuciones Hoy", value: data.ejecuciones_hoy, icon: CheckSquare, color: "text-blue-600" },

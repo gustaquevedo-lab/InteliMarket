@@ -84,7 +84,7 @@ export default function ReturnsPage() {
   const pendientes = returns.filter(r => r.estado === "pendiente").length
   const aprobadas = returns.filter(r => r.estado === "aprobado").length
   const rechazadas = returns.filter(r => r.estado === "rechazado").length
-  const montoTotal = returns.reduce((a, b) => a + (b.total || 0), 0)
+  const montoTotal = returns.reduce((a, b) => a + Number(b.total || 0), 0)
 
   const handleLoadSaleItems = async (saleId: string) => {
     if (!saleId) { setSaleItems([]); setSelectedItems({}); return }

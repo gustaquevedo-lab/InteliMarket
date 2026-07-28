@@ -45,8 +45,8 @@ export default function PaymentsPage() {
     (p.tipo || "").includes(search)
   )
 
-  const cobros = payments.filter(p => p.tipo === "cobro").reduce((a, b) => a + (b.monto || 0), 0)
-  const pagos = payments.filter(p => p.tipo === "pago").reduce((a, b) => a + (b.monto || 0), 0)
+  const cobros = payments.filter(p => p.tipo === "cobro").reduce((a, b) => a + Number(b.monto || 0), 0)
+  const pagos = payments.filter(p => p.tipo === "pago").reduce((a, b) => a + Number(b.monto || 0), 0)
 
   const handleCreatePayment = async () => {
     if (!paymentForm.payment_method_id || !paymentForm.monto) {

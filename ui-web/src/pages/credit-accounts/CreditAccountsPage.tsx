@@ -44,8 +44,8 @@ export default function CreditAccountsPage() {
   })
 
   const totalCredito = accounts.reduce((sum, a) => sum + (a.limite_credito || 0), 0)
-  const totalUtilizado = accounts.reduce((sum, a) => sum + (a.saldo_utilizado || 0), 0)
-  const totalDisponible = accounts.reduce((sum, a) => sum + (a.saldo_disponible || 0), 0)
+  const totalUtilizado = accounts.reduce((sum, a) => sum + Number(a.saldo_utilizado || 0), 0)
+  const totalDisponible = accounts.reduce((sum, a) => sum + Number(a.saldo_disponible || 0), 0)
 
   const handleSubmit = async () => {
     if (!form.customer_id || !form.limite_credito) {
