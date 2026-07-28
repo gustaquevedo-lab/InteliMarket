@@ -39,8 +39,7 @@ export default function CreditAccountsPage() {
   useEffect(() => { fetchData() }, [])
 
   const filtered = accounts.filter(a => {
-    const customer = customers.find(c => c.id === a.customer_id)
-    return !search || (customer?.razon_social?.toLowerCase().includes(search.toLowerCase()) ?? false) || (customer?.ruc?.includes(search) ?? false)
+    return !search || (a.customer_nombre?.toLowerCase().includes(search.toLowerCase()) ?? false) || (a.customer_ruc?.includes(search) ?? false)
   })
 
   const totalCredito = accounts.reduce((sum, a) => sum + (a.limite_credito || 0), 0)
@@ -158,13 +157,12 @@ export default function CreditAccountsPage() {
               <tr><td colSpan={7} className="text-center py-12 text-gray-400">No hay cuentas de crédito</td></tr>
             ) : (
               filtered.map((a) => {
-                const customer = customers.find(c => c.id === a.customer_id)
                 const usoPct = (a.limite_credito || 0) > 0 ? Math.round(((a.saldo_utilizado || 0) / (a.limite_credito || 1)) * 100) : 0
                 return (
                   <tr key={a.id} className="table-row">
                     <td className="table-td">
-                      <p className="text-sm font-medium">{customer?.razon_social || "—"}</p>
-                      <p className="text-xs text-gray-400">{customer?.ruc || customer?.ci || ""}</p>
+                      <p className="text-sm font-medium">{a.customer_nombre || "—"}</p>
+                      <p className="text-xs text-gray-400">{a.customer_ruc || ""}</p>
                     </td>
                     <td className="table-td text-right font-mono font-bold">{formatPYG(a.limite_credito)}</td>
                     <td className="table-td text-right font-mono text-amber-500">{formatPYG(a.saldo_utilizado)}</td>
@@ -234,7 +232,7 @@ export default function CreditAccountsPage() {
             <div className="p-6 space-y-4">
               <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
                 <p className="text-sm text-gray-500">Cliente</p>
-                <p className="font-bold">{customers.find(c => c.id === selectedAccount.customer_id)?.razon_social || "—"}</p>
+                <p className="font-bold">{selectedAccount.customer_nombre || "—"}</p>
                 <p className="text-sm text-gray-500 mt-2">Saldo actual</p>
                 <p className="text-xl font-bold text-amber-500">{formatPYG(selectedAccount.saldo_utilizado)}</p>
               </div>

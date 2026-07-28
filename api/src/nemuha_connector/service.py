@@ -864,9 +864,15 @@ async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> i
 # 469 de 4.699 personas reales tienen un límite de crédito > 0 (verificado).
 # saldo_utilizado se calcula desde accounts_receivable (ya sincronizada), no
 # desde el legacy — es la misma fuente de verdad que usa el resto del sistema.
+# VL_LIMITE_CREDITO = 1 es un valor centinela del legado (35 casos verificados):
+# "tiene crédito habilitado" sin límite numérico real configurado — no un
+# límite de 1 guaraní. Sincronizarlo tal cual generaba "disponible" negativo
+# absurdo (deuda real sin límite real para compararla). Se excluyen: su deuda
+# real ya queda registrada en accounts_receivable, solo no se les arma una
+# línea de crédito formal con un límite inventado.
 
 async def sync_credit_accounts(db: AsyncSession, company_id: str, since: date | None) -> int:
-    rows = await _fetch("SELECT ID_PESSOA, VL_LIMITE_CREDITO FROM bs_pessoa WHERE VL_LIMITE_CREDITO > 0")
+    rows = await _fetch("SELECT ID_PESSOA, VL_LIMITE_CREDITO FROM bs_pessoa WHERE VL_LIMITE_CREDITO > 1")
 
     count = 0
     for r in rows:
