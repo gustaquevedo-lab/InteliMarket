@@ -1,7 +1,8 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { ArrowLeftRight, Search, Plus, Trash2, Send, CheckCircle2, AlertTriangle, Truck, Eye, FileText } from "lucide-react"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
+import { api } from "../../api"
 
 interface TransferOrder {
   id: string
@@ -25,82 +26,49 @@ interface TransferOrder {
   }[]
 }
 
-const MOCK_TRANSFERS: TransferOrder[] = [
-  {
-    id: "TR-001",
-    codigo: "TRF-2026-001",
-    origen: "Centro de Distribución (CD)",
-    destino: "Sucursal Centro (Súper)",
-    fecha: "2026-05-27",
-    itemsCount: 15,
-    valorTotal: 12500000,
-    estado: "Recibido",
-    asignado: "Carlos Maidana",
-    mermasReportadas: 2,
-    observaciones: "Palé de lácteos y carnes en frío.",
-    items: [
-      { product_id: "1", nombre: "Leche Entera Trébol 1L", sku: "7840001002231", cantidad: 120, recibido: 118, merma: 2 },
-      { product_id: "2", nombre: "Queso Paraguay Fresco kg", sku: "7840003004456", cantidad: 45, recibido: 45, merma: 0 },
-      { product_id: "3", nombre: "Pechuga de Pollo Kzero kg", sku: "7840005001123", cantidad: 80, recibido: 80, merma: 0 }
-    ]
-  },
-  {
-    id: "TR-002",
-    codigo: "TRF-2026-002",
-    origen: "Centro de Distribución (CD)",
-    destino: "Sucursal San Lorenzo",
-    fecha: "2026-05-27",
-    itemsCount: 8,
-    valorTotal: 8400000,
-    estado: "En Tránsito",
-    asignado: "Marta Benítez",
-    observaciones: "Artículos de limpieza y bazar.",
-    items: [
-      { product_id: "4", nombre: "Detergente OMO Multiactivo 800g", sku: "7840007008899", cantidad: 50 },
-      { product_id: "5", nombre: "Desodorante de Ambiente Glade", sku: "7840009002211", cantidad: 30 }
-    ]
-  },
-  {
-    id: "TR-003",
-    codigo: "TRF-2026-003",
-    origen: "Sucursal Luque",
-    destino: "Sucursal Centro (Súper)",
-    fecha: "2026-05-26",
-    itemsCount: 4,
-    valorTotal: 1800000,
-    estado: "Borrador",
-    asignado: "José Giménez",
-    items: [
-      { product_id: "6", nombre: "Aceite de Girasol Natura 900ml", sku: "7790272001029", cantidad: 24 }
-    ]
-  }
-]
-
+// No existe todavia un endpoint de listado de transferencias en el backend
+// (solo POST /inventory/transfers y POST .../complete) — antes esta pagina
+// mostraba 3 transferencias ficticias de un supermercado como si fueran
+// reales. Arranca vacia hasta que exista el GET real.
 export default function TransferenciasPage() {
-  const [transfers, setTransfers] = useState<TransferOrder[]>(MOCK_TRANSFERS)
+  const [transfers, setTransfers] = useState<TransferOrder[]>([])
   const [selectedTransfer, setSelectedTransfer] = useState<TransferOrder | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [search, setSearch] = useState("")
   const toast = useToast()
 
   // Form State
-  const [origen, setOrigen] = useState("Centro de Distribución (CD)")
-  const [destino, setDestino] = useState("Sucursal Centro (Súper)")
+  const [warehouses, setWarehouses] = useState<{ id: string; nombre: string }[]>([])
+  const [origen, setOrigen] = useState("")
+  const [destino, setDestino] = useState("")
   const [observaciones, setObservaciones] = useState("")
   const [asignado, setAsignado] = useState("")
   const [newItems, setNewItems] = useState<{ product_id: string; nombre: string; sku: string; cantidad: number }[]>([])
-  
-  // Quick Search for product selection inside modal
-  const [prodSearch, setProdSearch] = useState("")
-  const MOCK_PRODUCTS = [
-    { id: "1", nombre: "Leche Entera Trébol 1L", sku: "7840001002231" },
-    { id: "2", nombre: "Queso Paraguay Fresco kg", sku: "7840003004456" },
-    { id: "3", nombre: "Pechuga de Pollo Kzero kg", sku: "7840005001123" },
-    { id: "4", nombre: "Detergente OMO Multiactivo 800g", sku: "7840007008899" },
-    { id: "5", nombre: "Desodorante de Ambiente Glade", sku: "7840009002211" }
-  ]
 
-  const handleAddProduct = (prod: typeof MOCK_PRODUCTS[0]) => {
+  useEffect(() => {
+    api.warehouses.list()
+      .then((data: any[]) => {
+        setWarehouses(data)
+        if (data.length > 0) { setOrigen(data[0].nombre); setDestino(data[1]?.nombre || data[0].nombre) }
+      })
+      .catch(() => setWarehouses([]))
+  }, [])
+  
+  // Quick Search for product selection inside modal — busca en el catálogo real
+  const [prodSearch, setProdSearch] = useState("")
+  const [productResults, setProductResults] = useState<{ id: string; nombre: string; sku: string }[]>([])
+
+  useEffect(() => {
+    if (!showCreateModal) return
+    const t = setTimeout(() => {
+      api.products.list({ search: prodSearch || undefined, activo: true })
+        .then(data => setProductResults(data.map((p: any) => ({ id: p.id, nombre: p.nombre, sku: p.sku }))))
+        .catch(() => setProductResults([]))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [prodSearch, showCreateModal])
+
+  const handleAddProduct = (prod: { id: string; nombre: string; sku: string }) => {
     if (newItems.some(item => item.product_id === prod.id)) {
       toast.info("Ya agregado", "El producto ya está en la lista de picking")
       return
@@ -385,19 +353,13 @@ export default function TransferenciasPage() {
                 <div>
                   <label className="input-label label-required">Almacén Origen</label>
                   <select className="input-field" value={origen} onChange={e => setOrigen(e.target.value)}>
-                    <option value="Centro de Distribución (CD)">Centro de Distribución (CD)</option>
-                    <option value="Sucursal Centro (Súper)">Sucursal Centro (Súper)</option>
-                    <option value="Sucursal San Lorenzo">Sucursal San Lorenzo</option>
-                    <option value="Sucursal Luque">Sucursal Luque</option>
+                    {warehouses.map(w => <option key={w.id} value={w.nombre}>{w.nombre}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="input-label label-required">Almacén Destino</label>
                   <select className="input-field" value={destino} onChange={e => setDestino(e.target.value)}>
-                    <option value="Sucursal Centro (Súper)">Sucursal Centro (Súper)</option>
-                    <option value="Centro de Distribución (CD)">Centro de Distribución (CD)</option>
-                    <option value="Sucursal San Lorenzo">Sucursal San Lorenzo</option>
-                    <option value="Sucursal Luque">Sucursal Luque</option>
+                    {warehouses.map(w => <option key={w.id} value={w.nombre}>{w.nombre}</option>)}
                   </select>
                 </div>
               </div>
@@ -428,7 +390,7 @@ export default function TransferenciasPage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 max-h-[150px] overflow-y-auto mb-4 bg-gray-50 dark:bg-slate-800/40 p-2 rounded-lg">
-                  {MOCK_PRODUCTS.filter(p => p.nombre.toLowerCase().includes(prodSearch.toLowerCase())).map(p => (
+                  {productResults.map(p => (
                     <button 
                       key={p.id} 
                       onClick={() => handleAddProduct(p)}

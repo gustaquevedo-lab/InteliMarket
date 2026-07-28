@@ -5,81 +5,17 @@ import { Search, Plus, Loader2, DollarSign, Building2, Landmark, PiggyBank, Tren
 
 type Tab = "dashboard" | "ap" | "bancos" | "cashflow" | "presupuestos" | "pagos"
 
-// ── Mock Seed Data for Financial Demo Mode ────────────────────────────
-const MOCK_DASHBOARD: FinancialDashboard = {
-  ap_dashboard: {
-    total_pendiente: 184500000,
-    total_vencido: 42000000,
-    facturas_pendientes: 14,
-    facturas_vencidas: 3,
-    proveedores_con_deuda: 6,
-    aging_30: 98000000,
-    aging_60: 32500000,
-    aging_90: 21000000,
-    aging_90_plus: 33000000
-  } as any,
-  cash_flow: {
-    saldo_bancario: 345600000,
-    saldo_proyectado_7d: 389000000,
-    saldo_proyectado_30d: 412000000
-  } as any
-}
-
-const MOCK_INVOICES: SupplierInvoice[] = [
-  { id: "inv1", supplier_nombre: "Frigorífico Guaraní S.A.", numero_factura: "001-002-0045120", total: 45000000, saldo_pendiente: 45000000, fecha_vencimiento: "2026-06-15", estado: "pendiente" } as any,
-  { id: "inv2", supplier_nombre: "Distribuidora del Este", numero_factura: "002-001-0089456", total: 12500000, saldo_pendiente: 0, fecha_vencimiento: "2026-05-20", estado: "pagada" } as any,
-  { id: "inv3", supplier_nombre: "Coca-Cola FEMSA", numero_factura: "001-010-0034120", total: 18000000, saldo_pendiente: 18000000, fecha_vencimiento: "2026-05-24", estado: "pendiente" } as any,
-  { id: "inv4", supplier_nombre: "Lácteos La Pradera", numero_factura: "005-001-0022485", total: 8500000, saldo_pendiente: 8500000, fecha_vencimiento: "2026-06-02", estado: "aprobada" } as any,
-  { id: "inv5", supplier_nombre: "Química del Sur S.A.", numero_factura: "001-004-0012589", total: 24000000, saldo_pendiente: 24000000, fecha_vencimiento: "2026-05-18", estado: "pendiente" } as any
-]
-
-const MOCK_AGING = [
-  { supplier_nombre: "Frigorífico Guaraní S.A.", current: 15000000, days_1_30: 30000000, days_31_60: 0, days_61_90: 0, days_90_plus: 0, total: 45000000 },
-  { supplier_nombre: "Coca-Cola FEMSA", current: 0, days_1_30: 0, days_31_60: 18000000, days_61_90: 0, days_90_plus: 0, total: 18000000 },
-  { supplier_nombre: "Química del Sur S.A.", current: 0, days_1_30: 0, days_31_60: 0, days_61_90: 24000000, days_90_plus: 0, total: 24000000 }
-]
-
-const MOCK_BANKS: BankAccount[] = [
-  { id: "b1", banco: "Banco Itaú Paraguay", tipo: "corriente", numero_cuenta: "70014852-3", moneda: "PYG", saldo_actual: 245000000 } as any,
-  { id: "b2", banco: "Banco Continental", tipo: "ahorro", numero_cuenta: "15-23458-09", moneda: "PYG", saldo_actual: 100600000 } as any,
-  { id: "b3", banco: "Sudameris Bank", tipo: "corriente", numero_cuenta: "45-897120-1", moneda: "USD", saldo_actual: 15000 } as any
-]
-
-const MOCK_CASHFLOW: CashFlowProjection[] = [
-  { id: "cf1", fecha: "2026-05-27", saldo_inicial: 345600000, ingresos_estimados: 42000000, egresos_estimados: 15000000, saldo_final_proyectado: 372600000, saldo_final_real: 372600000 } as any,
-  { id: "cf2", fecha: "2026-05-28", saldo_inicial: 372600000, ingresos_estimados: 38000000, egresos_estimados: 24000000, saldo_final_proyectado: 386600000, saldo_final_real: null } as any,
-  { id: "cf3", fecha: "2026-05-29", saldo_inicial: 386600000, ingresos_estimados: 45000000, egresos_estimados: 8000000, saldo_final_proyectado: 423600000, saldo_final_real: null } as any
-]
-
-const MOCK_BUDGETS: Budget[] = [
-  { id: "bu1", nombre: "Presupuesto General de Carnicería", periodo: "2026-05", area: "carniceria", monto_presupuestado: 150000000, monto_ejecutado: 112000000, monto_disponible: 38000000 } as any,
-  { id: "bu2", nombre: "Presupuesto Harina y Panificados", periodo: "2026-05", area: "panaderia", monto_presupuestado: 80000000, monto_ejecutado: 74000000, monto_disponible: 600000 } as any,
-  { id: "bu3", nombre: "Publicidad y Campañas de Marketing", periodo: "2026-05", area: "general", monto_presupuestado: 25000000, monto_ejecutado: 12000000, monto_disponible: 13000000 } as any
-]
-
-const MOCK_RUNS: PaymentRun[] = [
-  { id: "pr1", nombre: "Pago de Proveedores - Fin de Mes", estado: "ejecutado", fecha_programada: "2026-05-25", total_monto: 88000000, metodo_pago: "transferencia", items: [{}, {}, {}] } as any,
-  { id: "pr2", nombre: "Lote Extraordinario - Servicios", estado: "borrador", fecha_programada: "2026-05-30", total_monto: 14200000, metodo_pago: "cheque", items: [{}] } as any
-]
-
-const MOCK_RATIOS = {
-  liquidity_ratio: 1.85,
-  rotacion_cartera_dias: 24,
-  rotacion_proveedores_dias: 35,
-  ciclo_efectivo_dias: 14
-}
-
 export default function FinancialPage() {
   const [tab, setTab] = useState<Tab>("dashboard")
   const [loading, setLoading] = useState(true)
-  const [dashboard, setDashboard] = useState<FinancialDashboard | null>(MOCK_DASHBOARD)
-  const [invoices, setInvoices] = useState<SupplierInvoice[]>(MOCK_INVOICES)
-  const [banks, setBanks] = useState<BankAccount[]>(MOCK_BANKS)
-  const [budgets, setBudgets] = useState<Budget[]>(MOCK_BUDGETS)
-  const [paymentRuns, setPaymentRuns] = useState<PaymentRun[]>(MOCK_RUNS)
-  const [cashFlow, setCashFlow] = useState<CashFlowProjection[]>(MOCK_CASHFLOW)
-  const [ratios, setRatios] = useState<any>(MOCK_RATIOS)
-  const [aging, setAging] = useState<any[]>(MOCK_AGING)
+  const [dashboard, setDashboard] = useState<FinancialDashboard | null>(null)
+  const [invoices, setInvoices] = useState<SupplierInvoice[]>([])
+  const [banks, setBanks] = useState<BankAccount[]>([])
+  const [budgets, setBudgets] = useState<Budget[]>([])
+  const [paymentRuns, setPaymentRuns] = useState<PaymentRun[]>([])
+  const [cashFlow, setCashFlow] = useState<CashFlowProjection[]>([])
+  const [ratios, setRatios] = useState<any>(null)
+  const [aging, setAging] = useState<any[]>([])
   const [search, setSearch] = useState("")
   const [showInvoiceForm, setShowInvoiceForm] = useState(false)
   const [showBankForm, setShowBankForm] = useState(false)

@@ -17,65 +17,15 @@ interface ReplenishItem {
   prioridad: "Alta" | "Media" | "Baja"
 }
 
-const MOCK_ITEMS: ReplenishItem[] = [
-  {
-    id: "REP-01",
-    producto: "Leche Entera Trébol 1L",
-    sku: "7840001002231",
-    proveedor: "Lácteos Cooperativa Trébol",
-    stockActual: 45,
-    stockSeguridad: 120,
-    velocidadVenta: 42,
-    leadTime: 3,
-    sugerido: 201, // 120 + (42 * 3) - 45 = 201
-    costoUnitario: 5800,
-    prioridad: "Alta"
-  },
-  {
-    id: "REP-02",
-    producto: "Tomate Perita Seleccionado kg",
-    sku: "7840002001122",
-    proveedor: "Abasto Central Distribuidora",
-    stockActual: 18,
-    stockSeguridad: 60,
-    velocidadVenta: 25,
-    leadTime: 1,
-    sugerido: 67, // 60 + (25 * 1) - 18 = 67
-    costoUnitario: 7500,
-    prioridad: "Alta"
-  },
-  {
-    id: "REP-03",
-    producto: "Detergente OMO Multiactivo 800g",
-    sku: "7840007008899",
-    proveedor: "Unilever Paraguay",
-    stockActual: 52,
-    stockSeguridad: 40,
-    velocidadVenta: 8,
-    leadTime: 5,
-    sugerido: 28, // 40 + (8 * 5) - 52 = 28
-    costoUnitario: 14500,
-    prioridad: "Media"
-  },
-  {
-    id: "REP-04",
-    producto: "Arroz Tipo 1 Clarilla 1kg",
-    sku: "7840008003322",
-    proveedor: "Clarilla S.A.",
-    stockActual: 150,
-    stockSeguridad: 100,
-    velocidadVenta: 15,
-    leadTime: 4,
-    sugerido: 0, // 100 + (15 * 4) - 150 = 10 (pero como tenemos 150, es 0)
-    costoUnitario: 5200,
-    prioridad: "Baja"
-  }
-]
-
+// El calculo real de reposicion sugerida (stock actual + velocidad de venta +
+// lead time del proveedor) todavia no tiene un endpoint backend — solo existe
+// el CRUD de reglas (advanced_inventory/replenish-rules). Antes esta pagina
+// mostraba 4 productos ficticios de supermercado como si fueran sugerencias
+// reales. Arranca vacia hasta que exista el motor de calculo real.
 export default function AutoReplenishPage() {
-  const [items, setItems] = useState<ReplenishItem[]>(MOCK_ITEMS)
+  const [items, setItems] = useState<ReplenishItem[]>([])
   const [search, setSearch] = useState("")
-  const [selectedItems, setSelectedItems] = useState<string[]>(["REP-01", "REP-02", "REP-03"])
+  const [selectedItems, setSelectedItems] = useState<string[]>([])
   const toast = useToast()
 
   const handleToggleSelect = (id: string) => {

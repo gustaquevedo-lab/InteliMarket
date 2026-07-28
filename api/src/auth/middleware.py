@@ -20,14 +20,19 @@ async def get_current_user(
 
     # Acceso directo de demo (ui-web AuthContext.loginDemo) — string fijo, no un
     # JWT real. Solo el frontend de demo lo emite; no es un login real.
+    # IMPORTANTE: company_id/tenant_id son un UUID que NO existe en ninguna base
+    # real (verificado). Antes apuntaba a los IDs reales de Casa Gonzalito —
+    # cualquiera que mandara este token sin contraseña veía datos reales de
+    # produccion del cliente en toda la app salvo el Dashboard (que sí tiene
+    # su propio mock hardcodeado). No reusar IDs reales de ningún tenant acá.
     if credentials.credentials == "demo-token":
         return {
-            "id": "00000000-0000-0000-0000-0000000000d1",
+            "id": "11111111-1111-1111-1111-111111111111",
             "email": "demo@intelimarket.py",
             "nombre": "Demo",
             "rol": "admin",
-            "company_id": "00000000-0000-0000-0000-000000000010",
-            "tenant_id": "00000000-0000-0000-0000-000000000001",
+            "company_id": "11111111-1111-1111-1111-111111111111",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
         }
 
     try:

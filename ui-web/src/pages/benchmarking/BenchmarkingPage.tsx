@@ -26,80 +26,6 @@ const KPI_UNITS: Record<string, string> = {
   labor_productivity: "Gs/hora",
 }
 
-const BRANCHES = [
-  { id: "b001", name: "Suc. Central" },
-  { id: "b002", name: "Suc. Shopping" },
-  { id: "b003", name: "Suc. Centro" },
-  { id: "b004", name: "Suc. Norte" },
-  { id: "b005", name: "Suc. Sur" },
-]
-
-const MOCK_DASHBOARD = {
-  total_stores: 5,
-  periods_analyzed: 12,
-  avg_overall_score: 71.3,
-  green_stores: 2,
-  yellow_stores: 2,
-  red_stores: 1,
-  top_store: { branch_id: "b001", branch_name: "Suc. Central", score: 88.5 },
-  bottom_store: { branch_id: "b005", branch_name: "Suc. Sur", score: 45.2 },
-  best_kpi: { branch: "Suc. Central", kpi: "Margen Bruto %", value: 34.5 },
-  worst_kpi: { branch: "Suc. Sur", kpi: "Shrinkage %", value: 4.8 },
-  rankings: [] as any[],
-  trend_data: [
-    { period_start: "2026-04-14", avg_score: 65.2 },
-    { period_start: "2026-04-21", avg_score: 67.8 },
-    { period_start: "2026-04-28", avg_score: 69.1 },
-    { period_start: "2026-05-05", avg_score: 68.4 },
-    { period_start: "2026-05-12", avg_score: 72.0 },
-    { period_start: "2026-05-19", avg_score: 70.5 },
-    { period_start: "2026-05-26", avg_score: 73.8 },
-    { period_start: "2026-06-02", avg_score: 71.3 },
-  ],
-}
-
-const MOCK_RANKINGS: any[] = [
-  { branch_id: "b001", branch_name: "Suc. Central", kpi_key: "gross_margin_pct", kpi_label: "Margen Bruto %", value: 34.5, rank: 1, total: 5, percentile: 20, direction: "higher", unit: "%", trend: "up" },
-  { branch_id: "b002", branch_name: "Suc. Shopping", kpi_key: "gross_margin_pct", kpi_label: "Margen Bruto %", value: 31.2, rank: 2, total: 5, percentile: 40, direction: "higher", unit: "%", trend: "stable" },
-  { branch_id: "b003", branch_name: "Suc. Centro", kpi_key: "gross_margin_pct", kpi_label: "Margen Bruto %", value: 29.8, rank: 3, total: 5, percentile: 60, direction: "higher", unit: "%", trend: "down" },
-  { branch_id: "b004", branch_name: "Suc. Norte", kpi_key: "gross_margin_pct", kpi_label: "Margen Bruto %", value: 27.5, rank: 4, total: 5, percentile: 80, direction: "higher", unit: "%", trend: "up" },
-  { branch_id: "b005", branch_name: "Suc. Sur", kpi_key: "gross_margin_pct", kpi_label: "Margen Bruto %", value: 24.1, rank: 5, total: 5, percentile: 100, direction: "higher", unit: "%", trend: "down" },
-  { branch_id: "b003", branch_name: "Suc. Centro", kpi_key: "sales_per_sqm", kpi_label: "Ventas/m²", value: 1850000, rank: 1, total: 5, percentile: 20, direction: "higher", unit: "Gs", trend: "up" },
-  { branch_id: "b001", branch_name: "Suc. Central", kpi_key: "sales_per_sqm", kpi_label: "Ventas/m²", value: 1720000, rank: 2, total: 5, percentile: 40, direction: "higher", unit: "Gs", trend: "stable" },
-  { branch_id: "b002", branch_name: "Suc. Shopping", kpi_key: "sales_per_sqm", kpi_label: "Ventas/m²", value: 1650000, rank: 3, total: 5, percentile: 60, direction: "higher", unit: "Gs", trend: "down" },
-  { branch_id: "b004", branch_name: "Suc. Norte", kpi_key: "sales_per_sqm", kpi_label: "Ventas/m²", value: 1450000, rank: 4, total: 5, percentile: 80, direction: "higher", unit: "Gs", trend: "up" },
-  { branch_id: "b005", branch_name: "Suc. Sur", kpi_key: "sales_per_sqm", kpi_label: "Ventas/m²", value: 1280000, rank: 5, total: 5, percentile: 100, direction: "higher", unit: "Gs", trend: "stable" },
-  { branch_id: "b001", branch_name: "Suc. Central", kpi_key: "shrinkage_pct", kpi_label: "Shrinkage %", value: 1.8, rank: 1, total: 5, percentile: 20, direction: "lower", unit: "%", trend: "down" },
-  { branch_id: "b002", branch_name: "Suc. Shopping", kpi_key: "shrinkage_pct", kpi_label: "Shrinkage %", value: 2.1, rank: 2, total: 5, percentile: 40, direction: "lower", unit: "%", trend: "stable" },
-  { branch_id: "b004", branch_name: "Suc. Norte", kpi_key: "shrinkage_pct", kpi_label: "Shrinkage %", value: 2.5, rank: 3, total: 5, percentile: 60, direction: "lower", unit: "%", trend: "up" },
-  { branch_id: "b003", branch_name: "Suc. Centro", kpi_key: "shrinkage_pct", kpi_label: "Shrinkage %", value: 2.8, rank: 4, total: 5, percentile: 80, direction: "lower", unit: "%", trend: "stable" },
-  { branch_id: "b005", branch_name: "Suc. Sur", kpi_key: "shrinkage_pct", kpi_label: "Shrinkage %", value: 4.8, rank: 5, total: 5, percentile: 100, direction: "lower", unit: "%", trend: "up" },
-]
-
-const MOCK_SCORES: any[] = [
-  { branch_id: "b001", branch_name: "Suc. Central", overall_score: 88.5, traffic_light: "green", rank: 1, total_stores: 5, percentile: 20, kpi_scores: { sales_per_sqm: 85, gross_margin_pct: 92, shrinkage_pct: 90, inventory_turnover: 78, avg_ticket: 82, transactions_per_day: 88, labor_productivity: 95 } },
-  { branch_id: "b002", branch_name: "Suc. Shopping", overall_score: 76.2, traffic_light: "green", rank: 2, total_stores: 5, percentile: 40, kpi_scores: { sales_per_sqm: 72, gross_margin_pct: 80, shrinkage_pct: 85, inventory_turnover: 70, avg_ticket: 75, transactions_per_day: 78, labor_productivity: 82 } },
-  { branch_id: "b003", branch_name: "Suc. Centro", overall_score: 68.4, traffic_light: "yellow", rank: 3, total_stores: 5, percentile: 60, kpi_scores: { sales_per_sqm: 78, gross_margin_pct: 65, shrinkage_pct: 72, inventory_turnover: 62, avg_ticket: 70, transactions_per_day: 68, labor_productivity: 65 } },
-  { branch_id: "b004", branch_name: "Suc. Norte", overall_score: 61.8, traffic_light: "yellow", rank: 4, total_stores: 5, percentile: 80, kpi_scores: { sales_per_sqm: 58, gross_margin_pct: 72, shrinkage_pct: 78, inventory_turnover: 55, avg_ticket: 60, transactions_per_day: 65, labor_productivity: 58 } },
-  { branch_id: "b005", branch_name: "Suc. Sur", overall_score: 45.2, traffic_light: "red", rank: 5, total_stores: 5, percentile: 100, kpi_scores: { sales_per_sqm: 42, gross_margin_pct: 48, shrinkage_pct: 35, inventory_turnover: 40, avg_ticket: 50, transactions_per_day: 45, labor_productivity: 52 } },
-]
-
-const MOCK_COMPARISON: any[] = [
-  { region_id: "r1", region_name: "Zona Centro", store_count: 2, avg_score: 82.4, avg_sales_per_sqm: 1785000, avg_margin: 32.9, avg_shrinkage: 1.95, avg_ticket: 48500, best_store: "Suc. Central", worst_store: "Suc. Shopping" },
-  { region_id: "r2", region_name: "Zona Periferia", store_count: 2, avg_score: 55.0, avg_sales_per_sqm: 1365000, avg_margin: 25.8, avg_shrinkage: 3.65, avg_ticket: 38000, best_store: "Suc. Norte", worst_store: "Suc. Sur" },
-  { region_id: "unassigned", region_name: "Sin Región", store_count: 1, avg_score: 68.4, avg_sales_per_sqm: 1650000, avg_margin: 29.8, avg_shrinkage: 2.8, avg_ticket: 42000, best_store: null, worst_store: null },
-]
-
-const MOCK_CONFIGS: any[] = [
-  { kpi_key: "sales_per_sqm", kpi_label: "Ventas/m²", weight: 1.0, target_value: 1500000, target_direction: "higher", green_threshold: 80, red_threshold: 40, unit: "Gs/m²", is_active: true },
-  { kpi_key: "gross_margin_pct", kpi_label: "Margen Bruto %", weight: 1.5, target_value: 30, target_direction: "higher", green_threshold: 80, red_threshold: 40, unit: "%", is_active: true },
-  { kpi_key: "shrinkage_pct", kpi_label: "Shrinkage %", weight: 1.5, target_value: 2.5, target_direction: "lower", green_threshold: 80, red_threshold: 40, unit: "%", is_active: true },
-  { kpi_key: "inventory_turnover", kpi_label: "Rotación Inventario", weight: 0.8, target_value: 8, target_direction: "higher", green_threshold: 60, red_threshold: 30, unit: "x", is_active: true },
-  { kpi_key: "avg_ticket", kpi_label: "Ticket Promedio", weight: 0.8, target_value: 40000, target_direction: "higher", green_threshold: 70, red_threshold: 35, unit: "Gs", is_active: true },
-  { kpi_key: "transactions_per_day", kpi_label: "Transacciones/día", weight: 0.7, target_value: 500, target_direction: "higher", green_threshold: 70, red_threshold: 35, unit: "trans/día", is_active: true },
-  { kpi_key: "labor_productivity", kpi_label: "Productividad Laboral", weight: 0.7, target_value: 150000, target_direction: "higher", green_threshold: 70, red_threshold: 35, unit: "Gs/hora", is_active: true },
-]
-
 function TrendIcon({ trend }: { trend?: string }) {
   if (trend === "up") return <ChevronUp className="w-4 h-4 text-green-500" />
   if (trend === "down") return <ChevronDown className="w-4 h-4 text-red-500" />
@@ -122,11 +48,11 @@ export default function BenchmarkingPage() {
   const [filterKpi, setFilterKpi] = useState<string>("gross_margin_pct")
   const toast = useToast()
 
-  const [dashboard, setDashboard] = useState<any>(MOCK_DASHBOARD)
-  const [rankings, setRankings] = useState<any[]>(MOCK_RANKINGS)
-  const [scores, setScores] = useState<any[]>(MOCK_SCORES)
-  const [comparison, setComparison] = useState<any[]>(MOCK_COMPARISON)
-  const [configs, setConfigs] = useState<any[]>(MOCK_CONFIGS)
+  const [dashboard, setDashboard] = useState<any>(null)
+  const [rankings, setRankings] = useState<any[]>([])
+  const [scores, setScores] = useState<any[]>([])
+  const [comparison, setComparison] = useState<any[]>([])
+  const [configs, setConfigs] = useState<any[]>([])
   const [historyModal, setHistoryModal] = useState<any>(null)
 
   const fetchAll = async () => {

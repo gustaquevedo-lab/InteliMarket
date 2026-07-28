@@ -56,7 +56,13 @@ VERTICALS: dict[str, VerticalPreset] = {
         nombre="Distribución / Mayorista",
         descripcion="Para distribuidores, mayoristas e importadores. Gestión completa: importación con costos landed, acuerdos comerciales con proveedores y clientes, ruteo de venta, gestión de crédito, cobranzas en ruta, InteliCont integrado.",
         features=[
-            "pos", "crm", "inventory", "sales", "purchases", "payments",
+            # Nota: "crm" (CrmPage.tsx, "Fidelidad & CRM") es un club de fidelizacion
+            # de consumidor final con categorias de supermercado (panaderia, carniceria,
+            # verduleria) sin datos reales conectados — no aplica a un distribuidor
+            # mayorista B2B. El modulo real de clientes para esta vertical es
+            # "clientes_fidelizacion" (ClientesPage.tsx), que ya esta en esta lista
+            # y si tiene endpoints reales (RFM, loyalty, cupones, ofertas).
+            "pos", "inventory", "sales", "purchases", "payments",
             "reports", "sifen", "caja", "branches", "returns",
             "logistics", "credit_accounts", "stock_lots", "variants",
             "quotes", "sales_orders", "price_lists", "imports", "rbac",

@@ -62,51 +62,13 @@ interface RiskItem {
 
 type Tab = "dashboard" | "alerts" | "cash" | "log" | "risks"
 
-/* ─────────────────────── MOCK DATA ─────────────────────── */
-const MOCK_LOGS: AuditLog[] = [
-  { id: "a1", accion: "venta_completada", entidad: "Venta", user_id: "Alicia Gimenez", created_at: "2026-05-27T10:15:00Z", datos_nuevos: { total: 3450000, items: 15, sucursal: "Centro" } },
-  { id: "a2", accion: "desposte_ejecutado", entidad: "Carnicería", user_id: "Carlos Maidana", created_at: "2026-05-27T09:30:00Z", datos_nuevos: { peso_entrada: 220, rendimiento: 100 } },
-  { id: "a3", accion: "transferencia_despachada", entidad: "Inventario", user_id: "Marta Benítez", created_at: "2026-05-27T08:00:00Z", datos_anteriores: { stock: 150 }, datos_nuevos: { origen: "CD", destino: "Centro", stock: 120 } },
-  { id: "a4", accion: "descuento_manual", entidad: "Venta", user_id: "Roberto Díaz", created_at: "2026-05-27T11:22:00Z", datos_anteriores: { precio: 85000 }, datos_nuevos: { precio: 42500, descuento_pct: 50 } },
-  { id: "a5", accion: "anulacion_venta", entidad: "Venta", user_id: "Roberto Díaz", created_at: "2026-05-27T11:45:00Z", datos_anteriores: { total: 120000 }, datos_nuevos: { motivo: "error_cajero" } },
-  { id: "a6", accion: "stock_ajustado", entidad: "Inventario", user_id: "Sistema", created_at: "2026-05-27T00:05:00Z", datos_anteriores: { cant: 500 }, datos_nuevos: { cant: 460, merma: 40 } },
-  { id: "a7", accion: "login_usuario", entidad: "Seguridad", user_id: "Admin", created_at: "2026-05-27T02:33:00Z", ip_address: "201.217.18.45", datos_nuevos: { ip: "201.217.18.45", pais: "Argentina" } },
-  { id: "a8", accion: "precio_modificado", entidad: "Producto", user_id: "Marta Benítez", created_at: "2026-05-26T16:10:00Z", datos_anteriores: { precio: 15000 }, datos_nuevos: { precio: 9000, variacion_pct: -40 } },
-  { id: "a9", accion: "devolucion_registrada", entidad: "Venta", user_id: "Alicia Gimenez", created_at: "2026-05-27T12:05:00Z", datos_nuevos: { monto: 85000, motivo: "producto_defectuoso" } },
-  { id: "a10", accion: "cliente_creado", entidad: "Cliente", user_id: "Marta Benítez", created_at: "2026-05-26T14:20:00Z", datos_nuevos: { nombre: "Supermercados ABC", ruc: "80123456-1" } },
-]
+/* ─────────────────────── DATA ─────────────────────── */
+// Alertas, riesgos y sesiones de caja no tienen endpoint backend todavia —
+// antes se mostraban datos ficticios de un supermercado (cajeros, HACCP,
+// carniceria) como si fueran reales. Hasta que exista un modulo real,
+// arrancan vacios en vez de inventar actividad de un negocio que no existe.
+const CASH_SESSIONS: CashSession[] = []
 
-const MOCK_ALERTS: InternalAlert[] = [
-  { id: "al1", severity: "critical", type: "Descuento excesivo sin autorización", description: "Roberto Díaz aplicó descuento del 50% (Gs 42.500) sin aprobación gerencial. Umbral: 30%.", user: "Roberto Díaz", area: "POS / Cajero", timestamp: "2026-05-27T11:22:00Z", resolved: false, recommendation: "Revertir descuento y notificar al gerente de turno. Evaluar suspensión temporal del permiso de descuento." },
-  { id: "al2", severity: "critical", type: "Anulaciones múltiples mismo cajero", description: "Roberto Díaz realizó 3 anulaciones en la última hora. Patrón anómalo detectado.", user: "Roberto Díaz", area: "POS / Cajero", timestamp: "2026-05-27T11:45:00Z", resolved: false, recommendation: "Revisar las tickets anulados con supervisión. Verificar si hay faltante de caja asociado." },
-  { id: "al3", severity: "high", type: "Diferencia de caja superior a Gs 50.000", description: "Cierre de caja nocturno presentó diferencia de Gs 87.000. Cajera: Alicia Gimenez.", user: "Alicia Gimenez", area: "Caja N°2", timestamp: "2026-05-26T23:55:00Z", resolved: false, recommendation: "Corroborar el conteo físico. Solicitar reconteo y cruzar con registro POS del turno." },
-  { id: "al4", severity: "high", type: "Login desde IP desconocida en horario nocturno", description: "Usuario Admin accedió desde IP 201.217.18.45 (Argentina) a las 02:33 hs.", user: "Admin", area: "Seguridad", timestamp: "2026-05-27T02:33:00Z", resolved: false, recommendation: "Verificar con el propietario de la cuenta. Si no fue autorizado, bloquear sesión y cambiar contraseña." },
-  { id: "al5", severity: "medium", type: "Precio de producto reducido -40% sin justificación", description: "Marta Benítez modificó el precio de 'Arroz 5kg' de Gs 15.000 a Gs 9.000 (-40%).", user: "Marta Benítez", area: "Productos", timestamp: "2026-05-26T16:10:00Z", resolved: false, recommendation: "Confirmar si el cambio fue autorizado por gerencia. Revisar historial de cambios de precios del usuario." },
-  { id: "al6", severity: "medium", type: "Merma nocturna excede promedio histórico", description: "Ajuste automático de stock registró merma de 40 unidades (8%). Promedio histórico: 3.2%.", user: "Sistema", area: "Inventario", timestamp: "2026-05-27T00:05:00Z", resolved: false, recommendation: "Realizar inventario físico de los artículos afectados. Cruzar con cámaras de seguridad del período." },
-  { id: "al7", severity: "low", type: "Proveedor con alta tasa de rechazo", description: "Distribuidora del Sur acumula 12% de recepciones rechazadas en los últimos 30 días.", user: undefined, area: "Compras / Recepción", timestamp: "2026-05-24T09:00:00Z", resolved: true, recommendation: "Evaluar renegociación de contrato o cambio de proveedor. Aplicar penalización contractual si corresponde." },
-  { id: "al8", severity: "low", type: "Producto sin movimiento 45 días", description: "15 SKUs sin ventas en más de 45 días. Posible ocultamiento de merma o falta de rotación.", user: undefined, area: "Inventario", timestamp: "2026-05-20T00:00:00Z", resolved: false, recommendation: "Realizar conteo físico de los SKUs afectados. Evaluar promoción o devolución al proveedor." },
-]
-
-const MOCK_CASH: CashSession[] = [
-  { id: "c1", date: "2026-05-27", cashier: "Alicia Gimenez", expected: 4850000, actual: 4763000, diff: -87000, status: "critical", discounts: 245000, returns: 1, voids: 0 },
-  { id: "c2", date: "2026-05-27", cashier: "Roberto Díaz", expected: 3210000, actual: 3205000, diff: -5000, status: "ok", discounts: 590000, returns: 3, voids: 3 },
-  { id: "c3", date: "2026-05-26", cashier: "Alicia Gimenez", expected: 5120000, actual: 5134000, diff: 14000, status: "ok", discounts: 180000, returns: 0, voids: 1 },
-  { id: "c4", date: "2026-05-26", cashier: "Lorenzo Caballero", expected: 2890000, actual: 2890000, diff: 0, status: "ok", discounts: 95000, returns: 1, voids: 0 },
-  { id: "c5", date: "2026-05-25", cashier: "Roberto Díaz", expected: 3450000, actual: 3395000, diff: -55000, status: "warning", discounts: 420000, returns: 2, voids: 2 },
-  { id: "c6", date: "2026-05-25", cashier: "Alicia Gimenez", expected: 4780000, actual: 4799000, diff: 19000, status: "ok", discounts: 135000, returns: 0, voids: 0 },
-]
-
-const MOCK_RISKS: RiskItem[] = [
-  { id: "r1", risk: "Robo interno por parte de cajeros", area: "POS / Caja", probability: 3, impact: 4, owner: "Gerente Operaciones", status: "active", notes: "Controles implementados: cámaras en cajas, conteo doble al cierre." },
-  { id: "r2", risk: "Desabastecimiento por falla de proveedor clave", area: "Compras", probability: 2, impact: 5, owner: "Jefe de Compras", status: "active", notes: "Proveedor alternativo identificado para los 10 SKUs más críticos." },
-  { id: "r3", risk: "Incumplimiento HACCP en cadena de frío", area: "Carnicería / Pescadería", probability: 2, impact: 5, owner: "Responsable Calidad", status: "mitigated", notes: "Sensores IoT instalados. Alertas automáticas configuradas." },
-  { id: "r4", risk: "Pérdida de datos por falla de servidores", area: "IT / Sistemas", probability: 2, impact: 5, owner: "IT Manager", status: "mitigated", notes: "Backups diarios en la nube. RTO estimado: 4 horas." },
-  { id: "r5", risk: "Fraude en devoluciones coordinadas", area: "POS / Caja", probability: 2, impact: 3, owner: "Gerente Operaciones", status: "active", notes: "Pendiente: implementar foto obligatoria en devoluciones >Gs 100.000." },
-  { id: "r6", risk: "Multas por emisión incorrecta de factura electrónica", area: "Contabilidad / SIFEN", probability: 3, impact: 4, owner: "Contador", status: "active", notes: "Revisión mensual de rechazos SET pendiente de formalizar." },
-  { id: "r7", risk: "Merma no detectada en depósito nocturno", area: "Inventario", probability: 4, impact: 3, owner: "Jefe de Almacén", status: "active", notes: "Alertas automáticas por variación configuradas. Cámaras pendientes en sector F." },
-]
-
-const RISK_WEEK = [42, 58, 51, 63, 45, 38, 47]
 
 /* ─────────────────────── HELPERS ─────────────────────── */
 const formatGs = (n: number) =>
@@ -224,8 +186,8 @@ function RiskGauge({ score }: { score: number }) {
 export default function AuditPage() {
   const [tab, setTab] = useState<Tab>("dashboard")
   const [logs, setLogs] = useState<AuditLog[]>([])
-  const [alerts, setAlerts] = useState<InternalAlert[]>(MOCK_ALERTS)
-  const [risks, setRisks] = useState<RiskItem[]>(MOCK_RISKS)
+  const [alerts, setAlerts] = useState<InternalAlert[]>([])
+  const [risks, setRisks] = useState<RiskItem[]>([])
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(true)
   const [config, setConfig] = useState<Record<string, unknown> | null>(null)
@@ -247,9 +209,9 @@ export default function AuditPage() {
     setLoading(true)
     try {
       const data = await api.inteliaudit.logs({ limit: 200 })
-      setLogs(Array.isArray(data) && data.length > 0 ? (data as unknown as AuditLog[]) : MOCK_LOGS)
+      setLogs(Array.isArray(data) ? (data as unknown as AuditLog[]) : [])
     } catch {
-      setLogs(MOCK_LOGS)
+      setLogs([])
     } finally {
       setLoading(false)
     }
@@ -307,7 +269,7 @@ export default function AuditPage() {
   const activeAlerts = alerts.filter(a => !a.resolved)
   const criticalCount = activeAlerts.filter(a => a.severity === "critical").length
   const highCount = activeAlerts.filter(a => a.severity === "high").length
-  const totalCashDiff = MOCK_CASH.reduce((s, c) => s + c.diff, 0)
+  const totalCashDiff = CASH_SESSIONS.reduce((s, c) => s + c.diff, 0)
   const riskScoreVal = Math.min(100, Math.round(
     criticalCount * 20 + highCount * 10 + alerts.filter(a => !a.resolved && a.severity === "medium").length * 5 + 10
   ))
@@ -419,11 +381,9 @@ export default function AuditPage() {
 
             {/* Sparkline card */}
             <div className="card p-6 col-span-1">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Evolución del Riesgo — 7 días</p>
-              <Sparkline data={RISK_WEEK} color={riskScoreVal >= 65 ? "#ef4444" : riskScoreVal >= 40 ? "#f97316" : "#22c55e"} />
-              <div className="flex justify-between text-xs text-gray-400 mt-2">
-                <span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Hoy</span>
-              </div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Score de Riesgo Actual</p>
+              <Sparkline data={[riskScoreVal, riskScoreVal]} color={riskScoreVal >= 65 ? "#ef4444" : riskScoreVal >= 40 ? "#f97316" : "#22c55e"} />
+              <p className="text-xs text-gray-400 mt-2">Histórico no disponible aún — no hay endpoint de tendencia.</p>
             </div>
 
             {/* Quick stats */}
@@ -440,11 +400,11 @@ export default function AuditPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-500">Descuentos manuales</span>
-                  <span className="font-bold text-orange-500">{formatGs(MOCK_CASH.filter(c => c.date === "2026-05-27").reduce((s, c) => s + c.discounts, 0))}</span>
+                  <span className="font-bold text-orange-500">{formatGs(CASH_SESSIONS.filter(c => c.date === "2026-05-27").reduce((s, c) => s + c.discounts, 0))}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-500">Anulaciones totales</span>
-                  <span className="font-bold text-purple-500">{MOCK_CASH.reduce((s, c) => s + c.voids, 0)}</span>
+                  <span className="font-bold text-purple-500">{CASH_SESSIONS.reduce((s, c) => s + c.voids, 0)}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-500">Riesgos activos</span>
@@ -582,9 +542,9 @@ export default function AuditPage() {
           {/* Summary KPIs */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <KpiCard icon={<DollarSign className="w-5 h-5" />} label="Diferencia Total" value={formatGs(totalCashDiff)} sub="Últimos 3 días" trend="down" color="text-red-500" />
-            <KpiCard icon={<CreditCard className="w-5 h-5" />} label="Descuentos Manuales" value={formatGs(MOCK_CASH.reduce((s, c) => s + c.discounts, 0))} sub="Todos los cajeros" color="text-orange-500" />
-            <KpiCard icon={<RotateCcw className="w-5 h-5" />} label="Total Devoluciones" value={MOCK_CASH.reduce((s, c) => s + c.returns, 0) + " ops"} sub="6 cierres evaluados" color="text-purple-500" />
-            <KpiCard icon={<XCircle className="w-5 h-5" />} label="Anulaciones" value={MOCK_CASH.reduce((s, c) => s + c.voids, 0) + " ops"} sub="6 cierres evaluados" color="text-red-500" />
+            <KpiCard icon={<CreditCard className="w-5 h-5" />} label="Descuentos Manuales" value={formatGs(CASH_SESSIONS.reduce((s, c) => s + c.discounts, 0))} sub="Todos los cajeros" color="text-orange-500" />
+            <KpiCard icon={<RotateCcw className="w-5 h-5" />} label="Total Devoluciones" value={CASH_SESSIONS.reduce((s, c) => s + c.returns, 0) + " ops"} sub="6 cierres evaluados" color="text-purple-500" />
+            <KpiCard icon={<XCircle className="w-5 h-5" />} label="Anulaciones" value={CASH_SESSIONS.reduce((s, c) => s + c.voids, 0) + " ops"} sub="6 cierres evaluados" color="text-red-500" />
           </div>
 
           {/* Cash sessions table */}
@@ -609,7 +569,7 @@ export default function AuditPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {MOCK_CASH.map((c, i) => (
+                  {CASH_SESSIONS.map((c, i) => (
                     <tr key={c.id} className={`border-b border-gray-100 dark:border-gray-800 ${i % 2 === 0 ? "" : "bg-gray-50/50 dark:bg-gray-800/20"}`}>
                       <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{c.date}</td>
                       <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{c.cashier}</td>
@@ -640,7 +600,7 @@ export default function AuditPage() {
                 <CreditCard className="w-4 h-4 text-orange-500" /> Ranking Descuentos Manuales
               </h3>
               {["Roberto Díaz", "Alicia Gimenez", "Lorenzo Caballero"].map((c, i) => {
-                const total = MOCK_CASH.filter(x => x.cashier === c).reduce((s, x) => s + x.discounts, 0)
+                const total = CASH_SESSIONS.filter(x => x.cashier === c).reduce((s, x) => s + x.discounts, 0)
                 const max = 1010000
                 return (
                   <div key={c} className="mb-2">
@@ -660,7 +620,7 @@ export default function AuditPage() {
                 <XCircle className="w-4 h-4 text-red-500" /> Ranking Anulaciones
               </h3>
               {["Roberto Díaz", "Alicia Gimenez", "Lorenzo Caballero"].map((c, i) => {
-                const total = MOCK_CASH.filter(x => x.cashier === c).reduce((s, x) => s + x.voids, 0)
+                const total = CASH_SESSIONS.filter(x => x.cashier === c).reduce((s, x) => s + x.voids, 0)
                 const max = 5
                 return (
                   <div key={c} className="mb-2">

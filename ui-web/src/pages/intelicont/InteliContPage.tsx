@@ -24,24 +24,13 @@ export default function InteliContPage() {
   const [syncing, setSyncing] = useState(false)
   const [search, setSearch] = useState("")
 
-const MOCK_ENTRIES: InteliContEntry[] = [
-  { id: "1", fecha: "2026-05-27", numero: "AS-0002102", concepto: "Ventas Diarias Caja Rápida - Sucursal Centro", monto_debe: 3450000, monto_haber: 3450000, estado: "sincronizado" },
-  { id: "2", fecha: "2026-05-27", numero: "AS-0002103", concepto: "Costo de Ventas - Lote Carnicería desposte", monto_debe: 1800000, monto_haber: 1800000, estado: "sincronizado" },
-  { id: "3", fecha: "2026-05-26", numero: "AS-0002104", concepto: "Reposición de Bóveda - Caja Chica", monto_debe: 500000, monto_haber: 500000, estado: "sincronizado" }
-]
-
-const MOCK_PENDING = [
-  { id: "p1", fecha: "2026-05-27", tipo_asiento: "Ingreso Ventas", descripcion: "Ventas Caja Autoservicio 03 - QR BCP", total_debe: 1250000, sync_status: "pendiente" },
-  { id: "p2", fecha: "2026-05-27", tipo_asiento: "Merma Inventario", descripcion: "Merma Panadería Plan Diario lote #A", total_debe: 18000, sync_status: "pendiente" }
-]
-
   const fetchEntries = async () => {
     setEntriesLoading(true)
     try {
       const data = await api.intelicont.entries()
-      setEntries(Array.isArray(data) && data.length > 0 ? data : MOCK_ENTRIES)
+      setEntries(Array.isArray(data) ? data : [])
     } catch {
-      setEntries(MOCK_ENTRIES)
+      setEntries([])
     } finally {
       setEntriesLoading(false)
     }
@@ -51,9 +40,9 @@ const MOCK_PENDING = [
     setPendingLoading(true)
     try {
       const data = await api.intelicont.pending()
-      setPending(Array.isArray(data) && data.length > 0 ? data : MOCK_PENDING)
+      setPending(Array.isArray(data) ? data : [])
     } catch {
-      setPending(MOCK_PENDING)
+      setPending([])
     } finally {
       setPendingLoading(false)
     }

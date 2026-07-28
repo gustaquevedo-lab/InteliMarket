@@ -20,27 +20,12 @@ interface CartItem {
   iva_tasa: number
 }
 
-const MOCK_PRODUCTS: (Product & { category: string; color: string })[] = [
-  { id: "p1", nombre: "Leche Entera UHT 1L", precio_venta: 6500, sku: "7891234567890", codigo_barra: "7891234567890", iva_tasa: 10, category: "almacen", color: "rgba(59,130,246,0.15)" } as any,
-  { id: "p2", nombre: "Pan Felipe (Bolsa 500g)", precio_venta: 5000, sku: "7891234567891", codigo_barra: "7891234567891", iva_tasa: 5, category: "panaderia", color: "rgba(245,158,11,0.15)" } as any,
-  { id: "p3", nombre: "Queso Paraguay (kg)", precio_venta: 38000, sku: "7891234567892", codigo_barra: "7891234567892", iva_tasa: 5, category: "almacen", color: "rgba(14,165,233,0.15)" } as any,
-  { id: "p4", nombre: "Yerba Mate Clásica 500g", precio_venta: 12000, sku: "7891234567893", codigo_barra: "7891234567893", iva_tasa: 10, category: "almacen", color: "rgba(16,185,129,0.15)" } as any,
-  { id: "p5", nombre: "Gaseosa Cola 2L", precio_venta: 9000, sku: "7891234567894", codigo_barra: "7891234567894", iva_tasa: 10, category: "almacen", color: "rgba(99,102,241,0.15)" } as any,
-  { id: "p6", nombre: "Arroz Tipo 1 1kg", precio_venta: 7000, sku: "7891234567895", codigo_barra: "7891234567895", iva_tasa: 5, category: "almacen", color: "rgba(148,163,184,0.15)" } as any,
-  { id: "p7", nombre: "Tomate Perita (kg)", precio_venta: 8500, sku: "7891234567896", codigo_barra: "7891234567896", iva_tasa: 5, category: "fruver", color: "rgba(239,68,68,0.15)" } as any,
-  { id: "p8", nombre: "Manzana Roja (kg)", precio_venta: 14000, sku: "7891234567897", codigo_barra: "7891234567897", iva_tasa: 5, category: "fruver", color: "rgba(244,63,94,0.15)" } as any,
-  { id: "p9", nombre: "Banana de Oro (kg)", precio_venta: 6000, sku: "7891234567898", codigo_barra: "7891234567898", iva_tasa: 5, category: "fruver", color: "rgba(245,158,11,0.15)" } as any,
-  { id: "p10", nombre: "Costilla de Primera (kg)", precio_venta: 32000, sku: "7891234567899", codigo_barra: "7891234567899", iva_tasa: 5, category: "carnes", color: "rgba(249,115,22,0.15)" } as any,
-  { id: "p11", nombre: "Peceto Vacuno (kg)", precio_venta: 48000, sku: "7891234567900", codigo_barra: "7891234567900", iva_tasa: 5, category: "carnes", color: "rgba(239,68,68,0.15)" } as any,
-  { id: "p12", nombre: "Medialunas de Manteca (Doz)", precio_venta: 24000, sku: "7891234567901", codigo_barra: "7891234567901", iva_tasa: 10, category: "panaderia", color: "rgba(234,179,8,0.15)" } as any
-]
+// Catalogo cosmetico usado solo para asignarle categoria/color a productos
+// reales que no tengan una (no representan productos vendibles reales).
+const MOCK_PRODUCTS: (Product & { category: string; color: string })[] = []
 
-const MOCK_CUSTOMERS: Customer[] = [
-  { id: "c1", nombre: "Juan Pérez", razon_social: "Juan Pérez", ruc: "4444444-1", ci: "4444444", activo: true } as any,
-  { id: "c2", nombre: "María Rodríguez", razon_social: "María Rodríguez", ruc: "5555555-2", ci: "5555555", activo: true } as any,
-]
-
-// Mock Fidelity Database Linked to CRM
+// Mock Fidelity Database Linked to CRM — nunca calza con IDs de clientes
+// reales (Casa Gonzalito no usa el club de fidelizacion de supermercado).
 const FIDELITY_DATA: Record<string, { tier: string; points: number; cashback: number; coupons: { id: string; code: string; label: string; applied: boolean; value: number; type: "percent" | "fixed"; targetCategory?: string; targetProduct?: string }[] }> = {
   "c1": {
     tier: "Platino",
@@ -63,8 +48,8 @@ const FIDELITY_DATA: Record<string, { tier: string; points: number; cashback: nu
 }
 
 export default function CajaRapidaPage() {
-  const [products, setProducts] = useState<Product[]>(MOCK_PRODUCTS)
-  const [customers, setCustomers] = useState<Customer[]>(MOCK_CUSTOMERS)
+  const [products, setProducts] = useState<Product[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [cart, setCart] = useState<CartItem[]>([])
   const [barcode, setBarcode] = useState("")
   const [loading, setLoading] = useState(true)
