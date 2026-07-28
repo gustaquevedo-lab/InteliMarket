@@ -223,10 +223,10 @@ function AppRoutes() {
             la ruta entraba igual, sin pasar por FeatureRoute. */}
         <Route path="pos" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pos"><CajaRapidaPage /></FeatureRoute></Suspense>} />
         <Route path="self-checkout" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SelfCheckoutPage /></FeatureRoute></Suspense>} />
-        <Route path="transferencias" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><TransferenciasPage /></FeatureRoute></Suspense>} />
+        <Route path="transferencias" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><TransferenciasPage /></FeatureRoute></Suspense>} />
         <Route path="boveda" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><BovedaPage /></FeatureRoute></Suspense>} />
         <Route path="edge-agent" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><EdgeAgentPage /></FeatureRoute></Suspense>} />
-        <Route path="auto-replenish" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><AutoReplenishPage /></FeatureRoute></Suspense>} />
+        <Route path="auto-replenish" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><AutoReplenishPage /></FeatureRoute></Suspense>} />
         <Route path="sifen" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sifen"><SifenPage /></FeatureRoute></Suspense>} />
         <Route path="sellers" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="seller_tracking"><SellersPage /></FeatureRoute></Suspense>} />
         <Route path="mapa-tiempo-real" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="real_time_map"><MapaPage /></FeatureRoute></Suspense>} />

@@ -101,8 +101,8 @@ const navGroups: NavGroup[] = [
       { icon: Package, label: "Kits", path: "/kits", feature: "kits" },
       { icon: Warehouse, label: "Almacenes", path: "/inventory" },
       { icon: Scale, label: "Básculas", path: "/escalas", feature: "supermercado" },
-      { icon: ArrowLeftRight, label: "Transferencias", path: "/transferencias", feature: "supermercado" },
-      { icon: ClipboardList, label: "Reabastecimiento", path: "/auto-replenish", feature: "supermercado" },
+      { icon: ArrowLeftRight, label: "Transferencias", path: "/transferencias", feature: "advanced_inventory" },
+      { icon: ClipboardList, label: "Reabastecimiento", path: "/auto-replenish", feature: "advanced_inventory" },
       { icon: MapPin, label: "Inventario Avanzado", path: "/advanced-inventory", feature: "advanced_inventory" },
     ]
   },

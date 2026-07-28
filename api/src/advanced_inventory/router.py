@@ -278,3 +278,23 @@ async def check_alerts(
     user: dict = Depends(require_auth),
 ):
     return await service.check_alerts(db, user["company_id"])
+
+
+@router.delete("/replenish-rules/{rule_id}")
+async def delete_replenish_rule(
+    rule_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    ok = await service.delete_replenish_rule(db, user["company_id"], rule_id)
+    if not ok:
+        raise HTTPException(404, "Regla no encontrada")
+    return {"deleted": True}
+
+
+@router.get("/replenish-suggestions")
+async def get_replenish_suggestions(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_auth),
+):
+    return await service.get_replenish_suggestions(db, user["company_id"])

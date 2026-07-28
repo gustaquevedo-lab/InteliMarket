@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.advanced_inventory.models import (
@@ -432,6 +432,91 @@ async def check_alerts(db: AsyncSession, company_id: str) -> list[dict]:
             })
     await db.flush()
     return alerts
+
+
+async def delete_replenish_rule(db: AsyncSession, company_id: str, rule_id: str) -> bool:
+    r = await db.execute(
+        select(AutoReplenishRule).where(AutoReplenishRule.id == UUID(rule_id), AutoReplenishRule.company_id == UUID(company_id))
+    )
+    rule = r.scalar_one_or_none()
+    if not rule:
+        return False
+    await db.delete(rule)
+    await db.flush()
+    return True
+
+
+async def get_replenish_suggestions(db: AsyncSession, company_id: str) -> list[dict]:
+    """Sugerencias reales de reposicion: por cada regla activa, cruza stock
+    actual, velocidad de venta real (ultimos 30 dias) y lead time del
+    proveedor para calcular cuanto reponer. Solo devuelve items con reglas
+    configuradas — no inventa productos ni proveedores."""
+    result = await db.execute(
+        text("""
+            SELECT
+                r.id AS rule_id, r.product_id, r.warehouse_id,
+                r.stock_minimo, r.stock_seguridad, r.cantidad_reorden, r.lead_time_dias,
+                r.supplier_id,
+                p.nombre AS producto, p.sku, p.precio_venta AS costo_unitario,
+                sup.razon_social AS proveedor,
+                COALESCE(st.cantidad, 0) AS stock_actual,
+                COALESCE(v.velocidad, 0) AS velocidad_venta
+            FROM adv_auto_replenish_rules r
+            JOIN products p ON p.id = r.product_id
+            LEFT JOIN suppliers sup ON sup.id = r.supplier_id
+            LEFT JOIN stock st ON st.warehouse_id = r.warehouse_id AND st.product_id = r.product_id
+            LEFT JOIN (
+                SELECT si.product_id, SUM(si.cantidad) / 30.0 AS velocidad
+                FROM sale_items si
+                JOIN sales sa ON sa.id = si.sale_id
+                WHERE sa.company_id = :company_id
+                  AND sa.estado <> 'cancelado'
+                  AND sa.fecha >= NOW() - INTERVAL '30 days'
+                GROUP BY si.product_id
+            ) v ON v.product_id = r.product_id
+            WHERE r.company_id = :company_id AND r.activo = true
+            ORDER BY p.nombre
+        """),
+        {"company_id": company_id},
+    )
+    rows = result.fetchall()
+
+    out = []
+    for row in rows:
+        stock_actual = float(row.stock_actual or 0)
+        stock_minimo = float(row.stock_minimo or 0)
+        stock_seguridad = float(row.stock_seguridad or 0)
+        velocidad = float(row.velocidad_venta or 0)
+        lead_time = row.lead_time_dias or 1
+
+        sugerido = 0.0
+        if stock_actual < stock_minimo:
+            if row.cantidad_reorden:
+                sugerido = float(row.cantidad_reorden)
+            else:
+                sugerido = max(0.0, stock_seguridad + lead_time * velocidad - stock_actual)
+
+        if stock_actual <= stock_seguridad * 0.5:
+            prioridad = "Alta"
+        elif stock_actual < stock_minimo:
+            prioridad = "Media"
+        else:
+            prioridad = "Baja"
+
+        out.append({
+            "id": str(row.rule_id),
+            "producto": row.producto,
+            "sku": row.sku,
+            "proveedor": row.proveedor or "Sin proveedor asignado",
+            "stockActual": stock_actual,
+            "stockSeguridad": stock_seguridad,
+            "velocidadVenta": round(velocidad, 2),
+            "leadTime": lead_time,
+            "sugerido": round(sugerido),
+            "costoUnitario": float(row.costo_unitario or 0),
+            "prioridad": prioridad,
+        })
+    return out
 
 
 def _rule_to_dict(rule):

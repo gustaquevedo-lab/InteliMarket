@@ -333,6 +333,15 @@ export const api = {
     create: (data: Partial<PaymentMethod>) => client.post<PaymentMethod>("/v1/payment-methods", data),
     update: (id: string, data: Partial<PaymentMethod>) => client.patch<PaymentMethod>(`/v1/payment-methods/${id}`, data),
   },
+  advancedInventory: {
+    replenishSuggestions: () => client.get<any[]>("/v1/advanced-inventory/replenish-suggestions"),
+    replenishRules: {
+      list: () => client.get<any[]>("/v1/advanced-inventory/replenish-rules"),
+      create: (data: { product_id: string; warehouse_id: string; stock_minimo: number; stock_seguridad?: number; cantidad_reorden?: number; lead_time_dias?: number; supplier_id?: string }) =>
+        client.post<any>("/v1/advanced-inventory/replenish-rules", data),
+      delete: (id: string) => client.delete<void>(`/v1/advanced-inventory/replenish-rules/${id}`),
+    },
+  },
   inventory: {
     warehouses: () => client.get<Warehouse[]>(`/v1/companies/${COMPANY_ID}/warehouses`),
     stock: (warehouseId?: string) => client.get<StockItem[]>(warehouseId ? `/v1/warehouses/${warehouseId}/stock` : `/v1/companies/${COMPANY_ID}/stock`),
