@@ -526,6 +526,7 @@ export const api = {
     salesByPeriod: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<any>("/api/reports/sales/by-period", params),
     salesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/sales/by-category", params),
     salesByProduct: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<any[]>("/api/reports/sales/by-product", params),
+    marginSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ monto: number; costo: number; margen_pct: number }>("/api/reports/sales/margin-summary", params),
     inventory: () => client.get<any>("/api/reports/inventory/summary"),
     inventorySummary: () => client.get<any>("/api/reports/inventory/summary"),
     fifo: () => client.get<FifoReport[]>("/api/reports/inventory/fifo"),

@@ -139,6 +139,36 @@ async def get_sales_by_category(db: AsyncSession, fecha_desde: Optional[date] = 
     ]
 
 
+async def get_margin_summary(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
+    """Margen bruto real del periodo: (monto - costo) / monto, en base al
+    costo_unitario cargado en cada sale_item — no una aproximacion inventada."""
+    params = {}
+    where = "v.estado <> 'cancelado'"
+    if fecha_desde:
+        where += " AND v.fecha >= :fecha_desde"
+        params["fecha_desde"] = fecha_desde
+    if fecha_hasta:
+        where += " AND v.fecha < CAST(:fecha_hasta AS date) + interval '1 day'"
+        params["fecha_hasta"] = fecha_hasta
+
+    query = f"""
+        SELECT
+            COALESCE(SUM(vi.total), 0) as monto,
+            COALESCE(SUM(vi.costo_unitario * vi.cantidad), 0) as costo
+        FROM sales v
+        JOIN sale_items vi ON vi.sale_id = v.id
+        WHERE {where}
+    """
+    r = (await _exec(db, query, params)).first()
+    monto = float(r["monto"] or 0)
+    costo = float(r["costo"] or 0)
+    return {
+        "monto": monto,
+        "costo": costo,
+        "margen_pct": round(((monto - costo) / max(monto, 1)) * 100, 1) if monto > 0 else 0.0,
+    }
+
+
 async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, limit: int = 50) -> list:
     params = {"limit": limit}
     where = "v.estado <> 'cancelado'"

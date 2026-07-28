@@ -8,7 +8,7 @@ import { api, type StockItem, type CreditAccount } from "../api"
 import { KPICard } from "../components/KPICard"
 import { Widget } from "../components/Widget"
 import { AnimatedPage } from "../components/AnimatedPage"
-import { formatPYG } from "../utils/format"
+import { formatPYG, formatPercentage } from "../utils/format"
 import { useSSE } from "../hooks/useSSE"
 import { useToast } from "../context/ToastContext"
 import { useFeatures } from "../context/FeatureContext"
@@ -213,16 +213,21 @@ export default function Dashboard() {
 
     // KPIs
     try {
-      const [sales, inventory, fin, creditAccs] = await Promise.allSettled([
+      const [sales, inventory, fin, creditAccs, margin] = await Promise.allSettled([
         api.reports.salesSummary({ fecha_desde: TODAY, fecha_hasta: TODAY }),
         api.reports.inventorySummary(),
         api.reports.financialSummary(),
         api.creditAccounts.list({ activo: true }),
+        api.reports.marginSummary({ fecha_desde: TODAY, fecha_hasta: TODAY }),
       ])
       if (sales.status === "fulfilled") {
         setSalesSummary(sales.value)
-        setMarginAvg(sales.value.ticket_promedio > 0 && sales.value.total_items > 0
-          ? Math.round((sales.value.monto_total / sales.value.total_items) * 0.25) : null)
+      }
+      // Margen real: (ingresos - costo) / ingresos, calculado en el backend
+      // desde el costo_unitario de cada sale_item — antes era un numero
+      // inventado (ticket promedio * 25%) mostrado como si fuera guaranies.
+      if (margin.status === "fulfilled") {
+        setMarginAvg(margin.value.monto > 0 ? margin.value.margen_pct : null)
       }
       if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
       if (fin.status === "fulfilled") setFinancial(fin.value)
@@ -237,7 +242,7 @@ export default function Dashboard() {
       setInventorySummary({ bajo_stock: 18, sin_stock: 3 })
       setFinancial({ cuentas_por_cobrar: 45600000 })
       setCreditUsed(12300000)
-      setMarginAvg(35000)
+      setMarginAvg(24.5)
       setKpisLoaded(true)
       const now = new Date()
       const fallbackWeek: WeekDay[] = []
@@ -479,7 +484,7 @@ export default function Dashboard() {
         <KPICard
           icon={Percent}
           label="Margen Promedio"
-          value={marginAvg !== null ? formatPYG(marginAvg) : "—"}
+          value={marginAvg !== null ? formatPercentage(marginAvg) : "—"}
           color="green"
           loading={!kpisLoaded}
         />
