@@ -433,6 +433,7 @@ async def list_bank_transactions(
     bank_account_id: str | None = None,
     conciliado: bool | None = None,
     desde: date | None = None, hasta: date | None = None,
+    categoria: str | None = None,
     limit: int = 100, offset: int = 0,
 ) -> list[BankTransaction]:
     query = select(BankTransaction).where(BankTransaction.company_id == uuid.UUID(company_id))
@@ -444,6 +445,8 @@ async def list_bank_transactions(
         query = query.where(BankTransaction.fecha >= desde)
     if hasta:
         query = query.where(BankTransaction.fecha <= hasta)
+    if categoria:
+        query = query.where(BankTransaction.categoria == categoria)
     query = query.order_by(BankTransaction.fecha.desc()).offset(offset).limit(limit)
     result = await db.execute(query)
     return list(result.scalars().all())
