@@ -26,16 +26,23 @@ interface TransferOrder {
   }[]
 }
 
-// No existe todavia un endpoint de listado de transferencias en el backend
-// (solo POST /inventory/transfers y POST .../complete) — antes esta pagina
-// mostraba 3 transferencias ficticias de un supermercado como si fueran
-// reales. Arranca vacia hasta que exista el GET real.
 export default function TransferenciasPage() {
   const [transfers, setTransfers] = useState<TransferOrder[]>([])
+  const [loading, setLoading] = useState(true)
   const [selectedTransfer, setSelectedTransfer] = useState<TransferOrder | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [search, setSearch] = useState("")
   const toast = useToast()
+
+  const fetchTransfers = () => {
+    setLoading(true)
+    api.inventory.transfers()
+      .then((data: any[]) => setTransfers(data.map(t => ({ ...t, asignado: t.asignado || "Sin asignar" }))))
+      .catch(() => setTransfers([]))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { fetchTransfers() }, [])
 
   // Form State
   const [warehouses, setWarehouses] = useState<{ id: string; nombre: string }[]>([])
@@ -49,7 +56,7 @@ export default function TransferenciasPage() {
     api.warehouses.list()
       .then((data: any[]) => {
         setWarehouses(data)
-        if (data.length > 0) { setOrigen(data[0].nombre); setDestino(data[1]?.nombre || data[0].nombre) }
+        if (data.length > 0) { setOrigen(data[0].id); setDestino(data[1]?.id || data[0].id) }
       })
       .catch(() => setWarehouses([]))
   }, [])
@@ -84,7 +91,7 @@ export default function TransferenciasPage() {
     setNewItems(newItems.map(item => item.product_id === id ? { ...item, cantidad: Math.max(1, qty) } : item))
   }
 
-  const handleCreateTransfer = () => {
+  const handleCreateTransfer = async () => {
     if (origen === destino) {
       toast.error("Error de Origen/Destino", "El origen y el destino no pueden ser iguales.")
       return
@@ -94,60 +101,45 @@ export default function TransferenciasPage() {
       return
     }
 
-    const newTr: TransferOrder = {
-      id: `TR-00${transfers.length + 1}`,
-      codigo: `TRF-2026-00${transfers.length + 1}`,
-      origen,
-      destino,
-      fecha: new Date().toISOString().split("T")[0],
-      itemsCount: newItems.reduce((sum, item) => sum + item.cantidad, 0),
-      valorTotal: newItems.length * 350000, // Dummy pricing
-      estado: "Borrador",
-      asignado: asignado || "Sin asignar",
-      observaciones,
-      items: newItems.map(it => ({ ...it }))
+    try {
+      const created = await api.inventory.createTransfer({
+        warehouse_origen_id: origen,
+        warehouse_destino_id: destino,
+        items: newItems.map(it => ({ product_id: it.product_id, cantidad: it.cantidad })),
+        observaciones,
+      })
+      setShowCreateModal(false)
+      setObservaciones("")
+      setAsignado("")
+      setNewItems([])
+      toast.success("Transferencia Creada", `Se registró el borrador ${created.codigo}`)
+      fetchTransfers()
+    } catch (e: any) {
+      toast.error("Error", e.message || "No se pudo crear la transferencia")
     }
-
-    setTransfers([newTr, ...transfers])
-    setShowCreateModal(false)
-    // Clear states
-    setObservaciones("")
-    setAsignado("")
-    setNewItems([])
-    toast.success("Transferencia Creada", `Se registró el borrador ${newTr.codigo}`)
   }
 
-  const handleTransitionStatus = (transferId: string, nextStatus: "En Tránsito" | "Recibido") => {
+  // El backend solo modela "pendiente" -> "completada" (POST .../complete, que
+  // mueve stock real entre almacenes). "En Tránsito" es un paso visual local
+  // antes de confirmar la recepción — no hay mermas simuladas, la recepción
+  // llama al endpoint real y refresca desde la base.
+  const handleTransitionStatus = async (transferId: string, nextStatus: "En Tránsito" | "Recibido") => {
+    if (nextStatus === "Recibido") {
+      try {
+        await api.inventory.completeTransfer(transferId)
+        toast.success("Recibido y Conciliado", "Transferencia recibida, stock actualizado.")
+        fetchTransfers()
+        setSelectedTransfer(null)
+      } catch (e: any) {
+        toast.error("Error", e.message || "No se pudo completar la transferencia")
+      }
+      return
+    }
     setTransfers(prev => prev.map(tr => {
       if (tr.id === transferId) {
-        let updatedItems = [...tr.items]
-        let mermas = 0
-        if (nextStatus === "Recibido") {
-          // Simulate receiving check where maybe 1 item has a minor loss (merma)
-          updatedItems = tr.items.map(item => {
-            const lossSim = Math.floor(Math.random() * 2) // 0 or 1
-            const actualRec = Math.max(0, item.cantidad - lossSim)
-            mermas += lossSim
-            return {
-              ...item,
-              recibido: actualRec,
-              merma: lossSim
-            }
-          })
-          toast.success("Recibido y Conciliado", `Transferencia recibida con ${mermas} mermas.`)
-        } else {
-          toast.info("En Tránsito", `El cargamento ha salido hacia ${tr.destino}.`)
-        }
-        
-        const nextTr = {
-          ...tr,
-          estado: nextStatus,
-          items: updatedItems,
-          mermasReportadas: mermas > 0 ? mermas : undefined
-        }
-        if (selectedTransfer?.id === tr.id) {
-          setSelectedTransfer(nextTr)
-        }
+        toast.info("En Tránsito", `El cargamento ha salido hacia ${tr.destino}.`)
+        const nextTr = { ...tr, estado: nextStatus }
+        if (selectedTransfer?.id === tr.id) setSelectedTransfer(nextTr)
         return nextTr
       }
       return tr
@@ -353,13 +345,13 @@ export default function TransferenciasPage() {
                 <div>
                   <label className="input-label label-required">Almacén Origen</label>
                   <select className="input-field" value={origen} onChange={e => setOrigen(e.target.value)}>
-                    {warehouses.map(w => <option key={w.id} value={w.nombre}>{w.nombre}</option>)}
+                    {warehouses.map(w => <option key={w.id} value={w.id}>{w.nombre}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="input-label label-required">Almacén Destino</label>
                   <select className="input-field" value={destino} onChange={e => setDestino(e.target.value)}>
-                    {warehouses.map(w => <option key={w.id} value={w.nombre}>{w.nombre}</option>)}
+                    {warehouses.map(w => <option key={w.id} value={w.id}>{w.nombre}</option>)}
                   </select>
                 </div>
               </div>

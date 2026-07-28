@@ -54,6 +54,11 @@ async def list_movements(
     return await service.list_movements(db, company_id, product_id, warehouse_id, tipo, limit, offset)
 
 
+@router.get("/companies/{company_id}/inventory/transfers")
+async def list_transfers(company_id: str, db: AsyncSession = Depends(get_db)):
+    return await service.list_transfers(db, company_id)
+
+
 @router.post("/inventory/transfers", response_model=TransferResponse, status_code=status.HTTP_201_CREATED)
 async def create_transfer(body: TransferCreate, db: AsyncSession = Depends(get_db)):
     return await service.create_transfer(db, body)

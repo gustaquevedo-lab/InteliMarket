@@ -124,6 +124,55 @@ async def create_transfer(db: AsyncSession, data: TransferCreate, user_id: uuid.
     return transfer
 
 
+async def list_transfers(db: AsyncSession, company_id: str) -> list[dict]:
+    result = await db.execute(
+        select(StockTransfer)
+        .where(StockTransfer.company_id == uuid.UUID(company_id))
+        .order_by(StockTransfer.created_at.desc())
+    )
+    transfers = result.scalars().all()
+    if not transfers:
+        return []
+
+    warehouse_ids = {t.warehouse_origen_id for t in transfers} | {t.warehouse_destino_id for t in transfers}
+    wh_result = await db.execute(select(Warehouse).where(Warehouse.id.in_(warehouse_ids)))
+    wh_names = {w.id: w.nombre for w in wh_result.scalars().all()}
+
+    items_result = await db.execute(
+        select(StockTransferItem, Product.nombre, Product.sku, Product.precio_venta)
+        .join(Product, Product.id == StockTransferItem.product_id)
+        .where(StockTransferItem.transfer_id.in_([t.id for t in transfers]))
+    )
+    items_by_transfer: dict[uuid.UUID, list[dict]] = {}
+    for item, nombre, sku, precio_venta in items_result.all():
+        items_by_transfer.setdefault(item.transfer_id, []).append({
+            "product_id": str(item.product_id),
+            "nombre": nombre,
+            "sku": sku,
+            "cantidad": item.cantidad_enviada,
+            "recibido": item.cantidad_recibida,
+            "precio_venta": float(precio_venta or 0),
+        })
+
+    out = []
+    for t in transfers:
+        items = items_by_transfer.get(t.id, [])
+        out.append({
+            "id": str(t.id),
+            "codigo": t.codigo,
+            "origen": wh_names.get(t.warehouse_origen_id, "—"),
+            "destino": wh_names.get(t.warehouse_destino_id, "—"),
+            "fecha": t.created_at.date().isoformat() if t.created_at else None,
+            "itemsCount": len(items),
+            "valorTotal": sum(i["cantidad"] * i["precio_venta"] for i in items),
+            "estado": {"pendiente": "Borrador", "en_transito": "En Tránsito", "completada": "Recibido"}.get(t.estado, t.estado),
+            "asignado": None,
+            "observaciones": t.observaciones,
+            "items": items,
+        })
+    return out
+
+
 async def complete_transfer(db: AsyncSession, transfer_id: str, user_id: uuid.UUID | None = None) -> StockTransfer | None:
     transfer = await db.execute(select(StockTransfer).where(StockTransfer.id == uuid.UUID(transfer_id)))
     transfer_obj = transfer.scalar_one_or_none()

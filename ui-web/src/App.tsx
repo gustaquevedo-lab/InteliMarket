@@ -186,12 +186,6 @@ function AppRoutes() {
         <Route index element={<Navigate to={isElectron ? "/pos" : "/dashboard"} replace />} />
         {[
           ["dashboard", <Dashboard />],
-          ["pos", <CajaRapidaPage />],
-          ["self-checkout", <SelfCheckoutPage />],
-          ["transferencias", <TransferenciasPage />],
-          ["boveda", <BovedaPage />],
-          ["edge-agent", <EdgeAgentPage />],
-          ["auto-replenish", <AutoReplenishPage />],
           ["sales", <SalesPage />],
           ["products", <ProductsPage />],
           ["inventory", <InventoryPage />],
@@ -200,7 +194,6 @@ function AppRoutes() {
           ["payments", <PaymentsPage />],
           ["reports", <ReportsPage />],
           ["settings", <SettingsPage />],
-          ["sifen", <SifenPage />],
           ["caja", <CajaPage />],
           ["admin", <AdminPage />],
           ["admin/verticals", <VerticalsPage />],
@@ -222,16 +215,25 @@ function AppRoutes() {
           ["financiero", <FinancialPage />],
           ["contratos-proveedores", <SupplierContractsPage />],
           ["acuerdos-clientes", <CustomerAgreementsPage />],
-          ["distribuidora", <DistribuidoraPage />],
-          ["sellers", <SellersPage />],
-          ["mapa-tiempo-real", <MapaPage />],
-          ["rutas", <RutasPage />],
-          ["visitas", <VisitasPage />],
-          ["geocercas", <GeocercasPage />],
-          ["rendimiento", <RendimientoPage />],
         ].map(([path, el]) => (
           <Route key={path as string} path={path as string} element={<Suspense fallback={<PageLoader />}>{el as React.ReactNode}</Suspense>} />
         ))}
+        {/* Rutas que Layout.tsx gatea por feature en el menu pero antes no
+            estaban protegidas a nivel de URL — cualquiera que adivinara/tipeara
+            la ruta entraba igual, sin pasar por FeatureRoute. */}
+        <Route path="pos" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pos"><CajaRapidaPage /></FeatureRoute></Suspense>} />
+        <Route path="self-checkout" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SelfCheckoutPage /></FeatureRoute></Suspense>} />
+        <Route path="transferencias" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><TransferenciasPage /></FeatureRoute></Suspense>} />
+        <Route path="boveda" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><BovedaPage /></FeatureRoute></Suspense>} />
+        <Route path="edge-agent" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><EdgeAgentPage /></FeatureRoute></Suspense>} />
+        <Route path="auto-replenish" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><AutoReplenishPage /></FeatureRoute></Suspense>} />
+        <Route path="sifen" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sifen"><SifenPage /></FeatureRoute></Suspense>} />
+        <Route path="sellers" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="seller_tracking"><SellersPage /></FeatureRoute></Suspense>} />
+        <Route path="mapa-tiempo-real" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="real_time_map"><MapaPage /></FeatureRoute></Suspense>} />
+        <Route path="rutas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sales_routes"><RutasPage /></FeatureRoute></Suspense>} />
+        <Route path="visitas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="seller_tracking"><VisitasPage /></FeatureRoute></Suspense>} />
+        <Route path="geocercas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="geofence_zones"><GeocercasPage /></FeatureRoute></Suspense>} />
+        <Route path="rendimiento" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="seller_performance"><RendimientoPage /></FeatureRoute></Suspense>} />
         <Route path="pagopar" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pagopar"><PagoparPage /></FeatureRoute></Suspense>} />
         <Route path="kuapay" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="kuapay"><KuapayPage /></FeatureRoute></Suspense>} />
         <Route path="spi" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="spi"><SpiPage /></FeatureRoute></Suspense>} />

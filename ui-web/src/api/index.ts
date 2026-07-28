@@ -336,6 +336,10 @@ export const api = {
   inventory: {
     warehouses: () => client.get<Warehouse[]>(`/v1/companies/${COMPANY_ID}/warehouses`),
     stock: (warehouseId?: string) => client.get<StockItem[]>(warehouseId ? `/v1/warehouses/${warehouseId}/stock` : `/v1/companies/${COMPANY_ID}/stock`),
+    transfers: () => client.get<any[]>(`/v1/companies/${COMPANY_ID}/inventory/transfers`),
+    createTransfer: (data: { warehouse_origen_id: string; warehouse_destino_id: string; items: { product_id: string; cantidad: number }[]; observaciones?: string }) =>
+      client.post<any>("/v1/inventory/transfers", { ...data, company_id: COMPANY_ID }),
+    completeTransfer: (id: string) => client.post<any>(`/v1/inventory/transfers/${id}/complete`, {}),
   },
   warehouses: {
     list: () => client.get<Warehouse[]>(`/v1/companies/${COMPANY_ID}/warehouses`),
