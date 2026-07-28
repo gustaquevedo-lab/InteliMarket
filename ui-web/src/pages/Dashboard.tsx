@@ -4,7 +4,7 @@ import {
   Clock, RefreshCw, ChevronRight, CreditCard, Percent, Ban as Banknote,
   Apple, Beef, Croissant, AlertCircle, Utensils, Sparkles, Check, CheckCircle, Trash2
 } from "lucide-react"
-import { api, type StockItem, type CreditAccount, type SaleItem } from "../api"
+import { api, type StockItem, type CreditAccount } from "../api"
 import { KPICard } from "../components/KPICard"
 import { Widget } from "../components/Widget"
 import { AnimatedPage } from "../components/AnimatedPage"
@@ -287,24 +287,20 @@ export default function Dashboard() {
       setLoadingWeek(false)
     }
 
-    // Top products
+    // Top products — agregado en el backend (antes hacia una consulta HTTP
+    // por cada venta de los ultimos 7 dias, decenas de requests en cadena
+    // que con volumen real de datos dejaban el spinner girando por minutos)
     setLoadingTop(true)
     setErrorTop(null)
     try {
-      const salesList = await api.sales.list({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY })
-      const itemsPromises = salesList.map(s => api.sales.items(s.id).catch(() => [] as SaleItem[]))
-      const allItems = (await Promise.allSettled(itemsPromises))
-        .flatMap(r => r.status === "fulfilled" ? r.value : [])
-      const agg = new Map<string, { nombre: string; sku: string; cantidad: number; total: number }>()
-      for (const item of allItems) {
-        const key = item.product_id || ""
-        const cur = agg.get(key) || { nombre: item.product?.nombre || item.descripcion || "Producto", sku: item.product?.sku || "", cantidad: 0, total: 0 }
-        cur.cantidad += (item.cantidad || 0)
-        cur.total += (item.total || 0)
-        agg.set(key, cur)
-      }
-      const sorted = Array.from(agg.entries()).sort((a, b) => b[1].total - a[1].total).slice(0, 5)
-      setTopProducts(sorted.map(([product_id, p]) => ({ product_id, ...p })))
+      const byProduct = await api.reports.salesByProduct({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY, limit: 5 })
+      setTopProducts(byProduct.map((p: any) => ({
+        product_id: p.sku || p.producto,
+        nombre: p.producto,
+        sku: p.sku,
+        cantidad: p.cantidad,
+        total: p.monto,
+      })))
     } catch {
       setErrorTop("No se pudieron cargar los productos")
       setTopProducts([])
