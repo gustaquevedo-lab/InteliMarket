@@ -83,7 +83,7 @@ export default function QuotesPage() {
   const vigentes = quotes.filter((q) => q.estado === "vigente")
   const aceptadas = quotes.filter((q) => q.estado === "aceptada")
   const convertidas = quotes.filter((q) => q.estado === "convertida")
-  const montoTotal = quotes.reduce((a, b) => a + (b.total || 0), 0)
+  const montoTotal = quotes.reduce((a, b) => a + Number(b.total || 0), 0)
 
   const handleViewQuote = async (quote: Quote) => {
     setViewingQuote(quote)

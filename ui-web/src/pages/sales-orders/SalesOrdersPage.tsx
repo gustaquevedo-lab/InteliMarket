@@ -82,7 +82,7 @@ export default function SalesOrdersPage() {
     en_curso: orders.filter((o) => o.estado === "aprobado" || o.estado === "en_preparacion" || o.estado === "listo").length,
     completados: orders.filter((o) => o.estado === "completado").length,
     cancelados: orders.filter((o) => o.estado === "cancelado" || o.estado === "rechazado").length,
-    total_monto: orders.reduce((a, b) => a + (b.total || 0), 0),
+    total_monto: orders.reduce((a, b) => a + Number(b.total || 0), 0),
   }
 
   const canTransition = (order: SalesOrder, target: string) => {
@@ -716,7 +716,7 @@ function DetailModal({
   const isPendingApproval = order.estado === "pendiente_aprobacion"
   const canCancel = order.estado !== "cancelado" && order.estado !== "rechazado" && order.estado !== "completado"
 
-  const subtotal = order.subtotal ?? items.reduce((a: number, i: any) => a + i.cantidad * i.precio_unitario, 0)
+  const subtotal = order.subtotal ?? items.reduce((a: number, i: any) => a + Number(i.cantidad) * Number(i.precio_unitario), 0)
   const iva10 = order.iva_10 ?? 0
   const iva5 = order.iva_5 ?? 0
   const descuento = order.descuento_total ?? 0
