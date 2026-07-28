@@ -58,6 +58,15 @@ async def get_sales_summary(db: AsyncSession, fecha_desde: Optional[date] = None
         "monto_exento": float((result["monto_total"] or 0) - (result["monto_iva_10"] or 0) - (result["monto_iva_5"] or 0)),
         "ticket_promedio": float((result["monto_total"] or 0) / max(result["total_ventas"], 1)),
         "total_items": int(result["total_items"] or 0),
+        # OJO: total_pagado/saldo a nivel de venta no son confiables para
+        # Casa Gonzalito — el legacy usa un campo MODOPAGO con codigos
+        # internos (0, 153, 303, 803, 991...) sin tabla de referencia clara,
+        # y RENDIDO esta en 0 para el 100% de las 2.24M ventas migradas.
+        # Sumado da un "saldo pendiente" de ~1 billon de Gs, mayor incluso
+        # que el total facturado — un numero fabricado, no real. NO usar
+        # estos dos campos para mostrar cuentas por cobrar en la UI; el
+        # saldo real y confiable esta en customer_accounts.saldo_actual
+        # (ver accounts_receivable/service.py y financial summary).
         "total_pagado": float(result["total_pagado"] or 0),
         "saldo_pendiente": float(result["saldo_pendiente"] or 0),
     }

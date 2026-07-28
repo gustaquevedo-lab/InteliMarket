@@ -76,8 +76,6 @@ export default function SalesPage() {
 
   const active = sales.filter(s => s.estado !== "cancelado" && s.estado !== "devuelto")
   const totalVentas = summary?.monto_total ?? 0
-  const totalCobrado = summary?.total_pagado ?? 0
-  const totalSaldo = summary?.saldo_pendiente ?? 0
   const totalIva = (summary?.monto_iva_10 ?? 0) + (summary?.monto_iva_5 ?? 0)
   const totalTransacciones = summary?.total_ventas ?? active.length
 
@@ -184,7 +182,16 @@ export default function SalesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* "Por Cobrar"/"Cobrado" por venta se sacaron: total_pagado/saldo
+          quedaron en 0/sin sentido en el 100% de las ventas migradas — el
+          legacy usa un campo MODOPAGO con codigos internos (0, 153, 303,
+          803, 991...) que no corresponden a ninguna tabla de referencia
+          real, y RENDIDO esta en 0 para las 2.24M filas. No hay forma
+          confiable de saber cuanto se cobro por venta con estos datos —
+          mostrar un numero ahi seria inventarlo. El saldo real por cobrar
+          (agregado por cliente, ese si confiable) esta en la pagina de
+          Cuentas por Cobrar. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1"><DollarSign className="w-4 h-4 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total</span></div>
           <p className="text-xl font-bold text-green-500">{formatPYG(totalVentas)}</p>
@@ -192,14 +199,6 @@ export default function SalesPage() {
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1"><ShoppingCart className="w-4 h-4 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Transacciones</span></div>
           <p className="text-xl font-bold text-gray-900 dark:text-white">{totalTransacciones}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><TrendingUp className="w-4 h-4 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Por Cobrar</span></div>
-          <p className="text-xl font-bold text-amber-500">{formatPYG(totalSaldo)}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><DollarSign className="w-4 h-4 text-blue-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Cobrado</span></div>
-          <p className="text-xl font-bold text-blue-500">{formatPYG(totalCobrado)}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1"><CreditCard className="w-4 h-4 text-purple-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">IVA Total</span></div>

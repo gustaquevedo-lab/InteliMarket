@@ -86,6 +86,23 @@ async def get_dashboard(
     r = await db.execute(items_q)
     productos_vendidos = int(r.scalar() or 0)
 
+    # Margen real: ventas vs costo real cargado en sale_items.costo_unitario
+    # (poblado en 22,7M de 23,2M filas). Antes se promediaba
+    # get_depto_pyl(), que calcula margen desde ProductionRecipe — recetas
+    # de produccion de carniceria/panaderia de supermercado, sin relacion
+    # con esta vertical — daba resultados sin sentido (ej. -128,4%).
+    margin_q = select(
+        sa_func.coalesce(sa_func.sum(SaleItem.total), 0),
+        sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
+    ).join(Sale, SaleItem.sale_id == Sale.id)\
+     .where(Sale.company_id == company_id, Sale.estado != "anulado")
+    margin_q = _apply_date_range(margin_q, Sale.fecha, desde or month_start, hasta or now)
+    r = await db.execute(margin_q)
+    margin_row = r.one()
+    margin_total = float(margin_row[0] or 0)
+    margin_costo = float(margin_row[1] or 0)
+    margen_promedio_real = round(((margin_total - margin_costo) / max(margin_total, 1)) * 100, 1) if margin_total > 0 else 0.0
+
     top_q = select(
         SaleItem.product_id,
         sa_func.sum(SaleItem.cantidad).label("cantidad"),
@@ -98,14 +115,23 @@ async def get_dashboard(
     r = await db.execute(top_q)
     top_rows = r.all()
 
+    # Antes: 1 SELECT de producto + 1 de categoria POR CADA uno de los 10
+    # top (hasta 20 queries extra). Batch fetch en su lugar.
+    top_product_ids = [tr.product_id for tr in top_rows]
+    products_by_id = {}
+    categories_by_id = {}
+    if top_product_ids:
+        prod_r = await db.execute(select(Product).where(Product.id.in_(top_product_ids)))
+        products_by_id = {p.id: p for p in prod_r.scalars().all()}
+        cat_ids = {p.category_id for p in products_by_id.values() if p.category_id}
+        if cat_ids:
+            cat_r = await db.execute(select(ProductCategory).where(ProductCategory.id.in_(cat_ids)))
+            categories_by_id = {c.id: c.nombre for c in cat_r.scalars().all()}
+
     top_productos = []
     for tr in top_rows:
-        prod_r = await db.execute(select(Product).where(Product.id == tr.product_id))
-        prod = prod_r.scalar_one_or_none()
-        cat_nombre = None
-        if prod and prod.category_id:
-            cat_r = await db.execute(select(ProductCategory.nombre).where(ProductCategory.id == prod.category_id))
-            cat_nombre = cat_r.scalar_one_or_none()
+        prod = products_by_id.get(tr.product_id)
+        cat_nombre = categories_by_id.get(prod.category_id) if prod and prod.category_id else None
         cant = float(tr.cantidad or 0)
         tot = float(tr.total or 0)
         costo = float(tr.costo_prom or 0) * cant
@@ -143,14 +169,17 @@ async def get_dashboard(
             "ticket_promedio": round(total_h / max(cnt, 1), 0),
         })
 
-    deptos = await get_depto_pyl(db, company_id, desde, hasta)
-    margen_deptos = [d["margen_porcentaje"] for d in deptos if d["ventas"] > 0]
+    # Antes pasaba desde/hasta crudos (None si el caller no los mando) —
+    # a diferencia de TODO el resto de esta funcion, que usa
+    # "desde or month_start, hasta or now". Sin fecha, get_depto_pyl
+    # agregaba TODA la historia (23,2M filas) en vez del mes actual.
+    deptos = await get_depto_pyl(db, company_id, desde or month_start, hasta or now)
 
     return {
         "ventas_hoy": ventas_hoy,
         "ventas_semana": ventas_semana,
         "ventas_mes": ventas_mes,
-        "margen_promedio": round(sum(margen_deptos) / max(len(margen_deptos), 1), 1) if margen_deptos else 0,
+        "margen_promedio": margen_promedio_real,
         "ticket_promedio": ticket_promedio,
         "clientes_atendidos": total_clientes,
         "productos_vendidos": productos_vendidos,
