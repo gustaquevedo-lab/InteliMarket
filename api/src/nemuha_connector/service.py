@@ -50,6 +50,9 @@ reales (nunca asumidos):
         (qtdAtual) — no hace falta recalcular desde movimientos. Verificado:
         10.761 filas, una sola filial (idFilial=1). stock_minimo real también
         se sincroniza (est_produto.QTD_MINIMA_EM_ESTOQUE) en _resolve_producto.
+    - bs_pessoa.VL_LIMITE_CREDITO -> credit_accounts.CreditAccount (sync_credit_accounts).
+        469 de 4.699 personas reales tienen límite > 0 (verificado). saldo_utilizado
+        se calcula desde accounts_receivable ya sincronizada, no desde el legacy.
 
 Deliberadamente FUERA de esta versión:
     - fin_pagamento / fin_recebimento (detalle de pagos y cobros) — se usa por
@@ -87,6 +90,7 @@ from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
 from api.src.sales.models import Sale, SaleItem
 from api.src.inventory.models import Warehouse, Stock
+from api.src.credit_accounts.models import CreditAccount
 
 MONEDA_MAP = {1: "PYG", 2: "USD", 3: "BRL"}  # bs_moeda — verificado contra datos reales
 SYSTEM_RUN_MODEL = "system:nemuha-controles-automaticos"
@@ -806,6 +810,52 @@ async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> i
     return count
 
 
+# ── Líneas de crédito (bs_pessoa.VL_LIMITE_CREDITO) ─────────────────────────────
+#
+# 469 de 4.699 personas reales tienen un límite de crédito > 0 (verificado).
+# saldo_utilizado se calcula desde accounts_receivable (ya sincronizada), no
+# desde el legacy — es la misma fuente de verdad que usa el resto del sistema.
+
+async def sync_credit_accounts(db: AsyncSession, company_id: str, since: date | None) -> int:
+    rows = await _fetch("SELECT ID_PESSOA, VL_LIMITE_CREDITO FROM bs_pessoa WHERE VL_LIMITE_CREDITO > 0")
+
+    count = 0
+    for r in rows:
+        customer_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "customer")
+        limite = Decimal(str(r["VL_LIMITE_CREDITO"]))
+
+        saldo_result = await db.execute(
+            text("""
+                SELECT COALESCE(SUM(saldo_pendiente), 0) FROM accounts_receivable
+                WHERE company_id = :company_id AND customer_id = :customer_id AND estado = 'pendiente'
+            """),
+            {"company_id": company_id, "customer_id": str(customer_id)},
+        )
+        saldo_utilizado = Decimal(str(saldo_result.scalar() or "0"))
+
+        result = await db.execute(
+            select(CreditAccount).where(CreditAccount.company_id == company_id, CreditAccount.customer_id == customer_id)
+        )
+        cuenta = result.scalar_one_or_none()
+        if cuenta:
+            cuenta.limite_credito = limite
+            cuenta.saldo_utilizado = saldo_utilizado
+            cuenta.saldo_disponible = limite - saldo_utilizado
+        else:
+            db.add(CreditAccount(
+                company_id=company_id,
+                customer_id=customer_id,
+                limite_credito=limite,
+                saldo_utilizado=saldo_utilizado,
+                saldo_disponible=limite - saldo_utilizado,
+            ))
+
+        count += 1
+
+    await db.flush()
+    return count
+
+
 # ── Orquestador ──────────────────────────────────────────────────────────────
 
 async def run_sync(db: AsyncSession, company_id: str, since: date | None = None) -> NemuhaSyncRun:
@@ -827,6 +877,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("cash_deposit_gaps", sync_cash_deposit_gaps),
         ("sales", sync_sales),
         ("stock", sync_stock),
+        ("credit_accounts", sync_credit_accounts),
     ):
         try:
             rows_synced[name] = await fn(db, company_id, since)
