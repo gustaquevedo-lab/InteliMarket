@@ -118,6 +118,25 @@ async def delete_bank_account(account_id: str, db: AsyncSession = Depends(get_db
     return {"message": "Cuenta bancaria eliminada"}
 
 
+@router.get("/banks/transactions", response_model=list[BankTransactionResponse])
+async def list_all_bank_transactions(
+    company_id: str = Query(),
+    categoria: str | None = Query(None),
+    conciliado: bool | None = Query(None),
+    desde: date | None = Query(None),
+    hasta: date | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Movimientos bancarios de todas las cuentas de la empresa, sin filtrar por cuenta.
+
+    Registrada antes de /banks/{account_id}/transactions para que "transactions"
+    no se interprete como un account_id.
+    """
+    return await service.list_bank_transactions(db, company_id, None, conciliado, desde, hasta, categoria, limit, offset)
+
+
 @router.get("/banks/{account_id}/transactions", response_model=list[BankTransactionResponse])
 async def list_bank_transactions(
     account_id: str,
@@ -125,11 +144,12 @@ async def list_bank_transactions(
     conciliado: bool | None = Query(None),
     desde: date | None = Query(None),
     hasta: date | None = Query(None),
+    categoria: str | None = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_bank_transactions(db, company_id, account_id, conciliado, desde, hasta, limit, offset)
+    return await service.list_bank_transactions(db, company_id, account_id, conciliado, desde, hasta, categoria, limit, offset)
 
 
 @router.post("/banks/{account_id}/import", response_model=list[BankTransactionResponse])
