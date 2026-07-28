@@ -11,6 +11,7 @@ from api.src.caja.models import CashRegister, CashSession
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment, CashSessionCreate, CashSessionClose
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
 from api.src.customers.models import Customer
+from api.src.products.models import Product
 
 
 def calculate_taxes(item: dict) -> dict:
@@ -355,12 +356,28 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
 async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
     result = await db.execute(select(SaleItem).where(SaleItem.sale_id == uuid.UUID(sale_id)))
     items = result.scalars().all()
+
+    # Igual que con el cliente de la venta: no hay relacion ORM SaleItem->Product,
+    # y "descripcion" quedo vacia en los items migrados/sincronizados desde el
+    # legacy (nunca se cargo un texto libre, solo product_id) — sin esto el
+    # modal de detalle no tenia forma de mostrar que producto era cada linea.
+    product_ids = {i.product_id for i in items if i.product_id}
+    products_by_id = {}
+    if product_ids:
+        prod_result = await db.execute(select(Product).where(Product.id.in_(product_ids)))
+        products_by_id = {p.id: p for p in prod_result.scalars().all()}
+
     return [
         {
             "id": str(i.id),
             "sale_id": str(i.sale_id),
             "product_id": str(i.product_id),
             "descripcion": i.descripcion,
+            "product": {
+                "id": str(i.product_id),
+                "nombre": products_by_id[i.product_id].nombre,
+                "sku": products_by_id[i.product_id].sku,
+            } if i.product_id in products_by_id else None,
             "cantidad": float(i.cantidad),
             "precio_unitario": int(i.precio_unitario),
             "descuento_pct": float(i.descuento_pct),
