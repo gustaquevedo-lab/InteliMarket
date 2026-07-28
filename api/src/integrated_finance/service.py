@@ -607,7 +607,8 @@ async def recalculate_score(db: AsyncSession, company_id: str, customer_id: str)
 async def compute_ebitda(db: AsyncSession, company_id: str, month: str | None = None) -> dict:
     cid = uuid.UUID(company_id)
 
-    from api.src.sales.models import Sale
+    from api.src.sales.models import Sale, SaleItem
+    from api.src.petty_cash.models import Expense
 
     today = _today()
     current_month = month or today.strftime("%Y-%m")
@@ -625,28 +626,32 @@ async def compute_ebitda(db: AsyncSession, company_id: str, month: str | None = 
     )
     ingresos_netos = float(sales_r.scalar() or 0)
 
-    from api.src.financial.models import SupplierInvoice
-    purchases_r = await db.execute(
-        select(func.coalesce(func.sum(SupplierInvoice.total), 0)).where(
-            SupplierInvoice.company_id == cid,
-            SupplierInvoice.fecha_emision >= inicio,
-            SupplierInvoice.fecha_emision <= fin,
+    # Costo de ventas real: costo unitario x cantidad de cada linea vendida en el mes
+    # (dato real sincronizado desde el legado, no una aproximacion via compras del mes).
+    cogs_r = await db.execute(
+        select(func.coalesce(func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0))
+        .select_from(SaleItem)
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .where(
+            Sale.company_id == cid,
+            Sale.estado != 'anulado',
+            func.date(Sale.fecha) >= inicio,
+            func.date(Sale.fecha) <= fin,
         )
     )
-    costo_ventas = float(purchases_r.scalar() or 0)
+    costo_ventas = float(cogs_r.scalar() or 0)
 
-    gastos_operativos = 0
-    expense_cats = ["gasto", "servicio", "alquiler", "salario", "marketing", "administrativo"]
-    for cat in expense_cats:
-        cat_r = await db.execute(
-            select(func.coalesce(func.sum(SupplierInvoice.total), 0)).where(
-                SupplierInvoice.company_id == cid,
-                SupplierInvoice.fecha_emision >= inicio,
-                SupplierInvoice.fecha_emision <= fin,
-                SupplierInvoice.concepto.ilike(f"%{cat}%"),
-            )
+    # Gastos operativos reales: tabla expenses (sincronizada desde fin_gasto del legado),
+    # no una adivinanza por texto sobre facturas de proveedor.
+    gastos_r = await db.execute(
+        select(func.coalesce(func.sum(Expense.monto), 0)).where(
+            Expense.company_id == cid,
+            Expense.estado != "rechazado",
+            Expense.fecha_gasto >= inicio,
+            Expense.fecha_gasto <= fin,
         )
-        gastos_operativos += float(cat_r.scalar() or 0)
+    )
+    gastos_operativos = float(gastos_r.scalar() or 0)
 
     resultado_bruto = ingresos_netos - costo_ventas
     ebitda = resultado_bruto - gastos_operativos
