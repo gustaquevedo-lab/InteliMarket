@@ -367,18 +367,12 @@ export default function PurchasesPage() {
         api.warehouses.list(),
       ])
       if (pos.status === "fulfilled") setPurchaseOrders(pos.value)
-      else setPurchaseOrders(mockPOs)
       if (recs.status === "fulfilled") setReceipts(recs.value)
-      else setReceipts(mockReceipts)
       if (sups.status === "fulfilled") setSuppliers(sups.value)
-      else setSuppliers(mockSuppliers)
       if (prods.status === "fulfilled") setProducts(prods.value)
-      else setProducts(mockProducts)
       if (wares.status === "fulfilled") setWarehouses(wares.value)
-      else setWarehouses(mockWarehouses)
     } catch {
-      setPurchaseOrders(mockPOs); setReceipts(mockReceipts)
-      setSuppliers(mockSuppliers); setProducts(mockProducts); setWarehouses(mockWarehouses)
+      /* sin datos reales disponibles — se muestran vacios, no mock */
     } finally { setLoading(false) }
   }, [])
   useEffect(() => { fetchAll() }, [fetchAll])
@@ -517,17 +511,33 @@ export default function PurchasesPage() {
   }
   const handleRemovePOItem = (index: number) => setPoFormItems(prev => prev.filter((_, i) => i !== index))
 
-  const handleSelectPOforReceipt = (poId: string) => {
+  const handleSelectPOforReceipt = async (poId: string) => {
     setReceiptPO(poId)
     const po = purchaseOrders.find(p => p.id === poId)
     if (po) {
       setReceiptSupplier(po.supplier_id ?? "")
-      const items: ReceiptItem[] = []
-      for (let i = 0; i < 3; i++) {
-        const prod = products[i] || mockProducts[i]
-        items.push({ product_id: prod.id, nombre: prod.nombre, sku: prod.sku || "", cantidad_ordenada: 10 + i * 5, cantidad_recibir: 10 + i * 5, costo_unitario: prod.precio || 0, lote: "", fecha_vencimiento: "" })
+      try {
+        const poItems = await api.purchases.getOrderItems(poId)
+        const items: ReceiptItem[] = poItems.map((it: any) => {
+          const prod = products.find(p => p.id === it.product_id)
+          const ordenada = Number(it.cantidad || 0)
+          const yaRecibida = Number(it.cantidad_recibida || 0)
+          return {
+            product_id: it.product_id,
+            nombre: it.descripcion || prod?.nombre || "—",
+            sku: prod?.sku || "",
+            cantidad_ordenada: ordenada,
+            cantidad_recibir: Math.max(ordenada - yaRecibida, 0),
+            costo_unitario: Number(it.precio_unitario || it.costo_unitario_estimado || 0),
+            lote: "",
+            fecha_vencimiento: "",
+          }
+        })
+        setReceiptItems(items)
+      } catch {
+        toast.error("Error", "No se pudieron cargar los items de la orden")
+        setReceiptItems([])
       }
-      setReceiptItems(items)
     }
   }
 
