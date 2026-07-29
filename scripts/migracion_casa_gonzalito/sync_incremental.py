@@ -307,27 +307,34 @@ def sync_productos(pg, my, cat_map):
     with my.cursor() as cur:
         cur.execute(
             "SELECT CODIGO, COD_BARRA, NOMBRE, ID_CATEGORIA, SERVICIO, INACTIVO, "
-            "FECHA, FECMOD FROM productos WHERE FECMOD > %s ORDER BY FECMOD", (since,))
+            "FECHA, FECMOD, PRECIOCOSTO FROM productos WHERE FECMOD > %s ORDER BY FECMOD", (since,))
         legacy_rows = cur.fetchall()
     if not legacy_rows:
         log("  productos: sin cambios")
         return set(), {}
     max_ts = since
     codigos, costos, rows = set(), {}, []
-    for (codigo, cod_barra, nombre, id_cat, servicio, inactivo, fecha, fecmod) in legacy_rows:
+    for (codigo, cod_barra, nombre, id_cat, servicio, inactivo, fecha, fecmod, preciocosto) in legacy_rows:
         cod = txt_keep(codigo, 50)
         if not cod:
             continue
         codigos.add(cod)
         cat_id = cat_map.get(str(id_cat)) if id_cat else None
+        costo = money(preciocosto) if preciocosto else 0
+        costos[cod] = costo
+        # products.costo_promedio/ultimo_costo nunca se escribian pese a leerse
+        # aca — bug arrastrado del etl.py original (se armaba el dict "costos"
+        # y se descartaba antes del INSERT). Backfill unico ya corrido para los
+        # 11.358 productos existentes (ver backfill_costo.py); esto lo mantiene
+        # al dia para altas/cambios de aca en mas.
         rows.append((uuid.uuid5(NS, f"prod:{cod}"), COMPANY_ID, cat_id, cod,
                      txt_keep(cod_barra, 50), (txt(nombre) or cod)[:200],
                      "servicio" if servicio == 1 else "producto",
-                     not bool(inactivo)))
+                     not bool(inactivo), costo, costo))
         if fecmod and fecmod > max_ts:
             max_ts = fecmod
     n = upsert(pg, "products", ["id", "company_id", "category_id", "sku", "codigo_barra",
-                                 "nombre", "tipo", "activo"], rows)
+                                 "nombre", "tipo", "activo", "costo_promedio", "ultimo_costo"], rows)
     log(f"  productos: {n} filas actualizadas (FECMOD > {since})")
     set_watermark(pg, "productos", last_synced_at=max_ts)
     return codigos, costos
