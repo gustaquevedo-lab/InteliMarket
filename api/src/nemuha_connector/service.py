@@ -82,7 +82,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.config import settings
 from api.src.nemuha_connector.models import NemuhaRecordMap, NemuhaSyncRun
-from api.src.purchases.models import Supplier
+from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseOrderItem, PurchaseReceipt, PurchaseReceiptItem
 from api.src.customers.models import Customer
 from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction
 from api.src.petty_cash.models import Expense
@@ -911,6 +911,171 @@ async def sync_credit_accounts(db: AsyncSession, company_id: str, since: date | 
     return count
 
 
+# ── Órdenes de Compra y Recepciones (est_ordem_compra / est_recepcao_ordem_compra) ──
+#
+# El reporte más usado del negocio (RelatorioOrdemCompra, 9.099 corridas) sale de
+# esta area — verificado contra aud_relatorio del propio legado.
+# No hay flag "enviado" real en est_ordem_compra: los únicos booleanos son
+# BO_CANCELADO/BO_CONFIRMADO/BO_FINALIZADO. "parcial" se infiere si algún item
+# tiene QTD_PRODUTO_ENTREGUE > 0 sin estar finalizada la orden.
+
+async def sync_purchase_orders(db: AsyncSession, company_id: str, since: date | None) -> int:
+    nombre_por_producto = {r["ID_PRODUTO"]: r["DS_PRODUTO"] for r in await _fetch("SELECT ID_PRODUTO, DS_PRODUTO FROM est_produto")}
+
+    sql = "SELECT * FROM est_ordem_compra WHERE 1=1"
+    params: tuple = ()
+    if since:
+        sql += " AND DT_ORDEM_COMPRA >= %s"
+        params = (since,)
+    ordenes = await _fetch(sql, params)
+
+    count = 0
+    for o in ordenes:
+        existing_id = await _get_mapped_target(db, company_id, "est_ordem_compra", o["ID_ORDEM_COMPRA"])
+        if existing_id:
+            count += 1
+            continue
+
+        if o["ID_PESSOA"] is None:
+            # 2 de 4.193 órdenes reales sin proveedor asociado en el legado — se saltan.
+            continue
+
+        supplier_id = await _resolve_pessoa(db, company_id, o["ID_PESSOA"], "supplier")
+
+        items_rows = await _fetch(
+            "SELECT * FROM est_item_ordem_compra WHERE ID_ORDEM_COMPRA = %s",
+            (o["ID_ORDEM_COMPRA"],),
+        )
+
+        cancelado = bool(o["BO_CANCELADO"])
+        finalizado = bool(o["BO_FINALIZADO"])
+        confirmado = bool(o["BO_CONFIRMADO"])
+        algo_entregado = any((it["QTD_PRODUTO_ENTREGUE"] or 0) > 0 for it in items_rows)
+
+        if cancelado:
+            estado = "cancelado"
+        elif finalizado:
+            estado = "completado"
+        elif algo_entregado:
+            estado = "parcial"
+        elif confirmado:
+            estado = "confirmado"
+        else:
+            estado = "borrador"
+
+        subtotal = Decimal("0")
+        iva_10 = iva_5 = Decimal("0")
+        order_items = []
+        for it in items_rows:
+            tasa = Decimal(str(it["IVA"])) if it["IVA"] is not None else Decimal("10")
+            total_item = Decimal(str(it["VL_TOTAL"] or 0))
+            iva_monto = _iva_monto(total_item, tasa)
+            base = total_item - iva_monto
+            if tasa == 10:
+                iva_10 += iva_monto
+            elif tasa == 5:
+                iva_5 += iva_monto
+            subtotal += base
+
+            product_id = await _resolve_producto(db, company_id, it["ID_PRODUTO"], it["CODIGO_BARRA"], tasa)
+            order_items.append(PurchaseOrderItem(
+                product_id=product_id,
+                descripcion=nombre_por_producto.get(it["ID_PRODUTO"]),
+                cantidad=Decimal(str(it["QTD_PRODUTO"] or 0)),
+                cantidad_recibida=Decimal(str(it["QTD_PRODUTO_ENTREGUE"] or 0)),
+                precio_unitario=Decimal(str(it["VL_UNITARIO"] or 0)),
+                iva_tasa=tasa,
+                total=total_item,
+            ))
+
+        order = PurchaseOrder(
+            company_id=company_id,
+            supplier_id=supplier_id,
+            numero=str(o["CD_ORDEM_COMPRA"]),
+            fecha=o["DT_ORDEM_COMPRA"] or o["DT_EMISSAO"],
+            estado=estado,
+            moneda=MONEDA_MAP.get(o["ID_MOEDA"], "PYG"),
+            subtotal=subtotal,
+            descuento_total=Decimal(str(o["VL_DESCONTO"] or 0)),
+            iva_10=iva_10,
+            iva_5=iva_5,
+            total=Decimal(str(o["VL_DOCUMENTO"] or 0)),
+        )
+        order.items = order_items
+        db.add(order)
+        await db.flush()
+        await _save_map(db, company_id, "est_ordem_compra", o["ID_ORDEM_COMPRA"], "purchase_orders", order.id)
+        count += 1
+
+    return count
+
+
+async def sync_purchase_receipts(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = "SELECT * FROM est_recepcao_ordem_compra WHERE 1=1"
+    params: tuple = ()
+    if since:
+        sql += " AND DT_CADASTRO >= %s"
+        params = (since,)
+    recepciones = await _fetch(sql, params)
+
+    warehouse_id = await _resolve_deposito(db, company_id, 1)
+
+    count = 0
+    for r in recepciones:
+        existing_id = await _get_mapped_target(db, company_id, "est_recepcao_ordem_compra", r["ID_RECEPCAO_ORDEM_COMPRA"])
+        if existing_id:
+            count += 1
+            continue
+
+        purchase_order_id = await _get_mapped_target(db, company_id, "est_ordem_compra", r["ID_ORDEM_COMPRA"])
+        if not purchase_order_id:
+            continue
+
+        po_row = await db.execute(
+            select(PurchaseOrder.supplier_id).where(PurchaseOrder.id == purchase_order_id)
+        )
+        supplier_id = po_row.scalar_one()
+
+        items_rows = await _fetch(
+            "SELECT * FROM est_item_recepcao_ordem_compra WHERE ID_RECEPCAO_ORDEM_COMPRA = %s",
+            (r["ID_RECEPCAO_ORDEM_COMPRA"],),
+        )
+
+        receipt_items = []
+        for it in items_rows:
+            product_id = await _resolve_producto(db, company_id, it["ID_PRODUTO"], None, Decimal("10"))
+            receipt_items.append(PurchaseReceiptItem(
+                product_id=product_id,
+                cantidad_ordenada=Decimal(str(it["QTD_PRODUTO_FATURA"] or it["QTD_RECEBIDA"] or 0)),
+                cantidad_recibida=Decimal(str(it["QTD_RECEBIDA"] or 0)),
+                precio_unitario=Decimal(str(it["VL_UNITARIO"] or 0)),
+                costo_unitario=Decimal(str(it["VL_UNITARIO"] or 0)),
+                total=Decimal(str(it["VL_TOTAL"] or 0)),
+            ))
+
+        # NR_DOCUMENTO (numero de factura del proveedor) no es único entre proveedores —
+        # se guarda como referencia, no como numero interno (que sí debe ser único).
+        receipt = PurchaseReceipt(
+            company_id=company_id,
+            purchase_order_id=purchase_order_id,
+            supplier_id=supplier_id,
+            warehouse_id=warehouse_id,
+            numero=f"REC-{r['ID_RECEPCAO_ORDEM_COMPRA']}",
+            fecha=r["DT_CADASTRO"],
+            total=Decimal(str(r["VL_RECEPCAO"] or 0)),
+            proveedor_ref=r["REMITO"] or r["NR_DOCUMENTO"],
+            estado="cancelado" if r["BO_CANCELADO"] else ("completado" if r["BO_FINALIZADO"] else "pendiente"),
+            observaciones=f"Factura proveedor: {r['NR_DOCUMENTO']}" if r["NR_DOCUMENTO"] else None,
+        )
+        receipt.items = receipt_items
+        db.add(receipt)
+        await db.flush()
+        await _save_map(db, company_id, "est_recepcao_ordem_compra", r["ID_RECEPCAO_ORDEM_COMPRA"], "purchase_receipts", receipt.id)
+        count += 1
+
+    return count
+
+
 # ── Orquestador ──────────────────────────────────────────────────────────────
 
 async def run_sync(db: AsyncSession, company_id: str, since: date | None = None) -> NemuhaSyncRun:
@@ -934,6 +1099,8 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("sale_payments", sync_sale_payments),
         ("stock", sync_stock),
         ("credit_accounts", sync_credit_accounts),
+        ("purchase_orders", sync_purchase_orders),
+        ("purchase_receipts", sync_purchase_receipts),
     ):
         try:
             rows_synced[name] = await fn(db, company_id, since)
