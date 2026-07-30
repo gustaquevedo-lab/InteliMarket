@@ -91,6 +91,7 @@ from api.src.products.models import Product
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.inventory.models import Warehouse, Stock
 from api.src.credit_accounts.models import CreditAccount
+from api.src.caja.models import CashRegister, CashSession, CashCount
 
 MONEDA_MAP = {1: "PYG", 2: "USD", 3: "BRL"}  # bs_moeda — verificado contra datos reales
 SYSTEM_RUN_MODEL = "system:nemuha-controles-automaticos"
@@ -1076,6 +1077,75 @@ async def sync_purchase_receipts(db: AsyncSession, company_id: str, since: date 
     return count
 
 
+# ── Cierres de caja de cajeros (fin_caixa_chica) ────────────────────────────────
+#
+# 2.061 sesiones reales de 39 cajeros distintos (ago 2025 - jul 2026). El
+# legado le puso "caixa_chica" (falso amigo pt-es de "caja chica") pero esto
+# NO es caja chica (esa es fin_gasto, ya sincronizada aparte como gastos
+# menores) — es la sesion real de apertura/cierre de turno del cajero.
+# Antes solo se escaneaba esta tabla para generar alertas de diferencia
+# (finance_recommendations, sync_cash_register_arqueo); nunca se cargaba
+# como sesion real en cash_registers/cash_sessions/cash_counts, el modelo
+# que InteliMarket ya tiene para esto y que estaba vacio.
+# El legado no distingue caja fisica (terminal POS), solo cajero — se usa
+# una unica "Caja Principal" por empresa, igual que el deposito unico.
+# STATUS_CAIXA: 'AB' = abierta (20 reales), 'FE' = fechada/cerrada (2.041).
+
+async def sync_cash_sessions(db: AsyncSession, company_id: str, since: date | None) -> int:
+    usuarios = {r["id_usuario"]: r["NM_USUARIO"] for r in await _fetch("SELECT id_usuario, NM_USUARIO FROM sys_usuario")}
+
+    sql = "SELECT * FROM fin_caixa_chica WHERE 1=1"
+    params: tuple = ()
+    if since:
+        sql += " AND DT_ABERTURA >= %s"
+        params = (since,)
+    rows = await _fetch(sql, params)
+
+    register_id = await _get_mapped_target(db, company_id, "cash_register:principal", 1)
+    if not register_id:
+        register = CashRegister(company_id=company_id, nombre="Caja Principal", codigo="1")
+        db.add(register)
+        await db.flush()
+        await _save_map(db, company_id, "cash_register:principal", 1, "cash_registers", register.id)
+        register_id = register.id
+
+    count = 0
+    for r in rows:
+        existing_id = await _get_mapped_target(db, company_id, "fin_caixa_chica", r["ID_CAIXA_CHICA"])
+        if existing_id:
+            count += 1
+            continue
+
+        cajero = usuarios.get(r["ID_USUARIO"], f"Usuario {r['ID_USUARIO']}")
+        estado = "abierta" if r["STATUS_CAIXA"] == "AB" else "cerrada"
+
+        session = CashSession(
+            register_id=register_id,
+            user_id=uuid.uuid5(uuid.NAMESPACE_DNS, f"nemuha-usuario-{r['ID_USUARIO']}"),
+            monto_apertura=Decimal(str(r["VL_ABERTURA_GUARANI"])),
+            fecha_apertura=r["DT_ABERTURA"],
+            fecha_cierre=r["DT_FECHAMENTO"] if estado == "cerrada" else None,
+            monto_cierre=Decimal(str(r["VL_FECHAMENTO_GUARANI"])) if estado == "cerrada" else None,
+            estado=estado,
+            observaciones=f"Cajero: {cajero}",
+        )
+        db.add(session)
+        await db.flush()
+
+        if estado == "cerrada":
+            db.add(CashCount(
+                session_id=session.id,
+                monto_efectivo=Decimal(str(r["VL_FECHAMENTO_GUARANI"])),
+                monto_total=Decimal(str(r["VL_FECHAMENTO_GUARANI"])),
+                diferencia=Decimal(str(r["VL_DIFERENCA_GUARANI"])),
+            ))
+
+        await _save_map(db, company_id, "fin_caixa_chica", r["ID_CAIXA_CHICA"], "cash_sessions", session.id)
+        count += 1
+
+    return count
+
+
 # ── Orquestador ──────────────────────────────────────────────────────────────
 
 async def run_sync(db: AsyncSession, company_id: str, since: date | None = None) -> NemuhaSyncRun:
@@ -1101,6 +1171,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("credit_accounts", sync_credit_accounts),
         ("purchase_orders", sync_purchase_orders),
         ("purchase_receipts", sync_purchase_receipts),
+        ("cash_sessions", sync_cash_sessions),
     ):
         try:
             rows_synced[name] = await fn(db, company_id, since)
