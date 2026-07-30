@@ -1006,6 +1006,83 @@ def sync_rescamion(pg, my):
 
 
 # ----------------------------------------------------------------------------
+# Contabilidad real (plan de cuentas + libro diario de partida doble)
+#
+# Confirmado con datos reales: plan_de_cuentas es un plan de cuentas de
+# verdad (Activo/Pasivo/Patrimonio/Ingreso/Egreso con rubros/subrubros), y
+# assiento/assiento1/assientohist son asientos contables reales (campo DH
+# = Debe/Haber) generados automaticamente por cada venta/compra, con Debe
+# = Haber. Vivo desde 2007 hasta hoy. SOLO se migran los datos crudos por
+# ahora (sin pantallas/reportes todavia — eso es una decision aparte,
+# dado el volumen ~3.26M lineas y que es un modulo nuevo, no una pantalla
+# existente esperando datos).
+#
+# assiento/assiento1/assientohist tienen rangos de IDASIENTO solapados
+# (parecen tablas rotativas/de respaldo del legacy, no particiones
+# limpias) — se sincronizan las 3 por separado con upsert keyed por
+# IDASIENTO (uuid5 determinista), que deduplica solo sin necesidad de
+# entender la relacion exacta entre las 3.
+# ----------------------------------------------------------------------------
+def sync_plan_de_cuentas(pg, my):
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT CODICUENT, CATEGORIA, TIPO, SECTOR, RUBROS, SUBRUBROS, INACTIVO "
+            "FROM plan_de_cuentas"
+        )
+        legacy_rows = cur.fetchall()
+    rows = []
+    for (cod, categoria, tipo, sector, rubros, subrubros, inactivo) in legacy_rows:
+        rows.append((
+            uuid.uuid5(NS, f"cuenta:{cod}"), COMPANY_ID, str(cod),
+            txt(categoria), txt(tipo), txt(sector), txt(rubros), txt(subrubros),
+            not bool(inactivo),
+        ))
+    n = upsert(pg, "general_ledger_accounts", ["id", "company_id", "codigo_legacy",
+                                                 "categoria", "tipo", "sector", "rubro",
+                                                 "subrubro", "activo"], rows)
+    log(f"  plan_de_cuentas: {n} filas (resync completo)")
+    return {str(cod) for (cod, *_r) in legacy_rows}
+
+
+def _sync_asiento_table(pg, my, table, cuentas_validas):
+    watermark_key = table  # "assiento" | "assiento1" | "assientohist"
+    last_id, _ = get_watermark(pg, watermark_key)
+    with my.cursor() as cur:
+        cur.execute(
+            f"SELECT IDASIENTO, IDCODICUENT, NUMERDOC, FECHA, CONCEPTO, MONTO, DH "
+            f"FROM {table} WHERE IDASIENTO > %s ORDER BY IDASIENTO", (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log(f"  {table}: sin filas nuevas")
+        return last_id
+    max_id, rows = last_id, []
+    for (iid, idcuenta, numerdoc, fecha, concepto, monto, dh) in legacy_rows:
+        max_id = max(max_id, iid)
+        fc = safe_dt(fecha)
+        if not fc:
+            continue
+        cod = str(idcuenta) if idcuenta else None
+        account_id = uuid.uuid5(NS, f"cuenta:{cod}") if cod and cod in cuentas_validas else None
+        rows.append((
+            uuid.uuid5(NS, f"asiento:{iid}"), COMPANY_ID, account_id,
+            txt_keep(numerdoc, 20), fc.date(), txt(concepto), money(monto),
+            "debe" if dh == 0 else "haber", table,
+        ))
+    n = upsert(pg, "general_ledger_entries", ["id", "company_id", "account_id",
+                                               "numero_documento", "fecha", "concepto",
+                                               "monto", "tipo", "origen_legacy"], rows)
+    log(f"  {table}: {n} filas nuevas (ID {last_id} -> {max_id})")
+    set_watermark(pg, watermark_key, last_id=max_id)
+    return max_id
+
+
+def sync_asientos(pg, my):
+    cuentas_validas = {txt_keep(c, 20) for c in legacy_id_set(my, "plan_de_cuentas", "CODICUENT")}
+    for table in ("assientohist", "assiento", "assiento1"):
+        _sync_asiento_table(pg, my, table, cuentas_validas)
+
+
+# ----------------------------------------------------------------------------
 # Post-proceso: recalcular IVA solo de las ventas/notas/compras tocadas esta corrida
 # ----------------------------------------------------------------------------
 def recalcular_iva(pg, sale_ids, purchase_ids):
@@ -1079,6 +1156,7 @@ def main():
         "cajas": lambda: sync_cajas(pg, my),
         "rutas": None,  # rutas + zparruta, se arma abajo
         "rescamion": lambda: sync_rescamion(pg, my),
+        "contabilidad": None,  # plan de cuentas + asientos, se arma abajo
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -1138,6 +1216,11 @@ def main():
         sync_zparruta(pg, my, rutas_validas)
     if not ONLY or ONLY == "rescamion":
         sync_rescamion(pg, my)
+
+    log("\n[4f] Contabilidad (plan de cuentas + libro diario)")
+    if not ONLY or ONLY == "contabilidad":
+        sync_plan_de_cuentas(pg, my)
+        sync_asientos(pg, my)
 
     log("\n[5] Post-proceso")
     recalcular_iva(pg, sale_ids, set())
