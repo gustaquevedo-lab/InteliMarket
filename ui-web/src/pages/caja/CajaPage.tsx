@@ -11,9 +11,11 @@ const registerStatusMap: Record<string, string> = {
 }
 
 export default function CajaPage() {
-  const [activeTab, setActiveTab] = useState<"registers" | "sessions">("registers")
+  const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "historial">("registers")
   const [registers, setRegisters] = useState<CashRegister[]>([])
   const [sessions, setSessions] = useState<CashSession[]>([])
+  const [historial, setHistorial] = useState<CashSession[]>([])
+  const [historialLoading, setHistorialLoading] = useState(false)
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(true)
   const [showOpenModal, setShowOpenModal] = useState(false)
@@ -47,12 +49,33 @@ export default function CajaPage() {
 
   useEffect(() => { fetchData() }, [])
 
+  const fetchHistorial = async () => {
+    setHistorialLoading(true)
+    try {
+      const data = await api.caja.sessions.list({ estado: "cerrada", limit: 200 })
+      setHistorial(data)
+    } catch {
+      toast.error("Error", "No se pudo cargar el historial de cierres")
+    } finally {
+      setHistorialLoading(false)
+    }
+  }
+
+  useEffect(() => { if (activeTab === "historial" && historial.length === 0) fetchHistorial() }, [activeTab])
+
+  const getRegisterName = (registerId?: string) => registers.find(r => r.id === registerId)?.nombre || "Caja Principal"
+  const getCajero = (s: CashSession) => (s.observaciones || "").replace(/^Cajero:\s*/, "") || "—"
+
   const filteredRegisters = registers.filter(r =>
     !search || r.nombre.toLowerCase().includes(search.toLowerCase())
   )
 
   const filteredSessions = sessions.filter(s =>
     !search || (s.estado || "").toLowerCase().includes(search.toLowerCase())
+  )
+
+  const filteredHistorial = historial.filter(s =>
+    !search || getCajero(s).toLowerCase().includes(search.toLowerCase())
   )
 
   const totalRegisters = registers.length
@@ -156,6 +179,7 @@ export default function CajaPage() {
       <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 w-fit">
         <button onClick={() => setActiveTab("registers")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "registers" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}>Cajas</button>
         <button onClick={() => setActiveTab("sessions")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "sessions" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}>Sesiones</button>
+        <button onClick={() => setActiveTab("historial")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "historial" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}>Historial</button>
       </div>
 
       <div className="relative">
@@ -163,7 +187,52 @@ export default function CajaPage() {
         <input className="input-field pl-10" placeholder="Buscar..." value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
 
-      {activeTab === "registers" ? (
+      {activeTab === "historial" ? (
+        <div className="card overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="table-header">
+                <th className="table-cell">Cajero</th>
+                <th className="table-cell">Caja</th>
+                <th className="table-cell">Apertura</th>
+                <th className="table-cell">Cierre</th>
+                <th className="table-cell text-right">Monto apertura</th>
+                <th className="table-cell text-right">Monto cierre</th>
+                <th className="table-cell text-right">Diferencia</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historialLoading ? (
+                <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
+              ) : filteredHistorial.length === 0 ? (
+                <tr><td colSpan={7} className="text-center py-12 text-gray-400">Sin cierres registrados</td></tr>
+              ) : (
+                filteredHistorial
+                  .slice()
+                  .sort((a, b) => new Date(b.fecha_cierre || b.fecha_apertura || 0).getTime() - new Date(a.fecha_cierre || a.fecha_apertura || 0).getTime())
+                  .map((s) => {
+                    const apertura = Number(s.monto_apertura || 0)
+                    const cierre = Number(s.monto_cierre || 0)
+                    const diferencia = cierre - apertura
+                    return (
+                      <tr key={s.id} className="table-row">
+                        <td className="table-td font-bold text-gray-900 dark:text-white">{getCajero(s)}</td>
+                        <td className="table-td text-sm text-gray-500">{getRegisterName((s as any).register_id)}</td>
+                        <td className="table-td text-sm">{s.fecha_apertura ? new Date(s.fecha_apertura).toLocaleString("es-PY") : "-"}</td>
+                        <td className="table-td text-sm">{s.fecha_cierre ? new Date(s.fecha_cierre).toLocaleString("es-PY") : "-"}</td>
+                        <td className="table-td text-right font-mono">{formatPYG(apertura)}</td>
+                        <td className="table-td text-right font-mono font-bold">{formatPYG(cierre)}</td>
+                        <td className={`table-td text-right font-mono font-bold ${diferencia === 0 ? "text-gray-400" : diferencia < 0 ? "text-red-500" : "text-green-500"}`}>
+                          {diferencia === 0 ? "—" : `${diferencia > 0 ? "+" : ""}${formatPYG(diferencia)}`}
+                        </td>
+                      </tr>
+                    )
+                  })
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : activeTab === "registers" ? (
         <div className="card overflow-hidden">
           <table className="w-full">
             <thead>
