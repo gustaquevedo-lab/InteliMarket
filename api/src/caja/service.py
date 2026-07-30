@@ -8,7 +8,7 @@ from decimal import Decimal
 import uuid
 
 from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement
-from api.src.sales.models import Sale
+from api.src.sales.models import Sale, SalePayment
 
 
 async def list_registers(db: AsyncSession, branch_id: str | None = None) -> list[CashRegister]:
@@ -128,6 +128,7 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
     session_obj = CashSession(
         register_id=register_id,
         user_id=data["user_id"],
+        cajero_nombre=data.get("cajero_nombre"),
         monto_apertura=data.get("monto_apertura", 0),
     )
     db.add(session_obj)
@@ -197,3 +198,127 @@ async def list_register_movements(db: AsyncSession, company_id: str, tipo: str |
         }
         for m in result.scalars().all()
     ]
+
+
+async def list_sessions_with_totals(
+    db: AsyncSession,
+    company_id: str,
+    register_id: str | None = None,
+    estado: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Sesiones con el monto realmente cobrado (ventas confirmadas vinculadas
+    a la sesion real, no una aproximacion por sucursal) y alerta de cash drop."""
+    query = select(CashSession).join(CashRegister, CashRegister.id == CashSession.register_id).where(
+        CashRegister.company_id == uuid.UUID(company_id)
+    )
+    if register_id:
+        query = query.where(CashSession.register_id == uuid.UUID(register_id))
+    if estado:
+        query = query.where(CashSession.estado == estado)
+    query = query.order_by(CashSession.fecha_apertura.desc()).limit(limit).offset(offset)
+    result = await db.execute(query)
+    sessions = list(result.scalars().all())
+
+    out = []
+    for s in sessions:
+        cobrado_result = await db.execute(
+            select(func.coalesce(func.sum(Sale.total), 0)).where(
+                Sale.session_id == s.id,
+                Sale.estado == "confirmado",
+            )
+        )
+        monto_cobrado = float(cobrado_result.scalar() or 0)
+
+        cash_drop_alert = False
+        efectivo_acumulado = 0.0
+        if s.estado == "abierta":
+            register_result = await db.execute(select(CashRegister).where(CashRegister.id == s.register_id))
+            register = register_result.scalar_one_or_none()
+            if register and register.cash_drop_threshold:
+                desde = s.ultimo_cash_drop_at or s.fecha_apertura
+                # Los pagos sincronizados del legado solo tienen granularidad de dia
+                # (fin_recebimento.DT_RECEBIMENTO es DATE, sin hora) — comparar por
+                # dia en vez de timestamp exacto, o una sesion abierta hoy nunca
+                # verian sus propios cobros de hoy (medianoche < hora de apertura).
+                efectivo_result = await db.execute(
+                    select(func.coalesce(func.sum(SalePayment.monto), 0))
+                    .select_from(SalePayment)
+                    .join(Sale, Sale.id == SalePayment.sale_id)
+                    .where(
+                        Sale.session_id == s.id,
+                        SalePayment.forma_pago == "EFECTIVO",
+                        func.date(SalePayment.fecha) >= func.date(desde),
+                    )
+                )
+                efectivo_acumulado = float(efectivo_result.scalar() or 0)
+                cash_drop_alert = efectivo_acumulado >= float(register.cash_drop_threshold)
+
+        out.append({
+            "id": str(s.id),
+            "register_id": str(s.register_id),
+            "user_id": str(s.user_id),
+            "cajero_nombre": s.cajero_nombre,
+            "fecha_apertura": s.fecha_apertura.isoformat(),
+            "fecha_cierre": s.fecha_cierre.isoformat() if s.fecha_cierre else None,
+            "monto_apertura": float(s.monto_apertura),
+            "monto_cierre": float(s.monto_cierre) if s.monto_cierre is not None else None,
+            "monto_cobrado": monto_cobrado,
+            "estado": s.estado,
+            "cash_drop_alert": cash_drop_alert,
+            "efectivo_acumulado": efectivo_acumulado,
+            "ultimo_cash_drop_at": s.ultimo_cash_drop_at.isoformat() if s.ultimo_cash_drop_at else None,
+        })
+    return out
+
+
+async def get_session_payment_breakdown(db: AsyncSession, session_id: str) -> list[dict]:
+    result = await db.execute(
+        select(
+            SalePayment.forma_pago,
+            func.count().label("cantidad"),
+            func.sum(SalePayment.monto).label("monto"),
+        )
+        .select_from(SalePayment)
+        .join(Sale, Sale.id == SalePayment.sale_id)
+        .where(Sale.session_id == uuid.UUID(session_id))
+        .group_by(SalePayment.forma_pago)
+        .order_by(func.sum(SalePayment.monto).desc())
+    )
+    rows = result.all()
+    total = float(sum(r.monto for r in rows)) or 1
+    return [
+        {
+            "forma_pago": r.forma_pago,
+            "cantidad": r.cantidad,
+            "monto": float(r.monto),
+            "porcentaje": round((float(r.monto) / total) * 100, 1),
+        }
+        for r in rows
+    ]
+
+
+async def register_cash_drop(db: AsyncSession, session_id: str, monto: Decimal, observaciones: str | None = None) -> CashRegisterMovement | None:
+    result = await db.execute(select(CashSession).where(CashSession.id == uuid.UUID(session_id)))
+    session_obj = result.scalar_one_or_none()
+    if not session_obj or session_obj.estado != "abierta":
+        return None
+
+    register_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
+    register = register_result.scalar_one_or_none()
+
+    movement = CashRegisterMovement(
+        company_id=register.company_id,
+        register_id=session_obj.register_id,
+        tipo="retiro",
+        monto=monto,
+        moneda="PYG",
+        fecha=datetime.now(timezone.utc),
+        observaciones=f"Cash drop sesión {session_id}" + (f" — {observaciones}" if observaciones else ""),
+    )
+    db.add(movement)
+    session_obj.ultimo_cash_drop_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(movement)
+    return movement

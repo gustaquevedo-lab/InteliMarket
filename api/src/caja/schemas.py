@@ -17,6 +17,7 @@ class CashRegisterUpdate(BaseModel):
     nombre: Optional[str] = None
     codigo: Optional[str] = None
     activo: Optional[bool] = None
+    cash_drop_threshold: Optional[Decimal] = None
 
 
 class CashRegisterResponse(BaseModel):
@@ -25,6 +26,7 @@ class CashRegisterResponse(BaseModel):
     nombre: str
     codigo: str
     activo: bool
+    cash_drop_threshold: Optional[Decimal] = None
     created_at: datetime
 
     class Config:
@@ -34,6 +36,7 @@ class CashRegisterResponse(BaseModel):
 class CashSessionCreate(BaseModel):
     cash_register_id: UUID
     user_id: UUID
+    cajero_nombre: Optional[str] = None
     monto_apertura: Decimal = Decimal("0")
 
 
@@ -41,11 +44,13 @@ class CashSessionResponse(BaseModel):
     id: UUID
     register_id: UUID
     user_id: UUID
+    cajero_nombre: Optional[str] = None
     fecha_apertura: datetime
     monto_apertura: Decimal
     fecha_cierre: Optional[datetime] = None
     monto_cierre: Optional[Decimal] = None
     estado: str
+    ultimo_cash_drop_at: Optional[datetime] = None
     observaciones: Optional[str] = None
     created_at: datetime
 
@@ -55,4 +60,9 @@ class CashSessionResponse(BaseModel):
 
 class CashSessionClose(BaseModel):
     monto_cierre_real: Decimal
+    observaciones: Optional[str] = None
+
+
+class CashDropCreate(BaseModel):
+    monto: Decimal
     observaciones: Optional[str] = None

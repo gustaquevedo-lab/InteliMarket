@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.caja.schemas import (
     CashRegisterCreate, CashRegisterUpdate, CashRegisterResponse,
-    CashSessionCreate, CashSessionClose, CashSessionResponse,
+    CashSessionCreate, CashSessionClose, CashSessionResponse, CashDropCreate,
 )
 from api.src.caja import service
 
@@ -94,3 +94,28 @@ async def close_session(session_id: str, body: CashSessionClose, db: AsyncSessio
 @router.get("/cash-register-movements")
 async def list_register_movements(company_id: str = Query(), tipo: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     return await service.list_register_movements(db, company_id, tipo)
+
+
+@router.get("/cash-sessions-summary")
+async def list_sessions_summary(
+    company_id: str = Query(),
+    register_id: str | None = Query(None),
+    estado: str | None = Query(None),
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.list_sessions_with_totals(db, company_id, register_id, estado, limit=limit, offset=offset)
+
+
+@router.get("/cash-sessions/{session_id}/payment-breakdown")
+async def session_payment_breakdown(session_id: str, db: AsyncSession = Depends(get_db)):
+    return await service.get_session_payment_breakdown(db, session_id)
+
+
+@router.post("/cash-sessions/{session_id}/cash-drop", status_code=status.HTTP_201_CREATED)
+async def cash_drop(session_id: str, body: CashDropCreate, db: AsyncSession = Depends(get_db)):
+    result = await service.register_cash_drop(db, session_id, body.monto, body.observaciones)
+    if not result:
+        raise HTTPException(status_code=400, detail="No se pudo registrar el cash drop (¿la sesión está abierta?)")
+    return result

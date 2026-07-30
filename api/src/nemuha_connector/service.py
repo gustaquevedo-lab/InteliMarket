@@ -761,9 +761,12 @@ async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> i
         recibido = bool(v["BO_RECEBIDO"])
         total = Decimal(str(v["VL_TOTAL"]))
 
+        session_id = await _get_mapped_target(db, company_id, "fin_caixa_chica", v["ID_CAIXA_CHICA"]) if v["ID_CAIXA_CHICA"] is not None else None
+
         sale = Sale(
             company_id=company_id,
             customer_id=customer_id,
+            session_id=session_id,
             numero=str(v["CD_VENDA"]),
             fecha=v["DT_VENDA"],
             tipo_comprobante="factura" if facturado else "ticket",
@@ -1189,12 +1192,12 @@ async def sync_cash_sessions(db: AsyncSession, company_id: str, since: date | No
         session = CashSession(
             register_id=register_id,
             user_id=uuid.uuid5(uuid.NAMESPACE_DNS, f"nemuha-usuario-{r['ID_USUARIO']}"),
+            cajero_nombre=cajero,
             monto_apertura=Decimal(str(r["VL_ABERTURA_GUARANI"])),
             fecha_apertura=r["DT_ABERTURA"],
             fecha_cierre=r["DT_FECHAMENTO"] if estado == "cerrada" else None,
             monto_cierre=Decimal(str(r["VL_FECHAMENTO_GUARANI"])) if estado == "cerrada" else None,
             estado=estado,
-            observaciones=f"Cajero: {cajero}",
         )
         db.add(session)
         await db.flush()
@@ -1358,6 +1361,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("petty_cash_expenses", sync_petty_cash_expenses),
         ("cash_register_arqueo", sync_cash_register_arqueo),
         ("cash_deposit_gaps", sync_cash_deposit_gaps),
+        ("cash_sessions", sync_cash_sessions),
         ("sales", sync_sales),
         ("sale_payments", sync_sale_payments),
         ("stock", sync_stock),
@@ -1365,7 +1369,6 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("supplier_balances", sync_supplier_balances),
         ("purchase_orders", sync_purchase_orders),
         ("purchase_receipts", sync_purchase_receipts),
-        ("cash_sessions", sync_cash_sessions),
         ("supplier_credit_notes", sync_supplier_credit_notes),
         ("cash_register_movements", sync_cash_register_movements),
     ):

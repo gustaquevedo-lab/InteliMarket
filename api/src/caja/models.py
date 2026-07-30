@@ -16,6 +16,7 @@ class CashRegister(Base):
     nombre = Column(String(100), nullable=False)
     codigo = Column(String(20), nullable=False, unique=True)
     activo = Column(Boolean, default=True)
+    cash_drop_threshold = Column(Numeric(15, 0))  # monto de efectivo acumulado que dispara la alerta de cash drop
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -25,11 +26,13 @@ class CashSession(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     register_id = Column(UUID(as_uuid=True), ForeignKey("cash_registers.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), nullable=False)
+    cajero_nombre = Column(String(100))
     monto_apertura = Column(Numeric(15, 0), nullable=False)
     fecha_apertura = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     fecha_cierre = Column(DateTime(timezone=True))
     monto_cierre = Column(Numeric(15, 0))
     estado = Column(String(20), nullable=False, default="abierta")
+    ultimo_cash_drop_at = Column(DateTime(timezone=True))
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

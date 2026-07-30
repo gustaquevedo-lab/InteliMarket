@@ -14,6 +14,7 @@ class Sale(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     branch_id = Column(UUID(as_uuid=True))
+    session_id = Column(UUID(as_uuid=True), index=True)
     customer_id = Column(UUID(as_uuid=True))
     emission_point_id = Column(UUID(as_uuid=True))
     numero = Column(String(20), nullable=False, unique=True)
