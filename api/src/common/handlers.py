@@ -1,9 +1,10 @@
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from api.src.common.exceptions import AppError
@@ -19,6 +20,12 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         except AppError as exc:
             return self._json(exc.status_code, exc.code, exc.message, exc.details)
+        except (HTTPException, StarletteHTTPException) as exc:
+            # raise HTTPException(...) en cualquier endpoint (400, 404, etc.) caía en el
+            # catch-all de abajo y se devolvia como 500 generico, perdiendo el status y
+            # el mensaje real — esto rompia cualquier validacion de negocio (ej. "ya
+            # existe una sesion abierta para esta caja") en toda la API, no solo en caja.
+            return self._json(exc.status_code, "HTTP_ERROR", str(exc.detail))
         except IntegrityError as exc:
             logger.warning("IntegrityError: %s", str(exc.orig)[:200])
             return self._json(409, "CONFLICT", "El recurso ya existe o tiene dependencias")
