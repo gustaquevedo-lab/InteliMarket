@@ -762,3 +762,37 @@ async def get_inventory_valuation(db: AsyncSession, warehouse_id: Optional[str] 
             for r in rows
         ],
     }
+
+
+async def get_expenses_by_category(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    params = {}
+    where = "e.estado <> 'rechazado'"
+    if fecha_desde:
+        where += " AND e.fecha_gasto >= :fecha_desde"
+        params["fecha_desde"] = fecha_desde
+    if fecha_hasta:
+        where += " AND e.fecha_gasto < CAST(:fecha_hasta AS date) + interval '1 day'"
+        params["fecha_hasta"] = fecha_hasta
+
+    query = f"""
+        SELECT
+            COALESCE(ec.nombre, 'Sin categoría') as categoria,
+            COUNT(*) as cantidad,
+            SUM(e.monto) as monto
+        FROM expenses e
+        LEFT JOIN expense_categories ec ON ec.id = e.category_id
+        WHERE {where}
+        GROUP BY ec.nombre
+        ORDER BY monto DESC
+    """
+    results = (await _exec(db, query, params)).all()
+    total = float(sum(r["monto"] for r in results)) or 1
+    return [
+        {
+            "categoria": r["categoria"],
+            "cantidad": int(r["cantidad"]),
+            "monto": float(r["monto"]),
+            "porcentaje": round((float(r["monto"]) / total) * 100, 1),
+        }
+        for r in results
+    ]
