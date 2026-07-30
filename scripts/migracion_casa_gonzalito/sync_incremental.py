@@ -30,6 +30,7 @@ Variables de entorno (mismas que etl.py, MYSQL_HOST default apunta al legacy en 
     PG_DSN=postgresql://intelimarket:intelimarket_dev@localhost:5432/intelimarket
 """
 
+import json
 import os
 import sys
 import time
@@ -889,6 +890,122 @@ def sync_cajas(pg, my):
 
 
 # ----------------------------------------------------------------------------
+# Rutas de venta/reparto (rutas + zparruta + iten_rutas)
+#
+# rutas = definicion de ruta (zona, dias de la semana que corre). zparruta
+# = que cliente pertenece a que ruta (CODICLIE + RUTA, donde RUTA se junta
+# contra rutas.ID — NO el autoincrement IDRUTA). iten_rutas da el orden de
+# visita planificado por ruta+cliente. sales_routes.user_id se relajo a
+# NULL-able (ver migracion de schema) porque IDFUNCIONARIO no es un
+# usuario real de la app — se guarda como texto en funcionario_codigo.
+# ----------------------------------------------------------------------------
+DIAS_BITMASK = [(1, 1), (2, 2), (4, 3), (8, 4), (16, 5), (32, 6), (64, 7)]
+
+
+def decode_dias_semana(dias):
+    if not dias:
+        return []
+    dias = int(dias)
+    return [iso for bit, iso in DIAS_BITMASK if dias & bit]
+
+
+def sync_rutas(pg, my):
+    with my.cursor() as cur:
+        cur.execute("SELECT ID, IDFUNCIONARIO, DIAS, DESCRIPCION, ZONA, IDRUTA FROM rutas WHERE ID > 0")
+        legacy_rows = cur.fetchall()
+    rows = []
+    for (rid, idfunc, dias, descr, zona, idruta) in legacy_rows:
+        rows.append((
+            uuid.uuid5(NS, f"ruta:{rid}"), COMPANY_ID, (txt(descr) or f"Ruta {rid}")[:100],
+            str(rid)[:20], txt_keep(idfunc, 20), json.dumps(decode_dias_semana(dias)),
+            txt_keep(zona, 100), "activo",
+        ))
+    n = upsert(pg, "sales_routes", ["id", "company_id", "nombre", "codigo_legacy",
+                                     "funcionario_codigo", "dias_semana", "zona", "estado"], rows)
+    log(f"  rutas: {n} filas (resync completo, {len(legacy_rows)} en el legacy)")
+    return {r[0] for r in legacy_rows}  # set de ID de ruta legacy validos
+
+
+def sync_zparruta(pg, my, rutas_validas):
+    clientes_validos = {txt_keep(c, 15) for c in legacy_id_set(my, "clientes", "IDCLIENTES")}
+    with my.cursor() as cur:
+        cur.execute("SELECT CODICLIE, RUTA FROM zparruta WHERE RUTA > 0")
+        legacy_rows = cur.fetchall()
+    orden_by_key = {}
+    with my.cursor() as cur:
+        cur.execute("SELECT IDRUTA, IDCLIENTE, ORDEN FROM iten_rutas")
+        for (idruta, idcli, orden) in cur.fetchall():
+            orden_by_key[(idruta, txt_keep(idcli, 15))] = orden
+
+    rows, saltados = [], 0
+    for (codiclie, ruta) in legacy_rows:
+        cli = txt_keep(codiclie, 15)
+        if not cli or cli not in clientes_validos or ruta not in rutas_validas:
+            saltados += 1
+            continue
+        orden = orden_by_key.get((ruta, cli), 0)
+        rows.append((
+            uuid.uuid5(NS, f"rutacli:{ruta}:{cli}"), uuid.uuid5(NS, f"ruta:{ruta}"),
+            uuid.uuid5(NS, f"cli:{cli}"), orden or 0,
+        ))
+    n = upsert(pg, "route_customers", ["id", "route_id", "customer_id", "orden_visita"], rows)
+    log(f"  zparruta (clientes x ruta): {n} filas (resync completo"
+        f"{', ' + str(saltados) + ' saltadas sin ruta/cliente valido' if saltados else ''})")
+
+
+# ----------------------------------------------------------------------------
+# Viajes de camion (rescamion) — historial de reparto, SIN enlace a clientes
+# especificos (el legacy no lo registra a ese nivel, no se inventa).
+# ----------------------------------------------------------------------------
+def sync_rescamion(pg, my):
+    last_id, _ = get_watermark(pg, "rescamion")
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT Id_RESCAMION, IDCAMION, IDCHOFER, IDADJUDANTE, KILOMSALIDA, "
+            "KILOMLLEGADA, FECHA FROM rescamion WHERE Id_RESCAMION > %s ORDER BY Id_RESCAMION",
+            (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log("  rescamion: sin filas nuevas")
+        return last_id
+
+    camiones = {}
+    with my.cursor() as cur:
+        cur.execute("SELECT IDCAMIONES, MARCA, MODELO, CHAPA FROM camiones")
+        for (cid, marca, modelo, chapa) in cur.fetchall():
+            camiones[cid] = txt_keep(chapa, 20) or f"{txt(marca) or ''} {txt(modelo) or ''}".strip() or None
+    choferes = {}
+    with my.cursor() as cur:
+        cur.execute("SELECT IDFUNCIONARIO, NOMBRE, APELLIDO FROM funcionarios")
+        for (idf, nom, ape) in cur.fetchall():
+            nombre = " ".join(p for p in (txt(nom), txt(ape)) if p)
+            if nombre:
+                choferes[txt_keep(idf, 10)] = nombre
+
+    max_id, rows = last_id, []
+    for (iid, idcamion, idchofer, idadjud, kmsal, kmlleg, fecha) in legacy_rows:
+        max_id = max(max_id, iid)
+        placa = camiones.get(idcamion)
+        chofer_nombre = choferes.get(txt_keep(idchofer, 10))
+        ayudante_nombre = choferes.get(txt_keep(idadjud, 10))
+        km_txt = f"Km {kmsal}-{kmlleg}" if kmsal or kmlleg else None
+        descr = " | ".join(p for p in (
+            f"Ayudante: {ayudante_nombre}" if ayudante_nombre else None, km_txt,
+        ) if p)
+        fc = safe_dt(fecha) or datetime.now()
+        rows.append((
+            uuid.uuid5(NS, f"viaje:{iid}"), COMPANY_ID,
+            f"Viaje {placa or idcamion or ''} {fc.date().isoformat()}"[:200],
+            (txt(descr) or None), chofer_nombre, placa, fc, "completado" if kmlleg else "programado",
+        ))
+    n = upsert(pg, "routes", ["id", "company_id", "nombre", "descripcion", "driver_name",
+                               "vehicle_plate", "fecha", "estado"], rows)
+    log(f"  rescamion (viajes de camion): {n} filas nuevas (ID {last_id} -> {max_id})")
+    set_watermark(pg, "rescamion", last_id=max_id)
+    return max_id
+
+
+# ----------------------------------------------------------------------------
 # Post-proceso: recalcular IVA solo de las ventas/notas/compras tocadas esta corrida
 # ----------------------------------------------------------------------------
 def recalcular_iva(pg, sale_ids, purchase_ids):
@@ -960,6 +1077,8 @@ def main():
         "cuentas_docs": None,  # ar + ap, se arman abajo
         "pagos_cobros": None,  # historial de pagos/cobros, se arma abajo
         "cajas": lambda: sync_cajas(pg, my),
+        "rutas": None,  # rutas + zparruta, se arma abajo
+        "rescamion": lambda: sync_rescamion(pg, my),
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -1012,6 +1131,13 @@ def main():
     log("\n[4d] Liquidacion de caja por cobrador/ruta")
     if not ONLY or ONLY == "cajas":
         sync_cajas(pg, my)
+
+    log("\n[4e] Rutas de venta/reparto")
+    if not ONLY or ONLY == "rutas":
+        rutas_validas = sync_rutas(pg, my)
+        sync_zparruta(pg, my, rutas_validas)
+    if not ONLY or ONLY == "rescamion":
+        sync_rescamion(pg, my)
 
     log("\n[5] Post-proceso")
     recalcular_iva(pg, sale_ids, set())

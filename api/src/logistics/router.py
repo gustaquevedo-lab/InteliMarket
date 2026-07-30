@@ -80,10 +80,12 @@ async def create_route(
 async def list_routes(
     estado: Optional[str] = None,
     fecha: Optional[datetime] = None,
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_routes(db, user["company_id"], estado=estado, fecha=fecha)
+    return await service.list_routes(db, user["company_id"], estado=estado, fecha=fecha, limit=limit, offset=offset)
 
 
 @router.get("/routes/{route_id}", response_model=RouteResponse)

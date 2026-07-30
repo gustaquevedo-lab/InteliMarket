@@ -56,13 +56,15 @@ async def create_route(db: AsyncSession, data: RouteCreate) -> Route:
     return route
 
 
-async def list_routes(db: AsyncSession, company_id: str, estado: Optional[str] = None, fecha: Optional[datetime] = None) -> list[Route]:
+async def list_routes(db: AsyncSession, company_id: str, estado: Optional[str] = None, fecha: Optional[datetime] = None, limit: int = 50, offset: int = 0) -> list[Route]:
+    # Sin limit/offset esto devolvia los 83.383 viajes migrados de Casa
+    # Gonzalito de una sola vez.
     query = select(Route).where(Route.company_id == company_id)
     if estado:
         query = query.where(Route.estado == estado)
     if fecha:
         query = query.where(Route.fecha >= fecha)
-    query = query.order_by(Route.fecha.desc())
+    query = query.order_by(Route.fecha.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 
