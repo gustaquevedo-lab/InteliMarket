@@ -250,6 +250,16 @@ def legacy_id_set(my, table, id_col):
         return {r[0] for r in cur.fetchall()}
 
 
+def pg_id_set(pg, table):
+    """Set completo de IDs (UUID) ya insertados en una tabla de Postgres —
+    a diferencia de legacy_id_set(), esto refleja lo que REALMENTE quedo
+    migrado (algunas filas del legacy se saltan por huerfanas, ej. ctas_a_cobrar
+    de un cliente que no existe), no todo lo que existe del lado legacy."""
+    with pg.cursor() as cur:
+        cur.execute(f"SELECT id FROM {table}")
+        return {r[0] for r in cur.fetchall()}
+
+
 # ----------------------------------------------------------------------------
 # Maestros chicos (resync completo cada corrida, volumen <3k filas combinadas)
 # ----------------------------------------------------------------------------
@@ -745,6 +755,77 @@ def sync_ctas_a_pagar_docs(pg, my):
 
 
 # ----------------------------------------------------------------------------
+# Historial de pagos/cobros reales (recibo por recibo)
+#
+# cobros y pagos son el detalle transaccion a transaccion (con numero de
+# recibo/comprobante) de lo efectivamente cobrado/pagado contra cada
+# documento de ctas_a_cobrar/ctas_a_pagar. El saldo agregado ya es correcto
+# desde el MONTO-COBRO/MONTO-PAGOS de esas tablas (sync_ctas_a_*_docs) —
+# esto agrega el detalle de auditoria (quien pago que, cuando, con que
+# comprobante), que antes no existia en Intelimarket para nada.
+# ----------------------------------------------------------------------------
+def sync_cobros(pg, my):
+    last_id, _ = get_watermark(pg, "cobros")
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT IDCOBROS, IDCTAACOBRAR, MONTO, FECHA, RECIBO FROM cobros "
+            "WHERE IDCOBROS > %s ORDER BY IDCOBROS", (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log("  cobros: sin filas nuevas")
+        return last_id
+    # Contra Postgres, no contra el legacy: algunas filas de ctas_a_cobrar se
+    # saltean al migrar (cliente huerfano) y esos cobros quedarian con un
+    # receivable_id que no existe -> FK violation.
+    ar_pg_ids = pg_id_set(pg, "accounts_receivable")
+    max_id, rows, saltados = last_id, [], 0
+    for (iid, idcta, monto, fecha, recibo) in legacy_rows:
+        max_id = max(max_id, iid)
+        ar_id = uuid.uuid5(NS, f"ar:{idcta}") if idcta else None
+        if not ar_id or ar_id not in ar_pg_ids:
+            saltados += 1
+            continue
+        rows.append((uuid.uuid5(NS, f"cobro:{iid}"), ar_id, "efectivo",
+                     money(monto), "PYG", (safe_dt(fecha) or datetime.now()).date(),
+                     txt_keep(recibo, 100)))
+    n = upsert(pg, "accounts_receivable_payments", ["id", "receivable_id", "payment_method",
+                                                      "monto", "moneda", "fecha_pago", "referencia"], rows)
+    log(f"  cobros: {n} filas nuevas (ID {last_id} -> {max_id}"
+        f"{', ' + str(saltados) + ' saltadas sin cuenta' if saltados else ''})")
+    set_watermark(pg, "cobros", last_id=max_id)
+    return max_id
+
+
+def sync_pagos(pg, my):
+    last_id, _ = get_watermark(pg, "pagos")
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT IDPAGOS, IDCTAPAGAR, MONTO, FECHA, COMPROBANTE FROM pagos "
+            "WHERE IDPAGOS > %s ORDER BY IDPAGOS", (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log("  pagos: sin filas nuevas")
+        return last_id
+    ap_pg_ids = pg_id_set(pg, "supplier_invoices")
+    max_id, rows, saltados = last_id, [], 0
+    for (iid, idcta, monto, fecha, comprobante) in legacy_rows:
+        max_id = max(max_id, iid)
+        ap_id = uuid.uuid5(NS, f"ap:{idcta}") if idcta else None
+        if not ap_id or ap_id not in ap_pg_ids:
+            saltados += 1
+            continue
+        rows.append((uuid.uuid5(NS, f"pago:{iid}"), ap_id, "efectivo",
+                     money(monto), "PYG", (safe_dt(fecha) or datetime.now()).date(),
+                     txt_keep(comprobante, 100), "confirmado"))
+    n = upsert(pg, "supplier_invoice_payments", ["id", "invoice_id", "payment_method",
+                                                   "monto", "moneda", "fecha_pago", "referencia", "estado"], rows)
+    log(f"  pagos: {n} filas nuevas (ID {last_id} -> {max_id}"
+        f"{', ' + str(saltados) + ' saltadas sin cuenta' if saltados else ''})")
+    set_watermark(pg, "pagos", last_id=max_id)
+    return max_id
+
+
+# ----------------------------------------------------------------------------
 # Post-proceso: recalcular IVA solo de las ventas/notas/compras tocadas esta corrida
 # ----------------------------------------------------------------------------
 def recalcular_iva(pg, sale_ids, purchase_ids):
@@ -814,6 +895,7 @@ def main():
         "ventas": None,      # necesita cli_ids
         "cuentas": lambda: sync_cuentas(pg, my),
         "cuentas_docs": None,  # ar + ap, se arman abajo
+        "pagos_cobros": None,  # historial de pagos/cobros, se arma abajo
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -857,6 +939,11 @@ def main():
     if not ONLY or ONLY == "cuentas_docs":
         sync_ctas_a_cobrar_docs(pg, my)
         sync_ctas_a_pagar_docs(pg, my)
+
+    log("\n[4c] Historial de pagos/cobros (detalle de recibos/comprobantes)")
+    if not ONLY or ONLY == "pagos_cobros":
+        sync_cobros(pg, my)
+        sync_pagos(pg, my)
 
     log("\n[5] Post-proceso")
     recalcular_iva(pg, sale_ids, set())
