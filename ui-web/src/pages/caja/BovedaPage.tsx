@@ -1,25 +1,45 @@
 import { useState, useEffect } from "react"
-import { Banknote, ShieldAlert, ShieldCheck, History, RefreshCw, Loader2 } from "lucide-react"
+import { Banknote, ShieldAlert, ShieldCheck, History, RefreshCw, Loader2, TrendingDown, TrendingUp, AlertTriangle } from "lucide-react"
 import { api, type BankAccount, type BankTransaction } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
+
+interface ApSupplierAging {
+  supplier_id: string
+  razon_social: string
+  total_pendiente: string | number
+  vencido: string | number
+  por_vencer: string | number
+}
+
+interface ArCustomerAging {
+  customer_id: string
+  customer_name: string
+  saldo_total: number
+}
 
 export default function BovedaPage() {
   const [banks, setBanks] = useState<BankAccount[]>([])
   const [deposits, setDeposits] = useState<BankTransaction[]>([])
   const [pendientes, setPendientes] = useState<{ id: string; titulo: string; monto_relacionado?: string; entidad_relacionada?: string }[]>([])
+  const [apAging, setApAging] = useState<{ aging_buckets: { rango: string; monto: string; facturas: number }[]; por_supplier: ApSupplierAging[] } | null>(null)
+  const [arAging, setArAging] = useState<{ buckets: { rango: string; monto: number; cantidad: number }[]; por_clientes: ArCustomerAging[] } | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
   const load = async () => {
     try {
-      const [bankList, deps, recs] = await Promise.all([
+      const [bankList, deps, recs, ap, ar] = await Promise.all([
         api.financial.banks.list(),
         api.financial.banks.allTransactions({ categoria: "deposito_caja", limit: 100 }),
         api.financeAgent.recommendations("pending"),
+        api.financial.aging(),
+        api.accountsReceivable.aging(),
       ])
       setBanks(bankList)
       setDeposits(deps)
       setPendientes(recs.filter(r => r.tipo === "deposito_pendiente"))
+      setApAging(ap as any)
+      setArAging(ar as any)
     } catch {
       setBanks([]); setDeposits([]); setPendientes([])
     } finally {
@@ -31,6 +51,17 @@ export default function BovedaPage() {
 
   const saldoTotalPYG = banks.filter(b => b.moneda === "PYG").reduce((s, b) => s + Number(b.saldo_actual || 0), 0)
   const bankName = (id?: string) => banks.find(b => b.id === id)?.banco || "—"
+
+  const apVencido90 = Number(apAging?.aging_buckets.find(b => b.rango.includes("+90"))?.monto || 0)
+  const arVencido90 = Number(arAging?.buckets.find(b => b.rango.includes("+90"))?.monto || 0)
+  const apTotalPendiente = apAging?.aging_buckets.reduce((s, b) => s + Number(b.monto || 0), 0) || 0
+  const topProveedoresVencidos = [...(apAging?.por_supplier || [])]
+    .sort((a, b) => Number(b.vencido || 0) - Number(a.vencido || 0))
+    .filter(p => Number(p.vencido || 0) > 0)
+    .slice(0, 5)
+  const topClientesDeuda = [...(arAging?.por_clientes || [])]
+    .sort((a, b) => Number(b.saldo_total || 0) - Number(a.saldo_total || 0))
+    .slice(0, 5)
 
   if (loading) {
     return <div className="flex justify-center py-24"><Loader2 className="animate-spin text-primary" size={28} /></div>
@@ -79,6 +110,58 @@ export default function BovedaPage() {
                 <a href="/finance-agent" className="text-primary hover:underline font-semibold">Ver en el Gerente Financiero IA</a>
               </p>
             </>
+          )}
+        </div>
+      </div>
+
+      {/* Alertas de cobranza y pago */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className={`card p-6 border ${apVencido90 > arVencido90 * 2 ? "border-red-500/30 bg-red-900/5" : "border-transparent"}`}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <TrendingDown className="w-4 h-4 text-red-500" /> Vencido a pagar (+90 días)
+            </h3>
+            {apVencido90 > arVencido90 * 2 && (
+              <span className="flex items-center gap-1 text-[10px] font-bold text-red-500 bg-red-500/10 px-2 py-0.5 rounded-full">
+                <AlertTriangle className="w-3 h-3" /> Riesgo alto
+              </span>
+            )}
+          </div>
+          <p className="text-3xl font-extrabold text-red-500 font-mono mb-1">{formatPYG(apVencido90)}</p>
+          <p className="text-xs text-gray-400 mb-4">de {formatPYG(apTotalPendiente)} pendiente en total a proveedores</p>
+          {topProveedoresVencidos.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Proveedores más vencidos</p>
+              {topProveedoresVencidos.map((p) => (
+                <div key={p.supplier_id} className="flex items-center justify-between text-sm">
+                  <span className="text-gray-700 dark:text-gray-300 truncate">{p.razon_social}</span>
+                  <span className="font-mono font-bold text-red-500 flex-shrink-0 ml-2">{formatPYG(Number(p.vencido))}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400">Sin facturas vencidas a proveedores.</p>
+          )}
+        </div>
+
+        <div className="card p-6">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-4">
+            <TrendingUp className="w-4 h-4 text-amber-500" /> Vencido a cobrar (+90 días)
+          </h3>
+          <p className="text-3xl font-extrabold text-amber-500 font-mono mb-1">{formatPYG(arVencido90)}</p>
+          <p className="text-xs text-gray-400 mb-4">de {formatPYG(arAging?.buckets.reduce((s, b) => s + b.monto, 0) || 0)} pendiente en total de clientes</p>
+          {topClientesDeuda.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Clientes con mayor saldo</p>
+              {topClientesDeuda.map((c) => (
+                <div key={c.customer_id} className="flex items-center justify-between text-sm">
+                  <span className="text-gray-700 dark:text-gray-300 truncate">{c.customer_name}</span>
+                  <span className="font-mono font-bold text-amber-500 flex-shrink-0 ml-2">{formatPYG(c.saldo_total)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400">Sin saldos pendientes de clientes.</p>
           )}
         </div>
       </div>
