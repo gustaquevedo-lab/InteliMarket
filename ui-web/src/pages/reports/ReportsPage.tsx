@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect, useRef } from "react"
+import { useSearchParams } from "react-router-dom"
 import { BarChart3, TrendingUp, Package, FileText, Download, Loader2, ChevronDown, FileSpreadsheet, Layers, ArrowUpDown } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -151,7 +152,20 @@ function ExportDropdown({ options, periodo }: { options: ExportOption[]; periodo
   )
 }
 
+const SECTOR_META: Record<string, { titulo: string; descripcion: string }> = {
+  ventas: { titulo: "Reportes de Ventas", descripcion: "Ventas por día, por categoría y por medio de pago" },
+  financiero: { titulo: "Reportes Financieros", descripcion: "Flujo de caja, medios de pago y gastos por categoría" },
+  inventario: { titulo: "Reportes de Inventario", descripcion: "Costeo FIFO, LIFO y comparación de costos" },
+}
+
 export default function ReportsPage() {
+  const [searchParams] = useSearchParams()
+  const sector = searchParams.get("sector")
+  const showVentas = !sector || sector === "ventas"
+  const showFinanciero = !sector || sector === "financiero"
+  const showInventario = !sector || sector === "inventario"
+  const meta = sector ? SECTOR_META[sector] : null
+
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState("7d")
   const [costingTab, setCostingTab] = useState<"fifo" | "lifo" | "comparison">("fifo")
@@ -227,8 +241,8 @@ export default function ReportsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Reportes</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Análisis y reportes del negocio</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{meta?.titulo || "Reportes"}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{meta?.descripcion || "Análisis y reportes del negocio"}</p>
         </div>
         <div className="flex gap-2">
           <select className="input-field w-fit" value={periodo} onChange={(e) => setPeriodo(e.target.value)}>
@@ -248,26 +262,27 @@ export default function ReportsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><TrendingUp className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Ventas período</span></div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{salesSummary ? formatPYG(salesSummary.monto_total) : "₲ 28.1M"}</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{salesSummary ? formatPYG(salesSummary.monto_total) : "—"}</p>
               {salesSummary && <p className="text-xs text-green-500 font-bold mt-1">{salesSummary.total_ventas} ventas</p>}
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><Package className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Transacciones</span></div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{salesSummary?.total_ventas || 156}</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{salesSummary?.total_ventas ?? "—"}</p>
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><span className="w-5 h-5 flex items-center justify-center text-lg font-bold text-amber-500">₲</span><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Ticket promedio</span></div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{salesSummary ? formatPYG(Math.round(salesSummary.ticket_promedio)) : "₲ 180K"}</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{salesSummary ? formatPYG(Math.round(salesSummary.ticket_promedio)) : "—"}</p>
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><BarChart3 className="w-5 h-5 text-secondary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Flujo caja</span></div>
-              <p className={`text-2xl font-bold ${financialSummary && financialSummary.flujo_caja >= 0 ? "text-green-500" : "text-red-500"}`}>
-                {financialSummary ? formatPYG(financialSummary.flujo_caja) : "₲ 13.1M"}
+              <p className={`text-2xl font-bold ${financialSummary ? (financialSummary.flujo_caja >= 0 ? "text-green-500" : "text-red-500") : "text-gray-900 dark:text-white"}`}>
+                {financialSummary ? formatPYG(financialSummary.flujo_caja) : "—"}
               </p>
             </div>
           </div>
 
           {/* Charts */}
+          {showVentas && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="card p-6">
               <h3 className="text-base font-bold text-gray-900 dark:text-white mb-4">Ventas por día</h3>
@@ -284,17 +299,7 @@ export default function ReportsPage() {
                   ))}
                 </div>
               ) : (
-                <div className="flex items-end gap-3 h-40">
-                  {[3.5, 4.2, 2.8, 5.1, 6.8, 4.5, 1.2].map((h, i) => (
-                    <div key={i} className="flex flex-col items-center flex-1 gap-2">
-                      <span className="text-xs font-mono text-gray-500">{h}M</span>
-                      <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-t-lg relative overflow-hidden" style={{ height: "100%" }}>
-                        <div className="absolute bottom-0 w-full bg-primary rounded-t-lg transition-all" style={{ height: `${(h / 6.8) * 100}%` }} />
-                      </div>
-                      <span className="text-xs font-bold text-gray-500">{chartDays[i]}</span>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-center py-8 text-gray-400">Sin datos de ventas todavía</p>
               )}
             </div>
 
@@ -313,28 +318,14 @@ export default function ReportsPage() {
                   ))}
                 </div>
               ) : (
-                <div className="flex items-end gap-3 h-40">
-                  {[
-                    { label: "Bebidas", value: 85 },
-                    { label: "Alimentos", value: 72 },
-                    { label: "Lácteos", value: 63 },
-                    { label: "Limpieza", value: 45 },
-                    { label: "Panadería", value: 38 },
-                  ].map((d, i) => (
-                    <div key={i} className="flex flex-col items-center flex-1 gap-2">
-                      <span className="text-xs font-mono text-gray-500">{d.value}%</span>
-                      <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-t-lg relative overflow-hidden" style={{ height: "100%" }}>
-                        <div className={`absolute bottom-0 w-full ${catColors[i]} rounded-t-lg transition-all`} style={{ height: `${d.value}%` }} />
-                      </div>
-                      <span className="text-xs font-bold text-gray-500 text-center leading-tight">{d.label}</span>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-center py-8 text-gray-400">Sin datos de ventas por categoría todavía</p>
               )}
             </div>
           </div>
+          )}
 
           {/* Medios de pago */}
+          {(showVentas || showFinanciero) && (
           <div className="card p-6">
             <h3 className="text-base font-bold text-gray-900 dark:text-white mb-4">Ventas por medio de pago</h3>
             {salesByPaymentMethod.length > 0 ? (
@@ -355,8 +346,10 @@ export default function ReportsPage() {
               <p className="text-center py-8 text-gray-400">Sin datos de medios de pago todavía</p>
             )}
           </div>
+          )}
 
           {/* Gastos por categoría */}
+          {showFinanciero && (
           <div className="card p-6">
             <h3 className="text-base font-bold text-gray-900 dark:text-white mb-4">Gastos por categoría</h3>
             {expensesByCategory.length > 0 ? (
@@ -377,8 +370,10 @@ export default function ReportsPage() {
               <p className="text-center py-8 text-gray-400">Sin datos de gastos por categoría todavía</p>
             )}
           </div>
+          )}
 
           {/* FIFO/LIFO Costing */}
+          {showInventario && (
           <div className="card p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
@@ -513,11 +508,12 @@ export default function ReportsPage() {
               )
             )}
           </div>
+          )}
 
           {/* Report types with export */}
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">Tipos de reporte</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {reportTypes.map((r) => (
+            {reportTypes.filter((r) => !sector || (sector === "ventas" && r.id === "sales") || (sector === "financiero" && (r.id === "financial" || r.id === "fiscal")) || (sector === "inventario" && r.id === "inventory")).map((r) => (
               <div key={r.id} className="card p-6 hover:shadow-md transition-shadow">
                 <div className="flex items-start gap-4">
                   <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">

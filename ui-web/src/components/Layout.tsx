@@ -47,6 +47,7 @@ const navGroups: NavGroup[] = [
       { icon: RotateCcw, label: "Devoluciones", path: "/returns" },
       { icon: Users, label: "Clientes", path: "/customers" },
       { icon: Globe, label: "Portal Clientes", path: "/portal", feature: "portal" },
+      { icon: LineChart, label: "Reportes de Ventas", path: "/reports?sector=ventas" },
     ]
   },
   {
@@ -60,6 +61,7 @@ const navGroups: NavGroup[] = [
       { icon: ArrowLeftRight, label: "Transferencias", path: "/transferencias", feature: "supermercado" },
       { icon: ClipboardList, label: "Reabastecimiento", path: "/auto-replenish", feature: "supermercado" },
       { icon: MapPin, label: "Inventario Avanzado", path: "/advanced-inventory", feature: "advanced_inventory" },
+      { icon: LineChart, label: "Reportes de Inventario", path: "/reports?sector=inventario" },
     ]
   },
   {
@@ -83,6 +85,7 @@ const navGroups: NavGroup[] = [
       { icon: Wallet, label: "Líneas de Crédito", path: "/credit-accounts", feature: "credit_accounts" },
       { icon: ReceiptText, label: "Gastos Operativos (Caja Chica)", path: "/gastos" },
       { icon: BarChart3, label: "Contabilidad Integrada", path: "/integrated-finance", feature: "integrated_finance" },
+      { icon: LineChart, label: "Reportes Financieros", path: "/reports?sector=financiero" },
     ]
   },
   {
