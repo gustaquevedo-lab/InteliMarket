@@ -22,6 +22,7 @@ const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"))
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"))
 const POSPage = lazy(() => import("./pages/pos/POSPage"))
 const CajaPage = lazy(() => import("./pages/caja/CajaPage"))
+const RouteCashSettlementsPage = lazy(() => import("./pages/route-cash-settlements/RouteCashSettlementsPage"))
 const AdminPage = lazy(() => import("./pages/admin/AdminPage"))
 const VerticalsPage = lazy(() => import("./pages/admin/VerticalsPage"))
 const PagoparPage = lazy(() => import("./pages/pagopar/PagoparPage"))
@@ -195,6 +196,7 @@ function AppRoutes() {
           ["reports", <ReportsPage />],
           ["settings", <SettingsPage />],
           ["caja", <CajaPage />],
+          ["route-cash-settlements", <RouteCashSettlementsPage />],
           ["admin", <AdminPage />],
           ["admin/verticals", <VerticalsPage />],
           ["audit", <AuditPage />],

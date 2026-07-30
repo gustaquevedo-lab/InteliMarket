@@ -373,6 +373,12 @@ export const api = {
     closeSession: (id: string, data: { monto_cierre: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
     summary: (id: string) => client.get<CashSessionSummary>(`/v1/cash-sessions/${id}/summary`),
   },
+  routeCashSettlements: {
+    list: (params?: { fecha_desde?: string; fecha_hasta?: string; cobrador_codigo?: string; limit?: number; offset?: number }) =>
+      client.get<any[]>(`/v1/companies/${COMPANY_ID}/route-cash-settlements`, params as any),
+    summary: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>
+      client.get<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/summary`, params as any),
+  },
   branches: {
     list: () => client.get<Branch[]>("/v1/branches"),
     get: (id: string) => client.get<Branch>(`/v1/branches/${id}`),
