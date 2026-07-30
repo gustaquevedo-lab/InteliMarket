@@ -285,3 +285,10 @@ async def get_financial_dashboard(company_id: str = Query(), db: AsyncSession = 
 @router.get("/ratios", response_model=dict)
 async def get_financial_ratios(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
     return await service.get_financial_ratios(db, company_id)
+
+
+# ── Supplier Credit Notes ────────────────────────────────────────────────────
+
+@router.get("/supplier-credit-notes")
+async def list_supplier_credit_notes(company_id: str = Query(), supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_supplier_credit_notes(db, company_id, supplier_id)
