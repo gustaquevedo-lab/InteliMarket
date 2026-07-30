@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 
-from api.src.caja.models import CashRegister, CashSession
+from api.src.caja.models import CashRegister, CashSession, CashCount
 from api.src.sales.models import Sale
 
 
@@ -59,7 +59,7 @@ async def delete_register(db: AsyncSession, register_id: str) -> bool:
 async def get_open_session(db: AsyncSession, register_id: str) -> CashSession | None:
     result = await db.execute(
         select(CashSession)
-        .where(CashSession.cash_register_id == uuid.UUID(register_id))
+        .where(CashSession.register_id == uuid.UUID(register_id))
         .where(CashSession.estado == "abierta")
         .order_by(CashSession.fecha_apertura.desc())
         .limit(1)
@@ -79,7 +79,7 @@ async def list_sessions(
 ) -> list[CashSession]:
     query = select(CashSession)
     if register_id:
-        query = query.where(CashSession.cash_register_id == uuid.UUID(register_id))
+        query = query.where(CashSession.register_id == uuid.UUID(register_id))
     if user_id:
         query = query.where(CashSession.user_id == uuid.UUID(user_id))
     if estado:
@@ -106,7 +106,7 @@ async def get_session_with_summary(db: AsyncSession, session_id: str) -> dict | 
             func.count(Sale.id).label("total_ventas"),
             func.coalesce(func.sum(Sale.total), 0).label("total_cobrado"),
         ).where(
-            Sale.branch_id == session_obj.cash_register_id,
+            Sale.branch_id == session_obj.register_id,
             Sale.fecha >= session_obj.fecha_apertura,
             Sale.estado == "confirmado",
         )
@@ -120,18 +120,23 @@ async def get_session_with_summary(db: AsyncSession, session_id: str) -> dict | 
 
 
 async def open_session(db: AsyncSession, data: dict) -> CashSession:
-    existing = await get_open_session(db, str(data["cash_register_id"]))
+    register_id = data["cash_register_id"]
+    existing = await get_open_session(db, str(register_id))
     if existing:
-        raise ValueError("Ya existe una sesi\u00f3n abierta para esta caja")
+        raise ValueError("Ya existe una sesión abierta para esta caja")
 
-    session_obj = CashSession(**data)
+    session_obj = CashSession(
+        register_id=register_id,
+        user_id=data["user_id"],
+        monto_apertura=data.get("monto_apertura", 0),
+    )
     db.add(session_obj)
     await db.flush()
     await db.refresh(session_obj)
     return session_obj
 
 
-async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: Decimal, observaciones: str | None = None) -> CashSession | None:
+async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: Decimal, observaciones: str | None = None) -> dict | None:
     result = await db.execute(
         select(CashSession).where(CashSession.id == uuid.UUID(session_id))
     )
@@ -141,7 +146,7 @@ async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: De
 
     sales_result = await db.execute(
         select(func.coalesce(func.sum(Sale.total), 0)).where(
-            Sale.branch_id == session_obj.cash_register_id,
+            Sale.branch_id == session_obj.register_id,
             Sale.fecha >= session_obj.fecha_apertura,
             Sale.estado == "confirmado",
         )
@@ -152,12 +157,22 @@ async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: De
     diferencia = Decimal(str(monto_cierre_real)) - monto_cierre_esperado
 
     session_obj.fecha_cierre = datetime.now(timezone.utc)
-    session_obj.monto_cierre_esperado = monto_cierre_esperado
-    session_obj.monto_cierre_real = monto_cierre_real
-    session_obj.diferencia = diferencia
-    session_obj.observaciones_cierre = observaciones
+    session_obj.monto_cierre = monto_cierre_real
+    session_obj.observaciones = observaciones
     session_obj.estado = "cerrada"
+    await db.flush()
 
+    db.add(CashCount(
+        session_id=session_obj.id,
+        monto_efectivo=monto_cierre_real,
+        monto_total=monto_cierre_real,
+        diferencia=diferencia,
+    ))
     await db.flush()
     await db.refresh(session_obj)
-    return session_obj
+
+    return {
+        "session": session_obj,
+        "monto_cierre_esperado": monto_cierre_esperado,
+        "diferencia": diferencia,
+    }
