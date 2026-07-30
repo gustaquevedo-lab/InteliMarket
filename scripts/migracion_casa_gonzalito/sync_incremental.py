@@ -1083,6 +1083,143 @@ def sync_asientos(pg, my):
 
 
 # ----------------------------------------------------------------------------
+# Detalle de movimientos de efectivo por caja (efectivo)
+#
+# route_cash_settlements.efectivo ya tiene el TOTAL correcto (via
+# cajaautoriza). Esto es el detalle linea por linea detras de ese total —
+# pedido explicito del usuario junto con vpedidos.
+# ----------------------------------------------------------------------------
+def sync_efectivo(pg, my):
+    last_id, _ = get_watermark(pg, "efectivo")
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT ID, IDCAJA, FECHA, MONTO, OBS, RECIBO, MONEDA FROM efectivo "
+            "WHERE ID > %s ORDER BY ID", (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log("  efectivo: sin filas nuevas")
+        return last_id
+    cajas_pg_ids = pg_id_set(pg, "route_cash_settlements")
+    max_id, rows, saltados = last_id, [], 0
+    for (iid, idcaja, fecha, monto, obs, recibo, moneda) in legacy_rows:
+        max_id = max(max_id, iid)
+        caja_id = uuid.uuid5(NS, f"caja:{idcaja}") if idcaja else None
+        if not caja_id or caja_id not in cajas_pg_ids:
+            saltados += 1
+            continue
+        fc = safe_dt(fecha)
+        if not fc:
+            continue
+        rows.append((
+            uuid.uuid5(NS, f"efectivo:{iid}"), caja_id, fc.date(), money(monto),
+            txt_keep(obs, 200), txt_keep(recibo, 20), txt_keep(moneda, 20),
+        ))
+    n = upsert(pg, "route_cash_settlement_movements", ["id", "settlement_id", "fecha",
+                                                          "monto", "observaciones", "recibo", "moneda"], rows)
+    log(f"  efectivo: {n} filas nuevas (ID {last_id} -> {max_id}"
+        f"{', ' + str(saltados) + ' saltadas sin caja valida' if saltados else ''})")
+    set_watermark(pg, "efectivo", last_id=max_id)
+    return max_id
+
+
+# ----------------------------------------------------------------------------
+# Pedidos tomados por vendedores de ruta (vpedidos)
+#
+# App movil de toma de pedidos: cada linea es un item pedido por un
+# vendedor a un cliente, con GPS y hora. Live hasta hoy (9,96M filas).
+# ~34% de las filas son solo "marca de visita" sin producto (CODIPROD=-1,
+# CAN=0) — se excluyen, no son pedidos. El resto (~6,59M lineas) se
+# agrupa por cliente+vendedor+fecha en un pedido (no hay un ID de pedido
+# explicito en el legacy a ese nivel — cada fila es una linea suelta).
+# vendedor_id queda NULL (CODIFUNC no es un usuario real de la app, igual
+# que en el resto de esta migracion) — el codigo se guarda en
+# observaciones. Los totales de cada pedido se recalculan al final desde
+# sus items, para que corridas incrementales que agregan mas lineas al
+# mismo pedido (mismo cliente+vendedor+dia, otra hora del dia) no dejen
+# el total desactualizado.
+# ----------------------------------------------------------------------------
+def sync_pedidos(pg, my):
+    last_id, _ = get_watermark(pg, "pedidos")
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT ID, CODICLIE, CODIFUNC, FECHA, CODIPROD, CAN, PRECIO, SUBTOTAL, "
+            "DES, RUTA FROM vpedidos WHERE ID > %s AND CODIPROD != '-1' AND CAN > 0 "
+            "ORDER BY ID", (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log("  vpedidos: sin filas nuevas")
+        return last_id
+
+    clientes_validos = {txt_keep(c, 15) for c in legacy_id_set(my, "clientes", "IDCLIENTES")}
+    productos_validos = {txt_keep(c, 50) for c in legacy_id_set(my, "productos", "CODIGO")}
+
+    max_id = last_id
+    orders: dict[tuple, dict] = {}
+    item_rows, saltados_cli, saltados_prod = [], 0, 0
+
+    for (iid, codiclie, codifunc, fecha, codiprod, can, precio, subtotal, des, ruta) in legacy_rows:
+        max_id = max(max_id, iid)
+        cli = txt_keep(codiclie, 15)
+        if not cli or cli not in clientes_validos:
+            saltados_cli += 1
+            continue
+        prod = txt_keep(codiprod, 50)
+        if not prod or prod not in productos_validos:
+            saltados_prod += 1
+            continue
+        fc = safe_dt(fecha)
+        if not fc:
+            continue
+        fecha_key = fc.date().isoformat()
+        func = txt_keep(codifunc, 10) or "SD"
+        key = (cli, func, fecha_key)
+        order_id = uuid.uuid5(NS, f"pedido:{cli}:{func}:{fecha_key}")
+        if key not in orders:
+            orders[key] = {
+                "order_id": order_id, "customer_id": uuid.uuid5(NS, f"cli:{cli}"),
+                "fecha": fc, "vendedor_codigo": func, "ruta": ruta,
+            }
+        pid = uuid.uuid5(NS, f"prod:{prod}")
+        total_linea = money(subtotal)
+        item_rows.append((
+            uuid.uuid5(NS, f"pedido_item:{iid}"), order_id, pid, num3(can),
+            money(precio), Decimal(str(des)) if des else Decimal("0"), total_linea,
+        ))
+
+    order_rows = []
+    for (cli, func, fecha_key), o in orders.items():
+        order_rows.append((
+            o["order_id"], COMPANY_ID, o["customer_id"],
+            f"P{str(o['order_id']).replace('-', '')[:15]}", o["fecha"], "completado",
+            "contado", f"Vendedor legacy: {o['vendedor_codigo']}" +
+            (f" | Ruta: {o['ruta']}" if o["ruta"] else ""),
+        ))
+    upsert(pg, "sales_orders", ["id", "company_id", "customer_id", "numero", "fecha",
+                                 "estado", "condicion", "observaciones"], order_rows,
+           update_cols=["customer_id", "fecha", "observaciones"])
+    upsert(pg, "sales_order_items", ["id", "order_id", "product_id", "cantidad",
+                                      "precio_unitario", "descuento_pct", "total"], item_rows)
+
+    if not DRY_RUN and order_rows:
+        with pg.cursor() as cur:
+            order_ids = [o[0] for o in order_rows]
+            cur.execute(
+                "UPDATE sales_orders so SET "
+                "subtotal = agg.total, total = agg.total "
+                "FROM (SELECT order_id, COALESCE(SUM(total), 0) as total "
+                "      FROM sales_order_items WHERE order_id = ANY(%s) GROUP BY order_id) agg "
+                "WHERE so.id = agg.order_id",
+                (order_ids,),
+            )
+        pg.commit()
+
+    log(f"  vpedidos: {len(order_rows)} pedidos ({len(item_rows)} lineas) "
+        f"(ID {last_id} -> {max_id}, {saltados_cli} sin cliente valido, {saltados_prod} sin producto valido)")
+    set_watermark(pg, "pedidos", last_id=max_id)
+    return max_id
+
+
+# ----------------------------------------------------------------------------
 # Post-proceso: recalcular IVA solo de las ventas/notas/compras tocadas esta corrida
 # ----------------------------------------------------------------------------
 def recalcular_iva(pg, sale_ids, purchase_ids):
@@ -1157,6 +1294,8 @@ def main():
         "rutas": None,  # rutas + zparruta, se arma abajo
         "rescamion": lambda: sync_rescamion(pg, my),
         "contabilidad": None,  # plan de cuentas + asientos, se arma abajo
+        "efectivo": lambda: sync_efectivo(pg, my),
+        "pedidos_ruta": lambda: sync_pedidos(pg, my),
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -1221,6 +1360,12 @@ def main():
     if not ONLY or ONLY == "contabilidad":
         sync_plan_de_cuentas(pg, my)
         sync_asientos(pg, my)
+
+    log("\n[4g] Efectivo por caja + pedidos de vendedores de ruta")
+    if not ONLY or ONLY == "efectivo":
+        sync_efectivo(pg, my)
+    if not ONLY or ONLY == "pedidos_ruta":
+        sync_pedidos(pg, my)
 
     log("\n[5] Post-proceso")
     recalcular_iva(pg, sale_ids, set())
