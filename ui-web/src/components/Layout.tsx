@@ -83,7 +83,7 @@ const navGroups: NavGroup[] = [
       { icon: Building, label: "Cuentas por Pagar y Bancos", path: "/financiero" },
       { icon: HandCoins, label: "Pagos y Cobros", path: "/payments" },
       { icon: Wallet, label: "Líneas de Crédito", path: "/credit-accounts", feature: "credit_accounts" },
-      { icon: ReceiptText, label: "Gastos Operativos (Caja Chica)", path: "/gastos" },
+      { icon: ReceiptText, label: "Gastos (Caja Chica)", path: "/gastos" },
       { icon: BarChart3, label: "Contabilidad Integrada", path: "/integrated-finance", feature: "integrated_finance" },
       { icon: LineChart, label: "Reportes Financieros", path: "/reports?sector=financiero" },
     ]
@@ -319,8 +319,9 @@ export default function Layout() {
                     const active = location.pathname === item.path
                     return (
                       <button key={item.path} onClick={() => { navigate(item.path); setSidebarOpen(false) }}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${active ? "bg-white/20 text-white shadow-lg" : "text-white/70 hover:text-white hover:bg-white/10"}`}>
-                        <item.icon className="w-5 h-5 flex-shrink-0" />{item.label}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${active ? "bg-white/20 text-white shadow-lg" : "text-white/70 hover:text-white hover:bg-white/10"}`}>
+                        <item.icon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                        <span className="text-left leading-tight">{item.label}</span>
                       </button>
                     )
                   })}
