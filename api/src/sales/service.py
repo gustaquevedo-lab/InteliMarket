@@ -7,8 +7,7 @@ from decimal import Decimal
 import uuid
 
 from api.src.sales.models import Sale, SaleItem
-from api.src.caja.models import CashRegister, CashSession
-from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment, CashSessionCreate, CashSessionClose
+from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
 
 
@@ -256,34 +255,6 @@ async def get_sales_today(db: AsyncSession, company_id: str) -> dict:
         "base_gravada_10": sum(int(s.base_gravada_10) for s in sales),
         "base_gravada_5": sum(int(s.base_gravada_5) for s in sales),
     }
-
-
-async def create_cash_session(db: AsyncSession, data: CashSessionCreate) -> CashSession:
-    session_obj = CashSession(**data.model_dump())
-    db.add(session_obj)
-    await db.flush()
-    await db.refresh(session_obj)
-    return session_obj
-
-
-async def close_cash_session(db: AsyncSession, session_id: str, data: CashSessionClose) -> CashSession | None:
-    result = await db.execute(select(CashSession).where(CashSession.id == uuid.UUID(session_id)))
-    session_obj = result.scalar_one_or_none()
-    if not session_obj or session_obj.estado != "abierta":
-        return None
-
-    sales_result = await db.execute(
-        select(Sale).where(Sale.branch_id == session_obj.cash_register_id)
-    )
-
-    session_obj.fecha_cierre = datetime.now(timezone.utc)
-    session_obj.monto_cierre_real = data.monto_cierre_real
-    session_obj.observaciones_cierre = data.observaciones
-    session_obj.estado = "cerrada"
-
-    await db.flush()
-    await db.refresh(session_obj)
-    return session_obj
 
 
 async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:

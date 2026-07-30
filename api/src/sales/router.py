@@ -7,10 +7,9 @@ from api.src.db import get_db
 from api.src.sales.schemas import (
     SaleCreate, SaleUpdate, SaleResponse, SaleWithItems,
     SaleAddPayment, SaleLinkQuote, SaleLinkOrder,
-    CashSessionCreate, CashSessionResponse, CashSessionClose,
 )
 from api.src.sales import service
-from api.src.events.emitters import emit_sale_completed, emit_cash_session_alert
+from api.src.events.emitters import emit_sale_completed
 from api.src.email import service as email_service
 from api.src.whatsapp.service import send_message_to_phone, get_wa_template, format_wa_template
 from api.src.intelicont.service import generate_sale_entry
@@ -127,23 +126,6 @@ async def get_sale(sale_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/companies/{company_id}/sales/today")
 async def sales_today(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_sales_today(db, company_id)
-
-
-@router.post("/cash-sessions", response_model=CashSessionResponse, status_code=status.HTTP_201_CREATED)
-async def open_cash_session(body: CashSessionCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_cash_session(db, body)
-
-
-@router.post("/cash-sessions/{session_id}/close", response_model=CashSessionResponse)
-async def close_cash_session(session_id: str, body: CashSessionClose, db: AsyncSession = Depends(get_db)):
-    result = await service.close_cash_session(db, session_id, body)
-    if not result:
-        raise HTTPException(status_code=400, detail="No se pudo cerrar la caja")
-    try:
-        await emit_cash_session_alert(result.company_id, session_id, f"Caja cerrada - {result.efectivo_total:,.0f} Gs")
-    except Exception:
-        pass
-    return result
 
 
 @router.post("/sales/{sale_id}/cancel", response_model=SaleResponse)
