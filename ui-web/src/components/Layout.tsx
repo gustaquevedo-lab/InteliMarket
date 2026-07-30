@@ -50,51 +50,6 @@ const navGroups: NavGroup[] = [
     ]
   },
   {
-    title: "Retail / Tienda",
-    items: [
-      { icon: ShoppingBag, label: "Retail Hub", path: "/retail", feature: "retail" },
-      { icon: Store, label: "Tienda Online", path: "/tienda" },
-    ]
-  },
-  {
-    title: "CRM & Marketing",
-    items: [
-      { icon: Target, label: "Fidelidad & CRM", path: "/crm", feature: "crm" },
-      { icon: MessageCircle, label: "WhatsApp", path: "/whatsapp", feature: "whatsapp" },
-      { icon: Megaphone, label: "IntelliZapp", path: "/intellizapp", feature: "intellizapp" },
-      { icon: Megaphone, label: "Campañas", path: "/promociones" },
-      { icon: Percent, label: "Descuentos", path: "/discounts" },
-      { icon: Coins, label: "Comisiones", path: "/commissions" },
-      { icon: DollarSign, label: "Precios Inteligente", path: "/smart-pricing", feature: "smart_pricing" },
-      { icon: BadgeDollarSign, label: "Listas de Precios", path: "/price-lists", feature: "price_lists" },
-      { icon: Megaphone, label: "Marketing Automat.", path: "/marketing", feature: "marketing_automation" },
-      { icon: Award, label: "Lealtad", path: "/loyalty", feature: "loyalty" },
-    ]
-  },
-  {
-    title: "IA & Analítica",
-    items: [
-      { icon: TrendingUp, label: "Forecast Demanda", path: "/demand-forecast", feature: "demand_forecast" },
-      { icon: Route, label: "Ruteo Inteligente", path: "/intelligent-routing", feature: "intelligent_routing" },
-      { icon: Shield, label: "Scoring Crédito", path: "/credit-scoring", feature: "credit_scoring" },
-      { icon: Lightbulb, label: "Oportunidades", path: "/oportunidades", feature: "comerciales" },
-      { icon: Thermometer, label: "Cadena de Frío", path: "/cold-chain", feature: "cold_chain" },
-      { icon: Bot, label: "Asistente Virtual", path: "/asistente-virtual", feature: "asistente_virtual" },
-      { icon: Users, label: "Clientes", path: "/clientes", feature: "clientes_fidelizacion" },
-      { icon: PieChart, label: "Customer 360", path: "/customer360", feature: "customer360" },
-      { icon: Clock, label: "Turnos", path: "/schedule", feature: "schedule" },
-      { icon: BarChart3, label: "Productividad", path: "/productividad", feature: "productividad" },
-      { icon: BookOpen, label: "Capacitación", path: "/capacitacion", feature: "capacitacion" },
-      { icon: DollarSign, label: "PyG Diario", path: "/pyg-diario", feature: "pyg_diario" },
-      { icon: AlertTriangle, label: "Shrinkage", path: "/shrinkage", feature: "shrinkage" },
-      { icon: TrendingUp, label: "Forecast Avanz.", path: "/forecast-avanzado", feature: "forecast_avanzado" },
-      { icon: BarChart3, label: "Benchmarking", path: "/benchmarking", feature: "benchmarking" },
-      { icon: ShoppingCart, label: "E-commerce", path: "/ecommerce-sm", feature: "ecommerce_sm" },
-      { icon: Globe, label: "Delivery Apps", path: "/delivery-integrations", feature: "delivery_integrations" },
-      { icon: Repeat, label: "Suscripciones", path: "/suscripciones", feature: "suscripciones" },
-    ]
-  },
-  {
     title: "Inventario",
     items: [
       { icon: Tags, label: "Catálogo", path: "/products" },
@@ -113,7 +68,6 @@ const navGroups: NavGroup[] = [
       { icon: ShoppingBag, label: "Gestión de Compras", path: "/purchases" },
       { icon: Upload, label: "Importaciones CSV", path: "/imports", feature: "imports" },
       { icon: Briefcase, label: "Contratos Prov.", path: "/contratos-proveedores" },
-      { icon: Users, label: "Acuerdos Clientes", path: "/acuerdos-clientes" },
       { icon: Globe, label: "Portal Proveedores", path: "/portal/proveedores/dashboard" },
     ]
   },
@@ -121,14 +75,60 @@ const navGroups: NavGroup[] = [
     title: "Finanzas & Tesorería",
     items: [
       { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
-      { icon: Banknote, label: "Arqueo de Caja", path: "/caja" },
+      { icon: Banknote, label: "Caja y Cajeros", path: "/caja" },
       { icon: Landmark, label: "Bóveda Central", path: "/boveda", feature: "supermercado" },
       { icon: Landmark, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
-      { icon: HandCoins, label: "Cuentas por Pagar", path: "/payments" },
+      { icon: Building, label: "Cuentas por Pagar y Bancos", path: "/financiero" },
+      { icon: HandCoins, label: "Pagos y Cobros", path: "/payments" },
       { icon: Wallet, label: "Líneas de Crédito", path: "/credit-accounts", feature: "credit_accounts" },
-      { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
-      { icon: Building, label: "Gestión Financiera", path: "/financiero" },
-      { icon: BarChart3, label: "Gestión Financ. Integr.", path: "/integrated-finance", feature: "integrated_finance" },
+      { icon: ReceiptText, label: "Gastos Operativos (Caja Chica)", path: "/gastos" },
+      { icon: BarChart3, label: "Contabilidad Integrada", path: "/integrated-finance", feature: "integrated_finance" },
+    ]
+  },
+  {
+    title: "CRM & Marketing",
+    items: [
+      { icon: Target, label: "Fidelidad & CRM", path: "/crm", feature: "crm" },
+      { icon: Award, label: "Programa de Fidelización", path: "/loyalty", feature: "loyalty" },
+      { icon: MessageCircle, label: "WhatsApp", path: "/whatsapp", feature: "whatsapp" },
+      { icon: Megaphone, label: "IntelliZapp", path: "/intellizapp", feature: "intellizapp" },
+      { icon: Megaphone, label: "Campañas", path: "/promociones" },
+      { icon: Percent, label: "Descuentos", path: "/discounts" },
+      { icon: Coins, label: "Comisiones", path: "/commissions" },
+      { icon: Users, label: "Acuerdos Clientes", path: "/acuerdos-clientes" },
+      { icon: DollarSign, label: "Precios Inteligente", path: "/smart-pricing", feature: "smart_pricing" },
+      { icon: BadgeDollarSign, label: "Listas de Precios", path: "/price-lists", feature: "price_lists" },
+      { icon: Megaphone, label: "Marketing Automat.", path: "/marketing", feature: "marketing_automation" },
+    ]
+  },
+  {
+    title: "Retail / Tienda",
+    items: [
+      { icon: ShoppingBag, label: "Retail Hub", path: "/retail", feature: "retail" },
+      { icon: Store, label: "Tienda Online", path: "/tienda" },
+    ]
+  },
+  {
+    title: "IA & Analítica",
+    items: [
+      { icon: TrendingUp, label: "Forecast Demanda", path: "/demand-forecast", feature: "demand_forecast" },
+      { icon: Route, label: "Ruteo Inteligente", path: "/intelligent-routing", feature: "intelligent_routing" },
+      { icon: Shield, label: "Scoring Crédito", path: "/credit-scoring", feature: "credit_scoring" },
+      { icon: Lightbulb, label: "Oportunidades", path: "/oportunidades", feature: "comerciales" },
+      { icon: Thermometer, label: "Cadena de Frío", path: "/cold-chain", feature: "cold_chain" },
+      { icon: Bot, label: "Asistente Virtual", path: "/asistente-virtual", feature: "asistente_virtual" },
+      { icon: Users, label: "Clientes 360", path: "/clientes", feature: "clientes_fidelizacion" },
+      { icon: PieChart, label: "Customer 360", path: "/customer360", feature: "customer360" },
+      { icon: Clock, label: "Turnos", path: "/schedule", feature: "schedule" },
+      { icon: BarChart3, label: "Productividad", path: "/productividad", feature: "productividad" },
+      { icon: BookOpen, label: "Capacitación", path: "/capacitacion", feature: "capacitacion" },
+      { icon: DollarSign, label: "PyG Diario", path: "/pyg-diario", feature: "pyg_diario" },
+      { icon: AlertTriangle, label: "Shrinkage", path: "/shrinkage", feature: "shrinkage" },
+      { icon: TrendingUp, label: "Forecast Avanz.", path: "/forecast-avanzado", feature: "forecast_avanzado" },
+      { icon: BarChart3, label: "Benchmarking", path: "/benchmarking", feature: "benchmarking" },
+      { icon: ShoppingCart, label: "E-commerce", path: "/ecommerce-sm", feature: "ecommerce_sm" },
+      { icon: Globe, label: "Delivery Apps", path: "/delivery-integrations", feature: "delivery_integrations" },
+      { icon: Repeat, label: "Suscripciones", path: "/suscripciones", feature: "suscripciones" },
     ]
   },
   {
@@ -184,8 +184,8 @@ const navGroups: NavGroup[] = [
   {
     title: "Inteligencia & Sistema",
     items: [
-      { icon: LineChart, label: "Business Intelligence", path: "/reports" },
-      { icon: PieChart, label: "Rep. Gerenciales", path: "/gerencial" },
+      { icon: LineChart, label: "Reportes", path: "/reports" },
+      { icon: PieChart, label: "Panel Gerencial", path: "/gerencial" },
       { icon: Fingerprint, label: "Auditoría", path: "/audit" },
       { icon: Settings, label: "Configuración", path: "/settings" },
       { icon: Building2, label: "Sucursales", path: "/branches", feature: "branches" },
