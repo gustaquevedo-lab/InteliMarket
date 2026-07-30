@@ -84,14 +84,14 @@ from api.src.config import settings
 from api.src.nemuha_connector.models import NemuhaRecordMap, NemuhaSyncRun
 from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseOrderItem, PurchaseReceipt, PurchaseReceiptItem
 from api.src.customers.models import Customer
-from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction
+from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction, SupplierCreditNote
 from api.src.petty_cash.models import Expense, ExpenseCategory
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.inventory.models import Warehouse, Stock
 from api.src.credit_accounts.models import CreditAccount
-from api.src.caja.models import CashRegister, CashSession, CashCount
+from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement
 
 MONEDA_MAP = {1: "PYG", 2: "USD", 3: "BRL"}  # bs_moeda — verificado contra datos reales
 SYSTEM_RUN_MODEL = "system:nemuha-controles-automaticos"
@@ -1213,6 +1213,131 @@ async def sync_cash_sessions(db: AsyncSession, company_id: str, since: date | No
     return count
 
 
+# ── Notas de crédito de proveedor (fin_recepcao_nota_credito) ───────────────────
+#
+# 405 reales. No se resta de accounts_payable.saldo_pendiente: VL_APAGAR ya
+# viene calculado por el legado y se desconoce con certeza si ya descuenta
+# estas notas internamente — se sincroniza como registro real informativo/
+# de auditoria, no se toca el saldo ya sincronizado para no arriesgar un
+# doble descuento.
+
+async def sync_supplier_credit_notes(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = "SELECT * FROM fin_recepcao_nota_credito WHERE BO_CANCELADO IS NULL OR BO_CANCELADO = 0"
+    params: tuple = ()
+    if since:
+        sql += " AND DT_RECEPCAO >= %s"
+        params = (since,)
+    rows = await _fetch(sql, params)
+
+    count = 0
+    for r in rows:
+        existing_id = await _get_mapped_target(db, company_id, "fin_recepcao_nota_credito", r["ID_RECEPCAO_NC"])
+        if existing_id:
+            count += 1
+            continue
+
+        supplier_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "supplier")
+
+        note = SupplierCreditNote(
+            company_id=company_id,
+            supplier_id=supplier_id,
+            numero=r["NR_NOTA_CREDITO"] or str(r["CD_RECEPCAO_NC"]),
+            numero_factura_origen=r["NR_FATURA_ORIGEM"],
+            timbrado=r["NR_TIMBRADO"],
+            fecha=r["DT_NOTA_CREDITO"].date() if hasattr(r["DT_NOTA_CREDITO"], "date") else r["DT_NOTA_CREDITO"],
+            motivo=r["MOTIVO"],
+            monto=Decimal(str(r["VL_TOTAL"])),
+            moneda=MONEDA_MAP.get(r["ID_MOEDA"], "PYG"),
+            observaciones=r["OBSERVACAO"],
+        )
+        db.add(note)
+        await db.flush()
+        await _save_map(db, company_id, "fin_recepcao_nota_credito", r["ID_RECEPCAO_NC"], "supplier_credit_notes", note.id)
+        count += 1
+
+    return count
+
+
+# ── Movimientos de caja principal (fin_entrada_caixa / fin_retirada_caixa) ─────
+#
+# 96 entradas + 649 retiros reales. Distinto de las sesiones de cajero
+# (fin_caixa_chica): esto es la caja fuerte central, no un turno de cajero —
+# tipicamente retiros hacia una cuenta bancaria o ingresos desde otra fuente.
+
+async def sync_cash_register_movements(db: AsyncSession, company_id: str, since: date | None) -> int:
+    register_id = await _get_mapped_target(db, company_id, "cash_register:principal", 1)
+    if not register_id:
+        register = CashRegister(company_id=company_id, nombre="Caja Principal", codigo="1")
+        db.add(register)
+        await db.flush()
+        await _save_map(db, company_id, "cash_register:principal", 1, "cash_registers", register.id)
+        register_id = register.id
+
+    count = 0
+
+    sql_e = "SELECT * FROM fin_entrada_caixa WHERE BO_CANCELADO = 0"
+    params: tuple = ()
+    if since:
+        sql_e += " AND DT_ENTRADA >= %s"
+        params = (since,)
+    for r in await _fetch(sql_e, params):
+        existing_id = await _get_mapped_target(db, company_id, "fin_entrada_caixa", r["ID_ENTRADA_CAIXA"])
+        if existing_id:
+            count += 1
+            continue
+        mov = CashRegisterMovement(
+            company_id=company_id,
+            register_id=register_id,
+            tipo="entrada",
+            monto=Decimal(str(r["VL_ENTRADA"])),
+            moneda=MONEDA_MAP.get(r["ID_MOEDA"], "PYG"),
+            fecha=r["DT_ENTRADA"],
+            usuario=r["USUARIO"],
+            observaciones=r["OBSERVACAO"],
+        )
+        db.add(mov)
+        await db.flush()
+        await _save_map(db, company_id, "fin_entrada_caixa", r["ID_ENTRADA_CAIXA"], "cash_register_movements", mov.id)
+        count += 1
+
+    sql_r = "SELECT * FROM fin_retirada_caixa WHERE BO_CANCELADO = 0"
+    params2: tuple = ()
+    if since:
+        sql_r += " AND DT_RETIRADA >= %s"
+        params2 = (since,)
+    for r in await _fetch(sql_r, params2):
+        existing_id = await _get_mapped_target(db, company_id, "fin_retirada_caixa", r["ID_RETIRADA"])
+        if existing_id:
+            count += 1
+            continue
+        # El retiro puede ser en las 3 monedas a la vez en el legado — se toma
+        # la primera con monto real distinto de cero (lo tipico es una sola).
+        monto_moneda = next(
+            ((v, m) for v, m in (
+                (r["VL_RETIRADA_GUARANI"], "PYG"),
+                (r["VL_RETIRADA_DOLAR"], "USD"),
+                (r["VL_RETIRADA_REAL"], "BRL"),
+            ) if v and v != 0),
+            (r["VL_RETIRADA_GUARANI"], "PYG"),
+        )
+        mov = CashRegisterMovement(
+            company_id=company_id,
+            register_id=register_id,
+            tipo="retiro",
+            monto=Decimal(str(monto_moneda[0])),
+            moneda=monto_moneda[1],
+            fecha=r["DT_RETIRADA"],
+            usuario=r["USUARIO"],
+            observaciones=r["OBSERVACAO"],
+        )
+        db.add(mov)
+        await db.flush()
+        await _save_map(db, company_id, "fin_retirada_caixa", r["ID_RETIRADA"], "cash_register_movements", mov.id)
+        count += 1
+
+    return count
+
+
 # ── Orquestador ──────────────────────────────────────────────────────────────
 
 async def run_sync(db: AsyncSession, company_id: str, since: date | None = None) -> NemuhaSyncRun:
@@ -1241,6 +1366,8 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("purchase_orders", sync_purchase_orders),
         ("purchase_receipts", sync_purchase_receipts),
         ("cash_sessions", sync_cash_sessions),
+        ("supplier_credit_notes", sync_supplier_credit_notes),
+        ("cash_register_movements", sync_cash_register_movements),
     ):
         try:
             rows_synced[name] = await fn(db, company_id, since)
