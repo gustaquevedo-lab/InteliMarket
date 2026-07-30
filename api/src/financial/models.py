@@ -172,3 +172,22 @@ class PaymentRunItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     payment_run = relationship("PaymentRun", back_populates="items")
+
+
+class SupplierCreditNote(Base):
+    """Notas de credito recibidas de proveedores (devoluciones, descuentos)."""
+    __tablename__ = "supplier_credit_notes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    numero = Column(String(30), nullable=False)
+    numero_factura_origen = Column(String(50))
+    timbrado = Column(String(30))
+    fecha = Column(Date, nullable=False)
+    motivo = Column(String(150))
+    monto = Column(Numeric(15, 0), nullable=False)
+    moneda = Column(String(3), default="PYG")
+    observaciones = Column(Text)
+    cancelado = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
