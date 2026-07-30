@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import date
 
 from api.src.db import get_db
 from api.src.caja.schemas import (
@@ -89,3 +90,26 @@ async def close_session(session_id: str, body: CashSessionClose, db: AsyncSessio
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo cerrar la sesi\u00f3n")
     return result
+
+
+@router.get("/companies/{company_id}/route-cash-settlements")
+async def list_route_settlements(
+    company_id: str,
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    cobrador_codigo: str | None = Query(None),
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.list_route_settlements(db, company_id, fecha_desde, fecha_hasta, cobrador_codigo, limit, offset)
+
+
+@router.get("/companies/{company_id}/route-cash-settlements/summary")
+async def route_settlements_summary(
+    company_id: str,
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_route_settlements_summary(db, company_id, fecha_desde, fecha_hasta)

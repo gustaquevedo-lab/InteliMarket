@@ -826,6 +826,69 @@ def sync_pagos(pg, my):
 
 
 # ----------------------------------------------------------------------------
+# Liquidacion de caja por cobrador/ruta (NO es un cierre de POS)
+#
+# "cajas" en el legacy es una liquidacion diaria por cobrador/vendedor de
+# ruta (907 cobradores distintos en la historia), no una caja registradora
+# fisica con un usuario logueado. No entra en el modelo actual de
+# cash_registers/cash_sessions de Intelimarket (pensado para POS, user_id
+# obligatorio contra la tabla users real, que solo tiene el admin) — por
+# eso tabla propia en vez de forzar el modelo existente. cajaautoriza trae
+# el desglose del cierre (efectivo, anticipo, descuentos, etc.) por IDCAJA;
+# si hay mas de una autorizacion para el mismo IDCAJA se toma la ultima.
+# ----------------------------------------------------------------------------
+def sync_cajas(pg, my):
+    last_id, _ = get_watermark(pg, "cajas")
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT IDCAJA, IDFUNCIONARIO, IDCOBRADOR, FECHA, CIERE, FECCIERE, "
+            "ARENDIR, OBSERVACION, SNRO, USRCIERRE FROM cajas "
+            "WHERE IDCAJA > %s ORDER BY IDCAJA", (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log("  cajas: sin filas nuevas")
+        return last_id
+
+    # Fetch completo de cajaautoriza (solo ~80K filas, barato) en vez de un
+    # WHERE IDCAJA IN (...) con hasta 262K IDs en la primera corrida.
+    autoriza_by_caja = {}
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT ID, TOTAL, ANTICIPO, DESCUENTOS, OTROEGRESO, OTROINGRESO, "
+            "PAGARES, EFECTIVO, USUARIO, IDCAJA FROM cajaautoriza ORDER BY ID"
+        )
+        for (aid, total, anticipo, descuentos, otroegreso, otroingreso,
+             pagares, efectivo, usuario, idcaja) in cur.fetchall():
+            autoriza_by_caja[idcaja] = (total, anticipo, descuentos, otroegreso,
+                                         otroingreso, pagares, efectivo, usuario)
+
+    max_id, rows = last_id, []
+    for (idcaja, idfunc, idcobr, fecha, ciere, feccierre, arendir, obs, snro, usrcierre) in legacy_rows:
+        max_id = max(max_id, idcaja)
+        a = autoriza_by_caja.get(idcaja)
+        total, anticipo, descuentos, otroegreso, otroingreso, pagares, efectivo, usr_autoriza = (
+            a if a else (0, 0, 0, 0, 0, 0, 0, None))
+        fc = safe_dt(feccierre)
+        rows.append((
+            uuid.uuid5(NS, f"caja:{idcaja}"), COMPANY_ID, txt_keep(snro, 20),
+            txt_keep(idcobr, 20) or "SD", txt_keep(idfunc, 20),
+            (safe_dt(fecha) or datetime.now()).date(), fc.date() if fc else None,
+            bool(ciere), money(arendir), money(total), money(efectivo),
+            money(anticipo), money(descuentos), money(otroegreso), money(otroingreso),
+            money(pagares), txt(obs), txt_keep(usrcierre, 50) or txt_keep(usr_autoriza, 50),
+        ))
+    n = upsert(pg, "route_cash_settlements", [
+        "id", "company_id", "codigo_legacy", "cobrador_codigo", "funcionario_codigo",
+        "fecha", "fecha_cierre", "cerrado", "a_rendir", "total", "efectivo",
+        "anticipo", "descuentos", "otro_egreso", "otro_ingreso", "pagares",
+        "observaciones", "usuario_cierre",
+    ], rows)
+    log(f"  cajas: {n} filas nuevas (ID {last_id} -> {max_id})")
+    set_watermark(pg, "cajas", last_id=max_id)
+    return max_id
+
+
+# ----------------------------------------------------------------------------
 # Post-proceso: recalcular IVA solo de las ventas/notas/compras tocadas esta corrida
 # ----------------------------------------------------------------------------
 def recalcular_iva(pg, sale_ids, purchase_ids):
@@ -896,6 +959,7 @@ def main():
         "cuentas": lambda: sync_cuentas(pg, my),
         "cuentas_docs": None,  # ar + ap, se arman abajo
         "pagos_cobros": None,  # historial de pagos/cobros, se arma abajo
+        "cajas": lambda: sync_cajas(pg, my),
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -944,6 +1008,10 @@ def main():
     if not ONLY or ONLY == "pagos_cobros":
         sync_cobros(pg, my)
         sync_pagos(pg, my)
+
+    log("\n[4d] Liquidacion de caja por cobrador/ruta")
+    if not ONLY or ONLY == "cajas":
+        sync_cajas(pg, my)
 
     log("\n[5] Post-proceso")
     recalcular_iva(pg, sale_ids, set())

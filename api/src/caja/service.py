@@ -161,3 +161,71 @@ async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: De
     await db.flush()
     await db.refresh(session_obj)
     return session_obj
+
+
+# ── Liquidaciones de caja por cobrador/ruta (route_cash_settlements) ──────────
+# No es un modelo ORM (tabla propia agregada por el conector de Casa
+# Gonzalito) — ver sync_incremental.py::sync_cajas. Se consulta con SQL
+# directo en vez de sumar otra capa de mapeo para una sola pantalla.
+
+async def list_route_settlements(
+    db: AsyncSession, company_id: str,
+    fecha_desde=None, fecha_hasta=None, cobrador_codigo: str | None = None,
+    limit: int = 50, offset: int = 0,
+) -> list[dict]:
+    where = "company_id = :company_id"
+    params = {"company_id": company_id, "limit": limit, "offset": offset}
+    if fecha_desde:
+        where += " AND fecha >= :fecha_desde"
+        params["fecha_desde"] = fecha_desde
+    if fecha_hasta:
+        where += " AND fecha <= :fecha_hasta"
+        params["fecha_hasta"] = fecha_hasta
+    if cobrador_codigo:
+        where += " AND cobrador_codigo = :cobrador_codigo"
+        params["cobrador_codigo"] = cobrador_codigo
+    result = await db.execute(
+        text(f"""
+            SELECT id, codigo_legacy, cobrador_codigo, funcionario_codigo, fecha,
+                   fecha_cierre, cerrado, a_rendir, total, efectivo, anticipo,
+                   descuentos, otro_egreso, otro_ingreso, pagares, observaciones,
+                   usuario_cierre
+            FROM route_cash_settlements
+            WHERE {where}
+            ORDER BY fecha DESC, id DESC
+            LIMIT :limit OFFSET :offset
+        """),
+        params,
+    )
+    return [dict(row._mapping) for row in result.fetchall()]
+
+
+async def get_route_settlements_summary(db: AsyncSession, company_id: str, fecha_desde=None, fecha_hasta=None) -> dict:
+    where = "company_id = :company_id"
+    params = {"company_id": company_id}
+    if fecha_desde:
+        where += " AND fecha >= :fecha_desde"
+        params["fecha_desde"] = fecha_desde
+    if fecha_hasta:
+        where += " AND fecha <= :fecha_hasta"
+        params["fecha_hasta"] = fecha_hasta
+    result = await db.execute(
+        text(f"""
+            SELECT
+                COUNT(*) as total_liquidaciones,
+                COUNT(*) FILTER (WHERE cerrado) as cerradas,
+                COUNT(DISTINCT cobrador_codigo) as cobradores,
+                COALESCE(SUM(total), 0) as total,
+                COALESCE(SUM(efectivo), 0) as efectivo,
+                COALESCE(SUM(anticipo), 0) as anticipo,
+                COALESCE(SUM(descuentos), 0) as descuentos,
+                COALESCE(SUM(otro_egreso), 0) as otro_egreso,
+                COALESCE(SUM(otro_ingreso), 0) as otro_ingreso,
+                COALESCE(SUM(pagares), 0) as pagares
+            FROM route_cash_settlements
+            WHERE {where}
+        """),
+        params,
+    )
+    row = result.first()
+    return dict(row._mapping) if row else {}
