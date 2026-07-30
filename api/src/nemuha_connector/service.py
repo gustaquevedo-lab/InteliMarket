@@ -85,7 +85,7 @@ from api.src.nemuha_connector.models import NemuhaRecordMap, NemuhaSyncRun
 from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseOrderItem, PurchaseReceipt, PurchaseReceiptItem
 from api.src.customers.models import Customer
 from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction
-from api.src.petty_cash.models import Expense
+from api.src.petty_cash.models import Expense, ExpenseCategory
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
 from api.src.sales.models import Sale, SaleItem, SalePayment
@@ -477,7 +477,36 @@ async def sync_bank_balances(db: AsyncSession, company_id: str, since: date | No
 # fin_caixa_chica la que de hecho opera como caja del POS — cada una de las
 # 116.392 ventas está vinculada a un cierre vía ven_venda.ID_CAIXA_CHICA) ──
 
+async def sync_expense_categories(db: AsyncSession, company_id: str, since: date | None) -> int:
+    rows = await _fetch("SELECT * FROM fin_classificacao_gasto")
+
+    count = 0
+    for r in rows:
+        existing_id = await _get_mapped_target(db, company_id, "fin_classificacao_gasto", r["ID_CLASSIFICACAO_GASTO"])
+        if existing_id:
+            count += 1
+            continue
+
+        category = ExpenseCategory(
+            company_id=company_id,
+            nombre=r["DS_CLASSIFICACAO_GASTO"],
+            activo=bool(r["BO_ATIVO"]),
+        )
+        db.add(category)
+        await db.flush()
+        await _save_map(db, company_id, "fin_classificacao_gasto", r["ID_CLASSIFICACAO_GASTO"], "expense_categories", category.id)
+        count += 1
+
+    return count
+
+
 async def sync_petty_cash_expenses(db: AsyncSession, company_id: str, since: date | None) -> int:
+    # centro de costo (fin_centro_de_custo) es una dimension real distinta de la
+    # clasificacion de gasto (fin_classificacao_gasto -> expense_categories) —
+    # no hay un modelo propio para "centro de costo" en InteliMarket todavia,
+    # se anota en notas para no perder el dato en vez de inventar un esquema nuevo.
+    centros_costo = {r["ID_CENTRO_CUSTO"]: r["DS_CENTRO_CUSTO"] for r in await _fetch("SELECT ID_CENTRO_CUSTO, DS_CENTRO_CUSTO FROM fin_centro_de_custo")}
+
     sql = "SELECT * FROM fin_gasto WHERE BO_CANCELADO = 0"
     params: tuple = ()
     if since:
@@ -492,13 +521,22 @@ async def sync_petty_cash_expenses(db: AsyncSession, company_id: str, since: dat
             count += 1
             continue
 
+        category_id = await _get_mapped_target(db, company_id, "fin_classificacao_gasto", r["ID_CLASSIFICACAO_GASTO"])
+
         # Sin comprobante fiscal asociado -> queda en revisión (no autoaprobado),
         # usando el mismo campo "notas" que ya usa el módulo, sin inventar columnas.
         sin_comprobante = r["ID_NOTA_FISCAL"] is None and not r["NR_DOCUMENTO"]
-        notas = "Sin comprobante fiscal en el sistema legacy — requiere revisión" if sin_comprobante else None
+        notas_partes = []
+        if sin_comprobante:
+            notas_partes.append("Sin comprobante fiscal en el sistema legacy — requiere revisión")
+        centro = centros_costo.get(r["ID_CENTRO_CUSTO"])
+        if centro:
+            notas_partes.append(f"Centro de costo: {centro}")
+        notas = " | ".join(notas_partes) if notas_partes else None
 
         expense = Expense(
             company_id=company_id,
+            category_id=category_id,
             monto=Decimal(str(r["VL_GASTO"])),
             descripcion=r["DS_GASTO"],
             fecha_gasto=r["DT_GASTO"],
@@ -912,6 +950,35 @@ async def sync_credit_accounts(db: AsyncSession, company_id: str, since: date | 
     return count
 
 
+# ── Saldos de proveedor (fin_saldo_fornecedor) — control cruzado ───────────────
+#
+# Solo 35 filas reales: no es una fuente primaria, es un saldo que el legado
+# mantenía aparte para conciliar contra las cuentas por pagar calculadas.
+# Se guarda en Supplier.notas como control cruzado en vez de crear una tabla
+# de saldo propia — con 35 filas no se justifica un modelo nuevo.
+
+async def sync_supplier_balances(db: AsyncSession, company_id: str, since: date | None) -> int:
+    rows = await _fetch("SELECT * FROM fin_saldo_fornecedor WHERE VL_SALDO != 0")
+
+    count = 0
+    for r in rows:
+        supplier_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "supplier")
+        moneda = MONEDA_MAP.get(r["ID_MOEDA"], "PYG")
+        saldo = Decimal(str(r["VL_SALDO"]))
+
+        result = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
+        supplier = result.scalar_one()
+        nota = f"Saldo legado ({moneda}): {saldo}"
+        if supplier.notas and "Saldo legado" not in supplier.notas:
+            supplier.notas = f"{supplier.notas} | {nota}"
+        else:
+            supplier.notas = nota
+        count += 1
+
+    await db.flush()
+    return count
+
+
 # ── Órdenes de Compra y Recepciones (est_ordem_compra / est_recepcao_ordem_compra) ──
 #
 # El reporte más usado del negocio (RelatorioOrdemCompra, 9.099 corridas) sale de
@@ -1162,6 +1229,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("bank_accounts", sync_bank_accounts),
         ("bank_transactions", sync_bank_transactions),
         ("bank_balances", sync_bank_balances),
+        ("expense_categories", sync_expense_categories),
         ("petty_cash_expenses", sync_petty_cash_expenses),
         ("cash_register_arqueo", sync_cash_register_arqueo),
         ("cash_deposit_gaps", sync_cash_deposit_gaps),
@@ -1169,6 +1237,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("sale_payments", sync_sale_payments),
         ("stock", sync_stock),
         ("credit_accounts", sync_credit_accounts),
+        ("supplier_balances", sync_supplier_balances),
         ("purchase_orders", sync_purchase_orders),
         ("purchase_receipts", sync_purchase_receipts),
         ("cash_sessions", sync_cash_sessions),
