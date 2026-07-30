@@ -68,35 +68,6 @@ class SaleWithItems(SaleResponse):
     items: list[dict] = []
 
 
-class CashSessionCreate(BaseModel):
-    cash_register_id: UUID
-    user_id: UUID
-    monto_apertura: Decimal = Decimal("0")
-
-
-class CashSessionResponse(BaseModel):
-    id: UUID
-    cash_register_id: UUID
-    user_id: UUID
-    fecha_apertura: datetime
-    monto_apertura: Decimal
-    fecha_cierre: Optional[datetime] = None
-    monto_cierre_esperado: Optional[Decimal] = None
-    monto_cierre_real: Optional[Decimal] = None
-    diferencia: Optional[Decimal] = None
-    estado: str
-    observaciones_cierre: Optional[str] = None
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class CashSessionClose(BaseModel):
-    monto_cierre_real: Decimal
-    observaciones: Optional[str] = None
-
-
 class SaleUpdate(BaseModel):
     customer_id: Optional[UUID] = None
     observaciones: Optional[str] = None
