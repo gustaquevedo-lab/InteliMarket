@@ -129,6 +129,16 @@ def safe_dt(v):
     return None
 
 
+def valid_venc_date(dt):
+    """Descarta fechas de vencimiento con anio corrupto en el legacy (ej.
+    '0107-12-01' visto en ctas_a_pagar) — un puñado de filas (11 de 106.815
+    en AP, 104 de 272.141 en AR), pero sin este filtro distorsionan el
+    bucket "+90 dias" del aging con moras de siglos que no son reales."""
+    if dt is None or dt.year < 2000 or dt.year > 2100:
+        return None
+    return dt
+
+
 def ruc_dv(ruc, dv):
     r = txt(ruc)
     if not r:
@@ -651,6 +661,90 @@ def sync_cuentas(pg, my):
 
 
 # ----------------------------------------------------------------------------
+# Cuentas por cobrar/pagar A NIVEL DOCUMENTO (con vencimiento real)
+#
+# ctas_a_cobrar y ctas_a_pagar en el legacy tienen detalle documento a
+# documento con fecha de vencimiento real (FECHA_VENCIMIENTO / FECHAVEN) —
+# la migracion original solo las uso para armar el saldo agregado por
+# cliente/proveedor (sync_cuentas arriba) y descarto el detalle, dejando
+# accounts_receivable/supplier_invoices vacias pese a que el dato SI existe.
+# Estas dos funciones migran el detalle real; el aging deja de ser "100%
+# al dia" inventado y pasa a ser el vencimiento real del legacy.
+# ----------------------------------------------------------------------------
+def sync_ctas_a_cobrar_docs(pg, my):
+    last_id, _ = get_watermark(pg, "ctas_a_cobrar_docs")
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT IDCTA_A_COBRAR, IDCLIENTES, FECHA_VENCIMIENTO, NUMERO, MONTO, COBRO, "
+            "CANCELADO, FECHA FROM ctas_a_cobrar WHERE IDCTA_A_COBRAR > %s ORDER BY IDCTA_A_COBRAR",
+            (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log("  ctas_a_cobrar (detalle): sin filas nuevas")
+        return last_id
+    clientes_validos = {txt_keep(c, 15) for c in legacy_id_set(my, "clientes", "IDCLIENTES")}
+    max_id, rows, saltados = last_id, [], 0
+    for (iid, idcli, fechaven, numero, monto, cobro, cancelado, fecha) in legacy_rows:
+        max_id = max(max_id, iid)
+        idc = txt_keep(idcli, 15)
+        if not idc or idc not in clientes_validos:
+            saltados += 1
+            continue
+        m = money(monto)
+        saldo = 0 if cancelado else max(0, m - money(cobro))
+        fv_dt = valid_venc_date(safe_dt(fechaven))
+        rows.append((uuid.uuid5(NS, f"ar:{iid}"), COMPANY_ID, uuid.uuid5(NS, f"cli:{idc}"),
+                     txt_keep(str(int(numero)) if numero else None, 50),
+                     safe_dt(fecha) or datetime.now(), fv_dt.date() if fv_dt else None,
+                     "PYG", m, saldo, "factura", "pagado" if cancelado else "pendiente"))
+    n = upsert(pg, "accounts_receivable", ["id", "company_id", "customer_id", "numero_documento",
+                                            "fecha_emision", "fecha_vencimiento", "moneda",
+                                            "monto_original", "saldo_pendiente", "tipo", "estado"], rows)
+    log(f"  ctas_a_cobrar (detalle): {n} filas nuevas (ID {last_id} -> {max_id}"
+        f"{', ' + str(saltados) + ' saltadas sin cliente' if saltados else ''})")
+    set_watermark(pg, "ctas_a_cobrar_docs", last_id=max_id)
+    return max_id
+
+
+def sync_ctas_a_pagar_docs(pg, my):
+    last_id, _ = get_watermark(pg, "ctas_a_pagar_docs")
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT IDCTAS_A_PAGAR, IDPROVEEDOR, ID_FACCOMPRA, NUMFAC, FECHA, FECHAVEN, "
+            "MONTO, PAGOS, CANCELADO FROM ctas_a_pagar WHERE IDCTAS_A_PAGAR > %s "
+            "ORDER BY IDCTAS_A_PAGAR", (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log("  ctas_a_pagar (detalle): sin filas nuevas")
+        return last_id
+    proveedores_validos = {txt_keep(p, 20) for p in legacy_id_set(my, "proveedor", "IDPROVEEDOR")}
+    compras_validas = legacy_id_set(my, "fac_compras", "IDFACCOMPRAS")
+    max_id, rows = last_id, []
+    for (iid, idprov, idfc, numfac, fecha, fechaven, monto, pagos, cancelado) in legacy_rows:
+        max_id = max(max_id, iid)
+        cod = txt_keep(idprov, 20)
+        # Igual que sync_compras: proveedor desconocido -> placeholder, no se
+        # descarta la factura (a diferencia de AR, donde una cuenta por
+        # cobrar sin cliente real no aporta nada).
+        sup_id = uuid.uuid5(NS, f"prov:{cod}") if cod and cod in proveedores_validos else PLACEHOLDER_SUP_ID
+        m = money(monto)
+        saldo = 0 if cancelado else max(0, m - money(pagos))
+        fv_dt = valid_venc_date(safe_dt(fechaven))
+        po_id = uuid.uuid5(NS, f"comp:{idfc}") if idfc and idfc in compras_validas else None
+        rows.append((uuid.uuid5(NS, f"ap:{iid}"), COMPANY_ID, sup_id,
+                     txt_keep(numfac, 50) or f"SD-{iid}",
+                     (safe_dt(fecha) or datetime.now()).date(),
+                     fv_dt.date() if fv_dt else (safe_dt(fecha) or datetime.now()).date(),
+                     m, saldo, "PYG", po_id, "pagada" if cancelado else "pendiente"))
+    n = upsert(pg, "supplier_invoices", ["id", "company_id", "supplier_id", "numero_factura",
+                                          "fecha_emision", "fecha_vencimiento", "total",
+                                          "saldo_pendiente", "moneda", "purchase_order_id", "estado"], rows)
+    log(f"  ctas_a_pagar (detalle): {n} filas nuevas (ID {last_id} -> {max_id})")
+    set_watermark(pg, "ctas_a_pagar_docs", last_id=max_id)
+    return max_id
+
+
+# ----------------------------------------------------------------------------
 # Post-proceso: recalcular IVA solo de las ventas/notas/compras tocadas esta corrida
 # ----------------------------------------------------------------------------
 def recalcular_iva(pg, sale_ids, purchase_ids):
@@ -719,6 +813,7 @@ def main():
         "stock": None,       # necesita valid_wh, se arma abajo
         "ventas": None,      # necesita cli_ids
         "cuentas": lambda: sync_cuentas(pg, my),
+        "cuentas_docs": None,  # ar + ap, se arman abajo
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -757,6 +852,11 @@ def main():
     log("\n[4] Cuentas por cobrar (recálculo completo — sin columna de auditoría en legacy)")
     if not ONLY or ONLY == "cuentas":
         sync_cuentas(pg, my)
+
+    log("\n[4b] Cuentas por cobrar/pagar a nivel documento (con vencimiento real)")
+    if not ONLY or ONLY == "cuentas_docs":
+        sync_ctas_a_cobrar_docs(pg, my)
+        sync_ctas_a_pagar_docs(pg, my)
 
     log("\n[5] Post-proceso")
     recalcular_iva(pg, sale_ids, set())

@@ -502,16 +502,18 @@ async def get_financial_summary(db: AsyncSession, fecha_desde: Optional[date] = 
     if fecha_hasta:
         where_po += " AND fecha < CAST(:fecha_hasta AS date) + interval '1 day'"
     egresos = (await _exec(db, f"SELECT COALESCE(SUM(total), 0) as total FROM purchase_orders WHERE {where_po}", params)).first()
-    # Cuentas por cobrar: el modelo de AR difiere por vertical/ETL. Algunos
-    # tenants (ej. conector Ñemuha) pueblan accounts_receivable a nivel
-    # documento; otros (ej. migración Casa Gonzalito) solo agregan el saldo
-    # en customer_accounts.saldo_actual y dejan accounts_receivable vacía.
-    # Se suman ambas fuentes — en la práctica solo una está poblada por tenant.
+    # Cuentas por cobrar: preferir accounts_receivable (detalle real por
+    # documento, con vencimiento) cuando existe; si un tenant no tiene
+    # accounts_receivable poblada, cae a customer_accounts.saldo_actual
+    # (agregado, sin vencimiento). NO sumar ambas — Casa Gonzalito ahora
+    # tiene las dos pobladas (el conector migra el detalle Y mantiene el
+    # agregado como respaldo), sumarlas duplicaba el mismo saldo dos veces.
     por_cobrar = (await _exec(db, """
         SELECT
-            COALESCE((SELECT SUM(saldo_pendiente) FROM accounts_receivable WHERE estado = 'pendiente'), 0)
-            + COALESCE((SELECT SUM(saldo_actual) FROM customer_accounts WHERE saldo_actual > 0), 0)
-        AS total
+            CASE WHEN EXISTS (SELECT 1 FROM accounts_receivable WHERE estado = 'pendiente')
+                THEN COALESCE((SELECT SUM(saldo_pendiente) FROM accounts_receivable WHERE estado = 'pendiente'), 0)
+                ELSE COALESCE((SELECT SUM(saldo_actual) FROM customer_accounts WHERE saldo_actual > 0), 0)
+            END AS total
     """)).first()
     r_ap = await db.execute(
         select(func.coalesce(func.sum(SupplierInvoice.saldo_pendiente), 0))

@@ -914,20 +914,22 @@ async def get_financial_dashboard(db: AsyncSession, company_id: str) -> dict:
     ap = await get_ap_dashboard(db, company_id)
     cash_flow = await get_cash_flow_dashboard(db, company_id)
 
-    # Cuentas por cobrar: el modelo de AR difiere por vertical/ETL. Algunos
-    # tenants pueblan accounts_receivable a nivel documento; otros solo
-    # agregan el saldo en customer_accounts.saldo_actual y dejan
-    # accounts_receivable vacía. Se suman ambas fuentes (en la práctica
-    # solo una está poblada por tenant).
+    # Cuentas por cobrar: preferir accounts_receivable (detalle real,
+    # vencimiento incluido) cuando el tenant la tiene poblada; si no, cae a
+    # customer_accounts.saldo_actual (agregado). NO sumar ambas — un tenant
+    # con las dos pobladas (ej. Casa Gonzalito, que migra detalle Y mantiene
+    # el agregado como respaldo) duplicaria el mismo saldo.
     from sqlalchemy import text as _text
     ar_result = await db.execute(
         _text("""
             SELECT
-                COALESCE((SELECT SUM(saldo_pendiente) FROM accounts_receivable
-                          WHERE company_id = :company_id AND estado = 'pendiente'), 0)
-                + COALESCE((SELECT SUM(ca.saldo_actual) FROM customer_accounts ca
-                            JOIN customers c ON c.id = ca.customer_id
-                            WHERE c.company_id = :company_id AND ca.saldo_actual > 0), 0)
+                CASE WHEN EXISTS (SELECT 1 FROM accounts_receivable WHERE company_id = :company_id AND estado = 'pendiente')
+                    THEN COALESCE((SELECT SUM(saldo_pendiente) FROM accounts_receivable
+                                   WHERE company_id = :company_id AND estado = 'pendiente'), 0)
+                    ELSE COALESCE((SELECT SUM(ca.saldo_actual) FROM customer_accounts ca
+                                   JOIN customers c ON c.id = ca.customer_id
+                                   WHERE c.company_id = :company_id AND ca.saldo_actual > 0), 0)
+                END
         """),
         {"company_id": company_id},
     )
@@ -977,16 +979,19 @@ async def get_financial_ratios(db: AsyncSession, company_id: str) -> dict:
     )
     ap_val = Decimal(str(ap_total.scalar() or "0"))
 
-    # Mismo criterio de doble fuente que get_financial_dashboard (ver comentario ahí).
+    # Mismo criterio (preferir AR, fallback a customer_accounts, no sumar
+    # ambas) que get_financial_dashboard — ver comentario ahí.
     from sqlalchemy import text as _text
     ar_total = await db.execute(
         _text("""
             SELECT
-                COALESCE((SELECT SUM(saldo_pendiente) FROM accounts_receivable
-                          WHERE company_id = :company_id AND estado = 'pendiente'), 0)
-                + COALESCE((SELECT SUM(ca.saldo_actual) FROM customer_accounts ca
-                            JOIN customers c ON c.id = ca.customer_id
-                            WHERE c.company_id = :company_id AND ca.saldo_actual > 0), 0)
+                CASE WHEN EXISTS (SELECT 1 FROM accounts_receivable WHERE company_id = :company_id AND estado = 'pendiente')
+                    THEN COALESCE((SELECT SUM(saldo_pendiente) FROM accounts_receivable
+                                   WHERE company_id = :company_id AND estado = 'pendiente'), 0)
+                    ELSE COALESCE((SELECT SUM(ca.saldo_actual) FROM customer_accounts ca
+                                   JOIN customers c ON c.id = ca.customer_id
+                                   WHERE c.company_id = :company_id AND ca.saldo_actual > 0), 0)
+                END
         """),
         {"company_id": str(cid)},
     )

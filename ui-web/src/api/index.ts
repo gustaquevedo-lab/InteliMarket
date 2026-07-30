@@ -923,14 +923,18 @@ export const api = {
   },
   financial: {
     invoices: {
-      list: (params?: { estado?: string; supplier_id?: string; vencidas?: boolean; desde?: string; hasta?: string; limit?: number; offset?: number }) => client.get<SupplierInvoice[]>("/v1/financial/invoices", params as any),
+      list: (params?: { estado?: string; supplier_id?: string; vencidas?: boolean; desde?: string; hasta?: string; limit?: number; offset?: number }) => client.get<SupplierInvoice[]>("/v1/financial/invoices", { company_id: COMPANY_ID, ...params } as any),
       get: (id: string) => client.get<SupplierInvoice>(`/v1/financial/invoices/${id}`),
       create: (data: any) => client.post<SupplierInvoice>("/v1/financial/invoices", data),
       approve: (id: string) => client.post<{ detail: string }>(`/v1/financial/invoices/${id}/approve`),
       pay: (id: string, data: any) => client.post<SupplierInvoice>(`/v1/financial/invoices/${id}/pay`, data),
     },
-    aging: () => client.get<any[]>("/v1/financial/aging"),
-    apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard"),
+    // apDashboard/invoices.list/aging quedaron afuera del fix de company_id
+    // faltante de un commit anterior (4549dc8) — el backend los requiere,
+    // por eso siempre daban 422 y la pagina de Gestion Financiera mostraba
+    // la pestaña de Cuentas por Pagar vacia pese a tener datos reales.
+    aging: () => client.get<any[]>("/v1/financial/aging", { company_id: COMPANY_ID }),
+    apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard", { company_id: COMPANY_ID }),
     banks: {
       list: () => client.get<BankAccount[]>("/v1/financial/banks"),
       create: (data: any) => client.post<BankAccount>("/v1/financial/banks", data),
