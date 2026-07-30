@@ -23,23 +23,26 @@ export default function BovedaPage() {
   const [pendientes, setPendientes] = useState<{ id: string; titulo: string; monto_relacionado?: string; entidad_relacionada?: string }[]>([])
   const [apAging, setApAging] = useState<{ aging_buckets: { rango: string; monto: string; facturas: number }[]; por_supplier: ApSupplierAging[] } | null>(null)
   const [arAging, setArAging] = useState<{ buckets: { rango: string; monto: number; cantidad: number }[]; por_clientes: ArCustomerAging[] } | null>(null)
+  const [movements, setMovements] = useState<{ id: string; tipo: string; monto: number; moneda: string; fecha: string; usuario: string; observaciones: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
   const load = async () => {
     try {
-      const [bankList, deps, recs, ap, ar] = await Promise.all([
+      const [bankList, deps, recs, ap, ar, movs] = await Promise.all([
         api.financial.banks.list(),
         api.financial.banks.allTransactions({ categoria: "deposito_caja", limit: 100 }),
         api.financeAgent.recommendations("pending"),
         api.financial.aging(),
         api.accountsReceivable.aging(),
+        api.caja.registerMovements(),
       ])
       setBanks(bankList)
       setDeposits(deps)
       setPendientes(recs.filter(r => r.tipo === "deposito_pendiente"))
       setApAging(ap as any)
       setArAging(ar as any)
+      setMovements(movs)
     } catch {
       setBanks([]); setDeposits([]); setPendientes([])
     } finally {
@@ -62,6 +65,9 @@ export default function BovedaPage() {
   const topClientesDeuda = [...(arAging?.por_clientes || [])]
     .sort((a, b) => Number(b.saldo_total || 0) - Number(a.saldo_total || 0))
     .slice(0, 5)
+
+  const totalEntradas = movements.filter(m => m.tipo === "entrada" && m.moneda === "PYG").reduce((s, m) => s + m.monto, 0)
+  const totalRetiros = movements.filter(m => m.tipo === "retiro" && m.moneda === "PYG").reduce((s, m) => s + m.monto, 0)
 
   if (loading) {
     return <div className="flex justify-center py-24"><Loader2 className="animate-spin text-primary" size={28} /></div>
@@ -164,6 +170,53 @@ export default function BovedaPage() {
             <p className="text-xs text-gray-400">Sin saldos pendientes de clientes.</p>
           )}
         </div>
+      </div>
+
+      {/* Movimientos de caja principal */}
+      <div className="card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-md font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <Banknote className="w-5 h-5 text-primary" /> Movimientos de caja principal
+          </h3>
+          <div className="flex gap-4 text-xs">
+            <span className="text-green-500 font-bold">+{formatPYG(totalEntradas)} entradas</span>
+            <span className="text-red-500 font-bold">-{formatPYG(totalRetiros)} retiros</span>
+          </div>
+        </div>
+        {movements.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-4">Sin movimientos de caja principal registrados.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="table-header">
+                  <th className="table-cell">Tipo</th>
+                  <th className="table-cell">Fecha</th>
+                  <th className="table-cell">Usuario</th>
+                  <th className="table-cell">Observaciones</th>
+                  <th className="table-cell text-right">Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {movements.slice(0, 15).map((m) => (
+                  <tr key={m.id} className="table-row">
+                    <td className="table-td">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${m.tipo === "entrada" ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"}`}>
+                        {m.tipo === "entrada" ? "Entrada" : "Retiro"}
+                      </span>
+                    </td>
+                    <td className="table-td text-xs text-gray-400">{formatDate(m.fecha)}</td>
+                    <td className="table-td text-xs">{m.usuario || "—"}</td>
+                    <td className="table-td text-xs text-gray-500 max-w-xs truncate" title={m.observaciones}>{m.observaciones || "—"}</td>
+                    <td className={`table-td text-right font-mono font-bold ${m.tipo === "entrada" ? "text-green-600" : "text-red-500"}`}>
+                      {m.tipo === "entrada" ? "+" : "-"}{formatPYG(m.monto)} {m.moneda !== "PYG" ? m.moneda : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card p-6 space-y-6">

@@ -16,6 +16,7 @@ export default function FinancialPage() {
   const [cashFlow, setCashFlow] = useState<CashFlowProjection[]>([])
   const [ratios, setRatios] = useState<any>(null)
   const [aging, setAging] = useState<any[]>([])
+  const [creditNotes, setCreditNotes] = useState<{ id: string; supplier_nombre: string; numero: string; numero_factura_origen: string; fecha: string; motivo: string; monto: number; moneda: string }[]>([])
   const [search, setSearch] = useState("")
   const [showInvoiceForm, setShowInvoiceForm] = useState(false)
   const [showBankForm, setShowBankForm] = useState(false)
@@ -41,8 +42,9 @@ export default function FinancialPage() {
       if (tab === "dashboard") p.push(api.financial.dashboard().then(setDashboard))
       if (tab === "ap") {
         p.push(api.financial.invoices.list({ estado: filterEstado || undefined }).then(setInvoices))
-        p.push(api.financial.aging().then(setAging))
+        p.push(api.financial.aging().then((d: any) => setAging(d?.por_supplier || [])))
         p.push(api.financial.apDashboard().then(d => setDashboard({ ap_dashboard: d } as any)))
+        p.push(api.financial.creditNotes().then(setCreditNotes))
       }
       if (tab === "bancos") {
         p.push(api.financial.banks.list().then(setBanks))
@@ -286,16 +288,32 @@ export default function FinancialPage() {
                   <h3 className="font-semibold mb-3">Aging por proveedor</h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead><tr className="text-left text-xs text-gray-500"><th className="p-2">Proveedor</th><th className="p-2">Corriente</th><th className="p-2">1-30</th><th className="p-2">31-60</th><th className="p-2">61-90</th><th className="p-2">90+</th><th className="p-2">Total</th></tr></thead>
+                      <thead><tr className="text-left text-xs text-gray-500"><th className="p-2">Proveedor</th><th className="p-2">Vencido</th><th className="p-2">Por vencer</th><th className="p-2">Total pendiente</th></tr></thead>
                       <tbody>{aging.map((a: any, i: number) => (
                         <tr key={i} className="border-t border-gray-100 dark:border-gray-700">
-                          <td className="p-2 font-medium">{a.supplier_nombre || a.supplier_id}</td>
-                          <td className="p-2">{formatGs(a.current)}</td>
-                          <td className="p-2">{formatGs(a.days_1_30)}</td>
-                          <td className="p-2">{formatGs(a.days_31_60)}</td>
-                          <td className="p-2">{formatGs(a.days_61_90)}</td>
-                          <td className="p-2">{formatGs(a.days_90_plus)}</td>
-                          <td className="p-2 font-semibold">{formatGs(a.total)}</td>
+                          <td className="p-2 font-medium">{a.razon_social || a.supplier_id}</td>
+                          <td className="p-2 text-red-500 font-semibold">{formatGs(a.vencido)}</td>
+                          <td className="p-2">{formatGs(a.por_vencer)}</td>
+                          <td className="p-2 font-semibold">{formatGs(a.total_pendiente)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              {creditNotes.length > 0 && (
+                <div className="card p-5">
+                  <h3 className="font-semibold mb-3">Notas de crédito de proveedor</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-left text-xs text-gray-500"><th className="p-2">Proveedor</th><th className="p-2">Número</th><th className="p-2">Fecha</th><th className="p-2">Motivo</th><th className="p-2 text-right">Monto</th></tr></thead>
+                      <tbody>{creditNotes.map((n) => (
+                        <tr key={n.id} className="border-t border-gray-100 dark:border-gray-700">
+                          <td className="p-2 font-medium">{n.supplier_nombre}</td>
+                          <td className="p-2 font-mono text-xs">{n.numero}</td>
+                          <td className="p-2 text-xs text-gray-500">{n.fecha}</td>
+                          <td className="p-2 text-xs">{n.motivo || "—"}</td>
+                          <td className="p-2 text-right font-semibold text-green-600">{formatGs(n.monto)} {n.moneda !== "PYG" ? n.moneda : ""}</td>
                         </tr>
                       ))}</tbody>
                     </table>

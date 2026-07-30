@@ -361,6 +361,7 @@ export const api = {
     openSession: (data: { caja_id: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions/open", data),
     closeSession: (id: string, data: { monto_cierre: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
     summary: (id: string) => client.get<CashSessionSummary>(`/v1/cash-sessions/${id}/summary`),
+    registerMovements: (params?: { tipo?: string }) => client.get<{ id: string; register_id: string; tipo: string; monto: number; moneda: string; fecha: string; usuario: string; observaciones: string }[]>("/v1/cash-register-movements", { company_id: COMPANY_ID, ...params } as any),
   },
   branches: {
     list: () => client.get<Branch[]>("/v1/branches"),
@@ -931,6 +932,7 @@ export const api = {
     },
     aging: () => client.get<any[]>("/v1/financial/aging", { company_id: COMPANY_ID } as any),
     apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard", { company_id: COMPANY_ID } as any),
+    creditNotes: (params?: { supplier_id?: string }) => client.get<{ id: string; supplier_id: string; supplier_nombre: string; numero: string; numero_factura_origen: string; fecha: string; motivo: string; monto: number; moneda: string; observaciones: string }[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
     banks: {
       list: () => client.get<BankAccount[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
       create: (data: any) => client.post<BankAccount>("/v1/financial/banks", { company_id: COMPANY_ID, ...data }),
