@@ -48,3 +48,21 @@ class CashCount(Base):
     diferencia = Column(Numeric(15, 0))
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CashRegisterMovement(Base):
+    """Entradas y retiros de la caja/boveda principal (distinto de las
+    sesiones de cajero: son movimientos de la caja fuerte central,
+    tipicamente hacia/desde una cuenta bancaria)."""
+    __tablename__ = "cash_register_movements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    register_id = Column(UUID(as_uuid=True), ForeignKey("cash_registers.id"), nullable=False)
+    tipo = Column(String(20), nullable=False)  # entrada | retiro
+    monto = Column(Numeric(15, 0), nullable=False)
+    moneda = Column(String(3), default="PYG")
+    fecha = Column(DateTime(timezone=True), nullable=False)
+    usuario = Column(String(60))
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

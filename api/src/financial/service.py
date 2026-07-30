@@ -11,6 +11,7 @@ from api.src.financial.models import (
     BankAccount, BankTransaction,
     CashFlowProjection, Budget,
     PaymentRun, PaymentRunItem,
+    SupplierCreditNote,
 )
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoicePaymentCreate,
@@ -1022,3 +1023,29 @@ async def get_financial_ratios(db: AsyncSession, company_id: str) -> dict:
         "ap_total": ap_val,
         "ar_total": ar_val,
     }
+
+
+async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier_id: str | None = None, limit: int = 100) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    query = select(SupplierCreditNote, Supplier.razon_social).join(
+        Supplier, Supplier.id == SupplierCreditNote.supplier_id, isouter=True
+    ).where(SupplierCreditNote.company_id == cid, SupplierCreditNote.cancelado == False)
+    if supplier_id:
+        query = query.where(SupplierCreditNote.supplier_id == uuid.UUID(supplier_id))
+    query = query.order_by(SupplierCreditNote.fecha.desc()).limit(limit)
+    result = await db.execute(query)
+    return [
+        {
+            "id": str(note.id),
+            "supplier_id": str(note.supplier_id),
+            "supplier_nombre": razon_social,
+            "numero": note.numero,
+            "numero_factura_origen": note.numero_factura_origen,
+            "fecha": note.fecha.isoformat(),
+            "motivo": note.motivo,
+            "monto": float(note.monto),
+            "moneda": note.moneda,
+            "observaciones": note.observaciones,
+        }
+        for note, razon_social in result.all()
+    ]

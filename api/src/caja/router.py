@@ -89,3 +89,8 @@ async def close_session(session_id: str, body: CashSessionClose, db: AsyncSessio
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo cerrar la sesi\u00f3n")
     return result
+
+
+@router.get("/cash-register-movements")
+async def list_register_movements(company_id: str = Query(), tipo: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_register_movements(db, company_id, tipo)

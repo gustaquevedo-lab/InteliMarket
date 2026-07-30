@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 
-from api.src.caja.models import CashRegister, CashSession, CashCount
+from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement
 from api.src.sales.models import Sale
 
 
@@ -176,3 +176,24 @@ async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: De
         "monto_cierre_esperado": monto_cierre_esperado,
         "diferencia": diferencia,
     }
+
+
+async def list_register_movements(db: AsyncSession, company_id: str, tipo: str | None = None, limit: int = 100) -> list[dict]:
+    query = select(CashRegisterMovement).where(CashRegisterMovement.company_id == uuid.UUID(company_id))
+    if tipo:
+        query = query.where(CashRegisterMovement.tipo == tipo)
+    query = query.order_by(CashRegisterMovement.fecha.desc()).limit(limit)
+    result = await db.execute(query)
+    return [
+        {
+            "id": str(m.id),
+            "register_id": str(m.register_id),
+            "tipo": m.tipo,
+            "monto": float(m.monto),
+            "moneda": m.moneda,
+            "fecha": m.fecha.isoformat(),
+            "usuario": m.usuario,
+            "observaciones": m.observaciones,
+        }
+        for m in result.scalars().all()
+    ]
