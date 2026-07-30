@@ -354,8 +354,8 @@ export const api = {
       create: (data: Partial<CashRegister>) => client.post<CashRegister>("/v1/cash-registers", data),
     },
     sessions: {
-      list: (params?: { estado?: string }) => client.get<CashSession[]>("/v1/cash-sessions", params),
-      create: (data: { cash_register_id?: string; caja_id?: string; user_id?: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions/open", data),
+      list: (params?: { estado?: string; limit?: number; offset?: number }) => client.get<CashSession[]>("/v1/cash-sessions", params),
+      create: (data: { cash_register_id?: string; caja_id?: string; user_id?: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions", data),
       close: (id: string, data: { monto_cierre_real: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
     },
     openSession: (data: { caja_id: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions/open", data),
@@ -519,6 +519,7 @@ export const api = {
     salesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/sales/by-category", params),
     salesByProduct: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<{ producto: string; sku: string; unidad_medida: string; cantidad: number; monto: number; costo: number; margen: number }[]>("/api/reports/sales/by-product", params),
     salesByPaymentMethod: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/sales/by-payment-method", params),
+    expensesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ categoria: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/expenses/by-category", params),
     inventory: () => client.get<any>("/api/reports/inventory/summary"),
     inventorySummary: () => client.get<any>("/api/reports/inventory/summary"),
     fifo: () => client.get<FifoReport[]>("/api/reports/inventory/fifo"),
