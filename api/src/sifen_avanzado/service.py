@@ -136,7 +136,7 @@ async def get_iva_book(db: AsyncSession, company_id: str, tipo: str, periodo: st
         rows = await db.execute(
             text("""
                 SELECT s.fecha::date, s.numero, s.tipo_comprobante,
-                       c.ruc, COALESCE(c.razon_social, c.nombre) as razon_social,
+                       c.ruc, COALESCE(c.razon_social, c.nombre_fantasia) as razon_social,
                        COALESCE(s.base_gravada_5, 0) as base_5,
                        COALESCE(s.base_gravada_10, 0) as base_10,
                        COALESCE(s.base_exenta, 0) as exenta,
@@ -147,7 +147,7 @@ async def get_iva_book(db: AsyncSession, company_id: str, tipo: str, periodo: st
                 FROM sales s
                 LEFT JOIN customers c ON c.id = s.customer_id
                 WHERE s.company_id = :cid
-                  AND s.estado != 'anulado'
+                  AND s.estado = 'confirmado'
                   AND s.fecha::date >= :inicio
                   AND s.fecha::date <= :fin
                 ORDER BY s.fecha
@@ -168,7 +168,7 @@ async def get_iva_book(db: AsyncSession, company_id: str, tipo: str, periodo: st
         rows = await db.execute(
             text("""
                 SELECT si.fecha_emision, si.numero_factura, si.tipo_comprobante,
-                       sp.ruc, sp.nombre as razon_social,
+                       sp.ruc, COALESCE(sp.razon_social, sp.nombre_fantasia) as razon_social,
                        COALESCE(si.iva_5, 0) as iva_5_raw,
                        COALESCE(si.iva_10, 0) as iva_10_raw,
                        COALESCE(si.subtotal, si.total) as subtotal,
@@ -177,6 +177,7 @@ async def get_iva_book(db: AsyncSession, company_id: str, tipo: str, periodo: st
                 FROM supplier_invoices si
                 LEFT JOIN suppliers sp ON sp.id = si.supplier_id
                 WHERE si.company_id = :cid
+                  AND si.estado != 'cancelada'
                   AND si.fecha_emision >= :inicio
                   AND si.fecha_emision <= :fin
                 ORDER BY si.fecha_emision
@@ -184,18 +185,21 @@ async def get_iva_book(db: AsyncSession, company_id: str, tipo: str, periodo: st
             {"cid": company_id, "inicio": inicio, "fin": fin},
         )
         for r in rows:
-            iva_5_raw = float(r[6] or 0)
-            iva_10_raw = float(r[7] or 0)
-            subtotal_val = float(r[8] or 0)
+            # Acceso por nombre de columna (no posicional) — un indice
+            # posicional desalineado hacia que cada campo leyera la columna
+            # equivocada (ej. "total" leia el cdc, "cdc" quedaba fuera de rango).
+            iva_5_raw = float(r.iva_5_raw or 0)
+            iva_10_raw = float(r.iva_10_raw or 0)
+            subtotal_val = float(r.subtotal or 0)
             base_5 = round(iva_5_raw / 0.05, 2) if iva_5_raw > 0 else 0
             base_10 = round(iva_10_raw / 0.10, 2) if iva_10_raw > 0 else 0
             exenta = round(subtotal_val - base_5 - base_10, 2) if subtotal_val > 0 else 0
             entries.append({
-                "fecha": r[0], "numero_documento": r[1], "tipo_documento": r[2] or "factura",
-                "ruc": r[3] or "", "razon_social": r[4] or "",
+                "fecha": r.fecha_emision, "numero_documento": r.numero_factura, "tipo_documento": r.tipo_comprobante or "factura",
+                "ruc": r.ruc or "", "razon_social": r.razon_social or "",
                 "base_gravada_5": base_5, "base_gravada_10": base_10,
                 "exenta": exenta, "iva_5": iva_5_raw, "iva_10": iva_10_raw,
-                "total": float(r[9] or 0), "cdc": r[10],
+                "total": float(r.total or 0), "cdc": r.cdc,
             })
 
     total_base_5 = sum(e["base_gravada_5"] for e in entries)
@@ -579,19 +583,19 @@ async def get_dashboard(db: AsyncSession, company_id: str) -> dict:
     fin = date(y, m, calendar.monthrange(y, m)[1])
 
     facturas_mes = await db.execute(
-        text("SELECT COUNT(*) FROM sales WHERE company_id = :cid AND estado != 'anulado' AND fecha::date >= :inicio AND fecha::date <= :fin"),
+        text("SELECT COUNT(*) FROM sales WHERE company_id = :cid AND estado = 'confirmado' AND fecha::date >= :inicio AND fecha::date <= :fin"),
         {"cid": cid, "inicio": inicio, "fin": fin},
     )
     total_facturas = facturas_mes.scalar() or 0
 
     pend_sifen = await db.execute(
-        text("SELECT COUNT(*) FROM sales WHERE company_id = :cid AND sifen_estado IS NULL AND estado != 'anulado'"),
+        text("SELECT COUNT(*) FROM sales WHERE company_id = :cid AND sifen_estado IS NULL AND estado = 'confirmado'"),
         {"cid": cid},
     )
     pendientes = pend_sifen.scalar() or 0
 
     con_cdc = await db.execute(
-        text("SELECT COUNT(*) FROM sales WHERE company_id = :cid AND cdc IS NOT NULL AND estado != 'anulado'"),
+        text("SELECT COUNT(*) FROM sales WHERE company_id = :cid AND cdc IS NOT NULL AND estado = 'confirmado'"),
         {"cid": cid},
     )
     con_cdc_count = con_cdc.scalar() or 0
