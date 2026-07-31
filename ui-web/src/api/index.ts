@@ -940,6 +940,7 @@ export const api = {
     aging: () => client.get<any[]>("/v1/financial/aging", { company_id: COMPANY_ID } as any),
     apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard", { company_id: COMPANY_ID } as any),
     creditNotes: (params?: { supplier_id?: string }) => client.get<{ id: string; supplier_id: string; supplier_nombre: string; numero: string; numero_factura_origen: string; fecha: string; motivo: string; monto: number; moneda: string; observaciones: string }[]>("/v1/financial/supplier-credit-notes", { company_id: COMPANY_ID, ...params } as any),
+    supplierReturns: (params?: { supplier_id?: string }) => client.get<{ id: string; supplier_id: string; supplier_nombre: string; numero_factura_origen: string; numero_nota_credito: string; fecha: string; monto: number; moneda: string; observaciones: string }[]>("/v1/financial/supplier-returns", { company_id: COMPANY_ID, ...params } as any),
     banks: {
       list: () => client.get<BankAccount[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
       create: (data: any) => client.post<BankAccount>("/v1/financial/banks", { company_id: COMPANY_ID, ...data }),

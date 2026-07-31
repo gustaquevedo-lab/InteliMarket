@@ -17,6 +17,7 @@ export default function FinancialPage() {
   const [ratios, setRatios] = useState<any>(null)
   const [aging, setAging] = useState<any[]>([])
   const [creditNotes, setCreditNotes] = useState<{ id: string; supplier_nombre: string; numero: string; numero_factura_origen: string; fecha: string; motivo: string; monto: number; moneda: string }[]>([])
+  const [supplierReturns, setSupplierReturns] = useState<{ id: string; supplier_nombre: string; numero_factura_origen: string; numero_nota_credito: string; fecha: string; monto: number; moneda: string; observaciones: string }[]>([])
   const [search, setSearch] = useState("")
   const [showInvoiceForm, setShowInvoiceForm] = useState(false)
   const [showBankForm, setShowBankForm] = useState(false)
@@ -45,6 +46,7 @@ export default function FinancialPage() {
         p.push(api.financial.aging().then((d: any) => setAging(d?.por_supplier || [])))
         p.push(api.financial.apDashboard().then(d => setDashboard({ ap_dashboard: d } as any)))
         p.push(api.financial.creditNotes().then(setCreditNotes))
+        p.push(api.financial.supplierReturns().then(setSupplierReturns))
       }
       if (tab === "bancos") {
         p.push(api.financial.banks.list().then(setBanks))
@@ -314,6 +316,25 @@ export default function FinancialPage() {
                           <td className="p-2 text-xs text-gray-500">{n.fecha}</td>
                           <td className="p-2 text-xs">{n.motivo || "—"}</td>
                           <td className="p-2 text-right font-semibold text-green-600">{formatGs(n.monto)} {n.moneda !== "PYG" ? n.moneda : ""}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              {supplierReturns.length > 0 && (
+                <div className="card p-5">
+                  <h3 className="font-semibold mb-3">Devoluciones a proveedor</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-left text-xs text-gray-500"><th className="p-2">Proveedor</th><th className="p-2">N/C origen</th><th className="p-2">Fecha</th><th className="p-2">Observación</th><th className="p-2 text-right">Monto</th></tr></thead>
+                      <tbody>{supplierReturns.map((r) => (
+                        <tr key={r.id} className="border-t border-gray-100 dark:border-gray-700">
+                          <td className="p-2 font-medium">{r.supplier_nombre}</td>
+                          <td className="p-2 font-mono text-xs">{r.numero_nota_credito || r.numero_factura_origen || "—"}</td>
+                          <td className="p-2 text-xs text-gray-500">{r.fecha}</td>
+                          <td className="p-2 text-xs">{r.observaciones || "—"}</td>
+                          <td className="p-2 text-right font-semibold text-green-600">{formatGs(r.monto)} {r.moneda !== "PYG" ? r.moneda : ""}</td>
                         </tr>
                       ))}</tbody>
                     </table>

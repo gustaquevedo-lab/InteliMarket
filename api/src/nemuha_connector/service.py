@@ -84,7 +84,7 @@ from api.src.config import settings
 from api.src.nemuha_connector.models import NemuhaRecordMap, NemuhaSyncRun
 from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseOrderItem, PurchaseReceipt, PurchaseReceiptItem
 from api.src.customers.models import Customer
-from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction, SupplierCreditNote
+from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction, SupplierCreditNote, SupplierReturn
 from api.src.petty_cash.models import Expense, ExpenseCategory
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
@@ -1275,6 +1275,49 @@ async def sync_supplier_credit_notes(db: AsyncSession, company_id: str, since: d
     return count
 
 
+# ── Devoluciones a proveedor (est_devolucao_fornecedor) ────────────────────────
+#
+# 240 filas reales (activo hasta el dia de hoy — vencidos, sobrestock, premios).
+# fin_movimento_fornecedor confirma que estas devoluciones acreditan el saldo
+# del proveedor (TIPO_MOV=CREDITO via ID_DEVOLUCAO_FORNECEDOR), distinto de una
+# nota de credito recibida (fin_recepcao_nota_credito, ya sincronizada aparte).
+
+async def sync_supplier_returns(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = "SELECT * FROM est_devolucao_fornecedor WHERE 1=1"
+    params: tuple = ()
+    if since:
+        sql += " AND DT_DEVOLUCAO >= %s"
+        params = (since,)
+    rows = await _fetch(sql, params)
+
+    count = 0
+    for r in rows:
+        existing_id = await _get_mapped_target(db, company_id, "est_devolucao_fornecedor", r["ID_DEVOLUCAO_FORNECEDOR"])
+        if existing_id:
+            count += 1
+            continue
+
+        supplier_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "supplier")
+
+        devolucion = SupplierReturn(
+            company_id=company_id,
+            supplier_id=supplier_id,
+            numero_factura_origen=r["NR_FATURA_ORIGEM"] or None,
+            numero_nota_credito=r["NR_NOTA_CREDITO"] or None,
+            timbrado=r["NR_TIMBRADO"],
+            fecha=r["DT_DEVOLUCAO"],
+            monto=Decimal(str(r["VL_TOTAL"])),
+            moneda=MONEDA_MAP.get(r["ID_MOEDA"], "PYG"),
+            observaciones=r["OBSERVACAO"],
+        )
+        db.add(devolucion)
+        await db.flush()
+        await _save_map(db, company_id, "est_devolucao_fornecedor", r["ID_DEVOLUCAO_FORNECEDOR"], "supplier_returns", devolucion.id)
+        count += 1
+
+    return count
+
+
 # ── Movimientos de caja principal (fin_entrada_caixa / fin_retirada_caixa) ─────
 #
 # 96 entradas + 649 retiros reales. Distinto de las sesiones de cajero
@@ -1384,6 +1427,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("purchase_orders", sync_purchase_orders),
         ("purchase_receipts", sync_purchase_receipts),
         ("supplier_credit_notes", sync_supplier_credit_notes),
+        ("supplier_returns", sync_supplier_returns),
         ("cash_register_movements", sync_cash_register_movements),
     ):
         try:

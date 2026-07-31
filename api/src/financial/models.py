@@ -191,3 +191,21 @@ class SupplierCreditNote(Base):
     observaciones = Column(Text)
     cancelado = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupplierReturn(Base):
+    """Mercaderia devuelta a un proveedor (vencidos, sobrestock, premios/bonif.)
+    — acredita el saldo del proveedor, distinto de una nota de credito recibida."""
+    __tablename__ = "supplier_returns"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    numero_factura_origen = Column(String(50))
+    numero_nota_credito = Column(String(30))
+    timbrado = Column(String(30))
+    fecha = Column(Date, nullable=False)
+    monto = Column(Numeric(15, 0), nullable=False)
+    moneda = Column(String(3), default="PYG")
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

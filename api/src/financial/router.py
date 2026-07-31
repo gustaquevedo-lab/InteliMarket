@@ -292,3 +292,10 @@ async def get_financial_ratios(company_id: str = Query(), db: AsyncSession = Dep
 @router.get("/supplier-credit-notes")
 async def list_supplier_credit_notes(company_id: str = Query(), supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     return await service.list_supplier_credit_notes(db, company_id, supplier_id)
+
+
+# ── Supplier Returns (devoluciones a proveedor) ─────────────────────────────
+
+@router.get("/supplier-returns")
+async def list_supplier_returns(company_id: str = Query(), supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_supplier_returns(db, company_id, supplier_id)

@@ -11,7 +11,7 @@ from api.src.financial.models import (
     BankAccount, BankTransaction,
     CashFlowProjection, Budget,
     PaymentRun, PaymentRunItem,
-    SupplierCreditNote,
+    SupplierCreditNote, SupplierReturn,
 )
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoicePaymentCreate,
@@ -1048,4 +1048,29 @@ async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier
             "observaciones": note.observaciones,
         }
         for note, razon_social in result.all()
+    ]
+
+
+async def list_supplier_returns(db: AsyncSession, company_id: str, supplier_id: str | None = None, limit: int = 100) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    query = select(SupplierReturn, Supplier.razon_social).join(
+        Supplier, Supplier.id == SupplierReturn.supplier_id, isouter=True
+    ).where(SupplierReturn.company_id == cid)
+    if supplier_id:
+        query = query.where(SupplierReturn.supplier_id == uuid.UUID(supplier_id))
+    query = query.order_by(SupplierReturn.fecha.desc()).limit(limit)
+    result = await db.execute(query)
+    return [
+        {
+            "id": str(r.id),
+            "supplier_id": str(r.supplier_id),
+            "supplier_nombre": razon_social,
+            "numero_factura_origen": r.numero_factura_origen,
+            "numero_nota_credito": r.numero_nota_credito,
+            "fecha": r.fecha.isoformat(),
+            "monto": float(r.monto),
+            "moneda": r.moneda,
+            "observaciones": r.observaciones,
+        }
+        for r, razon_social in result.all()
     ]
