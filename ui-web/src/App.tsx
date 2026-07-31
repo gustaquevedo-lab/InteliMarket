@@ -140,8 +140,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function FeatureRoute({ feature, children }: { feature: string; children: React.ReactNode }) {
   const { hasFeature, loading } = useFeatures()
   if (loading) return <PageLoader />
-  const isSupermerBypass = localStorage.getItem('demo_mode') === 'supermercado' && (feature === "crm" || feature === "whatsapp");
-  if (!hasFeature(feature) && !isSupermerBypass) {
+  if (!hasFeature(feature)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-body-light dark:bg-body-dark">
         <div className="text-center p-8 animate-fade-in">

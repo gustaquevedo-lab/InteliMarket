@@ -140,7 +140,7 @@ const navGroups: NavGroup[] = [
       { icon: Factory, label: "Distribuidora", path: "/distribuidora", feature: "distribuidora" },
       { icon: MapPinned, label: "Rutas de Distrib.", path: "/logistics", feature: "logistics" },
       { icon: Truck, label: "Flota y Entregas", path: "/intelientregas", feature: "logistics" },
-      { icon: Smartphone, label: "App Repartidor", path: "/driver-app" },
+      { icon: Smartphone, label: "App Repartidor", path: "/driver-app", feature: "logistics" },
     ]
   },
   {
@@ -204,7 +204,7 @@ export default function Layout() {
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false)
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
-  const { hasFeature } = useFeatures()
+  const { hasFeature, verticalSlug } = useFeatures()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -240,9 +240,9 @@ export default function Layout() {
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
               <Logo />
-              {localStorage.getItem('demo_mode') === 'supermercado' && (
+              {verticalSlug && (
                 <span className="mt-1 text-[10px] font-bold bg-green-500 text-white px-2 py-0.5 rounded-full w-max uppercase tracking-wider">
-                  Versión: Supermercado
+                  {verticalSlug}
                 </span>
               )}
             </div>
@@ -252,54 +252,7 @@ export default function Layout() {
 
         <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
           {navGroups.map((group) => {
-            if (localStorage.getItem('demo_mode') === 'supermercado') {
-              const allowedGroups = ["Inicio", "Ventas", "Inventario", "Abastecimiento", "Finanzas & Tesorería", "Verticales (Especiales)", "Integraciones", "Inteligencia & Sistema", "CRM & Marketing"];
-              if (!allowedGroups.includes(group.title)) return null;
-            }
-
-            const visibleItems = group.items.filter((item) => {
-              const isSupermerCRM = localStorage.getItem('demo_mode') === 'supermercado' && (item.label === "Fidelidad & CRM" || item.label === "WhatsApp");
-              if (item.feature && !hasFeature(item.feature) && !isSupermerCRM) return false;
-              if (localStorage.getItem('demo_mode') === 'supermercado') {
-                if (
-                  item.label === "SueldOK" ||
-                  item.label === "Supermercado" ||
-                  item.label === "Self-Checkout" ||
-                  item.label === "Edge Hardware" ||
-                  item.label === "Básculas" ||
-                  item.label === "Catálogo" ||
-                  item.label === "Almacenes" ||
-                  item.label === "Transferencias" ||
-                  item.label === "Reabastecimiento" ||
-                  item.label === "Punto de Venta" ||
-                  item.label === "Devoluciones" ||
-                  item.label === "Facturación" ||
-                  item.label === "Arqueo de Caja" ||
-                  item.label === "Bóveda Central" ||
-                  item.label === "Cuentas por Cobrar" ||
-                  item.label === "Cuentas por Pagar" ||
-                  item.label === "Líneas de Crédito" ||
-                  item.label === "Gastos Operativos" ||
-                  item.label === "Gestión Financiera" ||
-                  item.label === "Dashboard" ||
-                  item.label === "Facturación SET" ||
-                  item.label === "Pagopar" ||
-                  item.label === "Kuapay" ||
-                  item.label === "SPI QR" ||
-                  item.label === "InteliCont" ||
-                  item.label === "Ecosistema Intelli" ||
-                  item.label === "Auditoría" ||
-                  item.label === "Gestión de Compras" ||
-                  item.label === "Contratos Prov." ||
-                  item.label === "Fidelidad & CRM" ||
-                  item.label === "WhatsApp"
-                ) {
-                  return true;
-                }
-                return false;
-              }
-              return true;
-            });
+            const visibleItems = group.items.filter((item) => !item.feature || hasFeature(item.feature))
             if (visibleItems.length === 0) return null;
 
             return (
