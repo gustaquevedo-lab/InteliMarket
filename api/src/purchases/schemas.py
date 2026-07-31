@@ -155,10 +155,21 @@ class POUpdate(BaseModel):
     updated_by_name: Optional[str] = None
 
 
+class SupplierSummary(BaseModel):
+    id: UUID
+    razon_social: str
+    ruc: Optional[str] = None
+    ci: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class POResponse(BaseModel):
     id: UUID
     company_id: UUID
     supplier_id: UUID
+    supplier: Optional[SupplierSummary] = None
     numero: str
     fecha: datetime
     fecha_entrega_estimada: Optional[date] = None

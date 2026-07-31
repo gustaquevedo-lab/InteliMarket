@@ -1,6 +1,7 @@
 """Purchases service — suppliers, orders, receipts, requisitions, forecasting, suggestions, budgets, reports"""
 
 from sqlalchemy import select, text, case
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date
 from decimal import Decimal
@@ -231,7 +232,9 @@ async def list_purchase_orders(
     limit: int = 50,
     offset: int = 0,
 ) -> list[PurchaseOrder]:
-    query = select(PurchaseOrder).where(PurchaseOrder.company_id == uuid.UUID(company_id))
+    query = select(PurchaseOrder).options(selectinload(PurchaseOrder.supplier)).where(
+        PurchaseOrder.company_id == uuid.UUID(company_id)
+    )
     if supplier_id:
         query = query.where(PurchaseOrder.supplier_id == uuid.UUID(supplier_id))
     if estado:
@@ -249,7 +252,9 @@ async def get_purchase_order(db: AsyncSession, po_id: str) -> PurchaseOrder | No
 
 
 async def get_purchase_order_with_items(db: AsyncSession, po_id: str) -> PurchaseOrder | None:
-    result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == uuid.UUID(po_id)))
+    result = await db.execute(
+        select(PurchaseOrder).options(selectinload(PurchaseOrder.supplier)).where(PurchaseOrder.id == uuid.UUID(po_id))
+    )
     order = result.scalar_one_or_none()
     if order:
         items_result = await db.execute(
