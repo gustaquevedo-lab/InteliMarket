@@ -14,9 +14,23 @@ from api.src.integrated_finance.schemas import (
     CustomerScoreResponse, EbitdaResponse,
     AutoReconcileResult, ConsolidatedDashboard,
 )
-from api.src.integrated_finance import service
+from api.src.integrated_finance import service, auto_posting
+from datetime import date
 
 router = APIRouter(prefix="/api/v1/integrated-finance", tags=["integrated-finance"])
+
+
+@router.post("/accounting/auto-post")
+async def run_auto_posting(
+    company_id: str = Query(...),
+    desde: date = Query(...),
+    hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Postea automaticamente asientos contables desde ventas/compras/pagos/
+    cobros/nomina reales para el rango dado. Idempotente: correr de nuevo
+    sobre un rango ya posteado no duplica asientos."""
+    return await auto_posting.run_auto_posting(db, company_id, desde, hasta)
 
 
 # ── WITHHOLDING CONFIG ───────────────────────────────────────────────────────
