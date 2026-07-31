@@ -353,16 +353,16 @@ export default function ReportsPage() {
           <div className="card p-6">
             <h3 className="text-base font-bold text-gray-900 dark:text-white mb-4">Gastos por categoría</h3>
             {expensesByCategory.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {expensesByCategory.slice(0, 10).map((d, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300 w-52 flex-shrink-0 truncate" title={d.categoria}>{d.categoria}</span>
-                    <div className="flex-1 h-6 bg-gray-100 dark:bg-gray-800 rounded-md overflow-hidden">
-                      <div className={`h-full ${catColors[i % catColors.length]} rounded-md transition-all flex items-center justify-end px-2`} style={{ width: `${Math.max(d.porcentaje, 4)}%` }}>
-                        <span className="text-[10px] font-bold text-white">{d.porcentaje}%</span>
-                      </div>
+                  <div key={i}>
+                    <div className="flex items-baseline justify-between gap-3 mb-1">
+                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300 leading-snug">{d.categoria}</span>
+                      <span className="text-xs font-mono text-gray-500 flex-shrink-0 whitespace-nowrap">{formatPYG(d.monto)} · {d.porcentaje}%</span>
                     </div>
-                    <span className="text-xs font-mono text-gray-500 w-28 text-right flex-shrink-0">{formatPYG(d.monto)}</span>
+                    <div className="h-2.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                      <div className={`h-full ${catColors[i % catColors.length]} rounded-full transition-all`} style={{ width: `${Math.max(d.porcentaje, 2)}%` }} />
+                    </div>
                   </div>
                 ))}
               </div>
