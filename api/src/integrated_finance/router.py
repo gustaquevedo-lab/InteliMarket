@@ -14,10 +14,111 @@ from api.src.integrated_finance.schemas import (
     CustomerScoreResponse, EbitdaResponse,
     AutoReconcileResult, ConsolidatedDashboard,
 )
-from api.src.integrated_finance import service, auto_posting
+from api.src.integrated_finance import service, auto_posting, pdf_reports
 from datetime import date
+from fastapi.responses import StreamingResponse
+from sqlalchemy import text
+import uuid
 
 router = APIRouter(prefix="/api/v1/integrated-finance", tags=["integrated-finance"])
+
+
+async def _get_company(db: AsyncSession, company_id: str) -> dict:
+    r = await db.execute(text("SELECT razon_social, ruc FROM companies WHERE id = :cid"), {"cid": company_id})
+    row = r.first()
+    return {"razon_social": row.razon_social, "ruc": row.ruc} if row else {"razon_social": "Empresa", "ruc": "N/A"}
+
+
+def _pdf_response(pdf_bytes: bytes, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/accounting/pnl/{period_id}/pdf")
+async def get_pnl_pdf(period_id: str, company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    pnl = await service.get_pnl(db, company_id, period_id)
+    company = await _get_company(db, company_id)
+    pdf_bytes = pdf_reports.generate_pnl_pdf(company, pnl)
+    return _pdf_response(pdf_bytes, f"estado_resultados_{pnl.get('periodo', period_id[:8])}.pdf")
+
+
+@router.get("/accounting/trial-balance/{period_id}/pdf")
+async def get_trial_balance_pdf(period_id: str, company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    tb = await service.get_trial_balance(db, company_id, period_id)
+    company = await _get_company(db, company_id)
+    pdf_bytes = pdf_reports.generate_trial_balance_pdf(company, tb)
+    return _pdf_response(pdf_bytes, f"balance_comprobacion_{tb.get('periodo', period_id[:8])}.pdf")
+
+
+@router.get("/statement/customer/{customer_id}/pdf")
+async def get_customer_statement_pdf(customer_id: str, company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    cust_r = await db.execute(text("SELECT razon_social, ruc FROM customers WHERE id = :id"), {"id": customer_id})
+    cust = cust_r.first()
+    if not cust:
+        raise HTTPException(404, "Cliente no encontrado")
+
+    docs_r = await db.execute(
+        text("""
+            SELECT numero_documento, fecha_emision, fecha_vencimiento, monto_original, saldo_pendiente, dias_mora
+            FROM accounts_receivable
+            WHERE company_id = :cid AND customer_id = :cust_id AND estado = 'pendiente'
+            ORDER BY fecha_vencimiento
+        """),
+        {"cid": company_id, "cust_id": customer_id},
+    )
+    documentos = [
+        {
+            "numero": r.numero_documento or "-",
+            "fecha_emision": r.fecha_emision.isoformat() if r.fecha_emision else "-",
+            "fecha_vencimiento": r.fecha_vencimiento.isoformat() if r.fecha_vencimiento else "-",
+            "monto_original": float(r.monto_original or 0),
+            "saldo_pendiente": float(r.saldo_pendiente or 0),
+            "dias_mora": r.dias_mora,
+        }
+        for r in docs_r.all()
+    ]
+    company = await _get_company(db, company_id)
+    pdf_bytes = pdf_reports.generate_account_statement_pdf(
+        company, {"nombre": cust.razon_social, "ruc": cust.ruc}, "cliente", documentos
+    )
+    return _pdf_response(pdf_bytes, f"estado_cuenta_cliente_{customer_id[:8]}.pdf")
+
+
+@router.get("/statement/supplier/{supplier_id}/pdf")
+async def get_supplier_statement_pdf(supplier_id: str, company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    sup_r = await db.execute(text("SELECT razon_social, ruc FROM suppliers WHERE id = :id"), {"id": supplier_id})
+    sup = sup_r.first()
+    if not sup:
+        raise HTTPException(404, "Proveedor no encontrado")
+
+    docs_r = await db.execute(
+        text("""
+            SELECT numero_factura, fecha_emision, fecha_vencimiento, total, saldo_pendiente
+            FROM supplier_invoices
+            WHERE company_id = :cid AND supplier_id = :sup_id AND estado = 'pendiente'
+            ORDER BY fecha_vencimiento
+        """),
+        {"cid": company_id, "sup_id": supplier_id},
+    )
+    documentos = [
+        {
+            "numero": r.numero_factura or "-",
+            "fecha_emision": r.fecha_emision.isoformat() if r.fecha_emision else "-",
+            "fecha_vencimiento": r.fecha_vencimiento.isoformat() if r.fecha_vencimiento else "-",
+            "monto_original": float(r.total or 0),
+            "saldo_pendiente": float(r.saldo_pendiente or 0),
+            "dias_mora": None,
+        }
+        for r in docs_r.all()
+    ]
+    company = await _get_company(db, company_id)
+    pdf_bytes = pdf_reports.generate_account_statement_pdf(
+        company, {"nombre": sup.razon_social, "ruc": sup.ruc}, "proveedor", documentos
+    )
+    return _pdf_response(pdf_bytes, f"estado_cuenta_proveedor_{supplier_id[:8]}.pdf")
 
 
 @router.post("/accounting/auto-post")

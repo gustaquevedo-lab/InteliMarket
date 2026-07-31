@@ -333,27 +333,36 @@ async def get_pnl(db: AsyncSession, company_id: str, period_id: str) -> dict:
     )
     entries = list(entries_r.scalars().all())
 
-    ingresos = []
-    costos = []
-    gastos = []
-    total_ingresos = 0
-    total_costos = 0
-    total_gastos = 0
-
+    # Agregado por cuenta, no por asiento individual -- con posteo diario
+    # automatico una cuenta como "Ventas de Mercaderias" tiene un asiento por
+    # dia (hasta 31 en un mes), listarlos sueltos hace un estado de
+    # resultados inutilizable en vez de una linea por cuenta con su total.
+    por_cuenta: dict[str, float] = {}
     for e in entries:
         ac = accounts.get(str(e.account_id))
-        if not ac:
+        if not ac or ac.tipo not in ("ingreso", "costo", "gasto"):
             continue
-        item = {"account_id": str(e.account_id), "codigo": ac.codigo, "nombre": ac.nombre, "monto": float(e.monto)}
+        signo = 1 if (ac.tipo == "ingreso") == (e.tipo == "haber") else -1
+        por_cuenta[str(e.account_id)] = por_cuenta.get(str(e.account_id), 0.0) + signo * float(e.monto)
+
+    ingresos, costos, gastos = [], [], []
+    total_ingresos = total_costos = total_gastos = 0.0
+    for account_id, monto in por_cuenta.items():
+        ac = accounts[account_id]
+        item = {"account_id": account_id, "codigo": ac.codigo, "nombre": ac.nombre, "monto": round(monto, 2)}
         if ac.tipo == "ingreso":
             ingresos.append(item)
-            total_ingresos += float(e.monto) if e.tipo == "haber" else -float(e.monto)
+            total_ingresos += monto
         elif ac.tipo == "costo":
             costos.append(item)
-            total_costos += float(e.monto) if e.tipo == "debe" else -float(e.monto)
+            total_costos += monto
         elif ac.tipo == "gasto":
             gastos.append(item)
-            total_gastos += float(e.monto) if e.tipo == "debe" else -float(e.monto)
+            total_gastos += monto
+
+    ingresos.sort(key=lambda i: i["codigo"])
+    costos.sort(key=lambda i: i["codigo"])
+    gastos.sort(key=lambda i: i["codigo"])
 
     resultado_bruto = total_ingresos - total_costos
     resultado_operativo = resultado_bruto - total_gastos

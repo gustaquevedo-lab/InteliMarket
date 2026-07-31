@@ -2,11 +2,17 @@ import { useState, useEffect } from "react"
 import {
   BarChart3, Coins, ReceiptText, CalendarDays, Handshake, Percent, FileSpreadsheet,
   Landmark, HandCoins, Banknote, RefreshCcw, ClipboardCheck, TrendingUp, AlertTriangle,
-  CheckCircle, XCircle, Plus, Search, Loader2, ChevronDown, DollarSign, ArrowUpDown,
+  CheckCircle, XCircle, Plus, Search, Loader2, ChevronDown, DollarSign, ArrowUpDown, Download,
 } from "lucide-react"
 import { api } from "../../api/index"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+
+const API_BASE = import.meta.env.VITE_API_URL || "/api"
+
+function downloadPdf(path: string) {
+  window.open(`${API_BASE}${path}${path.includes("?") ? "&" : "?"}company_id=${COMPANY_ID}`, "_blank")
+}
 
 export default function IntegratedFinancePage() {
   const [tab, setTab] = useState("dashboard")
@@ -366,7 +372,15 @@ function CierreContableTab() {
       {currentPeriod && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-            <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3">Balance de Comprobación</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300">Balance de Comprobación</h3>
+              {trialBalance && (
+                <button onClick={() => downloadPdf(`/v1/integrated-finance/accounting/trial-balance/${selectedPeriod}/pdf`)}
+                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium">
+                  <Download className="w-3.5 h-3.5" />PDF
+                </button>
+              )}
+            </div>
             {trialBalance ? (
               <div className="overflow-x-auto max-h-72 overflow-y-auto">
                 <table className="w-full text-xs">
@@ -393,7 +407,15 @@ function CierreContableTab() {
           </div>
 
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-            <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3">Estado de Resultados (PyG)</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300">Estado de Resultados (PyG)</h3>
+              {pnl && (
+                <button onClick={() => downloadPdf(`/v1/integrated-finance/accounting/pnl/${selectedPeriod}/pdf`)}
+                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium">
+                  <Download className="w-3.5 h-3.5" />PDF
+                </button>
+              )}
+            </div>
             {pnl ? (
               <div className="space-y-3 text-sm">
                 <div><p className="text-xs text-gray-400 mb-1 font-semibold uppercase">Ingresos</p>
