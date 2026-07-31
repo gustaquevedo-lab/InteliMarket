@@ -148,7 +148,11 @@ async def _build_kpi_snapshot(
         # sin inventar numeros (antes caia a un fallback sintetico via MD5).
         pass
 
-    ticket_promedio = ventas_total / Decimal(ventas_count) if ventas_count else Decimal("0")
+    # Redondeado a guarani entero: el guarani no tiene centavos, y ademas una
+    # division sin quantize serializa como string con ~20 decimales
+    # ("102619.121951219512...") que corrompia el parseo de formatPYG en el
+    # frontend (asume separador de miles con punto) mostrando numeros absurdos.
+    ticket_promedio = (ventas_total / Decimal(ventas_count)).quantize(Decimal("1")) if ventas_count else Decimal("0")
 
     # Sales/m²
     m2 = Decimal("0")
@@ -156,7 +160,7 @@ async def _build_kpi_snapshot(
         cfg = await get_store_config(db, company_id, branch_id)
         if cfg and cfg.metros_cuadrados:
             m2 = cfg.metros_cuadrados
-    ventas_m2 = ventas_total / m2 if m2 else Decimal("0")
+    ventas_m2 = (ventas_total / m2).quantize(Decimal("1")) if m2 else Decimal("0")
 
     # Delta vs previous period (incluye clientes, simetrico a delta_ventas/ticket)
     prev_start = start - (end - start)
@@ -246,7 +250,7 @@ async def _build_kpi_snapshot(
         descuento_total=descuento_total,
         delta_ventas_pct=delta_ventas_pct.quantize(Decimal("0.01")),
         delta_ticket_pct=delta_ticket_pct.quantize(Decimal("0.01")),
-        delta_clientes_pct=delta_clientes_pct,
+        delta_clientes_pct=delta_clientes_pct.quantize(Decimal("0.01")),
         hora_pico=hora_pico,
         hora_pico_ventas=hora_pico_ventas,
         conversion_pct=conversion_pct,
