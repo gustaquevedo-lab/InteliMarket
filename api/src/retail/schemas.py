@@ -67,7 +67,7 @@ class KpiSnapshotResponse(BaseModel):
     delta_clientes_pct: Decimal
     hora_pico: Optional[int]
     hora_pico_ventas: Decimal
-    conversion_pct: Decimal
+    conversion_pct: Optional[Decimal] = None
     payload: Dict[str, Any] = Field(default_factory=dict)
 
     class Config:
