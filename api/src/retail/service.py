@@ -5,7 +5,6 @@ from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from uuid import UUID, uuid4
-import hashlib
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, desc, asc, text
@@ -87,7 +86,7 @@ async def upsert_store_config(db: AsyncSession, company_id: UUID, data: schemas.
 async def _build_kpi_snapshot(
     db: AsyncSession, company_id: UUID, branch_id: Optional[UUID], fecha: date, periodo: str
 ) -> schemas.KpiSnapshotResponse:
-    """Build KPI snapshot aggregating real sales data. Falls back to synthetic when no data."""
+    """Build KPI snapshot aggregating real sales data."""
 
     # Date range
     if periodo == "dia":
@@ -123,7 +122,7 @@ async def _build_kpi_snapshot(
                 Sale.company_id == company_id,
                 Sale.fecha >= start,
                 Sale.fecha < end,
-                Sale.estado.in_(["confirmada", "pagada", "cerrada"]),
+                Sale.estado == "confirmado",
             )
         )
         if branch_id:
@@ -145,31 +144,9 @@ async def _build_kpi_snapshot(
         ri = await db.execute(qi)
         productos_vendidos = int(ri.scalar() or 0)
     except Exception:
-        # Sales module not available, use synthetic
+        # Modulo de ventas no disponible — se devuelve el snapshot en cero,
+        # sin inventar numeros (antes caia a un fallback sintetico via MD5).
         pass
-
-    # Synthetic fallback if no real data (demo mode)
-    if ventas_count == 0 and periodo == "dia":
-        seed = int(hashlib.md5(f"{company_id}{fecha}".encode()).hexdigest()[:8], 16)
-        ventas_count = (seed % 30) + 8
-        ventas_total = Decimal(str(((seed % 200) + 50) * 100000))
-        clientes_unicos = (seed % 25) + 6
-        productos_vendidos = (seed % 60) + 15
-        descuento_total = ventas_total * Decimal("0.05")
-    elif ventas_count == 0 and periodo == "semana":
-        seed = int(hashlib.md5(f"{company_id}sem{fecha}".encode()).hexdigest()[:8], 16)
-        ventas_count = (seed % 200) + 80
-        ventas_total = Decimal(str(((seed % 2000) + 500) * 100000))
-        clientes_unicos = (seed % 150) + 50
-        productos_vendidos = (seed % 400) + 100
-        descuento_total = ventas_total * Decimal("0.05")
-    elif ventas_count == 0 and periodo == "mes":
-        seed = int(hashlib.md5(f"{company_id}mes{fecha}".encode()).hexdigest()[:8], 16)
-        ventas_count = (seed % 800) + 300
-        ventas_total = Decimal(str(((seed % 8000) + 2000) * 100000))
-        clientes_unicos = (seed % 600) + 200
-        productos_vendidos = (seed % 1800) + 400
-        descuento_total = ventas_total * Decimal("0.05")
 
     ticket_promedio = ventas_total / Decimal(ventas_count) if ventas_count else Decimal("0")
 
@@ -181,37 +158,80 @@ async def _build_kpi_snapshot(
             m2 = cfg.metros_cuadrados
     ventas_m2 = ventas_total / m2 if m2 else Decimal("0")
 
-    # Delta vs previous period
+    # Delta vs previous period (incluye clientes, simetrico a delta_ventas/ticket)
     prev_start = start - (end - start)
     prev_end = start
+    delta_ventas_pct = Decimal("0")
+    delta_ticket_pct = Decimal("0")
+    delta_clientes_pct = Decimal("0")
     try:
         from api.src.sales.models import Sale
-        qp = select(func.coalesce(func.sum(Sale.total), 0), func.count(Sale.id)).where(
+        qp = select(
+            func.coalesce(func.sum(Sale.total), 0),
+            func.count(Sale.id),
+            func.count(func.distinct(Sale.customer_id)),
+        ).where(
             and_(Sale.company_id == company_id, Sale.fecha >= prev_start, Sale.fecha < prev_end,
-                 Sale.estado.in_(["confirmada", "pagada", "cerrada"]))
+                 Sale.estado == "confirmado")
         )
         if branch_id:
             qp = qp.where(Sale.branch_id == branch_id)
         rp = await db.execute(qp)
-        prev_ventas, prev_count = rp.one()
+        prev_ventas, prev_count, prev_clientes = rp.one()
         prev_ventas = Decimal(str(prev_ventas or 0))
         prev_count = prev_count or 0
+        prev_clientes = prev_clientes or 0
         prev_ticket = prev_ventas / Decimal(prev_count) if prev_count else Decimal("0")
         delta_ventas_pct = ((ventas_total - prev_ventas) / prev_ventas * 100) if prev_ventas else Decimal("0")
         delta_ticket_pct = ((ticket_promedio - prev_ticket) / prev_ticket * 100) if prev_ticket else Decimal("0")
+        delta_clientes_pct = ((Decimal(clientes_unicos) - prev_clientes) / prev_clientes * 100) if prev_clientes else Decimal("0")
     except Exception:
-        delta_ventas_pct = Decimal("12.50")
-        delta_ticket_pct = Decimal("3.20")
+        pass
 
-    # Hora pico
-    seed = int(hashlib.md5(f"{company_id}hora{fecha}".encode()).hexdigest()[:8], 16)
-    hora_pico = (seed % 4) + 11  # 11-14
-    hora_pico_ventas = ventas_total * Decimal("0.18") if ventas_total else Decimal("0")
-    margen_bruto = ventas_total * Decimal("0.32")  # ~32% margin assumption
-    conversion_pct = Decimal("65.5")  # demo
+    # Hora pico real: la hora con mas ventas dentro del periodo
+    hora_pico = None
+    hora_pico_ventas = Decimal("0")
+    try:
+        from api.src.sales.models import Sale
+        qh = select(
+            func.extract("hour", Sale.fecha).label("hora"),
+            func.coalesce(func.sum(Sale.total), 0).label("ventas"),
+        ).where(
+            and_(Sale.company_id == company_id, Sale.fecha >= start, Sale.fecha < end, Sale.estado == "confirmado")
+        )
+        if branch_id:
+            qh = qh.where(Sale.branch_id == branch_id)
+        qh = qh.group_by(func.extract("hour", Sale.fecha)).order_by(desc("ventas")).limit(1)
+        rh = await db.execute(qh)
+        top_hora = rh.first()
+        if top_hora:
+            hora_pico = int(top_hora.hora)
+            hora_pico_ventas = Decimal(str(top_hora.ventas))
+    except Exception:
+        pass
 
-    # Delta clientes
-    delta_clientes_pct = Decimal("5.20")
+    # Margen bruto real: ingreso de items menos su costo unitario real (no un % asumido)
+    margen_bruto = Decimal("0")
+    try:
+        from api.src.sales.models import Sale, SaleItem
+        qm = select(
+            func.coalesce(func.sum(SaleItem.total), 0),
+            func.coalesce(func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
+        ).select_from(SaleItem).join(Sale, Sale.id == SaleItem.sale_id).where(
+            and_(Sale.company_id == company_id, Sale.fecha >= start, Sale.fecha < end, Sale.estado == "confirmado")
+        )
+        if branch_id:
+            qm = qm.where(Sale.branch_id == branch_id)
+        rm = await db.execute(qm)
+        ingreso_items, costo_items = rm.one()
+        margen_bruto = Decimal(str(ingreso_items or 0)) - Decimal(str(costo_items or 0))
+    except Exception:
+        pass
+
+    # Conversion (visitas -> ventas) requiere conteo de trafico real (sensor/camara
+    # en la entrada) que este cliente no tiene integrado -- no hay forma honesta
+    # de calcularlo, se deja sin dato en vez de inventar un numero.
+    conversion_pct = None
 
     return schemas.KpiSnapshotResponse(
         fecha=fecha,
@@ -242,25 +262,54 @@ async def build_dashboard(
     semana = await _build_kpi_snapshot(db, company_id, branch_id, today, "semana")
     mes = await _build_kpi_snapshot(db, company_id, branch_id, today, "mes")
 
-    # Heatmap 7 days x 24 hours
+    # Heatmap 7 dias x 24 horas — antes era enteramente sintetico (seed MD5),
+    # ahora agrega Sale real por dia+hora de la semana en curso.
     heatmap: List[schemas.HourHeatmapResponse] = []
     ventas_por_dia_semana = []
     dias_nombre = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    semana_inicio = today - timedelta(days=today.weekday())
+    semana_fin = semana_inicio + timedelta(days=7)
+
+    real_por_dia_hora: dict = {}
+    try:
+        from api.src.sales.models import Sale
+        qh = select(
+            func.date(Sale.fecha).label("dia"),
+            func.extract("hour", Sale.fecha).label("hora"),
+            func.coalesce(func.sum(Sale.total), 0).label("ventas"),
+            func.count(Sale.id).label("count"),
+            func.count(func.distinct(Sale.customer_id)).label("clientes"),
+        ).where(
+            and_(
+                Sale.company_id == company_id,
+                Sale.fecha >= semana_inicio,
+                Sale.fecha < semana_fin,
+                Sale.estado == "confirmado",
+            )
+        )
+        if branch_id:
+            qh = qh.where(Sale.branch_id == branch_id)
+        qh = qh.group_by(func.date(Sale.fecha), func.extract("hour", Sale.fecha))
+        rh = await db.execute(qh)
+        for row in rh.all():
+            real_por_dia_hora[(row.dia, int(row.hora))] = row
+    except Exception:
+        pass
+
     for d in range(7):
-        fecha_d = today - timedelta(days=today.weekday()) + timedelta(days=d)
+        fecha_d = semana_inicio + timedelta(days=d)
         total_dia = Decimal("0")
         count_dia = 0
         for h in range(24):
-            seed = int(hashlib.md5(f"{company_id}hm{fecha_d}{h}".encode()).hexdigest()[:8], 16)
-            ventas_h = Decimal(str(((seed % 50) + 5) * 10000)) if 8 <= h <= 21 else Decimal("0")
-            count_h = (seed % 4) + 1 if ventas_h else 0
-            clientes_h = (seed % 4) if ventas_h else 0
-            duracion = (seed % 12) + 5 if ventas_h else 0
-            # Personal sugerido según capacidad
-            personal = max(1, count_h // 4) if ventas_h else 0
+            row = real_por_dia_hora.get((fecha_d, h))
+            ventas_h = Decimal(str(row.ventas)) if row else Decimal("0")
+            count_h = row.count if row else 0
+            clientes_h = row.clientes if row else 0
+            # Personal sugerido segun capacidad real (1 cajero cada 4 ventas/hora)
+            personal = max(1, count_h // 4) if count_h else 0
             heatmap.append(schemas.HourHeatmapResponse(
                 fecha=fecha_d, hora=h, ventas_total=ventas_h, ventas_count=count_h,
-                clientes_count=clientes_h, duracion_promedio_min=duracion, personal_sugerido=personal
+                clientes_count=clientes_h, duracion_promedio_min=0, personal_sugerido=personal
             ))
             total_dia += ventas_h
             count_dia += count_h
@@ -275,14 +324,14 @@ async def build_dashboard(
         from api.src.products.models import Product
         q = (
             select(
-                Product.id, Product.nombre, Product.codigo, Product.codigo_barra,
+                Product.id, Product.nombre, Product.sku, Product.codigo_barra,
                 func.sum(SaleItem.cantidad).label("qty"),
-                func.sum(SaleItem.subtotal).label("total"),
+                func.sum(SaleItem.total).label("total"),
             )
             .join(SaleItem, SaleItem.product_id == Product.id)
             .join(Sale, Sale.id == SaleItem.sale_id)
             .where(and_(Sale.company_id == company_id, Sale.fecha >= today - timedelta(days=30)))
-            .group_by(Product.id, Product.nombre, Product.codigo, Product.codigo_barra)
+            .group_by(Product.id, Product.nombre, Product.sku, Product.codigo_barra)
             .order_by(desc("total"))
             .limit(20)
         )
@@ -291,17 +340,24 @@ async def build_dashboard(
         r = await db.execute(q)
         for row in r.all():
             top_productos.append({
-                "id": str(row.id), "nombre": row.nombre, "codigo": row.codigo,
+                "id": str(row.id), "nombre": row.nombre, "codigo": row.sku,
                 "codigo_barra": row.codigo_barra, "cantidad": int(row.qty or 0),
                 "total": float(row.total or 0),
             })
     except Exception:
-        # Synthetic top
-        for i in range(15):
-            top_productos.append({
-                "id": str(uuid4()), "nombre": f"Producto Top {i+1}", "codigo": f"P{1000+i}",
-                "codigo_barra": f"7891234{i:05d}", "cantidad": 80 - i*3, "total": float((80-i*3) * 45000)
-            })
+        pass
+
+    # Stock real vive en inventory.Stock (por deposito), no en Product — antes
+    # se leia un Product.stock_actual que no existe en el modelo, por lo que
+    # esta seccion caia siempre al catch generico y mostraba datos inventados.
+    stock_por_producto = {}
+    try:
+        from api.src.inventory.models import Stock
+        qs = select(Stock.product_id, func.coalesce(func.sum(Stock.cantidad), 0).label("total")).group_by(Stock.product_id)
+        rs = await db.execute(qs)
+        stock_por_producto = {row.product_id: row.total for row in rs.all()}
+    except Exception:
+        pass
 
     # Productos sin venta (rotación lenta)
     sin_venta = []
@@ -309,7 +365,7 @@ async def build_dashboard(
         from api.src.sales.models import SaleItem, Sale
         from api.src.products.models import Product
         q = (
-            select(Product.id, Product.nombre, Product.codigo, Product.stock_actual, Product.precio_venta)
+            select(Product.id, Product.nombre, Product.sku, Product.precio_venta)
             .outerjoin(SaleItem, SaleItem.product_id == Product.id)
             .outerjoin(Sale, and_(Sale.id == SaleItem.sale_id, Sale.fecha >= today - timedelta(days=30)))
             .where(and_(Product.company_id == company_id, Product.activo == True, SaleItem.id.is_(None)))
@@ -318,29 +374,29 @@ async def build_dashboard(
         r = await db.execute(q)
         for row in r.all():
             sin_venta.append({
-                "id": str(row.id), "nombre": row.nombre, "codigo": row.codigo,
-                "stock": float(row.stock_actual or 0), "precio": float(row.precio_venta or 0),
+                "id": str(row.id), "nombre": row.nombre, "codigo": row.sku,
+                "stock": float(stock_por_producto.get(row.id, 0)), "precio": float(row.precio_venta or 0),
             })
     except Exception:
-        for i in range(5):
-            sin_venta.append({
-                "id": str(uuid4()), "nombre": f"Sin Venta {i+1}", "codigo": f"SV{i}",
-                "stock": 12.0, "precio": 25000.0
-            })
+        pass
 
     # Alertas stock
     alertas = []
     try:
         from api.src.products.models import Product
-        q = select(Product.id, Product.nombre, Product.codigo, Product.stock_actual, Product.stock_minimo).where(
-            and_(Product.company_id == company_id, Product.activo == True, Product.stock_actual <= Product.stock_minimo)
-        ).limit(10)
+        q = select(Product.id, Product.nombre, Product.sku, Product.stock_minimo).where(
+            and_(Product.company_id == company_id, Product.activo == True)
+        )
         r = await db.execute(q)
         for row in r.all():
-            alertas.append({
-                "id": str(row.id), "nombre": row.nombre, "codigo": row.codigo,
-                "stock_actual": float(row.stock_actual or 0), "stock_minimo": float(row.stock_minimo or 0)
-            })
+            stock_real = stock_por_producto.get(row.id, 0)
+            if stock_real <= (row.stock_minimo or 0):
+                alertas.append({
+                    "id": str(row.id), "nombre": row.nombre, "codigo": row.sku,
+                    "stock_actual": float(stock_real), "stock_minimo": float(row.stock_minimo or 0)
+                })
+                if len(alertas) >= 10:
+                    break
     except Exception:
         pass
 
@@ -377,17 +433,19 @@ async def build_dashboard(
         r = await db.execute(q)
         cupones_count = int(r.scalar() or 0)
     except Exception:
-        cupones_count = 4
+        pass
 
-    # Comparativa
+    # Comparativa — mejor dia/hora de la semana calculados sobre el heatmap real recien armado
+    mejor_dia = max(ventas_por_dia_semana, key=lambda d: d["ventas"], default=None) if any(d["ventas"] for d in ventas_por_dia_semana) else None
+    mejor_hora_h = max(heatmap, key=lambda h: h.ventas_total, default=None) if heatmap and any(h.ventas_total for h in heatmap) else None
     comparativa = {
         "vs_ayer": {
             "ventas_pct": float(hoy.delta_ventas_pct),
             "ticket_pct": float(hoy.delta_ticket_pct),
             "clientes_pct": float(hoy.delta_clientes_pct),
         },
-        "mejor_dia_semana": "Sábado",
-        "mejor_hora": f"{hoy.hora_pico}:00",
+        "mejor_dia_semana": mejor_dia["dia"] if mejor_dia else None,
+        "mejor_hora": f"{mejor_hora_h.hora}:00" if mejor_hora_h else None,
         "producto_estrella": top_productos[0]["nombre"] if top_productos else "N/A",
     }
 
@@ -831,27 +889,46 @@ async def quick_customer_lookup(
     except Exception:
         pass
 
-    # Synthetic fallback
     if not customer_id:
-        # Generate synthetic from identifier hash
-        seed = int(hashlib.md5(ident.encode()).hexdigest()[:8], 16)
-        nombres = ["Juan Pérez", "María González", "Carlos Rodríguez", "Ana Martínez", "Luis Fernández",
-                   "Sofia López", "Pedro Díaz", "Laura Romero", "Diego Silva", "Carmen Torres"]
-        customer_nombre = nombres[seed % len(nombres)]
-        customer_id = uuid4()
-        telefono = f"+5959{seed % 1000000:06d}"
+        # Antes se inventaba un cliente con nombre al azar (ej. "Juan Pérez")
+        # cada vez que no habia match — eso podia terminar asociado a una
+        # venta real. Ahora se informa honestamente que no se encontro.
+        return schemas.QuickCustomerResult(
+            encontrado=False,
+            customer_id=None,
+            nombre=None,
+            telefono=None,
+            puntos=0,
+            segmento=None,
+            proxima_recompensa=None,
+            descuento_aplicable=Decimal("0"),
+            sugerencias=["Cliente no encontrado — registrar como nuevo si corresponde"],
+            mensaje="Cliente no encontrado",
+        )
 
-    # Compute points, segment, suggested actions
-    puntos = (hash(ident) % 3000) + 100
-    if puntos > 2000:
+    # Puntos reales: 1 punto por cada Gs 10.000 comprados historicamente (no
+    # una gamificacion inventada por hash del identificador).
+    puntos = 0
+    try:
+        from api.src.sales.models import Sale
+        qt = select(func.coalesce(func.sum(Sale.total), 0)).where(
+            and_(Sale.company_id == company_id, Sale.customer_id == customer_id, Sale.estado == "confirmado")
+        )
+        rt = await db.execute(qt)
+        total_historico = Decimal(str(rt.scalar() or 0))
+        puntos = int(total_historico / Decimal("10000"))
+    except Exception:
+        pass
+
+    if puntos > 20000:
         segmento = "VIP"
         recompensa = "🎁 Regalo en próxima compra"
-    elif puntos > 1200:
+    elif puntos > 8000:
         segmento = "Frecuente"
         recompensa = "💎 15% descuento en próxima compra"
-    elif puntos > 500:
+    elif puntos > 1000:
         segmento = "Regular"
-        recompensa = "⭐ Acumula 100 puntos más para descuento"
+        recompensa = "⭐ Acumula más puntos para tu próximo descuento"
     else:
         segmento = "Nuevo"
         recompensa = "🎉 Bienvenido, 5% descuento en tu primera compra"
@@ -888,7 +965,7 @@ async def quick_customer_lookup(
     await db.commit()
 
     return schemas.QuickCustomerResult(
-        encontrado=customer_id is not None,
+        encontrado=True,
         customer_id=customer_id,
         nombre=customer_nombre,
         telefono=telefono,
