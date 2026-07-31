@@ -61,11 +61,22 @@ class SalesOrderUpdate(BaseModel):
     direccion_entrega: Optional[str] = None
 
 
+class CustomerSummary(BaseModel):
+    id: UUID
+    razon_social: str
+    ruc: Optional[str] = None
+    ci: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class SalesOrderResponse(BaseModel):
     id: UUID
     company_id: UUID
     branch_id: Optional[UUID] = None
     customer_id: Optional[UUID] = None
+    customer: Optional[CustomerSummary] = None
     numero: str
     fecha: datetime
     fecha_entrega_solicitada: Optional[date] = None
