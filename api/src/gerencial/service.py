@@ -281,7 +281,7 @@ async def get_depto_pyl(
             })
 
     if not result:
-        r = await db.execute(
+        fallback_q = (
             select(
                 sa_func.coalesce(sa_func.sum(SaleItem.total), 0),
                 sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
@@ -289,6 +289,8 @@ async def get_depto_pyl(
             .join(Sale, SaleItem.sale_id == Sale.id)
             .where(Sale.company_id == company_id, Sale.estado != "anulado")
         )
+        fallback_q = _apply_date_range(fallback_q, Sale.fecha, desde, hasta)
+        r = await db.execute(fallback_q)
         row = r.one()
         ventas = float(row[0] or 0)
         costo = float(row[1] or 0)
