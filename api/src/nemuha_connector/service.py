@@ -89,6 +89,8 @@ from api.src.petty_cash.models import Expense, ExpenseCategory
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
 from api.src.sales.models import Sale, SaleItem, SalePayment
+from api.src.returns.models import Return, ReturnItem
+from api.src.currency.models import ExchangeRate
 from api.src.inventory.models import Warehouse, Stock
 from api.src.credit_accounts.models import CreditAccount
 from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement
@@ -905,6 +907,142 @@ async def sync_sale_payments(db: AsyncSession, company_id: str, since: date | No
     return count
 
 
+# ── Devoluciones de cliente (ven_devolucao) ─────────────────────────────────────
+#
+# 302 devoluciones reales (₲55.5M), activo hasta ayer — el modulo Return/ReturnItem
+# ya existia en InteliMarket (con su propio CRUD de aprobacion) pero nunca se
+# alimentaba con datos reales del legado. Se sincronizan ya aprobadas (estado
+# historico), ya que el legado no modela un flujo de aprobacion propio.
+
+async def sync_customer_returns(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = """
+        SELECT d.ID_DEVOLUCAO, d.CD_DEVOLUCAO, d.OBSERVACAO, d.DT_DEVOLUCAO, d.ID_VENDA, v.ID_PESSOA
+        FROM ven_devolucao d
+        JOIN ven_venda v ON v.ID_VENDA = d.ID_VENDA
+        WHERE (d.bo_cancelado = 0 OR d.bo_cancelado IS NULL)
+    """
+    params: tuple = ()
+    if since:
+        sql += " AND d.DT_DEVOLUCAO >= %s"
+        params = (since,)
+    devoluciones = await _fetch(sql, params)
+
+    count = 0
+    for d in devoluciones:
+        existing_id = await _get_mapped_target(db, company_id, "ven_devolucao", d["ID_DEVOLUCAO"])
+        if existing_id:
+            count += 1
+            continue
+
+        sale_id = await _get_mapped_target(db, company_id, "ven_venda", d["ID_VENDA"])
+        customer_id = await _resolve_pessoa(db, company_id, d["ID_PESSOA"], "customer")
+
+        items_rows = await _fetch(
+            "SELECT * FROM ven_item_devolucao WHERE ID_DEVOLUCAO = %s",
+            (d["ID_DEVOLUCAO"],),
+        )
+        if not items_rows:
+            continue  # devolucion sin items — no hay nada que registrar
+
+        subtotal = Decimal("0")
+        iva_10 = iva_5 = Decimal("0")
+        return_items = []
+        for it in items_rows:
+            tasa = Decimal(str(it["IVA"])) if it["IVA"] is not None else Decimal("10")
+            precio = Decimal(str(it["VL_PRECO_VENDA"]))
+            cantidad = Decimal(str(it["QUANTIDADE"]))
+            total_item = precio * cantidad
+            iva_monto = _iva_monto(total_item, tasa)
+            if tasa == 10:
+                iva_10 += iva_monto
+            elif tasa == 5:
+                iva_5 += iva_monto
+            subtotal += total_item - iva_monto
+
+            product_id = await _resolve_producto(db, company_id, it["ID_PRODUTO"], it["CODIGO_BARRA"], tasa)
+            return_items.append(ReturnItem(
+                product_id=product_id,
+                descripcion=None,
+                cantidad=cantidad,
+                precio_unitario=precio,
+                iva_tasa=tasa,
+                iva_monto=iva_monto,
+                total=total_item,
+            ))
+
+        total = subtotal + iva_10 + iva_5
+        devolucion = Return(
+            company_id=company_id,
+            sale_id=sale_id,
+            customer_id=customer_id,
+            numero=str(d["CD_DEVOLUCAO"]),
+            fecha=d["DT_DEVOLUCAO"],
+            tipo="devolucion",
+            motivo="cliente",
+            motivo_detalle=d["OBSERVACAO"],
+            estado="aprobada",
+            subtotal=subtotal,
+            iva_10=iva_10,
+            iva_5=iva_5,
+            total=total,
+        )
+        devolucion.items = return_items
+        db.add(devolucion)
+        await db.flush()
+        await _save_map(db, company_id, "ven_devolucao", d["ID_DEVOLUCAO"], "returns", devolucion.id)
+        count += 1
+
+    return count
+
+
+# ── Cotizaciones de cambio (bs_cotacao) ─────────────────────────────────────────
+#
+# 68 filas — tipo de cambio real que el cliente carga a mano varias veces por
+# dia (TP_COTACAO='FAC', tasa de facturacion). VALOR_GUARANI es una base fija
+# (1000) y VALOR_DOLAR/VALOR_REAL cuanto de esa moneda equivale a esa base —
+# se invierte a guaranies por unidad (convencion estandar PY). InteliMarket ya
+# tenia el modulo de moneda (ExchangeRate) armado pero vacio para este cliente.
+
+async def sync_exchange_rates(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = "SELECT * FROM bs_cotacao WHERE 1=1"
+    params: tuple = ()
+    if since:
+        sql += " AND DT_COTACAO >= %s"
+        params = (since,)
+    rows = await _fetch(sql, params)
+
+    count = 0
+    for r in rows:
+        existing_id = await _get_mapped_target(db, company_id, "bs_cotacao", r["ID_COTACAO"])
+        if existing_id:
+            count += 1
+            continue
+
+        base = Decimal(str(r["VALOR_GUARANI"]))
+        fecha = r["DT_COTACAO"].date() if hasattr(r["DT_COTACAO"], "date") else r["DT_COTACAO"]
+
+        for moneda, valor in (("USD", r["VALOR_DOLAR"]), ("BRL", r["VALOR_REAL"])):
+            valor_dec = Decimal(str(valor))
+            if valor_dec == 0:
+                continue
+            tasa = (base / valor_dec).quantize(Decimal("0.01"))
+            rate = ExchangeRate(
+                company_id=company_id,
+                moneda=moneda,
+                tasa_compra=tasa,
+                tasa_venta=tasa,
+                fuente="nemuha",
+                fecha=fecha,
+            )
+            db.add(rate)
+
+        await db.flush()
+        await _save_map(db, company_id, "bs_cotacao", r["ID_COTACAO"], "exchange_rates", uuid.uuid4())
+        count += 1
+
+    return count
+
+
 # ── Stock (view_estoque_catalogo) ───────────────────────────────────────────────
 #
 # view_estoque_catalogo es una vista del legacy que ya trae la cantidad ACTUAL
@@ -1523,6 +1661,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("bank_transactions", sync_bank_transactions),
         ("bank_balances", sync_bank_balances),
         ("supplier_invoice_payments", sync_supplier_invoice_payments),
+        ("exchange_rates", sync_exchange_rates),
         ("expense_categories", sync_expense_categories),
         ("petty_cash_expenses", sync_petty_cash_expenses),
         ("cash_register_arqueo", sync_cash_register_arqueo),
@@ -1530,6 +1669,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("cash_sessions", sync_cash_sessions),
         ("sales", sync_sales),
         ("sale_payments", sync_sale_payments),
+        ("customer_returns", sync_customer_returns),
         ("stock", sync_stock),
         ("credit_accounts", sync_credit_accounts),
         ("supplier_balances", sync_supplier_balances),
