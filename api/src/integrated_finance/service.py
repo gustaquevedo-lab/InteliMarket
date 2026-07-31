@@ -493,26 +493,26 @@ async def recalculate_score(db: AsyncSession, company_id: str, customer_id: str)
     cid = company_id
     cuid = customer_id
 
-    sales_r = await db.execute(
-        select(func.coalesce(func.sum(Sale.total), 0)).where(
-            Sale.company_id == uuid.UUID(cid),
-            Sale.customer_id == uuid.UUID(cuid),
-            Sale.estado != 'anulado',
-        )
+    # AR real: solo 'pagado'/'pendiente' existen como estado (no 'vencido' —
+    # eso se determina via dias_mora > 0 sobre un saldo pendiente).
+    ar_r = await db.execute(
+        text("SELECT COALESCE(SUM(saldo_pendiente), 0) FROM accounts_receivable WHERE company_id = :cid AND customer_id = :cuid AND estado = 'pendiente'"),
+        {"cid": cid, "cuid": cuid},
     )
     saldo_pendiente = float(ar_r.scalar() or 0)
 
     ar_count = await db.execute(
-        text("SELECT COUNT(*) FROM accounts_receivable WHERE company_id = :cid AND customer_id = :cuid AND estado = 'vencido'"),
+        text("SELECT COUNT(*) FROM accounts_receivable WHERE company_id = :cid AND customer_id = :cuid AND estado = 'pendiente' AND dias_mora > 0"),
         {"cid": cid, "cuid": cuid},
     )
     docs_vencidos = ar_count.scalar() or 0
 
+    # Sale.estado real: solo 'confirmado'/'cancelado' existen (no 'anulado').
     sales_r = await db.execute(
         select(func.coalesce(func.sum(Sale.total), 0)).where(
             Sale.company_id == uuid.UUID(cid),
             Sale.customer_id == uuid.UUID(cuid),
-            Sale.estado != 'anulado',
+            Sale.estado == 'confirmado',
         )
     )
     total_compras = float(sales_r.scalar() or 0)
@@ -541,9 +541,9 @@ async def recalculate_score(db: AsyncSession, company_id: str, customer_id: str)
     antiguity = 0
     first_sale = await db.execute(
         select(Sale.fecha).where(
-            Sale.company_id == cid,
-            Sale.customer_id == cuid,
-            Sale.estado != 'anulado',
+            Sale.company_id == uuid.UUID(cid),
+            Sale.customer_id == uuid.UUID(cuid),
+            Sale.estado == 'confirmado',
         ).order_by(Sale.fecha.asc()).limit(1)
     )
     f = first_sale.scalar_one_or_none()
