@@ -1,6 +1,7 @@
 """Financial service — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, text
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
@@ -508,10 +509,12 @@ async def generate_projection(db: AsyncSession, company_id: str, dias: int = 90)
     )
     saldo_bancario = Decimal(str(accounts_result.scalar() or "0"))
 
+    # SupplierInvoice.estado real: solo 'pendiente'/'cancelada'/'pagada'
+    # existen ('aprobada'/'parcial' nunca fueron valores reales).
     ap_result = await db.execute(
         select(SupplierInvoice).where(
             SupplierInvoice.company_id == cid,
-            SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
+            SupplierInvoice.estado == "pendiente",
         )
     )
     ap_invoices = list(ap_result.scalars().all())
@@ -522,18 +525,31 @@ async def generate_projection(db: AsyncSession, company_id: str, dias: int = 90)
             ap_due[fv] = Decimal("0")
         ap_due[fv] += inv.saldo_pendiente or Decimal("0")
 
-    ar_invoices_raw = await db.execute(
-        select(SupplierInvoice).where(
-            SupplierInvoice.company_id == cid,
-            SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
-        )
+    # Ingresos: antes esta funcion consultaba SupplierInvoice (lo que
+    # debemos) para proyectar ingresos (lo que nos deben) -- copiado y
+    # pegado del bloque de arriba -- y el resultado ni siquiera se usaba,
+    # asi que ingresos quedaba fijo en 0 y la proyeccion mostraba el saldo
+    # bancario vaciandose sin ningun cobro entrando, siempre. El modelo ORM
+    # de accounts_receivable (clase Account) esta desalineado con la tabla
+    # real (le faltan fecha_vencimiento/saldo_pendiente/estado reales), asi
+    # que se consulta la tabla real directo por SQL, igual que ya hace
+    # integrated_finance con esta misma tabla.
+    ar_rows = await db.execute(
+        text("""
+            SELECT fecha_vencimiento, COALESCE(SUM(saldo_pendiente), 0) as total
+            FROM accounts_receivable
+            WHERE company_id = :cid AND estado = 'pendiente'
+            GROUP BY fecha_vencimiento
+        """),
+        {"cid": company_id},
     )
+    ar_due = {row.fecha_vencimiento: Decimal(str(row.total)) for row in ar_rows}
 
     projections = []
     running_balance = saldo_bancario
     for i in range(dias):
         day = today + timedelta(days=i)
-        ingresos = Decimal("0")
+        ingresos = ar_due.get(day, Decimal("0"))
         egresos = ap_due.get(day, Decimal("0"))
 
         projected = running_balance + ingresos - egresos
