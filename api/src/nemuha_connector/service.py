@@ -91,7 +91,7 @@ from api.src.products.models import Product
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.returns.models import Return, ReturnItem
 from api.src.currency.models import ExchangeRate
-from api.src.inventory.models import Warehouse, Stock
+from api.src.inventory.models import Warehouse, Stock, InventoryAdjustment, InventoryAdjustmentItem
 from api.src.credit_accounts.models import CreditAccount
 from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement
 from api.src.fiscal.models import FiscalConfig, PuntoEmisionSecuencia
@@ -1208,6 +1208,72 @@ async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> i
     return count
 
 
+# ── Ajustes de inventario (est_ajuste_estoque) ──────────────────────────────────
+#
+# 470 ajustes reales / 4.628 items, activo hasta hoy. InteliMarket ya tiene el
+# flujo completo (InventoryAdjustment -> aprobar -> InventoryMovement + Stock)
+# para ajustes NUEVOS desde la UI, pero nunca se cargo el historial real del
+# legado. Se sincronizan como ya aprobados (el legado no modela un flujo de
+# aprobacion separado — BO_AJUSTE=1 ya es el ajuste aplicado) y NO se vuelve a
+# tocar Stock/InventoryMovement por ellos: el stock actual ya viene de
+# view_estoque_catalogo (sync_stock), tocarlo de nuevo aca duplicaria el
+# efecto. Esto es historial para trazabilidad, no una re-aplicacion.
+
+async def sync_inventory_adjustments(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = "SELECT * FROM est_ajuste_estoque WHERE BO_CANCELADO = 0"
+    params: tuple = ()
+    if since:
+        sql += " AND DT_AJUSTE >= %s"
+        params = (since,)
+    ajustes = await _fetch(sql, params)
+
+    count = 0
+    for a in ajustes:
+        existing_id = await _get_mapped_target(db, company_id, "est_ajuste_estoque", a["ID_AJUSTE_ESTOQUE"])
+        if existing_id:
+            count += 1
+            continue
+
+        warehouse_id = await _resolve_deposito(db, company_id, a["ID_FILIAL"])
+
+        items_rows = await _fetch(
+            "SELECT * FROM est_item_ajuste_estoque WHERE ID_AJUSTE_ESTOQUE = %s", (a["ID_AJUSTE_ESTOQUE"],)
+        )
+        if not items_rows:
+            continue
+
+        adjustment = InventoryAdjustment(
+            company_id=company_id,
+            warehouse_id=warehouse_id,
+            codigo=f"NEMUHA-{a['CD_AJUSTE_ESTOQUE']}",
+            motivo=(a["OBSERVACAO"] or "Ajuste de inventario")[:50],
+            estado="aprobado",
+            observaciones=a["OBSERVACAO"],
+            fecha_aprobacion=a["DT_AJUSTE"],
+        )
+        db.add(adjustment)
+        await db.flush()
+
+        for it in items_rows:
+            tasa_iva = Decimal("10")
+            product_id = await _resolve_producto(db, company_id, it["ID_PRODUTO"], it["CODIGO_BARRA"], tasa_iva)
+            cantidad_sistema = round(Decimal(str(it["QTD_EXISTENCIA_ATUAL"])))
+            cantidad_fisica = round(Decimal(str(it["QTD_NOVA_EXISTENCIA"])))
+            db.add(InventoryAdjustmentItem(
+                adjustment_id=adjustment.id,
+                product_id=product_id,
+                cantidad_sistema=int(cantidad_sistema),
+                cantidad_fisica=int(cantidad_fisica),
+                diferencia=int(cantidad_fisica - cantidad_sistema),
+            ))
+
+        await db.flush()
+        await _save_map(db, company_id, "est_ajuste_estoque", a["ID_AJUSTE_ESTOQUE"], "inventory_adjustments", adjustment.id)
+        count += 1
+
+    return count
+
+
 # ── Líneas de crédito (bs_pessoa.VL_LIMITE_CREDITO) ─────────────────────────────
 #
 # 469 de 4.699 personas reales tienen un límite de crédito > 0 (verificado).
@@ -1778,6 +1844,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("sale_payments", sync_sale_payments),
         ("customer_returns", sync_customer_returns),
         ("stock", sync_stock),
+        ("inventory_adjustments", sync_inventory_adjustments),
         ("credit_accounts", sync_credit_accounts),
         ("supplier_balances", sync_supplier_balances),
         ("purchase_orders", sync_purchase_orders),
