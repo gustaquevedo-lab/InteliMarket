@@ -324,11 +324,17 @@ async def get_ranking(
     r = await db.execute(total_q)
     total_ventas = float(r.scalar() or 1)
 
+    # cantidad y costo se netean por sign(total): en notas de credito
+    # SaleItem.cantidad/costo_unitario se guardan siempre en positivo
+    # (son magnitudes), solo total lleva el signo real. Sin este ajuste,
+    # una devolucion sumaba unidades y costo como si fuera una venta
+    # nueva sin compensar el ingreso negativo — aplastaba el margen de
+    # cualquier producto con devoluciones (ej. 1,5% en vez de ~20% real).
     q = select(
         SaleItem.product_id,
-        sa_func.sum(SaleItem.cantidad).label("cantidad"),
+        sa_func.sum(sa_func.sign(SaleItem.total) * SaleItem.cantidad).label("cantidad"),
         sa_func.sum(SaleItem.total).label("total"),
-        sa_func.avg(SaleItem.costo_unitario).label("costo_prom"),
+        sa_func.sum(sa_func.sign(SaleItem.total) * SaleItem.costo_unitario * SaleItem.cantidad).label("costo"),
     ).join(Sale, SaleItem.sale_id == Sale.id)\
      .where(Sale.company_id == company_id, Sale.estado != "anulado")
     q = _apply_date_range(q, Sale.fecha, desde, hasta)
@@ -350,7 +356,7 @@ async def get_ranking(
             cat_nombre = cat_r.scalar_one_or_none()
         cant = float(row.cantidad or 0)
         tot = float(row.total or 0)
-        costo = float(row.costo_prom or 0) * cant
+        costo = float(row.costo or 0)
         margen = round(((tot - costo) / max(tot, 1)) * 100, 1)
         participacion = round((tot / total_ventas) * 100, 2)
 
