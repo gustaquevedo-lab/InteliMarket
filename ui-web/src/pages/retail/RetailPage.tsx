@@ -62,7 +62,7 @@ function DashboardTab() {
         <KpiCard title="Ventas Hoy" value={formatPYG(hoy.ventas_total)} subtitle={`${hoy.ventas_count} transacciones`} icon={DollarSign} trend={parseFloat(hoy.delta_ventas_pct)} color="teal" />
         <KpiCard title="Ticket Promedio" value={formatPYG(hoy.ticket_promedio)} subtitle={`${hoy.clientes_unicos} clientes`} icon={Receipt} trend={parseFloat(hoy.delta_ticket_pct)} color="blue" />
         <KpiCard title="Ventas / m²" value={formatPYG(hoy.ventas_m2)} subtitle={`Hora pico: ${hoy.hora_pico}:00`} icon={Target} trend={parseFloat(hoy.delta_clientes_pct)} color="purple" />
-        <KpiCard title="Conversión" value={`${hoy.conversion_pct}%`} subtitle={`Margen: ${formatPYG(hoy.margen_bruto)}`} icon={TrendingUp} trend={2.4} color="amber" />
+        <KpiCard title="Conversión" value={hoy.conversion_pct != null ? `${hoy.conversion_pct}%` : "Sin datos"} subtitle={hoy.conversion_pct != null ? `Margen: ${formatPYG(hoy.margen_bruto)}` : "Requiere contador de tráfico"} icon={TrendingUp} trend={undefined} color="amber" />
       </div>
 
       {/* Week/Month stats */}
