@@ -176,10 +176,11 @@ VERTICALS: dict[str, VerticalPreset] = {
         descripcion="Para supermercados y autoservicios. Gestión completa: producción (carnicería, panadería, rotisería), perecederos con markdown automático, mermas, forecasting de compras, múltiples cajas, balanzas integradas.",
         features=[
             "pos", "crm", "inventory", "sales", "purchases", "payments",
-            "reports", "sifen", "caja", "branches",
+            "reports", "sifen", "sifen_avanzado", "caja", "branches",
             "variants", "price_lists", "imports", "rbac", "notifications",
             "discounts", "kits", "loyalty", "stock_lots", "returns",
             "whatsapp", "sales_orders", "commercial_agreements",
+            "credit_accounts", "integrated_finance",
             # Supermarket-specific
             "supermercado",
             # Supermercado Fase 1 — Operaciones
