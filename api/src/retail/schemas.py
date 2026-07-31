@@ -59,6 +59,7 @@ class KpiSnapshotResponse(BaseModel):
     ticket_promedio: Decimal
     ventas_m2: Decimal
     margen_bruto: Decimal
+    margen_pct: Decimal
     clientes_unicos: int
     productos_vendidos: int
     descuento_total: Decimal

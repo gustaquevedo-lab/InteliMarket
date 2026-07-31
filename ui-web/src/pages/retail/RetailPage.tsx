@@ -62,7 +62,7 @@ function DashboardTab() {
         <KpiCard title="Ventas Hoy" value={formatPYG(hoy.ventas_total)} subtitle={`${hoy.ventas_count} transacciones`} icon={DollarSign} trend={parseFloat(hoy.delta_ventas_pct)} color="teal" />
         <KpiCard title="Ticket Promedio" value={formatPYG(hoy.ticket_promedio)} subtitle={`${hoy.clientes_unicos} clientes`} icon={Receipt} trend={parseFloat(hoy.delta_ticket_pct)} color="blue" />
         <KpiCard title="Ventas / m²" value={formatPYG(hoy.ventas_m2)} subtitle={`Hora pico: ${hoy.hora_pico}:00`} icon={Target} trend={parseFloat(hoy.delta_clientes_pct)} color="purple" />
-        <KpiCard title="Conversión" value={hoy.conversion_pct != null ? `${hoy.conversion_pct}%` : "Sin datos"} subtitle={hoy.conversion_pct != null ? `Margen: ${formatPYG(hoy.margen_bruto)}` : "Requiere contador de tráfico"} icon={TrendingUp} trend={undefined} color="amber" />
+        <KpiCard title="Margen Bruto" value={`${hoy.margen_pct}%`} subtitle={formatPYG(hoy.margen_bruto)} icon={TrendingUp} trend={undefined} color="amber" />
       </div>
 
       {/* Week/Month stats */}
@@ -1405,9 +1405,9 @@ function LoadingState({ message }: { message: string }) {
 
 function generateDemoDashboard() {
   return {
-    hoy: { ventas_total: 4520000, ventas_count: 38, ticket_promedio: 118947, ventas_m2: 18833, margen_bruto: 1446000, clientes_unicos: 28, productos_vendidos: 124, descuento_total: 226000, delta_ventas_pct: 12.4, delta_ticket_pct: 3.2, delta_clientes_pct: 5.2, hora_pico: 13, hora_pico_ventas: 813600, conversion_pct: 65.5 },
-    semana: { ventas_total: 28900000, ventas_count: 234, ticket_promedio: 123504, ventas_m2: 120416, margen_bruto: 9248000, clientes_unicos: 187, productos_vendidos: 782, descuento_total: 1445000, delta_ventas_pct: 8.1, delta_ticket_pct: -1.2, delta_clientes_pct: 4.5, hora_pico: 12, hora_pico_ventas: 5202000, conversion_pct: 68.2 },
-    mes: { ventas_total: 124800000, ventas_count: 1056, ticket_promedio: 118181, ventas_m2: 520000, margen_bruto: 39936000, clientes_unicos: 832, productos_vendidos: 3524, descuento_total: 6240000, delta_ventas_pct: 15.7, delta_ticket_pct: 2.1, delta_clientes_pct: 8.3, hora_pico: 13, hora_pico_ventas: 22464000, conversion_pct: 67.4 },
+    hoy: { ventas_total: 4520000, ventas_count: 38, ticket_promedio: 118947, ventas_m2: 18833, margen_bruto: 1446000, margen_pct: 32.0, clientes_unicos: 28, productos_vendidos: 124, descuento_total: 226000, delta_ventas_pct: 12.4, delta_ticket_pct: 3.2, delta_clientes_pct: 5.2, hora_pico: 13, hora_pico_ventas: 813600, conversion_pct: 65.5 },
+    semana: { ventas_total: 28900000, ventas_count: 234, ticket_promedio: 123504, ventas_m2: 120416, margen_bruto: 9248000, margen_pct: 32.0, clientes_unicos: 187, productos_vendidos: 782, descuento_total: 1445000, delta_ventas_pct: 8.1, delta_ticket_pct: -1.2, delta_clientes_pct: 4.5, hora_pico: 12, hora_pico_ventas: 5202000, conversion_pct: 68.2 },
+    mes: { ventas_total: 124800000, ventas_count: 1056, ticket_promedio: 118181, ventas_m2: 520000, margen_bruto: 39936000, margen_pct: 32.0, clientes_unicos: 832, productos_vendidos: 3524, descuento_total: 6240000, delta_ventas_pct: 15.7, delta_ticket_pct: 2.1, delta_clientes_pct: 8.3, hora_pico: 13, hora_pico_ventas: 22464000, conversion_pct: 67.4 },
     heatmap_7dias: [],
     top_productos: [],
     productos_sin_venta: [],
