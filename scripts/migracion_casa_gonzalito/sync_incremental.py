@@ -1219,6 +1219,94 @@ def sync_pedidos(pg, my):
     return max_id
 
 
+def sync_limite_credito(pg, my):
+    """limite_de_credito en el legacy tiene varias filas por cliente (una por
+    IDDIVISION: 1-5), pero solo IDDIVISION=4 es el limite de credito real en
+    uso — confirmado leyendo Deudas/Index.asp del codigo fuente legacy, que
+    arma la pantalla de deudas filtrando exactamente por esa division. Las
+    demas divisiones dan siempre 0/vacio en los datos reales, no se usan.
+
+    Escribe a las 3 tablas de limite de credito que hoy existen en Intelimarket
+    (credit_accounts, customer_accounts.limite_credito, customer_credit_limits)
+    — quedaron asi por evolucion del codigo en distintos momentos, no por
+    diseño; mismo patron que accounts_receivable vs customer_accounts. El
+    limite viene del legacy; saldo_utilizado se calcula desde el AR real ya
+    migrado (accounts_receivable si tiene filas pendientes, si no
+    customer_accounts.saldo_actual), no del PROMEDIO del legacy (que es un
+    promedio historico viejo, no el saldo vivo)."""
+    last_id, _ = get_watermark(pg, "limite_credito")
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT IDLIMITE, IDCLIENTE, LIMITE_CREDITO, PLAZO FROM limite_de_credito "
+            "WHERE IDDIVISION = 4 AND IDLIMITE > %s ORDER BY IDLIMITE", (last_id,))
+        legacy_rows = cur.fetchall()
+    if not legacy_rows:
+        log("  limite_de_credito: sin filas nuevas")
+        return last_id
+
+    clientes_validos = {txt_keep(c, 15) for c in legacy_id_set(my, "clientes", "IDCLIENTES")}
+    max_id, por_cliente, saltados = last_id, {}, 0
+    for (iid, idcli, limite, plazo) in legacy_rows:
+        max_id = max(max_id, iid)
+        idc = txt_keep(idcli, 15)
+        if not idc or idc not in clientes_validos:
+            saltados += 1
+            continue
+        # Filas en orden ascendente de IDLIMITE -> la ultima por cliente pisa
+        # a las anteriores (mismo patron "last write wins" que sales_orders).
+        por_cliente[idc] = (money(limite), int(plazo) if plazo else 0)
+
+    ca_rows = [(uuid.uuid5(NS, f"credit:{idc}"), COMPANY_ID, uuid.uuid5(NS, f"cli:{idc}"),
+                lim, lim, 0, True) for idc, (lim, _plazo) in por_cliente.items()]
+    upsert(pg, "credit_accounts",
+           ["id", "company_id", "customer_id", "limite_credito", "saldo_disponible",
+            "saldo_utilizado", "activo"], ca_rows,
+           update_cols=["limite_credito", "activo"])
+
+    ccl_rows = [(uuid.uuid5(NS, f"ccl:{idc}"), COMPANY_ID, uuid.uuid5(NS, f"cli:{idc}"),
+                 lim, lim, 0, plazo) for idc, (lim, plazo) in por_cliente.items()]
+    upsert(pg, "customer_credit_limits",
+           ["id", "company_id", "customer_id", "limite_credito", "limite_disponible",
+            "saldo_utilizado", "dias_credito"], ccl_rows,
+           update_cols=["limite_credito", "limite_disponible", "dias_credito"])
+
+    cust_ids = [str(uuid.uuid5(NS, f"cli:{idc}")) for idc in por_cliente]
+    if not DRY_RUN and cust_ids:
+        with pg.cursor() as cur:
+            cur.execute(
+                "UPDATE customer_accounts ca SET limite_credito = lc.limite_credito "
+                "FROM credit_accounts lc WHERE lc.customer_id = ca.customer_id "
+                "AND ca.customer_id = ANY(%s::uuid[])", (cust_ids,),
+            )
+            # saldo_utilizado/disponible en las tablas nuevas: AR real si tiene
+            # pendiente, si no el agregado de customer_accounts — mismo criterio
+            # CASE/EXISTS ya usado en financial/service.py para no duplicar.
+            for tbl in ("credit_accounts", "customer_credit_limits"):
+                cur.execute(f"""
+                    UPDATE {tbl} t SET
+                      saldo_utilizado = COALESCE(CASE
+                        WHEN EXISTS (SELECT 1 FROM accounts_receivable ar
+                                     WHERE ar.customer_id = t.customer_id AND ar.estado = 'pendiente')
+                        THEN (SELECT SUM(ar.saldo_pendiente) FROM accounts_receivable ar
+                              WHERE ar.customer_id = t.customer_id AND ar.estado = 'pendiente')
+                        ELSE (SELECT ca.saldo_actual FROM customer_accounts ca
+                              WHERE ca.customer_id = t.customer_id)
+                      END, 0)
+                    WHERE t.company_id = %s AND t.customer_id = ANY(%s::uuid[])
+                """, (str(COMPANY_ID), cust_ids))
+                disp_col = "limite_disponible" if tbl == "customer_credit_limits" else "saldo_disponible"
+                cur.execute(f"""
+                    UPDATE {tbl} SET {disp_col} = GREATEST(limite_credito - saldo_utilizado, 0)
+                    WHERE company_id = %s AND customer_id = ANY(%s::uuid[])
+                """, (str(COMPANY_ID), cust_ids))
+        pg.commit()
+
+    log(f"  limite_de_credito: {len(por_cliente)} clientes con limite real "
+        f"(ID {last_id} -> {max_id}, {saltados} sin cliente valido)")
+    set_watermark(pg, "limite_credito", last_id=max_id)
+    return max_id
+
+
 # ----------------------------------------------------------------------------
 # Post-proceso: recalcular IVA solo de las ventas/notas/compras tocadas esta corrida
 # ----------------------------------------------------------------------------
@@ -1296,6 +1384,7 @@ def main():
         "contabilidad": None,  # plan de cuentas + asientos, se arma abajo
         "efectivo": lambda: sync_efectivo(pg, my),
         "pedidos_ruta": lambda: sync_pedidos(pg, my),
+        "limite_credito": lambda: sync_limite_credito(pg, my),
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -1366,6 +1455,10 @@ def main():
         sync_efectivo(pg, my)
     if not ONLY or ONLY == "pedidos_ruta":
         sync_pedidos(pg, my)
+
+    log("\n[4h] Limite de credito por cliente")
+    if not ONLY or ONLY == "limite_credito":
+        sync_limite_credito(pg, my)
 
     log("\n[5] Post-proceso")
     recalcular_iva(pg, sale_ids, set())
