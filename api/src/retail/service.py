@@ -232,6 +232,8 @@ async def _build_kpi_snapshot(
     except Exception:
         pass
 
+    margen_pct = (margen_bruto / ventas_total * 100).quantize(Decimal("0.01")) if ventas_total else Decimal("0")
+
     # Conversion (visitas -> ventas) requiere conteo de trafico real (sensor/camara
     # en la entrada) que este cliente no tiene integrado -- no hay forma honesta
     # de calcularlo, se deja sin dato en vez de inventar un numero.
@@ -245,6 +247,7 @@ async def _build_kpi_snapshot(
         ticket_promedio=ticket_promedio,
         ventas_m2=ventas_m2,
         margen_bruto=margen_bruto,
+        margen_pct=margen_pct,
         clientes_unicos=clientes_unicos,
         productos_vendidos=productos_vendidos,
         descuento_total=descuento_total,
