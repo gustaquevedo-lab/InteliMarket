@@ -42,7 +42,10 @@ async def _send_sale_wa(db: AsyncSession, sale, customer_phone: str | None, tipo
 
 @router.post("/sales", response_model=SaleResponse, status_code=status.HTTP_201_CREATED)
 async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
-    sale = await service.create_sale(db, body)
+    try:
+        sale = await service.create_sale(db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     try:
         await emit_sale_completed(

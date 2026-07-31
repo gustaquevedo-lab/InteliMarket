@@ -94,6 +94,9 @@ from api.src.currency.models import ExchangeRate
 from api.src.inventory.models import Warehouse, Stock
 from api.src.credit_accounts.models import CreditAccount
 from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement
+from api.src.fiscal.models import FiscalConfig, PuntoEmisionSecuencia
+from api.src.fiscal import service as fiscal_service
+from api.src.sifen.models import SifenTimbrado
 
 MONEDA_MAP = {1: "PYG", 2: "USD", 3: "BRL"}  # bs_moeda — verificado contra datos reales
 SYSTEM_RUN_MODEL = "system:nemuha-controles-automaticos"
@@ -1043,6 +1046,109 @@ async def sync_exchange_rates(db: AsyncSession, company_id: str, since: date | N
     return count
 
 
+# ── Configuracion fiscal real (con_timbrado + con_secuencia_fatura) ─────────────
+#
+# Extra Supermercado factura hoy como AUTOIMPRESOR (confirmado: TIPO_TIMBRADO
+# real = 'AUTOIMPRESO', timbrado 18545636 vigente 2026-01-01 a 2027-01-31) —
+# todavia no esta obligado por ley a Facturacion Electronica. Se deja
+# modo_emision switcheable (fiscal_config.modo_emision) para cuando le
+# corresponda migrar a "sifen", sin tocar la numeracion real: la misma
+# secuencia por punto de emision sirve para ambos modos, solo cambia si
+# ademas se genera CDC y se envia a SIFEN.
+#
+# Solo se siembra UNA VEZ por punto de emision: si InteliMarket ya emitio
+# facturas reales, su numero_actual ya avanzo mas alla de lo que muestra el
+# legado (que dejo de ser el sistema de referencia) — resincronizar no debe
+# hacerlo retroceder.
+
+TIPO_TIMBRADO_MAP = {"PREIMPRESO": "preimpreso", "AUTOIMPRESO": "autoimpresor", "ELETRONICO": "sifen"}
+TIPO_SECUENCIA_MAP = {"VENTA": "factura", "NOTA CREDITO": "nota_credito", "NOTA REMISSAO": "nota_remision"}
+
+
+async def sync_fiscal_setup(db: AsyncSession, company_id: str, since: date | None) -> int:
+    timbrados_legacy = await _fetch("SELECT * FROM con_timbrado WHERE BO_ATIVO = 1")
+    if not timbrados_legacy:
+        return 0
+
+    count = 0
+    default_punto_emision = None
+    max_disponibles = -1
+
+    for t in timbrados_legacy:
+        existing_timbrado_id = await _get_mapped_target(db, company_id, "con_timbrado", t["ID_TIMBRADO"])
+        numero_legacy = t["TIMBRADO"].decode() if isinstance(t["TIMBRADO"], (bytes, bytearray)) else str(t["TIMBRADO"])
+
+        secuencias_legacy = await _fetch(
+            "SELECT * FROM con_secuencia_fatura WHERE id_timbrado = %s", (t["ID_TIMBRADO"],)
+        )
+        rango_desde = min((s["proximo"] for s in secuencias_legacy), default=1)
+        rango_hasta = max((s["nr_final"] for s in secuencias_legacy), default=1)
+
+        if existing_timbrado_id:
+            timbrado_id = existing_timbrado_id
+        else:
+            timbrado = SifenTimbrado(
+                company_id=company_id,
+                numero=numero_legacy,
+                fecha_inicio=t["DT_INICIAL"],
+                fecha_fin=t["DT_FINAL"],
+                rango_desde=rango_desde,
+                rango_hasta=rango_hasta,
+                tipo_comprobante="factura",
+                activo=bool(t["BO_ATIVO"]),
+            )
+            db.add(timbrado)
+            await db.flush()
+            timbrado_id = timbrado.id
+            await _save_map(db, company_id, "con_timbrado", t["ID_TIMBRADO"], "sifen_timbrados", timbrado_id)
+            count += 1
+
+        for s in secuencias_legacy:
+            establecimiento = f"{s['id_filial']:03d}"
+            punto_emision = s["boca_emissao"]
+            tipo_documento = TIPO_SECUENCIA_MAP.get(s["tipo"], "factura")
+
+            existing_result = await db.execute(
+                select(PuntoEmisionSecuencia).where(
+                    PuntoEmisionSecuencia.company_id == company_id,
+                    PuntoEmisionSecuencia.establecimiento == establecimiento,
+                    PuntoEmisionSecuencia.punto_emision == punto_emision,
+                    PuntoEmisionSecuencia.tipo_documento == tipo_documento,
+                )
+            )
+            if existing_result.scalar_one_or_none():
+                continue  # ya sembrado — no pisar el progreso real de numeracion
+
+            db.add(PuntoEmisionSecuencia(
+                company_id=company_id,
+                timbrado_id=timbrado_id,
+                establecimiento=establecimiento,
+                punto_emision=punto_emision,
+                tipo_documento=tipo_documento,
+                numero_actual=s["proximo"],
+                numero_final=s["nr_final"],
+            ))
+
+            if tipo_documento == "factura":
+                disponibles = s["nr_final"] - s["proximo"] + 1
+                if disponibles > max_disponibles:
+                    max_disponibles = disponibles
+                    default_punto_emision = punto_emision
+
+        modo = TIPO_TIMBRADO_MAP.get(t["TIPO_TIMBRADO"], "autoimpresor")
+        existing_config = await fiscal_service.get_fiscal_config(db, company_id)
+        if not existing_config and default_punto_emision:
+            db.add(FiscalConfig(
+                company_id=company_id,
+                modo_emision=modo,
+                timbrado_id=timbrado_id,
+                punto_emision=default_punto_emision,
+            ))
+
+    await db.flush()
+    return count
+
+
 # ── Stock (view_estoque_catalogo) ───────────────────────────────────────────────
 #
 # view_estoque_catalogo es una vista del legacy que ya trae la cantidad ACTUAL
@@ -1662,6 +1768,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("bank_balances", sync_bank_balances),
         ("supplier_invoice_payments", sync_supplier_invoice_payments),
         ("exchange_rates", sync_exchange_rates),
+        ("fiscal_setup", sync_fiscal_setup),
         ("expense_categories", sync_expense_categories),
         ("petty_cash_expenses", sync_petty_cash_expenses),
         ("cash_register_arqueo", sync_cash_register_arqueo),

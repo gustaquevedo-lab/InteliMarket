@@ -46,6 +46,15 @@ async def upsert_fiscal_config(
     )
 
 
+@router.get("/status/{company_id}")
+async def get_fiscal_status(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_auth),
+):
+    return await fiscal_service.get_fiscal_status(db, company_id)
+
+
 @router.get("/timbrados/{company_id}")
 async def list_timbrados(
     company_id: str,

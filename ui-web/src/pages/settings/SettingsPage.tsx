@@ -37,6 +37,12 @@ export default function SettingsPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
 
   const [timbradoForm, setTimbradoForm] = useState({ numero: "", fecha_inicio: "", fecha_fin: "", rango_desde: 0, rango_hasta: 0 })
+  const [fiscalStatus, setFiscalStatus] = useState<{
+    modo_emision: string
+    punto_emision_default: string | null
+    puntos_emision: { punto_emision: string; establecimiento: string; tipo_documento: string; numero_actual: number; numero_final: number; disponibles: number; timbrado_numero: string; timbrado_fecha_fin: string; timbrado_vencido: boolean }[]
+  } | null>(null)
+  const [savingModo, setSavingModo] = useState(false)
   const [currencyForm, setCurrencyForm] = useState({ codigo: "", nombre: "", simbolo: "" })
   const [paymentForm, setPaymentForm] = useState({ nombre: "", tipo: "efectivo" })
 
@@ -53,13 +59,14 @@ export default function SettingsPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [comp, timb, curr, pay, vert, vertConfig] = await Promise.allSettled([
+      const [comp, timb, curr, pay, vert, vertConfig, fiscalSt] = await Promise.allSettled([
         api.companies.list(),
         api.sifen.timbrados.list(),
         api.settings.currencies.list(),
         api.paymentMethods.list(),
         api.verticals.list(),
         api.verticals.getCompanyConfig(),
+        api.fiscal.status(COMPANY_ID),
       ])
       if (comp.status === "fulfilled" && comp.value.length > 0) {
         setCompanies(comp.value)
@@ -74,6 +81,7 @@ export default function SettingsPage() {
         setSelectedVerticalId(vertConfig.value.vertical_id || "")
         setCustomFeatures(vertConfig.value.features || [])
       }
+      if (fiscalSt.status === "fulfilled") setFiscalStatus(fiscalSt.value)
     } catch {
       toast.error("Error", "No se pudo cargar la configuración")
     } finally {
@@ -115,6 +123,25 @@ export default function SettingsPage() {
       toast.error("Error", "No se pudo guardar la configuración")
     } finally {
       setSavingVertical(false)
+    }
+  }
+
+  const handleChangeModoEmision = async (modo: string) => {
+    if (!fiscalStatus) return
+    setSavingModo(true)
+    try {
+      await api.fiscal.config.upsert(COMPANY_ID, {
+        company_id: COMPANY_ID,
+        modo_emision: modo,
+        punto_emision: fiscalStatus.punto_emision_default || "001",
+      })
+      toast.success("Modo de facturación actualizado", modo === "sifen" ? "Facturación Electrónica activada" : "Autoimpresor activado")
+      const st = await api.fiscal.status(COMPANY_ID)
+      setFiscalStatus(st)
+    } catch {
+      toast.error("Error", "No se pudo cambiar el modo de facturación")
+    } finally {
+      setSavingModo(false)
     }
   }
 
@@ -267,6 +294,59 @@ export default function SettingsPage() {
 
       {!loading && activeSection === "timbrados" && (
         <div className="space-y-4">
+          {fiscalStatus && (
+            <div className="card p-6">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white mb-1">Modo de facturación</h3>
+                  <p className="text-sm text-gray-500">
+                    {fiscalStatus.modo_emision === "autoimpresor" && "Facturando como Autoimpresor (timbrado propio, impresión local) — no obligado por ley a Facturación Electrónica todavía."}
+                    {fiscalStatus.modo_emision === "sifen" && "Facturación Electrónica (SIFEN) activada."}
+                    {fiscalStatus.modo_emision === "preimpreso" && "Facturando con talonario preimpreso."}
+                    {fiscalStatus.modo_emision === "sin_configurar" && "Sin configurar todavía."}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${fiscalStatus.modo_emision === "autoimpresor" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-700 text-gray-500"}`}
+                    disabled={savingModo}
+                    onClick={() => handleChangeModoEmision("autoimpresor")}
+                  >
+                    Autoimpresor
+                  </button>
+                  <button
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${fiscalStatus.modo_emision === "sifen" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-700 text-gray-500"}`}
+                    disabled={savingModo}
+                    onClick={() => handleChangeModoEmision("sifen")}
+                  >
+                    Facturación Electrónica
+                  </button>
+                </div>
+              </div>
+              {fiscalStatus.puntos_emision.length > 0 && (
+                <div className="mt-5 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-left text-xs text-gray-500"><th className="p-2">Punto de emisión</th><th className="p-2">Timbrado</th><th className="p-2">Vence</th><th className="p-2">Próximo número</th><th className="p-2 text-right">Disponibles</th></tr></thead>
+                    <tbody>
+                      {fiscalStatus.puntos_emision.filter(p => p.tipo_documento === "factura").map((p, i) => (
+                        <tr key={i} className="border-t border-gray-100 dark:border-gray-700">
+                          <td className="p-2 font-mono font-bold">{p.establecimiento}-{p.punto_emision}</td>
+                          <td className="p-2 font-mono text-xs">{p.timbrado_numero}</td>
+                          <td className="p-2 text-xs">
+                            <span className={p.timbrado_vencido ? "text-red-500 font-bold" : "text-gray-500"}>
+                              {new Date(p.timbrado_fecha_fin).toLocaleDateString("es-PY")}
+                            </span>
+                          </td>
+                          <td className="p-2 font-mono text-xs">{p.establecimiento}-{p.punto_emision}-{String(p.numero_actual).padStart(7, "0")}</td>
+                          <td className={`p-2 text-right font-mono font-bold ${p.disponibles < 500 ? "text-amber-500" : "text-gray-700 dark:text-gray-300"}`}>{p.disponibles.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex justify-between items-center">
             <div>
               <h3 className="text-base font-bold text-gray-900 dark:text-white">Timbrados registrados</h3>

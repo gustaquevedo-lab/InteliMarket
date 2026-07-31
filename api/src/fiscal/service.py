@@ -9,7 +9,7 @@ from sqlalchemy import func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from api.src.fiscal.models import FiscalConfig, TimbradoUsage, NotaCreditoDebito
+from api.src.fiscal.models import FiscalConfig, TimbradoUsage, NotaCreditoDebito, PuntoEmisionSecuencia
 from api.src.sifen.models import SifenTimbrado
 from api.src.sales.models import Sale
 
@@ -122,6 +122,100 @@ async def reserve_next_number(db: AsyncSession, timbrado_id: uuid.UUID, company_
     db.add(usage)
     await db.flush()
     return next_num
+
+
+# ─── Numeracion fiscal real (autoimpresor / preimpreso / electronico) ────────
+#
+# Misma numeracion sirve para los 3 modos: lo unico que cambia entre
+# autoimpresor y electronico es si ademas se genera CDC y se envia a SIFEN
+# (eso lo maneja el modulo sifen aparte, todavia no obligatorio para este
+# cliente). Este reserve es el que hace que el numero impreso sea el numero
+# fiscal real (establecimiento-puntoemision-numero), no un correlativo interno.
+
+class TimbradoAgotadoError(ValueError):
+    pass
+
+
+class TimbradoVencidoError(ValueError):
+    pass
+
+
+async def reserve_fiscal_invoice_number(
+    db: AsyncSession,
+    company_id: str,
+    punto_emision: str,
+    tipo_documento: str = "factura",
+) -> str:
+    cid = uuid.UUID(company_id)
+    result = await db.execute(
+        select(PuntoEmisionSecuencia)
+        .where(
+            PuntoEmisionSecuencia.company_id == cid,
+            PuntoEmisionSecuencia.punto_emision == punto_emision,
+            PuntoEmisionSecuencia.tipo_documento == tipo_documento,
+            PuntoEmisionSecuencia.activo == True,
+        )
+        .with_for_update()
+    )
+    secuencia = result.scalar_one_or_none()
+    if not secuencia:
+        raise ValueError(
+            f"No hay secuencia de numeracion configurada para punto de emision '{punto_emision}' "
+            f"({tipo_documento}) — configurar en Facturación antes de emitir"
+        )
+
+    timbrado_result = await db.execute(select(SifenTimbrado).where(SifenTimbrado.id == secuencia.timbrado_id))
+    timbrado = timbrado_result.scalar_one_or_none()
+    if not timbrado or not timbrado.activo:
+        raise ValueError(f"El timbrado de punto de emision '{punto_emision}' no esta activo")
+    if timbrado.fecha_fin < date.today():
+        raise TimbradoVencidoError(f"El timbrado {timbrado.numero} vencio el {timbrado.fecha_fin} — renovarlo antes de seguir facturando")
+
+    if secuencia.numero_actual > secuencia.numero_final:
+        raise TimbradoAgotadoError(
+            f"El punto de emision '{punto_emision}' agoto su numeracion (hasta {secuencia.numero_final}) — "
+            f"solicitar ampliacion de timbrado"
+        )
+
+    numero_asignado = secuencia.numero_actual
+    secuencia.numero_actual += 1
+    await db.flush()
+
+    return f"{secuencia.establecimiento}-{secuencia.punto_emision}-{numero_asignado:07d}"
+
+
+async def get_fiscal_status(db: AsyncSession, company_id: str) -> dict:
+    """Resumen para mostrar en el panel de configuracion: modo, timbrado
+    vigente y disponibilidad por punto de emision."""
+    config = await get_fiscal_config(db, company_id)
+    cid = uuid.UUID(company_id)
+
+    secuencias_result = await db.execute(
+        select(PuntoEmisionSecuencia, SifenTimbrado)
+        .join(SifenTimbrado, SifenTimbrado.id == PuntoEmisionSecuencia.timbrado_id)
+        .where(PuntoEmisionSecuencia.company_id == cid, PuntoEmisionSecuencia.activo == True)
+        .order_by(PuntoEmisionSecuencia.punto_emision)
+    )
+    puntos = [
+        {
+            "punto_emision": s.punto_emision,
+            "establecimiento": s.establecimiento,
+            "tipo_documento": s.tipo_documento,
+            "numero_actual": s.numero_actual,
+            "numero_final": s.numero_final,
+            "disponibles": s.numero_final - s.numero_actual + 1,
+            "timbrado_numero": t.numero,
+            "timbrado_fecha_fin": t.fecha_fin,
+            "timbrado_vencido": t.fecha_fin < date.today(),
+        }
+        for s, t in secuencias_result.all()
+    ]
+
+    return {
+        "modo_emision": config.modo_emision if config else "sin_configurar",
+        "punto_emision_default": config.punto_emision if config else None,
+        "puntos_emision": puntos,
+    }
 
 
 # ─── NC / ND ─────────────────────────────────────────────────────────────────

@@ -1026,6 +1026,11 @@ export const api = {
       get: (companyId: string) => client.get<FiscalConfig | null>(`/v1/fiscal/config/${companyId}`),
       upsert: (companyId: string, data: any) => client.put<FiscalConfig>(`/v1/fiscal/config/${companyId}`, data),
     },
+    status: (companyId: string) => client.get<{
+      modo_emision: string
+      punto_emision_default: string | null
+      puntos_emision: { punto_emision: string; establecimiento: string; tipo_documento: string; numero_actual: number; numero_final: number; disponibles: number; timbrado_numero: string; timbrado_fecha_fin: string; timbrado_vencido: boolean }[]
+    }>(`/v1/fiscal/status/${companyId}`),
     timbrados: {
       list: (companyId: string, tipo_comprobante?: string) => client.get<any[]>(`/v1/fiscal/timbrados/${companyId}`, { tipo_comprobante } as any),
       create: (data: any) => client.post<any>("/v1/fiscal/timbrados", data),

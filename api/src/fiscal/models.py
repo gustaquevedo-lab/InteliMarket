@@ -34,6 +34,28 @@ class TimbradoUsage(Base):
     used_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PuntoEmisionSecuencia(Base):
+    """Secuencia de numeracion real por punto de emision (boca), independiente
+    del timbrado global — un timbrado autoimpresor/preimpreso en Paraguay se
+    reparte en varios puntos de emision (una caja/terminal cada uno), cada uno
+    con su propio rango y proximo numero a usar. Espejo de como ya lo maneja
+    el legado (con_secuencia_fatura) para poder continuar la numeracion sin
+    saltos ni duplicados al migrar."""
+    __tablename__ = "punto_emision_secuencias"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    timbrado_id = Column(UUID(as_uuid=True), ForeignKey("sifen_timbrados.id"), nullable=False)
+    establecimiento = Column(String(3), nullable=False, default="001")
+    punto_emision = Column(String(3), nullable=False)
+    tipo_documento = Column(String(20), nullable=False, default="factura")  # factura, nota_credito, nota_remision
+    numero_actual = Column(Integer, nullable=False)  # proximo numero a asignar
+    numero_final = Column(Integer, nullable=False)
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class NotaCreditoDebito(Base):
     """Nota de Crédito / Nota de Débito."""
     __tablename__ = "notas_credito_debito"

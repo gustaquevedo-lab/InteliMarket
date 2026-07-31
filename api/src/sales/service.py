@@ -9,6 +9,7 @@ import uuid
 from api.src.sales.models import Sale, SaleItem
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
+from api.src.fiscal import service as fiscal_service
 
 
 def calculate_taxes(item: dict) -> dict:
@@ -51,8 +52,22 @@ async def generate_sale_number(db: AsyncSession, company_id: str, branch_id: str
     return f"{date_part}-{branch_code}-{seq:06d}"
 
 
+async def resolve_sale_number(db: AsyncSession, data: SaleCreate) -> str:
+    """Si la empresa tiene facturacion fiscal configurada (autoimpresor,
+    preimpreso o electronico — mismo numerador para los 3), usa el numero
+    real 001-XXX-NNNNNNN de su timbrado vigente. Si no tiene nada configurado
+    (la mayoria de empresas todavia), sigue con el correlativo interno de
+    siempre — no rompe a nadie que no haya migrado a facturacion real."""
+    config = await fiscal_service.get_fiscal_config(db, str(data.company_id))
+    if not config:
+        return await generate_sale_number(db, str(data.company_id), str(data.branch_id) if data.branch_id else None)
+
+    punto_emision = data.punto_emision or config.punto_emision
+    return await fiscal_service.reserve_fiscal_invoice_number(db, str(data.company_id), punto_emision, "factura")
+
+
 async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
-    numero = await generate_sale_number(db, str(data.company_id), str(data.branch_id) if data.branch_id else None)
+    numero = await resolve_sale_number(db, data)
 
     subtotal = Decimal("0")
     descuento_total = Decimal("0")

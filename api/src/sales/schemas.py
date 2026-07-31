@@ -23,6 +23,7 @@ class SaleCreate(BaseModel):
     branch_id: Optional[UUID] = None
     customer_id: Optional[UUID] = None
     emission_point_id: Optional[UUID] = None
+    punto_emision: Optional[str] = None
     tipo_comprobante: str = "ticket"
     condicion: str = "contado"
     moneda: str = "PYG"
