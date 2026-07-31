@@ -154,7 +154,11 @@ async def get_sales_by_category(db: AsyncSession, fecha_desde: Optional[date] = 
 
 async def get_margin_summary(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
     """Margen bruto real del periodo: (monto - costo) / monto, en base al
-    costo_unitario cargado en cada sale_item — no una aproximacion inventada."""
+    costo_unitario cargado en cada sale_item — no una aproximacion inventada.
+    SIGN(vi.total): en notas de credito total es negativo pero costo_unitario
+    se guarda siempre positivo (magnitud, no signo) — sin este ajuste el
+    costo de una devolucion se sumaba como si fuera una venta nueva, sin
+    compensar el ingreso negativo, e inflaba el costo relativo al monto."""
     params = {}
     where = "v.estado <> 'cancelado'"
     if fecha_desde:
@@ -167,7 +171,7 @@ async def get_margin_summary(db: AsyncSession, fecha_desde: Optional[date] = Non
     query = f"""
         SELECT
             COALESCE(SUM(vi.total), 0) as monto,
-            COALESCE(SUM(vi.costo_unitario * vi.cantidad), 0) as costo
+            COALESCE(SUM(SIGN(vi.total) * vi.costo_unitario * vi.cantidad), 0) as costo
         FROM sales v
         JOIN sale_items vi ON vi.sale_id = v.id
         WHERE {where}
@@ -198,7 +202,7 @@ async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = N
             p.sku,
             SUM(vi.cantidad) as cantidad,
             SUM(vi.total) as monto,
-            SUM(vi.costo_unitario * vi.cantidad) as costo
+            SUM(SIGN(vi.total) * vi.costo_unitario * vi.cantidad) as costo
         FROM sales v
         JOIN sale_items vi ON vi.sale_id = v.id
         JOIN products p ON p.id = vi.product_id

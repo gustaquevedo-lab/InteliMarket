@@ -91,9 +91,13 @@ async def get_dashboard(
     # get_depto_pyl(), que calcula margen desde ProductionRecipe — recetas
     # de produccion de carniceria/panaderia de supermercado, sin relacion
     # con esta vertical — daba resultados sin sentido (ej. -128,4%).
+    # sign(SaleItem.total): en notas de credito costo_unitario se guarda
+    # siempre positivo (magnitud) aunque total sea negativo — sin este
+    # ajuste el costo de una devolucion se sumaba sin compensar el ingreso
+    # negativo, inflando el costo relativo al monto en dias con creditos grandes.
     margin_q = select(
         sa_func.coalesce(sa_func.sum(SaleItem.total), 0),
-        sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
+        sa_func.coalesce(sa_func.sum(sa_func.sign(SaleItem.total) * SaleItem.costo_unitario * SaleItem.cantidad), 0),
     ).join(Sale, SaleItem.sale_id == Sale.id)\
      .where(Sale.company_id == company_id, Sale.estado != "anulado")
     margin_q = _apply_date_range(margin_q, Sale.fecha, desde or month_start, hasta or now)
@@ -211,7 +215,7 @@ async def get_depto_pyl(
 
         sales_q = select(
             sa_func.coalesce(sa_func.sum(SaleItem.total), 0),
-            sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
+            sa_func.coalesce(sa_func.sum(sa_func.sign(SaleItem.total) * SaleItem.costo_unitario * SaleItem.cantidad), 0),
         ).join(Sale, SaleItem.sale_id == Sale.id).where(
             Sale.company_id == company_id,
             Sale.estado != "anulado",
@@ -257,7 +261,7 @@ async def get_depto_pyl(
     if all_area_pids:
         gral_q = select(
             sa_func.coalesce(sa_func.sum(SaleItem.total), 0),
-            sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
+            sa_func.coalesce(sa_func.sum(sa_func.sign(SaleItem.total) * SaleItem.costo_unitario * SaleItem.cantidad), 0),
         ).join(Sale, SaleItem.sale_id == Sale.id).where(
             Sale.company_id == company_id,
             Sale.estado != "anulado",
@@ -284,7 +288,7 @@ async def get_depto_pyl(
         fallback_q = (
             select(
                 sa_func.coalesce(sa_func.sum(SaleItem.total), 0),
-                sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
+                sa_func.coalesce(sa_func.sum(sa_func.sign(SaleItem.total) * SaleItem.costo_unitario * SaleItem.cantidad), 0),
             )
             .join(Sale, SaleItem.sale_id == Sale.id)
             .where(Sale.company_id == company_id, Sale.estado != "anulado")
