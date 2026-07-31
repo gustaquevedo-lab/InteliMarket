@@ -17,6 +17,7 @@ class CashRegister(Base):
     codigo = Column(String(20), nullable=False, unique=True)
     activo = Column(Boolean, default=True)
     cash_drop_threshold = Column(Numeric(15, 0))  # monto de efectivo acumulado que dispara la alerta de cash drop
+    diferencia_maxima_tolerada = Column(Numeric(15, 0))  # descuadre de cierre (PYG) a partir del cual se marca para revision
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -49,6 +50,13 @@ class CashCount(Base):
     monto_otro = Column(Numeric(15, 0), default=0)
     monto_total = Column(Numeric(15, 0), nullable=False)
     diferencia = Column(Numeric(15, 0))
+    # El legado (Ñemuha) maneja efectivo en 3 monedas por caja — ~96% de los cierres
+    # reales de este cliente incluyen Real brasileño. Guardamos cada moneda por
+    # separado (sin inventar una conversion que el legado tampoco hacia).
+    monto_efectivo_usd = Column(Numeric(12, 2), default=0)
+    monto_efectivo_brl = Column(Numeric(12, 2), default=0)
+    diferencia_usd = Column(Numeric(12, 2), default=0)
+    diferencia_brl = Column(Numeric(12, 2), default=0)
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

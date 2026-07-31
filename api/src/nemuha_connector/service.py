@@ -803,8 +803,14 @@ async def sync_sales(db: AsyncSession, company_id: str, since: date | None) -> i
 # (VL_RECEBIMENTO viene NULL en la mayoria de las filas).
 
 async def sync_sale_payments(db: AsyncSession, company_id: str, since: date | None) -> int:
+    # ID_MOEDA importa: ~8.6% de los recibos historicos son en Real brasileno
+    # (zona de frontera) y un puñado en Dolar — VL_RECEBIDO es el monto en esa
+    # moneda tal cual, sin convertir (VL_RECEBIMENTO/COTACAO vienen NULL). Antes
+    # se guardaba ese valor crudo como si fuera PYG, contaminando los totales de
+    # efectivo con montos ~1000x mas chicos de lo real. Ahora se etiqueta con
+    # moneda y los totales en guaranies filtran explicitamente por PYG.
     sql = """
-        SELECT r.ID_RECEBIMENTO, r.ID_VENDA, r.VL_RECEBIDO, r.DT_RECEBIMENTO,
+        SELECT r.ID_RECEBIMENTO, r.ID_VENDA, r.VL_RECEBIDO, r.DT_RECEBIMENTO, r.ID_MOEDA,
                COALESCE(f.DS_FORMA_RECEBIMENTO, 'DESCONOCIDO') AS forma_pago
         FROM fin_recebimento r
         LEFT JOIN fin_forma_recebimento f ON f.ID_FORMA_RECEBIMENTO = r.ID_FORMA_RECEBIMENTO
@@ -832,6 +838,7 @@ async def sync_sale_payments(db: AsyncSession, company_id: str, since: date | No
             sale_id=sale_id,
             forma_pago=r["forma_pago"].strip(),
             monto=Decimal(str(r["VL_RECEBIDO"])),
+            moneda=MONEDA_MAP.get(r["ID_MOEDA"], "PYG"),
             fecha=r["DT_RECEBIMENTO"],
         )
         db.add(payment)
@@ -1203,11 +1210,18 @@ async def sync_cash_sessions(db: AsyncSession, company_id: str, since: date | No
         await db.flush()
 
         if estado == "cerrada":
+            # fin_caixa_chica ya trae el cierre en las 3 monedas (guarani/dolar/real)
+            # — antes solo se migraba guarani y se perdia el resto (~96% de los
+            # cierres reales de este cliente incluyen Real, zona de frontera).
             db.add(CashCount(
                 session_id=session.id,
                 monto_efectivo=Decimal(str(r["VL_FECHAMENTO_GUARANI"])),
                 monto_total=Decimal(str(r["VL_FECHAMENTO_GUARANI"])),
                 diferencia=Decimal(str(r["VL_DIFERENCA_GUARANI"])),
+                monto_efectivo_usd=Decimal(str(r["VL_FECHAMENTO_DOLAR"])),
+                monto_efectivo_brl=Decimal(str(r["VL_FECHAMENTO_REAL"])),
+                diferencia_usd=Decimal(str(r["VL_DIFERENCA_DOLAR"])),
+                diferencia_brl=Decimal(str(r["VL_DIFERENCA_REAL"])),
             ))
 
         await _save_map(db, company_id, "fin_caixa_chica", r["ID_CAIXA_CHICA"], "cash_sessions", session.id)

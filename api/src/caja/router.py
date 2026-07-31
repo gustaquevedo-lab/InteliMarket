@@ -85,7 +85,9 @@ async def open_session(body: CashSessionCreate, db: AsyncSession = Depends(get_d
 
 @router.post("/cash-sessions/{session_id}/close")
 async def close_session(session_id: str, body: CashSessionClose, db: AsyncSession = Depends(get_db)):
-    result = await service.close_session(db, session_id, body.monto_cierre_real, body.observaciones)
+    result = await service.close_session(
+        db, session_id, body.monto_cierre_real, body.monto_cierre_usd, body.monto_cierre_brl, body.observaciones
+    )
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo cerrar la sesi\u00f3n")
     return result

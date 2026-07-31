@@ -18,6 +18,7 @@ class CashRegisterUpdate(BaseModel):
     codigo: Optional[str] = None
     activo: Optional[bool] = None
     cash_drop_threshold: Optional[Decimal] = None
+    diferencia_maxima_tolerada: Optional[Decimal] = None
 
 
 class CashRegisterResponse(BaseModel):
@@ -27,6 +28,7 @@ class CashRegisterResponse(BaseModel):
     codigo: str
     activo: bool
     cash_drop_threshold: Optional[Decimal] = None
+    diferencia_maxima_tolerada: Optional[Decimal] = None
     created_at: datetime
 
     class Config:
@@ -60,6 +62,8 @@ class CashSessionResponse(BaseModel):
 
 class CashSessionClose(BaseModel):
     monto_cierre_real: Decimal
+    monto_cierre_usd: Decimal = Decimal("0")
+    monto_cierre_brl: Decimal = Decimal("0")
     observaciones: Optional[str] = None
 
 

@@ -41,7 +41,7 @@ export interface Payment { id: string; sale_id?: string; metodo_pago_id?: string
 export interface Warehouse { id: string; codigo?: string; nombre: string; direccion?: string; ciudad?: string; tipo?: string; activo?: boolean; company_id?: string; created_at?: string }
 export interface StockItem { id?: string; product_id?: string; producto?: Product; product?: Product; nombre?: string; sku?: string; warehouse_id?: string; warehouse?: Warehouse; cantidad?: number; cantidad_reservada?: number; cantidad_disponible?: number; stock_minimo?: number; stock_maximo?: number; costo_promedio?: number; ultimo_costo?: number; costo_unitario?: number; lote?: string; fecha_vencimiento?: string; created_at?: string }
 export interface Company { id: string; nombre: string; ruc?: string; razon_social?: string; direccion?: string; telefono?: string; email?: string; logo_url?: string; activo?: boolean; config?: Record<string, unknown>; iva_condition?: string; regimen_tributario?: string; created_at?: string; updated_at?: string }
-export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; cash_drop_threshold?: number | null; created_at?: string }
+export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; cash_drop_threshold?: number | null; diferencia_maxima_tolerada?: number | null; created_at?: string }
 export interface CashSession { id: string; caja_id?: string; caja?: CashRegister; cash_register?: CashRegister; usuario_id?: string; fecha_apertura?: string; fecha_cierre?: string; monto_apertura?: number; monto_cierre?: number; total_ventas?: number; total_retiros?: number; total_ingresos?: number; estado?: string; observaciones?: string; created_at?: string }
 export interface Branch { id: string; nombre: string; codigo: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; ruc?: string; punto_emision?: string | number; activo?: boolean; company_id?: string; created_at?: string; updated_at?: string }
 export interface CreditAccount { id: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_ruc?: string; saldo?: number; limite_credito?: number; saldo_utilizado?: number; saldo_disponible?: number; porcentaje_uso?: number; estado?: string; activo?: boolean; created_at?: string; updated_at?: string }
@@ -352,18 +352,18 @@ export const api = {
     registers: {
       list: () => client.get<CashRegister[]>("/v1/cash-registers"),
       create: (data: Partial<CashRegister>) => client.post<CashRegister>("/v1/cash-registers", data),
-      update: (id: string, data: { nombre?: string; codigo?: string; activo?: boolean; cash_drop_threshold?: number }) => client.put<CashRegister>(`/v1/cash-registers/${id}`, data),
+      update: (id: string, data: { nombre?: string; codigo?: string; activo?: boolean; cash_drop_threshold?: number; diferencia_maxima_tolerada?: number }) => client.put<CashRegister>(`/v1/cash-registers/${id}`, data),
     },
     sessions: {
       list: (params?: { estado?: string; limit?: number; offset?: number }) => client.get<CashSession[]>("/v1/cash-sessions", params),
       create: (data: { cash_register_id?: string; caja_id?: string; user_id?: string; cajero_nombre?: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions", data),
-      close: (id: string, data: { monto_cierre_real: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
+      close: (id: string, data: { monto_cierre_real: number; monto_cierre_usd?: number; monto_cierre_brl?: number; observaciones?: string }) => client.post<{ session: CashSession; monto_cierre_esperado: number; diferencia: number; diferencia_usd: number; diferencia_brl: number; requiere_revision: boolean }>(`/v1/cash-sessions/${id}/close`, data),
     },
     sessionsSummary: (params?: { estado?: string; register_id?: string; limit?: number; offset?: number }) =>
-      client.get<{ id: string; register_id: string; user_id: string; cajero_nombre: string | null; fecha_apertura: string; fecha_cierre: string | null; monto_apertura: number; monto_cierre: number | null; monto_cobrado: number; estado: string; cash_drop_alert: boolean; efectivo_acumulado: number; ultimo_cash_drop_at: string | null }[]>(
+      client.get<{ id: string; register_id: string; user_id: string; cajero_nombre: string | null; fecha_apertura: string; fecha_cierre: string | null; monto_apertura: number; monto_cierre: number | null; monto_cobrado: number; estado: string; cash_drop_alert: boolean; efectivo_acumulado: number; efectivo_usd_acumulado: number; efectivo_brl_acumulado: number; ultimo_cash_drop_at: string | null }[]>(
         "/v1/cash-sessions-summary", { company_id: COMPANY_ID, ...params } as any
       ),
-    paymentBreakdown: (sessionId: string) => client.get<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>(`/v1/cash-sessions/${sessionId}/payment-breakdown`),
+    paymentBreakdown: (sessionId: string) => client.get<{ pyg: { forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]; otras_monedas: { forma_pago: string; moneda: string; cantidad: number; monto: number }[] }>(`/v1/cash-sessions/${sessionId}/payment-breakdown`),
     cashDrop: (sessionId: string, data: { monto: number; observaciones?: string }) => client.post<any>(`/v1/cash-sessions/${sessionId}/cash-drop`, data),
     openSession: (data: { caja_id: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions/open", data),
     closeSession: (id: string, data: { monto_cierre: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),

@@ -137,7 +137,30 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
     return session_obj
 
 
-async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: Decimal, observaciones: str | None = None) -> dict | None:
+async def _efectivo_esperado_por_moneda(db: AsyncSession, session_id, moneda: str) -> Decimal:
+    """Efectivo recibido en una moneda durante la sesion (sin conversion — el
+    legado tampoco convierte, cada moneda de caja se cuenta por separado)."""
+    result = await db.execute(
+        select(func.coalesce(func.sum(SalePayment.monto), 0))
+        .select_from(SalePayment)
+        .join(Sale, Sale.id == SalePayment.sale_id)
+        .where(
+            Sale.session_id == session_id,
+            SalePayment.forma_pago == "EFECTIVO",
+            SalePayment.moneda == moneda,
+        )
+    )
+    return Decimal(str(result.scalar() or 0))
+
+
+async def close_session(
+    db: AsyncSession,
+    session_id: str,
+    monto_cierre_real: Decimal,
+    monto_cierre_usd: Decimal = Decimal("0"),
+    monto_cierre_brl: Decimal = Decimal("0"),
+    observaciones: str | None = None,
+) -> dict | None:
     result = await db.execute(
         select(CashSession).where(CashSession.id == uuid.UUID(session_id))
     )
@@ -157,6 +180,18 @@ async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: De
     monto_cierre_esperado = Decimal(str(session_obj.monto_apertura)) + Decimal(str(total_cobrado))
     diferencia = Decimal(str(monto_cierre_real)) - monto_cierre_esperado
 
+    efectivo_usd_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "USD")
+    efectivo_brl_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "BRL")
+    diferencia_usd = monto_cierre_usd - efectivo_usd_esperado
+    diferencia_brl = monto_cierre_brl - efectivo_brl_esperado
+
+    register_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
+    register = register_result.scalar_one_or_none()
+    requiere_revision = bool(
+        register and register.diferencia_maxima_tolerada is not None
+        and abs(diferencia) > register.diferencia_maxima_tolerada
+    )
+
     session_obj.fecha_cierre = datetime.now(timezone.utc)
     session_obj.monto_cierre = monto_cierre_real
     session_obj.observaciones = observaciones
@@ -168,6 +203,10 @@ async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: De
         monto_efectivo=monto_cierre_real,
         monto_total=monto_cierre_real,
         diferencia=diferencia,
+        monto_efectivo_usd=monto_cierre_usd,
+        monto_efectivo_brl=monto_cierre_brl,
+        diferencia_usd=diferencia_usd,
+        diferencia_brl=diferencia_brl,
     ))
     await db.flush()
     await db.refresh(session_obj)
@@ -176,6 +215,9 @@ async def close_session(db: AsyncSession, session_id: str, monto_cierre_real: De
         "session": session_obj,
         "monto_cierre_esperado": monto_cierre_esperado,
         "diferencia": diferencia,
+        "diferencia_usd": diferencia_usd,
+        "diferencia_brl": diferencia_brl,
+        "requiere_revision": requiere_revision,
     }
 
 
@@ -233,17 +275,22 @@ async def list_sessions_with_totals(
 
         cash_drop_alert = False
         efectivo_acumulado = 0.0
+        efectivo_usd_acumulado = 0.0
+        efectivo_brl_acumulado = 0.0
         if s.estado == "abierta":
             register_result = await db.execute(select(CashRegister).where(CashRegister.id == s.register_id))
             register = register_result.scalar_one_or_none()
-            if register and register.cash_drop_threshold:
+            if register:
                 desde = s.ultimo_cash_drop_at or s.fecha_apertura
                 # Los pagos sincronizados del legado solo tienen granularidad de dia
                 # (fin_recebimento.DT_RECEBIMENTO es DATE, sin hora) — comparar por
                 # dia en vez de timestamp exacto, o una sesion abierta hoy nunca
                 # verian sus propios cobros de hoy (medianoche < hora de apertura).
-                efectivo_result = await db.execute(
-                    select(func.coalesce(func.sum(SalePayment.monto), 0))
+                # Solo PYG entra en el acumulado que dispara la alerta — el efectivo
+                # en USD/BRL se informa aparte, sin mezclarlo (el legado tampoco
+                # convierte moneda al arquear).
+                monedas_result = await db.execute(
+                    select(SalePayment.moneda, func.coalesce(func.sum(SalePayment.monto), 0))
                     .select_from(SalePayment)
                     .join(Sale, Sale.id == SalePayment.sale_id)
                     .where(
@@ -251,9 +298,14 @@ async def list_sessions_with_totals(
                         SalePayment.forma_pago == "EFECTIVO",
                         func.date(SalePayment.fecha) >= func.date(desde),
                     )
+                    .group_by(SalePayment.moneda)
                 )
-                efectivo_acumulado = float(efectivo_result.scalar() or 0)
-                cash_drop_alert = efectivo_acumulado >= float(register.cash_drop_threshold)
+                por_moneda = {row[0]: float(row[1]) for row in monedas_result.all()}
+                efectivo_acumulado = por_moneda.get("PYG", 0.0)
+                efectivo_usd_acumulado = por_moneda.get("USD", 0.0)
+                efectivo_brl_acumulado = por_moneda.get("BRL", 0.0)
+                if register.cash_drop_threshold:
+                    cash_drop_alert = efectivo_acumulado >= float(register.cash_drop_threshold)
 
         out.append({
             "id": str(s.id),
@@ -268,35 +320,54 @@ async def list_sessions_with_totals(
             "estado": s.estado,
             "cash_drop_alert": cash_drop_alert,
             "efectivo_acumulado": efectivo_acumulado,
+            "efectivo_usd_acumulado": efectivo_usd_acumulado,
+            "efectivo_brl_acumulado": efectivo_brl_acumulado,
             "ultimo_cash_drop_at": s.ultimo_cash_drop_at.isoformat() if s.ultimo_cash_drop_at else None,
         })
     return out
 
 
-async def get_session_payment_breakdown(db: AsyncSession, session_id: str) -> list[dict]:
+async def get_session_payment_breakdown(db: AsyncSession, session_id: str) -> dict:
+    """Desglose por forma de pago. Se separa PYG (base de los % mostrados) de
+    otras monedas (USD/BRL) — mezclarlas en un mismo total daria un porcentaje
+    sin sentido, ya que el legado tampoco convierte esos montos."""
     result = await db.execute(
         select(
             SalePayment.forma_pago,
+            SalePayment.moneda,
             func.count().label("cantidad"),
             func.sum(SalePayment.monto).label("monto"),
         )
         .select_from(SalePayment)
         .join(Sale, Sale.id == SalePayment.sale_id)
         .where(Sale.session_id == uuid.UUID(session_id))
-        .group_by(SalePayment.forma_pago)
+        .group_by(SalePayment.forma_pago, SalePayment.moneda)
         .order_by(func.sum(SalePayment.monto).desc())
     )
     rows = result.all()
-    total = float(sum(r.monto for r in rows)) or 1
-    return [
-        {
-            "forma_pago": r.forma_pago,
-            "cantidad": r.cantidad,
-            "monto": float(r.monto),
-            "porcentaje": round((float(r.monto) / total) * 100, 1),
-        }
-        for r in rows
-    ]
+    pyg_rows = [r for r in rows if r.moneda == "PYG"]
+    otras_rows = [r for r in rows if r.moneda != "PYG"]
+    total_pyg = float(sum(r.monto for r in pyg_rows)) or 1
+    return {
+        "pyg": [
+            {
+                "forma_pago": r.forma_pago,
+                "cantidad": r.cantidad,
+                "monto": float(r.monto),
+                "porcentaje": round((float(r.monto) / total_pyg) * 100, 1),
+            }
+            for r in pyg_rows
+        ],
+        "otras_monedas": [
+            {
+                "forma_pago": r.forma_pago,
+                "moneda": r.moneda,
+                "cantidad": r.cantidad,
+                "monto": float(r.monto),
+            }
+            for r in otras_rows
+        ],
+    }
 
 
 async def register_cash_drop(db: AsyncSession, session_id: str, monto: Decimal, observaciones: str | None = None) -> CashRegisterMovement | None:

@@ -79,7 +79,8 @@ class SalePayment(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     sale_id = Column(UUID(as_uuid=True), ForeignKey("sales.id"), nullable=False, index=True)
     forma_pago = Column(String(30), nullable=False)
-    monto = Column(Numeric(15, 0), nullable=False)
+    monto = Column(Numeric(15, 2), nullable=False)
+    moneda = Column(String(3), nullable=False, default="PYG", server_default=text("'PYG'"))
     fecha = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

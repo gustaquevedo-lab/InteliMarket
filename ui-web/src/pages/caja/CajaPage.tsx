@@ -19,6 +19,8 @@ interface SessionSummary {
   estado: string
   cash_drop_alert: boolean
   efectivo_acumulado: number
+  efectivo_usd_acumulado: number
+  efectivo_brl_acumulado: number
   ultimo_cash_drop_at: string | null
 }
 
@@ -27,6 +29,13 @@ interface PaymentBreakdownItem {
   cantidad: number
   monto: number
   porcentaje: number
+}
+
+interface OtraMonedaItem {
+  forma_pago: string
+  moneda: string
+  cantidad: number
+  monto: number
 }
 
 const registerStatusMap: Record<string, string> = {
@@ -50,15 +59,19 @@ export default function CajaPage() {
   const [showThresholdModal, setShowThresholdModal] = useState<CashRegister | null>(null)
   const [showCashDropModal, setShowCashDropModal] = useState<SessionSummary | null>(null)
   const [breakdown, setBreakdown] = useState<PaymentBreakdownItem[]>([])
+  const [otrasMonedas, setOtrasMonedas] = useState<OtraMonedaItem[]>([])
   const [breakdownLoading, setBreakdownLoading] = useState(false)
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null)
   const [selectedRegister, setSelectedRegister] = useState<string>("")
   const [montoApertura, setMontoApertura] = useState("0")
   const [montoCierre, setMontoCierre] = useState("0")
+  const [montoCierreUsd, setMontoCierreUsd] = useState("0")
+  const [montoCierreBrl, setMontoCierreBrl] = useState("0")
   const [observacionesCierre, setObservacionesCierre] = useState("")
   const [newRegisterName, setNewRegisterName] = useState("")
   const [newRegisterType, setNewRegisterType] = useState("principal")
   const [thresholdValue, setThresholdValue] = useState("0")
+  const [diferenciaToleradaValue, setDiferenciaToleradaValue] = useState("0")
   const [cashDropMonto, setCashDropMonto] = useState("0")
   const [cashDropObs, setCashDropObs] = useState("")
   const toast = useToast()
@@ -140,13 +153,21 @@ export default function CajaPage() {
   const handleCloseSession = async () => {
     if (!selectedSession) return
     try {
-      await api.caja.sessions.close(selectedSession.id, {
+      const result = await api.caja.sessions.close(selectedSession.id, {
         monto_cierre_real: parseFloat(montoCierre) || 0,
+        monto_cierre_usd: parseFloat(montoCierreUsd) || 0,
+        monto_cierre_brl: parseFloat(montoCierreBrl) || 0,
         observaciones: observacionesCierre,
       })
-      toast.success("Caja cerrada", "Sesión cerrada correctamente")
+      if (result.requiere_revision) {
+        toast.error("Caja cerrada — requiere revisión", `Descuadre de ${formatPYG(result.diferencia)}, supera la tolerancia configurada`)
+      } else {
+        toast.success("Caja cerrada", "Sesión cerrada correctamente")
+      }
       setShowCloseModal(false)
       setMontoCierre("0")
+      setMontoCierreUsd("0")
+      setMontoCierreBrl("0")
       setObservacionesCierre("")
       setSelectedSession(null)
       fetchData()
@@ -181,10 +202,12 @@ export default function CajaPage() {
     setBreakdownLoading(true)
     try {
       const data = await api.caja.paymentBreakdown(s.id)
-      setBreakdown(data)
+      setBreakdown(data.pyg)
+      setOtrasMonedas(data.otras_monedas)
     } catch {
       toast.error("Error", "No se pudo cargar el desglose de cobros")
       setBreakdown([])
+      setOtrasMonedas([])
     } finally {
       setBreakdownLoading(false)
     }
@@ -193,13 +216,17 @@ export default function CajaPage() {
   const handleOpenThreshold = (r: CashRegister) => {
     setShowThresholdModal(r)
     setThresholdValue(String(r.cash_drop_threshold || 0))
+    setDiferenciaToleradaValue(String(r.diferencia_maxima_tolerada || 0))
   }
 
   const handleSaveThreshold = async () => {
     if (!showThresholdModal) return
     try {
-      await api.caja.registers.update(showThresholdModal.id, { cash_drop_threshold: parseFloat(thresholdValue) || 0 })
-      toast.success("Guardado", "Umbral de cash drop actualizado")
+      await api.caja.registers.update(showThresholdModal.id, {
+        cash_drop_threshold: parseFloat(thresholdValue) || 0,
+        diferencia_maxima_tolerada: parseFloat(diferenciaToleradaValue) || 0,
+      })
+      toast.success("Guardado", "Umbrales actualizados")
       setShowThresholdModal(null)
       fetchData()
     } catch {
@@ -395,7 +422,7 @@ export default function CajaPage() {
                           <button onClick={() => handleOpenCashDrop(s)} className="btn-ghost text-xs text-amber-600">Cash drop</button>
                         )}
                         {s.estado === "abierta" && (
-                          <button onClick={() => { setSelectedSession(s); setMontoCierre("0"); setShowCloseModal(true) }} className="btn-ghost text-xs">Cerrar</button>
+                          <button onClick={() => { setSelectedSession(s); setMontoCierre("0"); setMontoCierreUsd("0"); setMontoCierreBrl("0"); setShowCloseModal(true) }} className="btn-ghost text-xs">Cerrar</button>
                         )}
                       </div>
                     </td>
@@ -479,6 +506,18 @@ export default function CajaPage() {
                 <label className="label">Monto de cierre (₲)</label>
                 <input className="input-field" type="number" placeholder="0" value={montoCierre} onChange={(e) => setMontoCierre(e.target.value)} />
               </div>
+              {(selectedSession.efectivo_usd_acumulado > 0 || selectedSession.efectivo_brl_acumulado > 0) && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Efectivo en USD</label>
+                    <input className="input-field" type="number" placeholder="0" value={montoCierreUsd} onChange={(e) => setMontoCierreUsd(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Efectivo en Real (R$)</label>
+                    <input className="input-field" type="number" placeholder="0" value={montoCierreBrl} onChange={(e) => setMontoCierreBrl(e.target.value)} />
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="label">Observaciones</label>
                 <textarea className="input-field" placeholder="Notas de cierre..." value={observacionesCierre} onChange={(e) => setObservacionesCierre(e.target.value)} rows={3} />
@@ -531,6 +570,19 @@ export default function CajaPage() {
                 ))}
               </div>
             )}
+            {otrasMonedas.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                <p className="text-xs font-bold text-gray-400 uppercase mb-2">Otras monedas recibidas</p>
+                <div className="space-y-1">
+                  {otrasMonedas.map((o, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-300">{o.forma_pago} ({o.moneda})</span>
+                      <span className="font-mono font-bold">{o.monto.toLocaleString("es-PY")} {o.moneda} <span className="text-gray-400 font-normal">· {o.cantidad}x</span></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {selectedSession.cash_drop_alert && (
               <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-500/10 rounded-xl flex items-center justify-between">
                 <div className="flex items-center gap-2 text-amber-600 text-sm font-bold">
@@ -547,12 +599,17 @@ export default function CajaPage() {
       {showThresholdModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowThresholdModal(null)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Umbral de cash drop</h3>
-            <p className="text-xs text-gray-400 mb-4">{showThresholdModal.nombre} — cuando el efectivo acumulado en una sesión abierta supere este monto, se muestra una alerta para retirarlo a la bóveda.</p>
-            <div className="space-y-4">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Umbrales de {showThresholdModal.nombre}</h3>
+            <div className="space-y-4 mt-4">
               <div>
-                <label className="label">Monto (₲)</label>
+                <label className="label">Umbral de cash drop (₲)</label>
+                <p className="text-xs text-gray-400 mb-1">Cuando el efectivo acumulado en una sesión abierta supere este monto, se muestra una alerta para retirarlo a la bóveda.</p>
                 <input className="input-field" type="number" placeholder="1500000" value={thresholdValue} onChange={(e) => setThresholdValue(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Diferencia máxima tolerada al cierre (₲)</label>
+                <p className="text-xs text-gray-400 mb-1">Si el descuadre al cerrar una sesión supera este monto, se marca la sesión como "requiere revisión".</p>
+                <input className="input-field" type="number" placeholder="0" value={diferenciaToleradaValue} onChange={(e) => setDiferenciaToleradaValue(e.target.value)} />
               </div>
               <div className="flex gap-3 justify-end pt-2">
                 <button className="btn-ghost" onClick={() => setShowThresholdModal(null)}>Cancelar</button>
