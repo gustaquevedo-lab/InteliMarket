@@ -84,7 +84,7 @@ from api.src.config import settings
 from api.src.nemuha_connector.models import NemuhaRecordMap, NemuhaSyncRun
 from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseOrderItem, PurchaseReceipt, PurchaseReceiptItem
 from api.src.customers.models import Customer
-from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction, SupplierCreditNote, SupplierReturn, PayrollMovement
+from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment, BankAccount, BankTransaction, SupplierCreditNote, SupplierReturn, PayrollMovement
 from api.src.petty_cash.models import Expense, ExpenseCategory
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
@@ -277,6 +277,62 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
             db.add(invoice)
             await db.flush()
             await _save_map(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"], "supplier_invoices", invoice.id)
+        count += 1
+
+    return count
+
+
+# ── Pagos a proveedor (fin_pagamento) ───────────────────────────────────────────
+#
+# Antes deliberadamente fuera de alcance: solo se sincronizaba el saldo
+# pendiente (VL_APAGAR) ya calculado en la cabecera de fin_conta_pagar, sin el
+# historial de pagos individuales. 5.499 pagos reales (₲13.560M, activo hasta
+# ayer) — sin esto, InteliMarket sabe CUANTO se debe pero no CUANDO/COMO se
+# fue pagando. Necesario para reconstruir flujo de caja historico y estado de
+# cuenta de proveedor.
+
+async def sync_supplier_invoice_payments(db: AsyncSession, company_id: str, since: date | None) -> int:
+    formas = {r["ID_FORMA_RECEBIMENTO"]: r["DS_FORMA_RECEBIMENTO"] for r in await _fetch("SELECT ID_FORMA_RECEBIMENTO, DS_FORMA_RECEBIMENTO FROM fin_forma_recebimento")}
+    operaciones = {r["ID_OPERACAO"]: r["ID_CONTA"] for r in await _fetch("SELECT ID_OPERACAO, ID_CONTA FROM bc_operacao_banco")}
+
+    sql = "SELECT * FROM fin_pagamento WHERE ID_CONTA_PAGAR IS NOT NULL"
+    params: tuple = ()
+    if since:
+        sql += " AND DT_PAGAMENTO >= %s"
+        params = (since,)
+    rows = await _fetch(sql, params)
+
+    count = 0
+    for r in rows:
+        existing_id = await _get_mapped_target(db, company_id, "fin_pagamento", r["ID_PAGAMENTO"])
+        if existing_id:
+            count += 1
+            continue
+
+        invoice_id = await _get_mapped_target(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"])
+        if not invoice_id:
+            continue  # factura no sincronizada (fuera del rango de fechas) — no inventar una
+
+        bank_account_id = None
+        id_conta_legacy = operaciones.get(r["ID_OPERACAO"]) if r["ID_OPERACAO"] else None
+        if id_conta_legacy:
+            bank_account_id = await _get_mapped_target(db, company_id, "bc_conta_banco", id_conta_legacy)
+
+        metodo = "CHEQUE" if r["BO_CHEQUE"] else formas.get(r["ID_FORMA_RECEBIMENTO"], "EFECTIVO")
+
+        payment = SupplierInvoicePayment(
+            invoice_id=invoice_id,
+            payment_method=(metodo or "EFECTIVO").strip(),
+            monto=Decimal(str(r["VL_PAGO"])),
+            moneda=MONEDA_MAP.get(r["ID_MOEDA"], "PYG"),
+            fecha_pago=r["DT_PAGAMENTO"],
+            referencia=str(r["NR_DOCUMENTO"]) if r["NR_DOCUMENTO"] else None,
+            bank_account_id=bank_account_id,
+            estado="pagado",
+        )
+        db.add(payment)
+        await db.flush()
+        await _save_map(db, company_id, "fin_pagamento", r["ID_PAGAMENTO"], "supplier_invoice_payments", payment.id)
         count += 1
 
     return count
@@ -1466,6 +1522,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("bank_accounts", sync_bank_accounts),
         ("bank_transactions", sync_bank_transactions),
         ("bank_balances", sync_bank_balances),
+        ("supplier_invoice_payments", sync_supplier_invoice_payments),
         ("expense_categories", sync_expense_categories),
         ("petty_cash_expenses", sync_petty_cash_expenses),
         ("cash_register_arqueo", sync_cash_register_arqueo),

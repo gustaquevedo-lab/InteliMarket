@@ -1,6 +1,7 @@
 """Financial service — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
 from sqlalchemy import select, func, and_, or_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
@@ -101,15 +102,11 @@ async def get_invoice(db: AsyncSession, invoice_id: str) -> SupplierInvoice | No
 
 async def get_invoice_with_payments(db: AsyncSession, invoice_id: str) -> SupplierInvoice | None:
     result = await db.execute(
-        select(SupplierInvoice).where(SupplierInvoice.id == uuid.UUID(invoice_id))
+        select(SupplierInvoice)
+        .options(selectinload(SupplierInvoice.payments))
+        .where(SupplierInvoice.id == uuid.UUID(invoice_id))
     )
-    invoice = result.scalar_one_or_none()
-    if invoice:
-        result_p = await db.execute(
-            select(SupplierInvoicePayment).where(SupplierInvoicePayment.invoice_id == uuid.UUID(invoice_id))
-        )
-        invoice.payments = list(result_p.scalars().all())
-    return invoice
+    return result.scalar_one_or_none()
 
 
 async def approve_invoice(db: AsyncSession, invoice_id: str, user_id: str | None = None) -> SupplierInvoice | None:
