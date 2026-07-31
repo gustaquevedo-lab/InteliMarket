@@ -176,6 +176,7 @@ export default function ReportsPage() {
   const [salesByPeriod, setSalesByPeriod] = useState<{ periodo: string; monto: number }[]>([])
   const [salesByPaymentMethod, setSalesByPaymentMethod] = useState<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>([])
   const [expensesByCategory, setExpensesByCategory] = useState<{ categoria: string; cantidad: number; monto: number; porcentaje: number }[]>([])
+  const [payrollByConcepto, setPayrollByConcepto] = useState<{ concepto: string; es_credito: boolean; cantidad: number; monto: number; porcentaje: number | null }[]>([])
   const [fifoData, setFifoData] = useState<any[]>([])
   const [lifoData, setLifoData] = useState<any[]>([])
   const [costComparison, setCostComparison] = useState<any[]>([])
@@ -185,7 +186,7 @@ export default function ReportsPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [sales, inventory, financial, category, period, paymentMethod, expenseCategory] = await Promise.allSettled([
+      const [sales, inventory, financial, category, period, paymentMethod, expenseCategory, payroll] = await Promise.allSettled([
         api.reports.salesSummary(),
         api.reports.inventorySummary(),
         api.reports.financialSummary(),
@@ -193,6 +194,7 @@ export default function ReportsPage() {
         api.reports.salesByPeriod({ agrupar_por: "dia" }),
         api.reports.salesByPaymentMethod(),
         api.reports.expensesByCategory(),
+        api.financial.payrollByConcepto(),
       ])
       if (sales.status === "fulfilled") setSalesSummary(sales.value)
       if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
@@ -201,6 +203,7 @@ export default function ReportsPage() {
       if (period.status === "fulfilled") setSalesByPeriod(period.value)
       if (paymentMethod.status === "fulfilled") setSalesByPaymentMethod(paymentMethod.value)
       if (expenseCategory.status === "fulfilled") setExpensesByCategory(expenseCategory.value)
+      if (payroll.status === "fulfilled") setPayrollByConcepto(payroll.value)
       if (sales.status === "rejected") toast.info("Datos demo", "Conectá el backend para ver datos reales")
     } catch {
       toast.error("Error", "No se pudieron cargar los reportes")
@@ -368,6 +371,44 @@ export default function ReportsPage() {
               </div>
             ) : (
               <p className="text-center py-8 text-gray-400">Sin datos de gastos por categoría todavía</p>
+            )}
+          </div>
+          )}
+
+          {/* Nómina por concepto */}
+          {showFinanciero && (
+          <div className="card p-6">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white mb-1">Nómina por concepto</h3>
+            <p className="text-xs text-gray-400 mb-4">Detalle real de rh_movimento (legado) — no está sumado a "Gastos por categoría" para no duplicar la cifra de sueldos.</p>
+            {payrollByConcepto.filter(p => p.es_credito).length > 0 ? (
+              <div className="space-y-4">
+                {payrollByConcepto.filter(p => p.es_credito).slice(0, 10).map((d, i) => (
+                  <div key={i}>
+                    <div className="flex items-baseline justify-between gap-3 mb-1">
+                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300 leading-snug">{d.concepto}</span>
+                      <span className="text-xs font-mono text-gray-500 flex-shrink-0 whitespace-nowrap">{formatPYG(d.monto)} · {d.porcentaje}%</span>
+                    </div>
+                    <div className="h-2.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                      <div className={`h-full ${catColors[i % catColors.length]} rounded-full transition-all`} style={{ width: `${Math.max(d.porcentaje || 2, 2)}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-center py-8 text-gray-400">Sin datos de nómina todavía</p>
+            )}
+            {payrollByConcepto.some(p => !p.es_credito) && (
+              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                <p className="text-xs font-bold text-gray-400 uppercase mb-2">Descuentos (adelantos, faltas, faltante de caja, multas)</p>
+                <div className="space-y-1">
+                  {payrollByConcepto.filter(p => !p.es_credito).map((d, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-300">{d.concepto}</span>
+                      <span className="font-mono font-bold text-red-500">-{formatPYG(d.monto)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
           )}

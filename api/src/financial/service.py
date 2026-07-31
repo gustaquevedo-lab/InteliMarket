@@ -11,7 +11,7 @@ from api.src.financial.models import (
     BankAccount, BankTransaction,
     CashFlowProjection, Budget,
     PaymentRun, PaymentRunItem,
-    SupplierCreditNote, SupplierReturn,
+    SupplierCreditNote, SupplierReturn, PayrollMovement,
 )
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoicePaymentCreate,
@@ -1073,4 +1073,54 @@ async def list_supplier_returns(db: AsyncSession, company_id: str, supplier_id: 
             "observaciones": r.observaciones,
         }
         for r, razon_social in result.all()
+    ]
+
+
+async def get_payroll_by_concepto(db: AsyncSession, company_id: str, fecha_desde: date | None = None, fecha_hasta: date | None = None) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    query = select(
+        PayrollMovement.concepto,
+        PayrollMovement.es_credito,
+        func.count().label("cantidad"),
+        func.sum(PayrollMovement.monto).label("monto"),
+    ).where(PayrollMovement.company_id == cid)
+    if fecha_desde:
+        query = query.where(PayrollMovement.fecha >= fecha_desde)
+    if fecha_hasta:
+        query = query.where(PayrollMovement.fecha <= fecha_hasta)
+    query = query.group_by(PayrollMovement.concepto, PayrollMovement.es_credito).order_by(func.sum(PayrollMovement.monto).desc())
+    result = await db.execute(query)
+    rows = result.all()
+    total_creditos = float(sum(r.monto for r in rows if r.es_credito)) or 1
+    return [
+        {
+            "concepto": r.concepto,
+            "es_credito": r.es_credito,
+            "cantidad": r.cantidad,
+            "monto": float(r.monto),
+            "porcentaje": round((float(r.monto) / total_creditos) * 100, 1) if r.es_credito else None,
+        }
+        for r in rows
+    ]
+
+
+async def list_payroll_movements(db: AsyncSession, company_id: str, empleado_nombre: str | None = None, limit: int = 200) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    query = select(PayrollMovement).where(PayrollMovement.company_id == cid)
+    if empleado_nombre:
+        query = query.where(PayrollMovement.empleado_nombre.ilike(f"%{empleado_nombre}%"))
+    query = query.order_by(PayrollMovement.fecha.desc()).limit(limit)
+    result = await db.execute(query)
+    return [
+        {
+            "id": str(m.id),
+            "empleado_nombre": m.empleado_nombre,
+            "concepto": m.concepto,
+            "es_credito": m.es_credito,
+            "monto": float(m.monto),
+            "fecha": m.fecha.isoformat(),
+            "cerrado": m.cerrado,
+            "observaciones": m.observaciones,
+        }
+        for m in result.scalars().all()
     ]

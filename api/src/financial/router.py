@@ -299,3 +299,20 @@ async def list_supplier_credit_notes(company_id: str = Query(), supplier_id: str
 @router.get("/supplier-returns")
 async def list_supplier_returns(company_id: str = Query(), supplier_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     return await service.list_supplier_returns(db, company_id, supplier_id)
+
+
+# ── Nomina (rh_movimento) ────────────────────────────────────────────────────
+
+@router.get("/payroll/by-concepto")
+async def payroll_by_concepto(
+    company_id: str = Query(),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_payroll_by_concepto(db, company_id, fecha_desde, fecha_hasta)
+
+
+@router.get("/payroll-movements")
+async def list_payroll_movements(company_id: str = Query(), empleado_nombre: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_payroll_movements(db, company_id, empleado_nombre)

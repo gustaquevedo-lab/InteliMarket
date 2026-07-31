@@ -84,7 +84,7 @@ from api.src.config import settings
 from api.src.nemuha_connector.models import NemuhaRecordMap, NemuhaSyncRun
 from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseOrderItem, PurchaseReceipt, PurchaseReceiptItem
 from api.src.customers.models import Customer
-from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction, SupplierCreditNote, SupplierReturn
+from api.src.financial.models import SupplierInvoice, BankAccount, BankTransaction, SupplierCreditNote, SupplierReturn, PayrollMovement
 from api.src.petty_cash.models import Expense, ExpenseCategory
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
@@ -1318,6 +1318,58 @@ async def sync_supplier_returns(db: AsyncSession, company_id: str, since: date |
     return count
 
 
+# ── Nomina (rh_movimento) ───────────────────────────────────────────────────
+#
+# Detalle real por empleado y concepto (salario base, horas extra, aguinaldo,
+# adelantos, vale compras, faltante en caja descontado, etc.) — 1986 filas,
+# ~119 empleados, activo. Es mas granular que el gasto agregado "SUELDOS Y
+# JORNALES"/"AGUINALDO"/"LIQUIDACION DE HABERES" que ya se sincroniza via
+# fin_gasto (caja chica) — no hay vinculo directo entre ambas fuentes en el
+# legado, asi que se muestran por separado para no arriesgar una doble
+# contabilizacion inventada por nosotros.
+
+async def sync_payroll_movements(db: AsyncSession, company_id: str, since: date | None) -> int:
+    sql = """
+        SELECT m.ID_MOVIMENTO, m.VL_MOVIMENTO, m.DT_MOVIMENTO, m.BO_FINALIZADO, m.OBSERVACAO,
+               c.DS_CLASSIFICACAO_RH, c.CREDITO,
+               COALESCE(p.NOME, CONCAT('Empleado ', f.ID_FUNCIONARIO)) AS empleado_nombre
+        FROM rh_movimento m
+        JOIN rh_classificacao c ON c.ID_CLASSIFICACAO_RH = m.ID_CLASSIFICACAO_RH
+        LEFT JOIN rh_funcionario f ON f.ID_FUNCIONARIO = m.ID_FUNCIONARIO
+        LEFT JOIN bs_pessoa p ON p.ID_PESSOA = f.ID_PESSOA
+        WHERE (m.BO_CANCELADO = 0 OR m.BO_CANCELADO IS NULL)
+    """
+    params: tuple = ()
+    if since:
+        sql += " AND m.DT_MOVIMENTO >= %s"
+        params = (since,)
+    rows = await _fetch(sql, params)
+
+    count = 0
+    for r in rows:
+        existing_id = await _get_mapped_target(db, company_id, "rh_movimento", r["ID_MOVIMENTO"])
+        if existing_id:
+            count += 1
+            continue
+
+        movimiento = PayrollMovement(
+            company_id=company_id,
+            empleado_nombre=r["empleado_nombre"],
+            concepto=r["DS_CLASSIFICACAO_RH"],
+            es_credito=bool(r["CREDITO"]),
+            monto=Decimal(str(r["VL_MOVIMENTO"])),
+            fecha=r["DT_MOVIMENTO"],
+            cerrado=bool(r["BO_FINALIZADO"]),
+            observaciones=r["OBSERVACAO"],
+        )
+        db.add(movimiento)
+        await db.flush()
+        await _save_map(db, company_id, "rh_movimento", r["ID_MOVIMENTO"], "payroll_movements", movimiento.id)
+        count += 1
+
+    return count
+
+
 # ── Movimientos de caja principal (fin_entrada_caixa / fin_retirada_caixa) ─────
 #
 # 96 entradas + 649 retiros reales. Distinto de las sesiones de cajero
@@ -1428,6 +1480,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("purchase_receipts", sync_purchase_receipts),
         ("supplier_credit_notes", sync_supplier_credit_notes),
         ("supplier_returns", sync_supplier_returns),
+        ("payroll_movements", sync_payroll_movements),
         ("cash_register_movements", sync_cash_register_movements),
     ):
         try:

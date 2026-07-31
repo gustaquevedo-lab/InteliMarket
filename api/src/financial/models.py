@@ -209,3 +209,22 @@ class SupplierReturn(Base):
     moneda = Column(String(3), default="PYG")
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PayrollMovement(Base):
+    """Detalle de nomina por empleado y concepto (salario base, horas extra,
+    aguinaldo, adelantos, faltante en caja descontado, etc.) — mas granular
+    que el gasto agregado 'SUELDOS Y JORNALES' que ya se sincroniza como gasto
+    de caja chica; se muestra aparte para no duplicar esa cifra."""
+    __tablename__ = "payroll_movements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    empleado_nombre = Column(String(150), nullable=False)
+    concepto = Column(String(100), nullable=False)
+    es_credito = Column(Boolean, nullable=False, default=True)  # False = descuento (adelanto, falta, multa, faltante de caja)
+    monto = Column(Numeric(15, 0), nullable=False)
+    fecha = Column(Date, nullable=False)
+    cerrado = Column(Boolean, default=False)  # BO_FINALIZADO — ya incluido en una liquidacion cerrada
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
