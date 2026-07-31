@@ -103,7 +103,7 @@ async def list_sessions_summary(
     company_id: str = Query(),
     register_id: str | None = Query(None),
     estado: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    limit: int = Query(50, le=5000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):

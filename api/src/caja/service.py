@@ -307,6 +307,25 @@ async def list_sessions_with_totals(
                 if register.cash_drop_threshold:
                     cash_drop_alert = efectivo_acumulado >= float(register.cash_drop_threshold)
 
+        # Arqueo real (CashCount) — antes el historial calculaba una
+        # "diferencia" en el frontend como monto_cierre - monto_apertura (eso
+        # es la recaudacion del turno, no un descuadre de caja) y nunca
+        # mostraba el diferencia real ya sincronizado del legado.
+        diferencia = None
+        diferencia_usd = None
+        diferencia_brl = None
+        monto_cierre_esperado = None
+        if s.estado == "cerrada":
+            count_result = await db.execute(
+                select(CashCount).where(CashCount.session_id == s.id).order_by(CashCount.created_at.desc()).limit(1)
+            )
+            count = count_result.scalar_one_or_none()
+            if count:
+                diferencia = float(count.diferencia) if count.diferencia is not None else None
+                diferencia_usd = float(count.diferencia_usd) if count.diferencia_usd is not None else None
+                diferencia_brl = float(count.diferencia_brl) if count.diferencia_brl is not None else None
+            monto_cierre_esperado = float(s.monto_apertura) + monto_cobrado
+
         out.append({
             "id": str(s.id),
             "register_id": str(s.register_id),
@@ -316,6 +335,10 @@ async def list_sessions_with_totals(
             "fecha_cierre": s.fecha_cierre.isoformat() if s.fecha_cierre else None,
             "monto_apertura": float(s.monto_apertura),
             "monto_cierre": float(s.monto_cierre) if s.monto_cierre is not None else None,
+            "monto_cierre_esperado": monto_cierre_esperado,
+            "diferencia": diferencia,
+            "diferencia_usd": diferencia_usd,
+            "diferencia_brl": diferencia_brl,
             "monto_cobrado": monto_cobrado,
             "estado": s.estado,
             "cash_drop_alert": cash_drop_alert,

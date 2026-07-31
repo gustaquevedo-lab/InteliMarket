@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from "react"
 import { Plus, Search, Loader2, Wallet, TrendingUp, ArrowUpRight, ArrowDownRight, DollarSign, CheckCircle, XCircle, AlertCircle, CreditCard, AlertTriangle, Settings, X } from "lucide-react"
-import { api, type CashRegister, type CashSession } from "../../api"
+import { api, type CashRegister } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { StatusBadge } from "../../components/DataTable"
@@ -15,6 +15,10 @@ interface SessionSummary {
   fecha_cierre: string | null
   monto_apertura: number
   monto_cierre: number | null
+  monto_cierre_esperado: number | null
+  diferencia: number | null
+  diferencia_usd: number | null
+  diferencia_brl: number | null
   monto_cobrado: number
   estado: string
   cash_drop_alert: boolean
@@ -48,7 +52,7 @@ export default function CajaPage() {
   const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "historial">("registers")
   const [registers, setRegisters] = useState<CashRegister[]>([])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [historial, setHistorial] = useState<CashSession[]>([])
+  const [historial, setHistorial] = useState<SessionSummary[]>([])
   const [historialLoading, setHistorialLoading] = useState(false)
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(true)
@@ -98,7 +102,10 @@ export default function CajaPage() {
   const fetchHistorial = async () => {
     setHistorialLoading(true)
     try {
-      const data = await api.caja.sessions.list({ estado: "cerrada", limit: 200 })
+      // sessionsSummary (no sessions.list) trae el arqueo real (diferencia
+      // de CashCount) via JOIN — sessions.list solo devuelve la sesion cruda,
+      // sin eso el historial no podia mostrar un descuadre real.
+      const data = await api.caja.sessionsSummary({ estado: "cerrada", limit: 2500 })
       setHistorial(data)
     } catch {
       toast.error("Error", "No se pudo cargar el historial de cierres")
@@ -110,7 +117,10 @@ export default function CajaPage() {
   useEffect(() => { if (activeTab === "historial" && historial.length === 0) fetchHistorial() }, [activeTab])
 
   const getRegisterName = (registerId?: string) => registers.find(r => r.id === registerId)?.nombre || "Caja Principal"
-  const getCajero = (s: CashSession) => (s.observaciones || "").replace(/^Cajero:\s*/, "") || "—"
+  // cajero_nombre es un campo real de la sesion desde esta semana — antes se
+  // intentaba extraer del texto de observaciones (que nunca lo contuvo para
+  // las sesiones sincronizadas), mostrando "—" en todas las filas siempre.
+  const getCajero = (s: SessionSummary) => s.cajero_nombre || "—"
 
   const filteredRegisters = registers.filter(r =>
     !search || r.nombre.toLowerCase().includes(search.toLowerCase())
@@ -306,34 +316,44 @@ export default function CajaPage() {
                 <th className="table-cell">Caja</th>
                 <th className="table-cell">Apertura</th>
                 <th className="table-cell">Cierre</th>
-                <th className="table-cell text-right">Monto apertura</th>
-                <th className="table-cell text-right">Monto cierre</th>
+                <th className="table-cell text-right">Cobrado</th>
+                <th className="table-cell text-right">Esperado</th>
+                <th className="table-cell text-right">Contado</th>
                 <th className="table-cell text-right">Diferencia</th>
               </tr>
             </thead>
             <tbody>
               {historialLoading ? (
-                <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
+                <tr><td colSpan={8} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
               ) : filteredHistorial.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-12 text-gray-400">Sin cierres registrados</td></tr>
+                <tr><td colSpan={8} className="text-center py-12 text-gray-400">Sin cierres registrados</td></tr>
               ) : (
                 filteredHistorial
                   .slice()
                   .sort((a, b) => new Date(b.fecha_cierre || b.fecha_apertura || 0).getTime() - new Date(a.fecha_cierre || a.fecha_apertura || 0).getTime())
                   .map((s) => {
-                    const apertura = Number(s.monto_apertura || 0)
-                    const cierre = Number(s.monto_cierre || 0)
-                    const diferencia = cierre - apertura
+                    // diferencia real del arqueo (CashCount, sincronizado del
+                    // legado o calculado al cerrar) — no "cierre - apertura"
+                    // (eso es la recaudacion del turno, no un descuadre).
+                    const diferencia = s.diferencia
+                    const tieneOtraMoneda = (s.diferencia_usd && s.diferencia_usd !== 0) || (s.diferencia_brl && s.diferencia_brl !== 0)
                     return (
                       <tr key={s.id} className="table-row">
                         <td className="table-td font-bold text-gray-900 dark:text-white">{getCajero(s)}</td>
-                        <td className="table-td text-sm text-gray-500">{getRegisterName((s as any).register_id)}</td>
+                        <td className="table-td text-sm text-gray-500">{getRegisterName(s.register_id)}</td>
                         <td className="table-td text-sm">{s.fecha_apertura ? new Date(s.fecha_apertura).toLocaleString("es-PY") : "-"}</td>
                         <td className="table-td text-sm">{s.fecha_cierre ? new Date(s.fecha_cierre).toLocaleString("es-PY") : "-"}</td>
-                        <td className="table-td text-right font-mono">{formatPYG(apertura)}</td>
-                        <td className="table-td text-right font-mono font-bold">{formatPYG(cierre)}</td>
-                        <td className={`table-td text-right font-mono font-bold ${diferencia === 0 ? "text-gray-400" : diferencia < 0 ? "text-red-500" : "text-green-500"}`}>
-                          {diferencia === 0 ? "—" : `${diferencia > 0 ? "+" : ""}${formatPYG(diferencia)}`}
+                        <td className="table-td text-right font-mono text-green-600">{formatPYG(s.monto_cobrado)}</td>
+                        <td className="table-td text-right font-mono text-gray-500">{s.monto_cierre_esperado != null ? formatPYG(s.monto_cierre_esperado) : "—"}</td>
+                        <td className="table-td text-right font-mono font-bold">{s.monto_cierre != null ? formatPYG(s.monto_cierre) : "—"}</td>
+                        <td className={`table-td text-right font-mono font-bold ${diferencia == null ? "text-gray-400" : diferencia === 0 ? "text-gray-400" : diferencia < 0 ? "text-red-500" : "text-green-500"}`}>
+                          {diferencia == null ? "s/d" : diferencia === 0 ? "—" : `${diferencia > 0 ? "+" : ""}${formatPYG(diferencia)}`}
+                          {tieneOtraMoneda && (
+                            <div className="text-[10px] font-normal text-amber-500">
+                              {s.diferencia_usd ? `USD ${s.diferencia_usd > 0 ? "+" : ""}${s.diferencia_usd.toFixed(2)} ` : ""}
+                              {s.diferencia_brl ? `R$ ${s.diferencia_brl > 0 ? "+" : ""}${s.diferencia_brl.toFixed(2)}` : ""}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )
