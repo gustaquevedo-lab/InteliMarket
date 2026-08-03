@@ -17,6 +17,7 @@ class User(Base):
     telefono = Column(String(20))
     rol = Column(String(30), nullable=False, default="operador")
     is_superadmin = Column(Boolean, default=False, server_default="false")
+    must_change_password = Column(Boolean, nullable=False, default=False, server_default="false")
     mfa_enabled = Column(Boolean, default=False)
     mfa_secret = Column(String(100))
     activo = Column(Boolean, default=True)

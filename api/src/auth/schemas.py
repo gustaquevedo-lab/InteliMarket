@@ -11,6 +11,14 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=6)
 
 
+class LoginCedulaRequest(BaseModel):
+    """Login para vendedores/supervisores/gerente del modulo de metas: no
+    tienen email real, usan cedula como usuario y contraseña (pedido
+    explicito del cliente, mas practico para gente de calle con celular)."""
+    cedula: str = Field(min_length=4, max_length=20)
+    password: str = Field(min_length=4)
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
@@ -22,6 +30,7 @@ class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    must_change_password: bool = False
 
 
 class UserResponse(BaseModel):

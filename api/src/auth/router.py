@@ -5,13 +5,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pydantic import BaseModel, Field
+
 from api.src.db import get_db
 from api.src.auth.models import User
 from api.src.auth.jwt import hash_password, verify_password, create_access_token, create_refresh_token
-from api.src.auth.schemas import LoginRequest, RegisterRequest, TokenResponse, UserResponse
-from api.src.auth.middleware import get_current_user
+from api.src.auth.schemas import LoginRequest, LoginCedulaRequest, RegisterRequest, TokenResponse, UserResponse
+from api.src.auth.middleware import get_current_user, require_auth
 from api.src.tenants.service import create_tenant_with_schema, get_user_tenants, get_tenant_by_id
 from api.src.tenants.models import UserTenant
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=6)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -87,7 +94,60 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     })
     refresh_token = create_refresh_token({"sub": str(user.id)})
 
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token, must_change_password=user.must_change_password)
+
+
+@router.post("/login-cedula", response_model=TokenResponse)
+async def login_cedula(body: LoginCedulaRequest, db: AsyncSession = Depends(get_db)):
+    """Login para vendedores/supervisores/gerente del modulo de metas —
+    cedula como usuario y contraseña. Internamente se busca por User.email,
+    donde para estas cuentas se guarda la cedula en vez de un email real
+    (documentado: no se usa esta columna para enviar correos a estos usuarios)."""
+    result = await db.execute(select(User).where(User.email == body.cedula))
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Cedula o contraseña incorrecta")
+
+    if not user.activo:
+        raise HTTPException(status_code=403, detail="Usuario desactivado")
+
+    await db.execute(
+        update(User).where(User.id == user.id).values(last_login=datetime.now(timezone.utc))
+    )
+    await db.commit()
+
+    access_token = create_access_token({
+        "sub": str(user.id),
+        "user_email": user.email,
+        "user_nombre": user.nombre,
+        "rol": user.rol,
+        "is_superadmin": False,
+    })
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token, must_change_password=user.must_change_password)
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    token_data: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.id == token_data.get("sub")))
+    user = result.scalar_one_or_none()
+    if not user or not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Contraseña actual incorrecta")
+
+    await db.execute(
+        update(User).where(User.id == user.id).values(
+            password_hash=hash_password(body.new_password),
+            must_change_password=False,
+        )
+    )
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/me", response_model=UserResponse)
