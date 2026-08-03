@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 from decimal import Decimal
 
@@ -65,3 +65,62 @@ class CascadeConfigResponse(BaseModel):
 class CascadeConfigUpdate(BaseModel):
     umbral_pct: Decimal
     activo: Optional[bool] = None
+
+
+class SalesTargetResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    sales_rep_id: Optional[UUID] = None
+    periodo_tipo: str
+    periodo_inicio: date
+    periodo_fin: date
+    product_line_id: Optional[UUID] = None
+    monto_gs: Decimal
+    cantidad_unidades: Decimal
+    origen: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SalesTargetCreate(BaseModel):
+    sales_rep_id: UUID
+    periodo_tipo: str
+    periodo_inicio: date
+    periodo_fin: date
+    product_line_id: Optional[UUID] = None
+    monto_gs: Decimal = Decimal("0")
+    cantidad_unidades: Decimal = Decimal("0")
+    origen: str = "manual"
+
+
+class SalesTargetUpdate(BaseModel):
+    monto_gs: Optional[Decimal] = None
+    cantidad_unidades: Optional[Decimal] = None
+    origen: Optional[str] = None
+
+
+class RepProgressResponse(BaseModel):
+    sales_rep_id: UUID
+    nombre: str
+    periodo_inicio: str
+    periodo_fin: str
+    venta_gs: Decimal
+    unidades: Decimal
+    meta_gs: Decimal
+    meta_unidades: Decimal
+    pct_gs: Decimal
+    pct_unidades: Decimal
+    cumplido: bool
+
+
+class CascadeStatusResponse(BaseModel):
+    lider_id: UUID
+    lider_nombre: str
+    umbral_pct: Decimal
+    equipo_total: int
+    equipo_cumplieron: int
+    pct_equipo_cumplio: Decimal
+    cascada_cumplida: bool
+    equipo: list[RepProgressResponse]
