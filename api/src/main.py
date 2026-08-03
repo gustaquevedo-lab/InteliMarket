@@ -80,6 +80,7 @@ from api.src.supermer.router import router as supermer_router
 from api.src.promotions.router import router as promotions_router
 from api.src.petty_cash.router import router as expenses_router
 from api.src.gerencial.router import router as gerencial_router
+from api.src.sales_targets.router import router as sales_targets_router
 from api.src.mobile.router import router as mobile_router
 from api.src.ecommerce.router import router as ecommerce_router
 from api.src.data_migration.router import router as data_migration_router
@@ -233,6 +234,7 @@ app.include_router(supermer_router)
 app.include_router(promotions_router)
 app.include_router(expenses_router)
 app.include_router(gerencial_router)
+app.include_router(sales_targets_router)
 app.include_router(mobile_router)
 app.include_router(ecommerce_router)
 app.include_router(fiscal_router)

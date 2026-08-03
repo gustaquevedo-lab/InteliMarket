@@ -17,9 +17,11 @@ def require_role(*roles: str):
     is_superadmin siempre pasa, sin importar los roles pedidos."""
 
     async def _check_role(user: dict = Depends(require_auth)) -> dict:
-        if user.get("is_superadmin"):
-            return user
         user_rol = user.get("rol")
+        # Mismo criterio que /auth/login: super_admin es equivalente a is_superadmin
+        # aunque el token no traiga el claim explicito (ej. tokens generados a mano).
+        if user.get("is_superadmin") or user_rol == "super_admin":
+            return user
         if user_rol not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
