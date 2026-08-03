@@ -475,7 +475,7 @@ def sync_ventas(pg, my):
     last_id, _ = get_watermark(pg, "ventas")
     with my.cursor() as cur:
         cur.execute(
-            "SELECT IDFACVENTAS, IDCLIENTE, NUMFAC, MONTO, FECHA, MODOPAGO, TIMBRADO, RENDIDO "
+            "SELECT IDFACVENTAS, IDCLIENTE, NUMFAC, MONTO, FECHA, MODOPAGO, TIMBRADO, RENDIDO, IDVENDEDOR "
             "FROM fac_ventas WHERE IDFACVENTAS > %s ORDER BY IDFACVENTAS", (last_id,))
         legacy_rows = cur.fetchall()
     if not legacy_rows:
@@ -483,7 +483,7 @@ def sync_ventas(pg, my):
         return set(), last_id
     clientes_validos = {txt_keep(c, 15) for c in legacy_id_set(my, "clientes", "IDCLIENTES")}
     max_id, rows = last_id, []
-    for (idfac, idcli, numfac, monto, fecha, modopago, timbrado, rendido) in legacy_rows:
+    for (idfac, idcli, numfac, monto, fecha, modopago, timbrado, rendido, idvend) in legacy_rows:
         idc = txt_keep(idcli, 15)
         cust = uuid.uuid5(NS, f"cli:{idc}") if (idc and idc in clientes_validos) else None
         total = money(monto)
@@ -491,11 +491,12 @@ def sync_ventas(pg, my):
         rows.append((uuid.uuid5(NS, f"fac:{idfac}"), COMPANY_ID, cust, str(idfac)[:20],
                      safe_dt(fecha) or datetime.now(), "factura",
                      "credito" if (modopago or 0) in (1, 2) else "contado", "PYG", "completado",
-                     total, total, total if rendido else 0, 0 if rendido else total, obs[:500]))
+                     total, total, total if rendido else 0, 0 if rendido else total, obs[:500],
+                     txt_keep(idvend, 10)))
         max_id = max(max_id, idfac)
     n = upsert(pg, "sales", ["id", "company_id", "customer_id", "numero", "fecha",
                               "tipo_comprobante", "condicion", "moneda", "estado", "subtotal",
-                              "total", "total_pagado", "saldo", "observaciones"], rows)
+                              "total", "total_pagado", "saldo", "observaciones", "vendedor_codigo"], rows)
     log(f"  ventas: {n} filas nuevas (IDFACVENTAS {last_id} -> {max_id})")
     set_watermark(pg, "ventas", last_id=max_id)
     return {idfac for (idfac, *_r) in legacy_rows}, max_id
