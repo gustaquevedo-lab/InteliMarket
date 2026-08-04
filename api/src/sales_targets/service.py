@@ -8,7 +8,7 @@ import uuid
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.sales_targets.models import (
@@ -199,9 +199,16 @@ async def _real_sales(db: AsyncSession, company_id: str, vendedor_codigo: str,
 
 async def get_rep_progress(db: AsyncSession, rep: SalesRep, periodo_inicio: date, periodo_fin: date,
                             product_line_id: str | None = None) -> dict:
+    # Si se pide una linea puntual, esa fila especifica. Si no, se SUMA todo
+    # lo que haya cargado para el periodo (normalmente una sola fila total
+    # con product_line_id=NULL, pero es tolerante a que ademas existan filas
+    # de desglose por linea sin duplicar el total del vendedor).
     meta_gs, meta_unidades = Decimal("0"), Decimal("0")
     if rep.funcionario_codigo:
-        target_query = select(SalesTarget).where(
+        target_query = select(
+            func.coalesce(func.sum(SalesTarget.monto_gs), 0),
+            func.coalesce(func.sum(SalesTarget.cantidad_unidades), 0),
+        ).where(
             SalesTarget.sales_rep_id == rep.id,
             SalesTarget.periodo_inicio == periodo_inicio,
             SalesTarget.periodo_fin == periodo_fin,
@@ -211,9 +218,9 @@ async def get_rep_progress(db: AsyncSession, rep: SalesRep, periodo_inicio: date
         else:
             target_query = target_query.where(SalesTarget.product_line_id.is_(None))
         result = await db.execute(target_query)
-        target = result.scalar_one_or_none()
-        if target:
-            meta_gs, meta_unidades = target.monto_gs, target.cantidad_unidades
+        row = result.first()
+        if row:
+            meta_gs, meta_unidades = Decimal(row[0]), Decimal(row[1])
 
     venta_gs, unidades = (Decimal("0"), Decimal("0"))
     if rep.funcionario_codigo:
@@ -288,10 +295,13 @@ async def list_baseline(db: AsyncSession, company_id: str, mes: int | None = Non
 
 
 async def suggest_targets(db: AsyncSession, company_id: str, req: SuggestTargetsRequest) -> list[dict]:
-    """Prorratea el baseline de cada linea entre los vendedores activos segun
-    su participacion historica real en esa linea (share = venta del vendedor
-    en esa linea / venta total de la empresa en esa linea, todo el historico
-    disponible). No persiste — es un preview; publicar es un paso aparte."""
+    """Meta TOTAL simple por vendedor (un numero en Gs por periodo, sin
+    fragmentar en filas por linea) — se prorratea internamente el baseline
+    de cada linea segun la participacion historica real del vendedor en esa
+    linea y se suma todo, pero lo que se devuelve/publica es un unico total
+    por vendedor. El desglose por linea queda solo como informacion
+    secundaria (`desglose`) para quien quiera verlo, no como filas separadas.
+    No persiste — es un preview; publicar es un paso aparte."""
     baseline = await list_baseline(db, company_id, req.mes_referencia)
     ajuste = 1 + (req.ajuste_manual_pct / 100)
 
@@ -322,7 +332,8 @@ async def suggest_targets(db: AsyncSession, company_id: str, req: SuggestTargets
         if v > 0:
             venta_por_linea_vendedor[str(row.linea_id)][row.vendedor_codigo] = v
 
-    sugeridas = []
+    # Acumular por vendedor: {rep_id: {"monto_gs":..., "cantidad_unidades":..., "desglose":[...]}}
+    por_vendedor: dict = {}
     for b in baseline:
         if not b["sugerido_gs"] or b["sugerido_gs"] <= 0:
             continue
@@ -340,24 +351,34 @@ async def suggest_targets(db: AsyncSession, company_id: str, req: SuggestTargets
             if venta_rep <= 0:
                 continue
             share = Decimal(str(venta_rep / total_linea))
-            sugeridas.append({
-                "sales_rep_id": rep.id, "nombre": rep.nombre,
-                "product_line_id": b["product_line_id"], "linea_nombre": b["linea_nombre"],
-                "monto_gs": round(meta_total_gs * share),
-                "cantidad_unidades": round(meta_total_unidades * share, 2),
-            })
+            monto_linea = round(meta_total_gs * share)
+            unidades_linea = round(meta_total_unidades * share, 2)
 
-    return sugeridas
+            acc = por_vendedor.setdefault(rep.id, {
+                "sales_rep_id": rep.id, "nombre": rep.nombre, "rama": rep.rama,
+                "monto_gs": Decimal("0"), "cantidad_unidades": Decimal("0"), "desglose": [],
+            })
+            acc["monto_gs"] += monto_linea
+            acc["cantidad_unidades"] += unidades_linea
+            if monto_linea > 0:
+                acc["desglose"].append({"linea_nombre": b["linea_nombre"], "monto_gs": monto_linea})
+
+    return list(por_vendedor.values())
 
 
 async def publish_suggested_targets(db: AsyncSession, company_id: str, req: SuggestTargetsRequest, created_by: str) -> int:
+    """Publica UNA meta total por vendedor (product_line_id=NULL) — simple,
+    sin fragmentar por linea. El desglose por linea del preview es solo
+    informativo, no se persiste como filas separadas."""
     sugeridas = await suggest_targets(db, company_id, req)
     rows = []
     for s in sugeridas:
+        if s["monto_gs"] <= 0:
+            continue
         rows.append(SalesTarget(
             company_id=uuid.UUID(company_id), sales_rep_id=s["sales_rep_id"],
             periodo_tipo=req.periodo_tipo, periodo_inicio=req.periodo_inicio, periodo_fin=req.periodo_fin,
-            product_line_id=s["product_line_id"], monto_gs=s["monto_gs"], cantidad_unidades=s["cantidad_unidades"],
+            product_line_id=None, monto_gs=s["monto_gs"], cantidad_unidades=s["cantidad_unidades"],
             origen="ajustado" if req.ajuste_manual_pct else "forecast",
             created_by=uuid.UUID(created_by) if created_by else None,
         ))

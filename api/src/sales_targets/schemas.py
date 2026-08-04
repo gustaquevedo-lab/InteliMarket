@@ -135,13 +135,18 @@ class SuggestTargetsRequest(BaseModel):
     ajuste_manual_pct: Decimal = Decimal("0")
 
 
+class SuggestedTargetLinea(BaseModel):
+    linea_nombre: str
+    monto_gs: Decimal
+
+
 class SuggestedTarget(BaseModel):
     sales_rep_id: UUID
     nombre: str
-    product_line_id: UUID
-    linea_nombre: str
+    rama: Optional[str] = None
     monto_gs: Decimal
     cantidad_unidades: Decimal
+    desglose: list[SuggestedTargetLinea] = []
 
 
 class CascadeStatusResponse(BaseModel):

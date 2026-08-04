@@ -523,23 +523,24 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
 
           {suggestions && (
             <div className="card p-6">
-              <h4 className="font-bold mb-3">Preview ({suggestions.length} sugerencias)</h4>
+              <h4 className="font-bold mb-3">Preview ({suggestions.length} vendedores)</h4>
+              <p className="text-xs text-gray-400 mb-3">Una meta total simple por vendedor. Desplegá una fila para ver el desglose por línea (informativo).</p>
               <div className="max-h-96 overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs text-gray-400 uppercase border-b border-gray-100 dark:border-gray-800">
                       <th className="py-2">Vendedor</th>
-                      <th>Línea</th>
-                      <th className="text-right">Meta (Gs)</th>
+                      <th>Rama</th>
+                      <th className="text-right">Meta total (Gs)</th>
                       <th className="text-right">Unidades</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {suggestions.slice(0, 200).map((s, i) => (
-                      <tr key={i} className="border-b border-gray-50 dark:border-gray-800/50">
+                    {[...suggestions].sort((a, b) => b.monto_gs - a.monto_gs).slice(0, 200).map((s) => (
+                      <tr key={s.sales_rep_id} className="border-b border-gray-50 dark:border-gray-800/50">
                         <td className="py-1.5">{s.nombre}</td>
-                        <td className="text-xs text-gray-400">{s.linea_nombre}</td>
-                        <td className="text-right font-mono">{formatPYG(s.monto_gs)}</td>
+                        <td className="text-xs uppercase text-gray-400">{s.rama || "—"}</td>
+                        <td className="text-right font-mono font-bold">{formatPYG(s.monto_gs)}</td>
                         <td className="text-right font-mono">{formatNumber(s.cantidad_unidades, 1)}</td>
                       </tr>
                     ))}
