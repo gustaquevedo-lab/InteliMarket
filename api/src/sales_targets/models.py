@@ -61,3 +61,21 @@ class SalesTargetCascadeConfig(Base):
     umbral_pct = Column(Numeric(5, 2), nullable=False, default=80)
     activo = Column(Boolean, nullable=False, default=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SalesTargetHistoryBaseline(Base):
+    __tablename__ = "sales_target_history_baseline"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    product_line_id = Column(UUID(as_uuid=True), ForeignKey("product_lines.id"))
+    mes = Column(Integer, nullable=False)
+    promedio_gs = Column(Numeric(15, 0))
+    promedio_unidades = Column(Numeric(15, 2))
+    tendencia_pct = Column(Numeric(6, 3))
+    desvio_gs = Column(Numeric(15, 0))
+    # OJO: pese al nombre de columna (heredado del DDL original), este campo
+    # guarda UNIDADES del objetivos legacy (objetivos.CANTIDAD), no Gs — no
+    # es comparable directo contra promedio_gs, si contra promedio_unidades.
+    objetivo_legacy_ref_gs = Column(Numeric(15, 0))
+    calculado_at = Column(DateTime(timezone=True), server_default=func.now())

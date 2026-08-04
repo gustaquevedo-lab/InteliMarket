@@ -115,6 +115,35 @@ class RepProgressResponse(BaseModel):
     cumplido: bool
 
 
+class BaselineResponse(BaseModel):
+    product_line_id: UUID
+    linea_nombre: str
+    mes: int
+    promedio_gs: Decimal
+    promedio_unidades: Decimal
+    tendencia_pct: Decimal
+    desvio_gs: Decimal
+    objetivo_legacy_ref_gs: Optional[Decimal] = None
+    sugerido_gs: Decimal
+
+
+class SuggestTargetsRequest(BaseModel):
+    periodo_tipo: str
+    periodo_inicio: date
+    periodo_fin: date
+    mes_referencia: int
+    ajuste_manual_pct: Decimal = Decimal("0")
+
+
+class SuggestedTarget(BaseModel):
+    sales_rep_id: UUID
+    nombre: str
+    product_line_id: UUID
+    linea_nombre: str
+    monto_gs: Decimal
+    cantidad_unidades: Decimal
+
+
 class CascadeStatusResponse(BaseModel):
     lider_id: UUID
     lider_nombre: str

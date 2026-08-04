@@ -8,11 +8,13 @@ from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.auth.rbac import require_role
 from api.src.sales_targets import service
+from api.src.sales_targets.baseline import recalculate_baseline
 from api.src.sales_targets.schemas import (
     SalesRepResponse, SalesRepCreate, SalesRepUpdate,
     ProductLineResponse, CascadeConfigResponse, CascadeConfigUpdate,
     SalesTargetResponse, SalesTargetCreate, SalesTargetUpdate,
     RepProgressResponse, CascadeStatusResponse,
+    BaselineResponse, SuggestTargetsRequest, SuggestedTarget,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["sales-targets"])
@@ -133,3 +135,31 @@ async def get_cascade_status(
     if rep.id not in {r.id for r in visibles}:
         raise HTTPException(status_code=403, detail="No autorizado")
     return await service.get_cascade_status(db, rep, periodo_inicio, periodo_fin)
+
+
+@router.post("/companies/{company_id}/sales-targets/baseline/recalculate",
+             dependencies=[Depends(require_role("admin", "gerente_comercial"))])
+async def recalculate_baseline_endpoint(company_id: str, db: AsyncSession = Depends(get_db)):
+    result = await recalculate_baseline(db, company_id)
+    await db.commit()
+    return result
+
+
+@router.get("/companies/{company_id}/sales-targets/baseline", response_model=list[BaselineResponse],
+            dependencies=[Depends(require_role("admin", "gerente_comercial"))])
+async def get_baseline(company_id: str, mes: int | None = Query(None, ge=1, le=12), db: AsyncSession = Depends(get_db)):
+    return await service.list_baseline(db, company_id, mes)
+
+
+@router.post("/companies/{company_id}/sales-targets/suggest", response_model=list[SuggestedTarget],
+             dependencies=[Depends(require_role("admin", "gerente_comercial"))])
+async def suggest_targets(company_id: str, body: SuggestTargetsRequest, db: AsyncSession = Depends(get_db)):
+    return await service.suggest_targets(db, company_id, body)
+
+
+@router.post("/companies/{company_id}/sales-targets/publish", dependencies=[Depends(require_role("admin"))])
+async def publish_suggested_targets(company_id: str, body: SuggestTargetsRequest, db: AsyncSession = Depends(get_db),
+                                     user: dict = Depends(require_auth)):
+    n = await service.publish_suggested_targets(db, company_id, body, user.get("sub"))
+    await db.commit()
+    return {"metas_publicadas": n}

@@ -5,14 +5,18 @@ su propia fila, un supervisor ve su equipo, gerente_comercial/admin ven todo.
 """
 
 import uuid
+from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.sales_targets.models import SalesRep, ProductLine, SalesTarget, SalesTargetCascadeConfig
+from api.src.sales_targets.models import (
+    SalesRep, ProductLine, SalesTarget, SalesTargetCascadeConfig, SalesTargetHistoryBaseline,
+)
 from api.src.sales_targets.schemas import (
     SalesRepCreate, SalesRepUpdate, CascadeConfigUpdate, SalesTargetCreate, SalesTargetUpdate,
+    SuggestTargetsRequest,
 )
 
 
@@ -255,3 +259,108 @@ async def get_cascade_status(db: AsyncSession, lider: SalesRep, periodo_inicio: 
         "cascada_cumplida": pct_equipo >= config.umbral_pct if equipo else False,
         "equipo": progresos,
     }
+
+
+# ── Forecast (baseline estadistico) ─────────────────────────────────────
+
+async def list_baseline(db: AsyncSession, company_id: str, mes: int | None = None) -> list[dict]:
+    query = select(SalesTargetHistoryBaseline, ProductLine.nombre).join(
+        ProductLine, ProductLine.id == SalesTargetHistoryBaseline.product_line_id
+    ).where(SalesTargetHistoryBaseline.company_id == uuid.UUID(company_id))
+    if mes:
+        query = query.where(SalesTargetHistoryBaseline.mes == mes)
+    query = query.order_by(ProductLine.nombre, SalesTargetHistoryBaseline.mes)
+    result = await db.execute(query)
+    rows = result.all()
+    out = []
+    for baseline, nombre in rows:
+        tendencia = baseline.tendencia_pct or Decimal("0")
+        sugerido = (baseline.promedio_gs or Decimal("0")) * (1 + tendencia / 100)
+        out.append({
+            "product_line_id": baseline.product_line_id, "linea_nombre": nombre, "mes": baseline.mes,
+            "promedio_gs": baseline.promedio_gs or Decimal("0"),
+            "promedio_unidades": baseline.promedio_unidades or Decimal("0"),
+            "tendencia_pct": tendencia, "desvio_gs": baseline.desvio_gs or Decimal("0"),
+            "objetivo_legacy_ref_gs": baseline.objetivo_legacy_ref_gs,
+            "sugerido_gs": round(sugerido),
+        })
+    return out
+
+
+async def suggest_targets(db: AsyncSession, company_id: str, req: SuggestTargetsRequest) -> list[dict]:
+    """Prorratea el baseline de cada linea entre los vendedores activos segun
+    su participacion historica real en esa linea (share = venta del vendedor
+    en esa linea / venta total de la empresa en esa linea, todo el historico
+    disponible). No persiste — es un preview; publicar es un paso aparte."""
+    baseline = await list_baseline(db, company_id, req.mes_referencia)
+    ajuste = 1 + (req.ajuste_manual_pct / 100)
+
+    result = await db.execute(
+        select(SalesRep).where(
+            SalesRep.company_id == uuid.UUID(company_id), SalesRep.rol == "vendedor", SalesRep.activo == True,
+            SalesRep.funcionario_codigo.is_not(None),
+        )
+    )
+    vendedores = list(result.scalars().all())
+
+    # Una sola query agregada para TODAS las lineas de una — el diseño
+    # original hacia una query por linea (N+1: ~70+ queries de agregacion
+    # sobre 11,6M filas cada una), tardaba mas de 90s. Agrupar todo junto
+    # y prorratear en Python es lo mismo trabajo de agregacion pero en un
+    # solo scan.
+    shares_result = await db.execute(text("""
+        SELECT p.linea_id, s.vendedor_codigo, SUM(si.total) AS venta
+        FROM sale_items si JOIN sales s ON s.id = si.sale_id JOIN products p ON p.id = si.product_id
+        WHERE s.company_id = :company_id AND s.estado <> 'anulado'
+          AND s.vendedor_codigo IS NOT NULL AND p.linea_id IS NOT NULL
+        GROUP BY p.linea_id, s.vendedor_codigo
+    """), {"company_id": company_id})
+
+    venta_por_linea_vendedor = defaultdict(dict)
+    for row in shares_result.all():
+        v = float(row.venta or 0)
+        if v > 0:
+            venta_por_linea_vendedor[str(row.linea_id)][row.vendedor_codigo] = v
+
+    sugeridas = []
+    for b in baseline:
+        if not b["sugerido_gs"] or b["sugerido_gs"] <= 0:
+            continue
+        linea_id = str(b["product_line_id"])
+        venta_por_vendedor = venta_por_linea_vendedor.get(linea_id, {})
+        total_linea = sum(venta_por_vendedor.values())
+        if total_linea <= 0:
+            continue
+
+        meta_total_gs = b["sugerido_gs"] * ajuste
+        meta_total_unidades = (b["promedio_unidades"] or Decimal("0")) * ajuste
+
+        for rep in vendedores:
+            venta_rep = venta_por_vendedor.get(rep.funcionario_codigo, 0)
+            if venta_rep <= 0:
+                continue
+            share = Decimal(str(venta_rep / total_linea))
+            sugeridas.append({
+                "sales_rep_id": rep.id, "nombre": rep.nombre,
+                "product_line_id": b["product_line_id"], "linea_nombre": b["linea_nombre"],
+                "monto_gs": round(meta_total_gs * share),
+                "cantidad_unidades": round(meta_total_unidades * share, 2),
+            })
+
+    return sugeridas
+
+
+async def publish_suggested_targets(db: AsyncSession, company_id: str, req: SuggestTargetsRequest, created_by: str) -> int:
+    sugeridas = await suggest_targets(db, company_id, req)
+    rows = []
+    for s in sugeridas:
+        rows.append(SalesTarget(
+            company_id=uuid.UUID(company_id), sales_rep_id=s["sales_rep_id"],
+            periodo_tipo=req.periodo_tipo, periodo_inicio=req.periodo_inicio, periodo_fin=req.periodo_fin,
+            product_line_id=s["product_line_id"], monto_gs=s["monto_gs"], cantidad_unidades=s["cantidad_unidades"],
+            origen="ajustado" if req.ajuste_manual_pct else "forecast",
+            created_by=uuid.UUID(created_by) if created_by else None,
+        ))
+    db.add_all(rows)
+    await db.flush()
+    return len(rows)
