@@ -480,6 +480,17 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
     }
   }
 
+  const promoverASupervisor = async (rep: SalesRep) => {
+    if (!confirm(`¿Convertir a ${rep.nombre} en supervisor? Deja de aparecer como vendedor y va a poder tener vendedores a cargo.`)) return
+    setSaving(rep.id)
+    try {
+      await api.salesTargets.updateRep(rep.id, { rol: "supervisor", supervisor_id: null })
+      onReload()
+    } finally {
+      setSaving(null)
+    }
+  }
+
   const createRep = async () => {
     if (!newRep.nombre.trim()) return
     setCreating(true)
@@ -614,6 +625,7 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
                     <th>Rama</th>
                     <th>Supervisor</th>
                     <th>Activo</th>
+                    <th>Convertir</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -641,6 +653,16 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
                           className={`px-2 py-1 rounded-full text-xs font-bold ${r.activo ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}
                         >
                           {r.activo ? "Activo" : "Inactivo"}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => promoverASupervisor(r)}
+                          disabled={saving === r.id}
+                          title="Convertir en supervisor"
+                          className="px-2 py-1 rounded-lg text-xs font-bold text-primary border border-primary/30 hover:bg-primary/10 flex items-center gap-1"
+                        >
+                          <UserCog className="w-3 h-3" /> A supervisor
                         </button>
                       </td>
                     </tr>
