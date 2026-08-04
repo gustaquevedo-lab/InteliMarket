@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Target, TrendingUp, Users, Trophy, ChevronLeft, ChevronRight, RefreshCw, Sparkles, UserCog } from "lucide-react"
+import { Target, TrendingUp, Users, Trophy, ChevronLeft, ChevronRight, RefreshCw, Sparkles, UserCog, BookOpen, Search, HelpCircle, ArrowRight } from "lucide-react"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts"
 import { api, SalesRep, RepProgress, CascadeStatus, SuggestedTarget } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -329,8 +329,109 @@ function GerenteView({ reps, periodo }: { reps: SalesRep[]; periodo: { inicio: s
 
 // ── Vista Admin ───────────────────────────────────────────────────────────
 
+function ManualSection({ title, children }: { title: string; children: any }) {
+  return (
+    <div className="card p-6">
+      <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+        <ArrowRight className="w-4 h-4 text-primary" /> {title}
+      </h3>
+      <div className="text-sm text-gray-600 dark:text-gray-300 space-y-2 leading-relaxed">{children}</div>
+    </div>
+  )
+}
+
+function ManualTab() {
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div className="card p-6 bg-primary/5 border border-primary/20">
+        <div className="flex items-start gap-3">
+          <HelpCircle className="w-6 h-6 text-primary flex-shrink-0 mt-0.5" />
+          <div>
+            <h2 className="font-black text-lg">¿Qué es este módulo?</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+              Le pone una meta de venta en guaraníes a cada vendedor, calculada con datos reales de venta (14 años de historia),
+              y mide en tiempo real cuánto lleva vendido cada uno vs. su meta. Además arma una <strong>cascada</strong>: el
+              supervisor "cumple" si un porcentaje de su equipo llega a su meta individual, y lo mismo para el Gerente Comercial
+              sobre sus supervisores.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <ManualSection title="1. La jerarquía: Vendedor → Supervisor → Gerente Comercial">
+        <p>
+          Hay dos ramas: <strong>MIX</strong> (Malta, Trébol/Raatz, Santa Rosa) y <strong>PARESA</strong>. Cada vendedor tiene
+          un supervisor, y todos los supervisores reportan al Gerente Comercial (hoy: Gabriel Ramírez).
+        </p>
+        <p>
+          El legacy (el sistema viejo) nunca guardó quién supervisa a quién, así que esa parte la armás vos acá, a mano,
+          en la pestaña <strong>"Estructura organizacional"</strong>:
+        </p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>Dar de alta un supervisor o al Gerente Comercial (arriba de la tabla).</li>
+          <li>Para cada vendedor, elegir su supervisor en el desplegable de la columna "Supervisor".</li>
+          <li>Si un vendedor ya no trabaja más en la empresa: tocá el botón "Activo" para pasarlo a "Inactivo" — <strong>no lo
+            borres</strong>. Al desactivarlo, deja de contar en la cascada de su supervisor automáticamente, sin tocar nada más.</li>
+        </ul>
+      </ManualSection>
+
+      <ManualSection title="2. De dónde sale la meta de cada vendedor (el Forecast)">
+        <p>
+          En la pestaña <strong>"Forecast y publicación de metas"</strong>: el sistema mira los últimos 14 años de venta real
+          de la empresa, calcula cuánto se vendió históricamente en cada línea de producto en ese mismo mes del año, le suma
+          la tendencia de crecimiento real de la empresa, y reparte ese total entre los vendedores según cuánto vendió
+          históricamente cada uno.
+        </p>
+        <p>
+          <strong>"Generar preview"</strong> te muestra el resultado sin guardar nada todavía. <strong>"Publicar"</strong> recién
+          ahí crea las metas oficiales del período. Podés meter un "% de ajuste manual" (por ejemplo +10%) para vos aplicar tu
+          criterio de mercado, clima, campaña, etc. antes de publicar.
+        </p>
+        <p className="text-amber-600 dark:text-amber-400 font-medium">
+          Ojo: si publicás dos veces para el mismo período, va a dar error (ya existen esas metas) — hay que borrar las viejas
+          primero si querés regenerar.
+        </p>
+      </ManualSection>
+
+      <ManualSection title="3. Cómo se mide el avance">
+        <p>
+          Para cada vendedor, se suma la venta real (facturas reales, no simuladas) desde el primer día del período hasta el
+          último, y se compara contra su meta. Las devoluciones/notas de crédito restan del total, como corresponde.
+        </p>
+        <p>El período puede verse semanal, quincenal o mensual — se elige con el selector arriba de la pantalla (excepto en la vista Admin).</p>
+      </ManualSection>
+
+      <ManualSection title="4. La cascada">
+        <p>
+          Un supervisor "cumple" si el <strong>% configurable</strong> (por defecto 80%) de su equipo activo alcanzó su propia
+          meta individual — no hace falta que todos lleguen al 100%, alcanza con que el umbral se cumpla. Lo mismo aplica para
+          el Gerente Comercial, mirando a sus supervisores.
+        </p>
+        <p>El umbral se ajusta en el botón de configuración de cascada (solo Admin).</p>
+      </ManualSection>
+
+      <ManualSection title="5. Quién ve qué">
+        <ul className="list-disc pl-5 space-y-1">
+          <li><strong>Vendedor:</strong> solo su propia meta y avance.</li>
+          <li><strong>Supervisor:</strong> su propio avance + el de todo su equipo + si su cascada está cumplida.</li>
+          <li><strong>Gerente Comercial:</strong> las dos ramas completas, todos los supervisores y su estado de cascada.</li>
+          <li><strong>Admin:</strong> todo lo anterior + puede armar la estructura y generar/publicar metas.</li>
+        </ul>
+      </ManualSection>
+
+      <ManualSection title="Cuentas de los vendedores">
+        <p>
+          Cada vendedor/supervisor/gerente entra con su <strong>cédula</strong> como usuario y contraseña (toggle "Cédula
+          (vendedores)" en la pantalla de login). La primera vez que entran, el sistema los obliga a cambiar la contraseña.
+        </p>
+      </ManualSection>
+    </div>
+  )
+}
+
 function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void }) {
-  const [tab, setTab] = useState<"resumen" | "estructura" | "forecast">("resumen")
+  const [tab, setTab] = useState<"resumen" | "estructura" | "forecast" | "manual">("resumen")
+  const [buscarVendedor, setBuscarVendedor] = useState("")
   const [saving, setSaving] = useState<string | null>(null)
   const supervisoresYGerente = reps.filter((r) => r.rol === "supervisor" || r.rol === "gerente_comercial")
 
@@ -433,6 +534,9 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
         <button onClick={() => setTab("forecast")} className={`px-4 py-2 text-sm font-bold rounded-lg ${tab === "forecast" ? "bg-white dark:bg-gray-700 shadow text-primary" : "text-gray-500"}`}>
           Forecast y publicación de metas
         </button>
+        <button onClick={() => setTab("manual")} className={`px-4 py-2 text-sm font-bold rounded-lg flex items-center gap-1.5 ${tab === "manual" ? "bg-white dark:bg-gray-700 shadow text-primary" : "text-gray-500"}`}>
+          <BookOpen className="w-4 h-4" /> Cómo funciona
+        </button>
       </div>
 
       {tab === "resumen" && (
@@ -486,10 +590,25 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
           </div>
 
           <div className="card p-6">
-            <h3 className="font-bold mb-4">Vendedores — asignar supervisor / activar-desactivar</h3>
-            <div className="overflow-x-auto">
+            <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
+              <h3 className="font-bold">Vendedores — asignar supervisor / activar-desactivar</h3>
+              <div className="flex items-center gap-3 text-xs text-gray-400">
+                <span>{reps.filter((r) => r.rol === "vendedor" && r.activo).length} activos</span>
+                <span>{reps.filter((r) => r.rol === "vendedor" && !r.activo).length} inactivos</span>
+                <span>{reps.filter((r) => r.rol === "vendedor" && r.activo && !r.supervisor_id).length} sin supervisor</span>
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              Si un vendedor ya no está en la empresa, desactivalo (no lo borres) — las metas de su equipo se recalculan solas entre los que quedan activos.
+              Asignale un supervisor desde el desplegable para que aparezca en la cascada de ese supervisor.
+            </p>
+            <div className="relative mb-3 max-w-xs">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input className="input-field pl-9" placeholder="Buscar vendedor..." value={buscarVendedor} onChange={(e) => setBuscarVendedor(e.target.value)} />
+            </div>
+            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
               <table className="w-full text-sm">
-                <thead>
+                <thead className="sticky top-0 bg-white dark:bg-gray-900">
                   <tr className="text-left text-xs text-gray-400 uppercase border-b border-gray-100 dark:border-gray-800">
                     <th className="py-2">Nombre</th>
                     <th>Rama</th>
@@ -498,7 +617,7 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
                   </tr>
                 </thead>
                 <tbody>
-                  {reps.filter((r) => r.rol === "vendedor").map((r) => (
+                  {reps.filter((r) => r.rol === "vendedor" && r.nombre.toLowerCase().includes(buscarVendedor.toLowerCase())).map((r) => (
                     <tr key={r.id} className="border-b border-gray-50 dark:border-gray-800/50">
                       <td className="py-2 font-medium">{r.nombre}</td>
                       <td><span className="text-xs uppercase text-gray-400">{r.rama}</span></td>
@@ -588,6 +707,8 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
           )}
         </div>
       )}
+
+      {tab === "manual" && <ManualTab />}
     </div>
   )
 }
