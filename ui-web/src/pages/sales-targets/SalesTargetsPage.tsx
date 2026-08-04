@@ -330,7 +330,7 @@ function GerenteView({ reps, periodo }: { reps: SalesRep[]; periodo: { inicio: s
 // ── Vista Admin ───────────────────────────────────────────────────────────
 
 function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void }) {
-  const [tab, setTab] = useState<"estructura" | "forecast">("estructura")
+  const [tab, setTab] = useState<"resumen" | "estructura" | "forecast">("resumen")
   const [saving, setSaving] = useState<string | null>(null)
   const supervisoresYGerente = reps.filter((r) => r.rol === "supervisor" || r.rol === "gerente_comercial")
 
@@ -343,9 +343,21 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
   const [publishing, setPublishing] = useState(false)
   const [publishMsg, setPublishMsg] = useState("")
 
+  const [progresos, setProgresos] = useState<RepProgress[]>([])
+  const [loadingResumen, setLoadingResumen] = useState(true)
+
   const now = new Date()
   const mesRef = now.getMonth() + 1
   const periodo = computePeriodo("mensual", now)
+
+  useEffect(() => {
+    if (tab !== "resumen") return
+    const vendedores = reps.filter((r) => r.rol === "vendedor" && r.activo)
+    setLoadingResumen(true)
+    Promise.all(vendedores.map((r) => api.salesTargets.getRepProgress(r.id, periodo.inicio, periodo.fin)))
+      .then((list) => setProgresos(list.filter((p) => p.meta_gs > 0)))
+      .finally(() => setLoadingResumen(false))
+  }, [tab, reps.length, periodo.inicio, periodo.fin])
 
   const assignSupervisor = async (repId: string, supervisorId: string | null) => {
     setSaving(repId)
@@ -412,6 +424,9 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
   return (
     <div className="space-y-6">
       <div className="flex gap-2 p-1 bg-gray-100 dark:bg-gray-800 rounded-xl w-fit">
+        <button onClick={() => setTab("resumen")} className={`px-4 py-2 text-sm font-bold rounded-lg ${tab === "resumen" ? "bg-white dark:bg-gray-700 shadow text-primary" : "text-gray-500"}`}>
+          Metas publicadas
+        </button>
         <button onClick={() => setTab("estructura")} className={`px-4 py-2 text-sm font-bold rounded-lg ${tab === "estructura" ? "bg-white dark:bg-gray-700 shadow text-primary" : "text-gray-500"}`}>
           Estructura organizacional
         </button>
@@ -419,6 +434,27 @@ function AdminView({ reps, onReload }: { reps: SalesRep[]; onReload: () => void 
           Forecast y publicación de metas
         </button>
       </div>
+
+      {tab === "resumen" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <KpiCard icon={Users} label="Vendedores con meta" value={String(progresos.length)} sub={periodo.label} />
+            <KpiCard icon={Target} label="Meta total" value={formatPYG(progresos.reduce((s, p) => s + p.meta_gs, 0))} />
+            <KpiCard icon={TrendingUp} label="Venta real" value={formatPYG(progresos.reduce((s, p) => s + p.venta_gs, 0))} />
+            <KpiCard icon={Trophy} label="Cumplieron" value={String(progresos.filter((p) => p.cumplido).length)} />
+          </div>
+          <div className="card p-6">
+            <h3 className="font-bold mb-3">Todos los vendedores — {periodo.label}</h3>
+            {loadingResumen ? (
+              <p className="text-center text-gray-400 py-8">Cargando...</p>
+            ) : progresos.length === 0 ? (
+              <p className="text-center text-gray-400 py-8">Todavía no hay metas publicadas para este período. Andá a la pestaña "Forecast y publicación de metas".</p>
+            ) : (
+              [...progresos].sort((a, b) => b.pct_gs - a.pct_gs).map((p) => <RepRow key={p.sales_rep_id} p={p} />)
+            )}
+          </div>
+        </div>
+      )}
 
       {tab === "estructura" && (
         <>
