@@ -5,14 +5,16 @@ import { useAuth } from "../context/AuthContext"
 
 export default function Login() {
   const [email, setEmail] = useState("")
+  const [cedula, setCedula] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState<"login" | "register">("login")
+  const [loginTipo, setLoginTipo] = useState<"email" | "cedula">("email")
   const [nombre, setNombre] = useState("")
   const [tenantNombre, setTenantNombre] = useState("")
-  const { login, register, loginDemo } = useAuth()
+  const { login, loginCedula, register, loginDemo } = useAuth()
   const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -22,7 +24,11 @@ export default function Login() {
 
     try {
       if (mode === "login") {
-        await login(email, password)
+        if (loginTipo === "cedula") {
+          await loginCedula(cedula, password)
+        } else {
+          await login(email, password)
+        }
       } else {
         if (!nombre || !tenantNombre) {
           setError("Todos los campos son obligatorios")
@@ -74,17 +80,50 @@ export default function Login() {
               </div>
             )}
 
-            <div>
-              <label className="input-label">Email</label>
-              <input
-                type="email"
-                className="input-field"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="tu@email.com"
-                required
-              />
-            </div>
+            {mode === "login" && (
+              <div className="flex gap-2 p-1 bg-gray-100 dark:bg-gray-800 rounded-xl mb-1">
+                <button
+                  type="button"
+                  onClick={() => setLoginTipo("email")}
+                  className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition ${loginTipo === "email" ? "bg-white dark:bg-gray-700 shadow text-primary" : "text-gray-500"}`}
+                >
+                  Email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoginTipo("cedula")}
+                  className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition ${loginTipo === "cedula" ? "bg-white dark:bg-gray-700 shadow text-primary" : "text-gray-500"}`}
+                >
+                  Cédula (vendedores)
+                </button>
+              </div>
+            )}
+
+            {mode === "login" && loginTipo === "cedula" ? (
+              <div>
+                <label className="input-label">Cédula</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  value={cedula}
+                  onChange={(e) => setCedula(e.target.value)}
+                  placeholder="1234567"
+                  required
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="input-label">Email</label>
+                <input
+                  type="email"
+                  className="input-field"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="tu@email.com"
+                  required
+                />
+              </div>
+            )}
 
             <div>
               <label className="input-label">Contraseña</label>

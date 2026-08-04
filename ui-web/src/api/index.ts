@@ -41,6 +41,14 @@ export interface Payment { id: string; sale_id?: string; metodo_pago_id?: string
 export interface Warehouse { id: string; codigo?: string; nombre: string; direccion?: string; ciudad?: string; tipo?: string; activo?: boolean; company_id?: string; created_at?: string }
 export interface StockItem { id?: string; product_id?: string; producto?: Product; product?: Product; nombre?: string; sku?: string; warehouse_id?: string; warehouse?: Warehouse; cantidad?: number; cantidad_reservada?: number; cantidad_disponible?: number; stock_minimo?: number; stock_maximo?: number; costo_promedio?: number; ultimo_costo?: number; costo_unitario?: number; lote?: string; fecha_vencimiento?: string; created_at?: string }
 export interface Company { id: string; nombre: string; ruc?: string; razon_social?: string; direccion?: string; telefono?: string; email?: string; logo_url?: string; activo?: boolean; config?: Record<string, unknown>; iva_condition?: string; regimen_tributario?: string; created_at?: string; updated_at?: string }
+export interface SalesRep { id: string; company_id: string; funcionario_codigo?: string; user_id?: string; nombre: string; cedula?: string; rama?: string; rol: string; supervisor_id?: string; activo: boolean; created_at: string; updated_at: string }
+export interface ProductLine { id: string; company_id: string; codigo_legacy?: string; nombre: string; activo: boolean }
+export interface CascadeConfig { id: string; company_id: string; umbral_pct: number; activo: boolean }
+export interface SalesTarget { id: string; company_id: string; sales_rep_id?: string; periodo_tipo: string; periodo_inicio: string; periodo_fin: string; product_line_id?: string; monto_gs: number; cantidad_unidades: number; origen: string; created_at: string }
+export interface RepProgress { sales_rep_id: string; nombre: string; periodo_inicio: string; periodo_fin: string; venta_gs: number; unidades: number; meta_gs: number; meta_unidades: number; pct_gs: number; pct_unidades: number; cumplido: boolean }
+export interface CascadeStatus { lider_id: string; lider_nombre: string; umbral_pct: number; equipo_total: number; equipo_cumplieron: number; pct_equipo_cumplio: number; cascada_cumplida: boolean; equipo: RepProgress[] }
+export interface Baseline { product_line_id: string; linea_nombre: string; mes: number; promedio_gs: number; promedio_unidades: number; tendencia_pct: number; desvio_gs: number; objetivo_legacy_ref_gs?: number; sugerido_gs: number }
+export interface SuggestedTarget { sales_rep_id: string; nombre: string; product_line_id: string; linea_nombre: string; monto_gs: number; cantidad_unidades: number }
 export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; created_at?: string }
 export interface CashSession { id: string; caja_id?: string; caja?: CashRegister; cash_register?: CashRegister; usuario_id?: string; fecha_apertura?: string; fecha_cierre?: string; monto_apertura?: number; monto_cierre?: number; total_ventas?: number; total_retiros?: number; total_ingresos?: number; estado?: string; observaciones?: string; created_at?: string }
 export interface Branch { id: string; nombre: string; codigo: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; ruc?: string; punto_emision?: string | number; activo?: boolean; company_id?: string; created_at?: string; updated_at?: string }
@@ -265,7 +273,9 @@ export type ApiError = { detail: string; code?: string }
 // ========== API CLIENT ==========
 export const api = {
   auth: {
-    login: (data: { email: string; password: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/login", data),
+    login: (data: { email: string; password: string }) => client.post<{ access_token: string; refresh_token: string; must_change_password?: boolean }>("/v1/auth/login", data),
+    loginCedula: (data: { cedula: string; password: string }) => client.post<{ access_token: string; refresh_token: string; must_change_password?: boolean }>("/v1/auth/login-cedula", data),
+    changePassword: (data: { current_password: string; new_password: string }) => client.post<{ ok: boolean }>("/v1/auth/change-password", data),
     register: (data: { email: string; password: string; nombre: string; tenant_nombre: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/register", data),
     me: () => client.get<{ id: string; email: string; nombre: string; rol: string; activo: boolean; tenant_id?: string; tenant_slug?: string }>("/v1/auth/me"),
     myTenants: () => client.get<Array<{ tenant_id: string; tenant_nombre: string; tenant_slug: string; plan: string; rol: string }>>("/v1/auth/me/tenants"),
@@ -1983,5 +1993,32 @@ export const api = {
       update: (storefrontId: string, data: any) => client.patch<any>(`/v1/retail/storefront/${storefrontId}`, data),
       publicBySlug: (slug: string) => client.get<any>(`/v1/retail/public/storefront/${slug}`),
     },
+  },
+  salesTargets: {
+    listReps: () => client.get<SalesRep[]>(`/v1/companies/${COMPANY_ID}/sales-reps`),
+    getRep: (repId: string) => client.get<SalesRep>(`/v1/sales-reps/${repId}`),
+    createRep: (data: { nombre: string; cedula?: string; rama?: string; rol: string; supervisor_id?: string }) =>
+      client.post<SalesRep>(`/v1/companies/${COMPANY_ID}/sales-reps`, data),
+    updateRep: (repId: string, data: Partial<{ nombre: string; rama: string; rol: string; supervisor_id: string | null; activo: boolean }>) =>
+      client.put<SalesRep>(`/v1/sales-reps/${repId}`, data),
+    listProductLines: () => client.get<ProductLine[]>(`/v1/companies/${COMPANY_ID}/product-lines`),
+    getCascadeConfig: () => client.get<CascadeConfig>(`/v1/companies/${COMPANY_ID}/sales-targets/cascade-config`),
+    updateCascadeConfig: (data: { umbral_pct: number; activo?: boolean }) =>
+      client.put<CascadeConfig>(`/v1/companies/${COMPANY_ID}/sales-targets/cascade-config`, data),
+    listTargets: (salesRepId?: string) => client.get<SalesTarget[]>(`/v1/companies/${COMPANY_ID}/sales-targets`, salesRepId ? { sales_rep_id: salesRepId } : undefined),
+    createTarget: (data: { sales_rep_id: string; periodo_tipo: string; periodo_inicio: string; periodo_fin: string; product_line_id?: string; monto_gs: number; cantidad_unidades: number; origen?: string }) =>
+      client.post<SalesTarget>(`/v1/companies/${COMPANY_ID}/sales-targets`, data),
+    updateTarget: (targetId: string, data: Partial<{ monto_gs: number; cantidad_unidades: number; origen: string }>) =>
+      client.put<SalesTarget>(`/v1/sales-targets/${targetId}`, data),
+    getRepProgress: (repId: string, periodoInicio: string, periodoFin: string, productLineId?: string) =>
+      client.get<RepProgress>(`/v1/sales-reps/${repId}/progress`, { periodo_inicio: periodoInicio, periodo_fin: periodoFin, product_line_id: productLineId }),
+    getCascadeStatus: (repId: string, periodoInicio: string, periodoFin: string) =>
+      client.get<CascadeStatus>(`/v1/sales-reps/${repId}/cascade`, { periodo_inicio: periodoInicio, periodo_fin: periodoFin }),
+    getBaseline: (mes?: number) => client.get<Baseline[]>(`/v1/companies/${COMPANY_ID}/sales-targets/baseline`, mes ? { mes } : undefined),
+    recalculateBaseline: () => client.post<{ lineas_procesadas: number }>(`/v1/companies/${COMPANY_ID}/sales-targets/baseline/recalculate`, {}),
+    suggestTargets: (data: { periodo_tipo: string; periodo_inicio: string; periodo_fin: string; mes_referencia: number; ajuste_manual_pct?: number }) =>
+      client.post<SuggestedTarget[]>(`/v1/companies/${COMPANY_ID}/sales-targets/suggest`, data),
+    publishTargets: (data: { periodo_tipo: string; periodo_inicio: string; periodo_fin: string; mes_referencia: number; ajuste_manual_pct?: number }) =>
+      client.post<{ metas_publicadas: number }>(`/v1/companies/${COMPANY_ID}/sales-targets/publish`, data),
   },
 }

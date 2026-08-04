@@ -23,6 +23,8 @@ const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"))
 const POSPage = lazy(() => import("./pages/pos/POSPage"))
 const CajaPage = lazy(() => import("./pages/caja/CajaPage"))
 const RouteCashSettlementsPage = lazy(() => import("./pages/route-cash-settlements/RouteCashSettlementsPage"))
+const SalesTargetsPage = lazy(() => import("./pages/sales-targets/SalesTargetsPage"))
+const ChangePasswordPage = lazy(() => import("./pages/ChangePasswordPage"))
 const AdminPage = lazy(() => import("./pages/admin/AdminPage"))
 const VerticalsPage = lazy(() => import("./pages/admin/VerticalsPage"))
 const PagoparPage = lazy(() => import("./pages/pagopar/PagoparPage"))
@@ -131,9 +133,10 @@ function PageLoader() {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
+  const { user, loading, mustChangePassword } = useAuth()
   if (loading) return <PageLoader />
   if (!user) return <Navigate to="/login" replace />
+  if (mustChangePassword) return <Navigate to="/change-password" replace />
   return <>{children}</>
 }
 
@@ -164,6 +167,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
+      <Route path="/change-password" element={<Suspense fallback={<PageLoader />}><ChangePasswordPage /></Suspense>} />
       <Route path="/portal/proveedores/login" element={<Suspense fallback={<PageLoader />}><SupplierLogin /></Suspense>} />
       <Route path="/portal/proveedores/dashboard" element={<Suspense fallback={<PageLoader />}><SupplierDashboard /></Suspense>} />
       <Route path="/driver-app" element={<Suspense fallback={<PageLoader />}><DriverAppPage /></Suspense>} />
@@ -197,6 +201,7 @@ function AppRoutes() {
           ["settings", <SettingsPage />],
           ["caja", <CajaPage />],
           ["route-cash-settlements", <RouteCashSettlementsPage />],
+          ["sales-targets", <SalesTargetsPage />],
           ["admin", <AdminPage />],
           ["admin/verticals", <VerticalsPage />],
           ["audit", <AuditPage />],
