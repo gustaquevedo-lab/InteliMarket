@@ -368,7 +368,10 @@ function ManualTab() {
           en la pestaña <strong>"Estructura organizacional"</strong>:
         </p>
         <ul className="list-disc pl-5 space-y-1">
-          <li>Dar de alta un supervisor o al Gerente Comercial (arriba de la tabla).</li>
+          <li>Dar de alta un supervisor o al Gerente Comercial escribiendo su nombre a mano (arriba de la tabla) —
+            <strong> o</strong>, más rápido si la lista no está depurada: tocar <strong>"A supervisor"</strong> al lado de
+            cualquier vendedor de la lista para convertirlo directamente. Deja de aparecer como vendedor y pasa a estar
+            disponible para asignarle gente a cargo.</li>
           <li>Para cada vendedor, elegir su supervisor en el desplegable de la columna "Supervisor".</li>
           <li>Si un vendedor ya no trabaja más en la empresa: tocá el botón "Activo" para pasarlo a "Inactivo" — <strong>no lo
             borres</strong>. Al desactivarlo, deja de contar en la cascada de su supervisor automáticamente, sin tocar nada más.</li>
