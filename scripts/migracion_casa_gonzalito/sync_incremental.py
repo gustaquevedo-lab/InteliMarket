@@ -1279,6 +1279,16 @@ def sync_limite_credito(pg, my):
                 "FROM credit_accounts lc WHERE lc.customer_id = ca.customer_id "
                 "AND ca.customer_id = ANY(%s::uuid[])", (cust_ids,),
             )
+            # customers.credito_limite (el campo que lee el listado de
+            # clientes del frontend) nunca se sincronizaba desde aca —
+            # quedaba con basura vieja de la migracion original (un "1"
+            # literal en vez del monto real). Encontrado por el usuario:
+            # "en el listado de clientes no veo sus limites de credito".
+            cur.execute(
+                "UPDATE customers c SET credito_limite = lc.limite_credito "
+                "FROM credit_accounts lc WHERE lc.customer_id = c.id "
+                "AND lc.limite_credito > 0 AND c.id = ANY(%s::uuid[])", (cust_ids,),
+            )
             # saldo_utilizado/disponible en las tablas nuevas: AR real si tiene
             # pendiente, si no el agregado de customer_accounts — mismo criterio
             # CASE/EXISTS ya usado en financial/service.py para no duplicar.
