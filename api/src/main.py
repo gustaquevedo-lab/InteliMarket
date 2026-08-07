@@ -44,6 +44,7 @@ from api.src.kuapay.router import router as kuapay_router
 from api.src.kuapay.public_router import router as kuapay_public_router
 from api.src.branches.router import router as branches_router
 from api.src.credit_accounts.router import router as credit_accounts_router
+from api.src.checks.router import router as checks_router
 from api.src.logistics.router import router as logistics_router
 from api.src.imports.router import router as imports_router
 from api.src.email.router import router as email_router
@@ -198,6 +199,7 @@ app.include_router(kuapay_router)
 app.include_router(kuapay_public_router)
 app.include_router(branches_router)
 app.include_router(credit_accounts_router)
+app.include_router(checks_router)
 app.include_router(logistics_router)
 app.include_router(imports_router)
 app.include_router(email_router)

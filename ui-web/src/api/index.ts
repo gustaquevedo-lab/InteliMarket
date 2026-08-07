@@ -52,7 +52,20 @@ export interface SuggestedTarget { sales_rep_id: string; nombre: string; rama?: 
 export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; created_at?: string }
 export interface CashSession { id: string; caja_id?: string; caja?: CashRegister; cash_register?: CashRegister; usuario_id?: string; fecha_apertura?: string; fecha_cierre?: string; monto_apertura?: number; monto_cierre?: number; total_ventas?: number; total_retiros?: number; total_ingresos?: number; estado?: string; observaciones?: string; created_at?: string }
 export interface Branch { id: string; nombre: string; codigo: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; ruc?: string; punto_emision?: string | number; activo?: boolean; company_id?: string; created_at?: string; updated_at?: string }
-export interface CreditAccount { id: string; customer_id?: string; customer?: Customer; saldo?: number; limite_credito?: number; saldo_utilizado?: number; saldo_disponible?: number; porcentaje_uso?: number; estado?: string; activo?: boolean; created_at?: string; updated_at?: string }
+export interface CreditAccount { id: string; customer_id?: string; customer?: Customer; saldo?: number; limite_credito?: number; saldo_utilizado?: number; saldo_disponible?: number; dias_plazo?: number; porcentaje_uso?: number; estado?: string; activo?: boolean; created_at?: string; updated_at?: string }
+
+export interface Check {
+  id: string; company_id: string; customer_id: string; tipo: "cheque" | "pagare"; numero: string;
+  banco?: string; titular?: string; monto: number; moneda: string; fecha_emision?: string;
+  fecha_vencimiento: string; estado: "cartera" | "depositado" | "acreditado" | "rechazado" | "reemplazado" | "endosado";
+  payment_id?: string; accounts_receivable_id?: string; reemplaza_check_id?: string;
+  observaciones?: string; created_at: string; updated_at?: string; customer_name?: string;
+}
+
+export interface CheckEvent {
+  id: string; check_id: string; estado_anterior?: string; estado_nuevo: string;
+  motivo?: string; user_id?: string; created_at: string;
+}
 export interface CreditMovement { id: string; credit_account_id?: string; tipo?: string; monto?: number; saldo_anterior?: number; saldo_nuevo?: number; referencia?: string; observaciones?: string; sale_id?: string; fecha?: string; created_at?: string }
 export interface Delivery { id: string; company_id?: string; sale_id?: string; customer_id?: string; customer?: Customer; driver_id?: string; driver?: Driver; driver_name?: string; vehicle_id?: string; direccion_entrega?: string; coordenadas?: string; estado?: string; fecha_programada?: string; fecha_salida?: string; fecha_entrega?: string; observaciones?: string; created_at?: string }
 export interface Driver { id: string; company_id?: string; nombre: string; telefono?: string; email?: string; licencia_numero?: string; estado?: string; activo?: boolean; created_at?: string }
@@ -328,7 +341,7 @@ export const api = {
     cancel: (id: string) => client.post<void>(`/v1/sales/${id}/cancel`),
     items: (id: string) => client.get<SaleItem[]>(`/v1/sales/${id}/items`),
     getItems: (id: string) => client.get<SaleItem[]>(`/v1/sales/${id}/items`),
-    addPayment: (id: string, data: { monto: number; metodo_pago_id?: string; payment_method_id?: string; referencia?: string }) => client.post<any>(`/v1/sales/${id}/payments`, data),
+    addPayment: (id: string, data: { monto: number; metodo_pago_id?: string; payment_method_id?: string; referencia?: string; check_numero?: string; check_banco?: string; check_titular?: string; check_fecha_vencimiento?: string }) => client.post<any>(`/v1/sales/${id}/payments`, data),
     linkQuote: (id: string, quoteId: string) => client.post<any>(`/v1/sales/${id}/link-quote`, { quote_id: quoteId }),
     linkOrder: (id: string, orderId: string) => client.post<any>(`/v1/sales/${id}/link-order`, { order_id: orderId }),
     downloadReceipt: (id: string) => client.get<Blob>(`/v1/receipts/${id}`),
@@ -418,6 +431,16 @@ export const api = {
     getByCustomer: (customerId: string) => client.get<CreditAccount>(`/v1/credit-accounts/customer/${customerId}`),
     movements: (id: string) => client.get<CreditMovement[]>(`/v1/credit-accounts/${id}/movements`),
     payment: (id: string, data: { monto: number; metodo_pago_id?: string; observaciones?: string }) => client.post<CreditAccount>(`/v1/credit-accounts/${id}/payment`, data),
+    authorizeExcess: (id: string, data: { monto: number; motivo: string }) =>
+      client.post<{ authorization_id: string; credit_account_id: string; monto: number; autorizado_por: string }>(`/v1/credit-accounts/${id}/authorize-excess`, data),
+  },
+  checks: {
+    list: (params?: { customer_id?: string; estado?: string; limit?: number; offset?: number }) => client.get<Check[]>("/v1/checks", params),
+    get: (id: string) => client.get<Check>(`/v1/checks/${id}`),
+    cartera: (dias?: number) => client.get<Check[]>("/v1/checks/cartera", dias ? { dias } : undefined),
+    events: (id: string) => client.get<CheckEvent[]>(`/v1/checks/${id}/events`),
+    changeStatus: (id: string, data: { estado: string; motivo?: string; user_id?: string }) => client.post<Check>(`/v1/checks/${id}/status`, data),
+    replace: (id: string, data: { numero: string; banco?: string; titular?: string; fecha_vencimiento: string; user_id?: string }) => client.post<Check>(`/v1/checks/${id}/replace`, data),
   },
   logistics: {
     deliveries: {

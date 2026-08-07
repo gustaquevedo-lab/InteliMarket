@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.auth.rbac import require_role
 from api.src.credit_accounts import service
 from api.src.credit_accounts.schemas import (
     CreditAccountCreate,
@@ -13,6 +14,8 @@ from api.src.credit_accounts.schemas import (
     CreditAccountResponse,
     CreditPayment,
     CreditMovementResponse,
+    AuthorizeExcessRequest,
+    AuthorizeExcessResponse,
 )
 
 router = APIRouter(prefix="/api/v1/credit-accounts", tags=["credit-accounts"])
@@ -85,6 +88,19 @@ async def make_payment(
     result = await service.process_payment(db, user["company_id"], str(account.customer_id), data)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/{account_id}/authorize-excess", response_model=AuthorizeExcessResponse)
+async def authorize_excess(
+    account_id: str,
+    data: AuthorizeExcessRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_role("supervisor", "gerente_comercial", "admin")),
+):
+    result = await service.authorize_excess(db, user["company_id"], account_id, data, str(user["id"]))
+    if not result:
+        raise HTTPException(status_code=404, detail="Cuenta de credito no encontrada")
     return result
 
 

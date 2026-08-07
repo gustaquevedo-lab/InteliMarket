@@ -10,10 +10,12 @@ class CreditAccountCreate(BaseModel):
     company_id: uuid.UUID
     customer_id: uuid.UUID
     limite_credito: float = 0
+    dias_plazo: int = 30
 
 
 class CreditAccountUpdate(BaseModel):
     limite_credito: Optional[float] = None
+    dias_plazo: Optional[int] = None
     activo: Optional[bool] = None
 
 
@@ -24,12 +26,25 @@ class CreditAccountResponse(BaseModel):
     limite_credito: float
     saldo_disponible: float
     saldo_utilizado: float
+    dias_plazo: int
     activo: bool
     created_at: datetime
     updated_at: Optional[datetime]
 
     class Config:
         from_attributes = True
+
+
+class AuthorizeExcessRequest(BaseModel):
+    monto: float
+    motivo: str
+
+
+class AuthorizeExcessResponse(BaseModel):
+    authorization_id: uuid.UUID
+    credit_account_id: uuid.UUID
+    monto: float
+    autorizado_por: uuid.UUID
 
 
 class CreditPayment(BaseModel):

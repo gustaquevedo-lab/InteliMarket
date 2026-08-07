@@ -36,6 +36,10 @@ export default function SalesPage() {
   const [payAmount, setPayAmount] = useState("")
   const [payMethod, setPayMethod] = useState("")
   const [payRef, setPayRef] = useState("")
+  const [checkNumero, setCheckNumero] = useState("")
+  const [checkBanco, setCheckBanco] = useState("")
+  const [checkTitular, setCheckTitular] = useState("")
+  const [checkVencimiento, setCheckVencimiento] = useState("")
   const [paying, setPaying] = useState(false)
   const [linkModal, setLinkModal] = useState<{ sale: Sale; type: "quote" | "order" } | null>(null)
   const [linkId, setLinkId] = useState("")
@@ -100,18 +104,35 @@ export default function SalesPage() {
     setPayAmount(String(sale.saldo || sale.total))
     setPayMethod("")
     setPayRef("")
+    setCheckNumero("")
+    setCheckBanco("")
+    setCheckTitular("")
+    setCheckVencimiento("")
       try { setPaymentMethods(await api.paymentMethods.list()) }
     catch { setPaymentMethods([]) }
   }
 
+  const payMethodTipo = paymentMethods.find(m => m.id === payMethod)?.tipo
+  const isCheckPayment = payMethodTipo === "cheque" || payMethodTipo === "pagare"
+
   const handleAddPayment = async () => {
     if (!paymentModal || !payMethod || !payAmount) return
+    if (isCheckPayment && (!checkNumero || !checkVencimiento)) {
+      toast.error("Error", "Ingresá número y fecha de vencimiento del cheque/pagaré")
+      return
+    }
     setPaying(true)
     try {
       await api.sales.addPayment(paymentModal.id, {
         payment_method_id: payMethod,
         monto: Number(payAmount),
         referencia: payRef || undefined,
+        ...(isCheckPayment ? {
+          check_numero: checkNumero,
+          check_banco: checkBanco || undefined,
+          check_titular: checkTitular || undefined,
+          check_fecha_vencimiento: checkVencimiento,
+        } : {}),
       })
       toast.success("Pago registrado", `Gs ${formatPYG(Number(payAmount))} aplicado a ${paymentModal.numero}`)
       setPaymentModal(null)
@@ -388,8 +409,29 @@ export default function SalesPage() {
               </div>
               <div>
                 <label className="label-field">Referencia (opcional)</label>
-                <input className="input-field" placeholder="Nro. transferencia, cheque..." value={payRef} onChange={(e) => setPayRef(e.target.value)} />
+                <input className="input-field" placeholder="Nro. transferencia..." value={payRef} onChange={(e) => setPayRef(e.target.value)} />
               </div>
+              {isCheckPayment && (
+                <div className="space-y-3 border-t border-gray-100 dark:border-gray-700 pt-4">
+                  <p className="text-xs font-black uppercase tracking-widest text-gray-400">Datos del {payMethodTipo}</p>
+                  <div>
+                    <label className="label-field">Número</label>
+                    <input className="input-field" value={checkNumero} onChange={(e) => setCheckNumero(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label-field">Banco</label>
+                    <input className="input-field" value={checkBanco} onChange={(e) => setCheckBanco(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label-field">Titular</label>
+                    <input className="input-field" value={checkTitular} onChange={(e) => setCheckTitular(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label-field">Fecha de vencimiento (cobro)</label>
+                    <input className="input-field" type="date" value={checkVencimiento} onChange={(e) => setCheckVencimiento(e.target.value)} />
+                  </div>
+                </div>
+              )}
               <button onClick={handleAddPayment} disabled={!payMethod || !payAmount || paying} className="btn-primary w-full">
                 {paying ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Registrar pago"}
               </button>

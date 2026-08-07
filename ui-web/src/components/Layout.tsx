@@ -127,6 +127,7 @@ const navGroups: NavGroup[] = [
       { icon: Landmark, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
       { icon: HandCoins, label: "Cuentas por Pagar", path: "/payments" },
       { icon: Wallet, label: "Líneas de Crédito", path: "/credit-accounts", feature: "credit_accounts" },
+      { icon: Landmark, label: "Cheques y Pagarés", path: "/checks", feature: "credit_accounts" },
       { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
       { icon: Building, label: "Gestión Financiera", path: "/financiero" },
       { icon: BarChart3, label: "Gestión Financ. Integr.", path: "/integrated-finance", feature: "integrated_finance" },

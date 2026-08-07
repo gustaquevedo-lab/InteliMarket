@@ -1,8 +1,8 @@
 """Sales service"""
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
 import uuid
 
@@ -76,6 +76,11 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         moneda=data.moneda,
         tipo_cambio=data.tipo_cambio,
         estado="confirmado",
+        # subtotal/total son NOT NULL sin default en la tabla — sin este placeholder,
+        # el flush de abajo (necesario para tener sale.id antes de crear los items)
+        # rompe con NotNullViolationError antes de calcular los valores reales.
+        subtotal=Decimal("0"),
+        total=Decimal("0"),
         observaciones=data.observaciones,
         user_id=data.user_id,
     )
@@ -124,19 +129,32 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     sale.saldo = sale.total
 
     if data.condicion == "credito" and data.customer_id:
-        from api.src.credit_accounts.service import process_purchase
+        from api.src.credit_accounts.service import process_purchase, CreditAuthorizationRequired
         credit_result = await process_purchase(
             db,
             str(data.company_id),
             str(data.customer_id),
             sale.total,
             sale.id,
+            authorization_id=str(data.credit_authorization_id) if data.credit_authorization_id else None,
         )
         if "error" in credit_result:
             raise ValueError(f"Credit account error: {credit_result['error']}")
-        sale.estado = "confirmado"
-        sale.total_pagado = sale.total
-        sale.saldo = Decimal("0")
+        if credit_result.get("requiere_autorizacion"):
+            raise CreditAuthorizationRequired(credit_result)
+
+        # Antes esto marcaba la venta como pagada al 100% en el momento de
+        # crearse (total_pagado=total, saldo=0) — una venta a credito recien
+        # nacida no esta pagada, y create_accounts_receivable_for_sale nunca
+        # se llamaba, asi que no quedaba ningun documento de cuenta por cobrar
+        # para cobrar despues (ver plan "Cuentas por Cobrar + Credito + Cheques").
+        sale.estado = "pendiente"
+        dias_plazo = credit_result.get("dias_plazo") or 30
+        from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
+        await create_accounts_receivable_for_sale(
+            db, str(data.company_id), str(data.customer_id), str(sale.id),
+            sale.total, numero, fecha_vencimiento=date.today() + timedelta(days=int(dias_plazo)),
+        )
 
     for item_data in data.items:
         qty_to_deduct = int(item_data.cantidad)
@@ -205,7 +223,15 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             )
             db.add(movement)
 
-    await db.flush()
+    # Ninguna funcion de este archivo hacia commit — solo flush() — asi que
+    # nada de esto quedaba guardado de verdad al cerrarse la sesion al final
+    # del request (confirmado en vivo: una venta de prueba devolvia 201 con
+    # un id real pero no aparecia en la base). El unico commit que existia
+    # era uno prematuro dentro de process_purchase(), que de rebote guardaba
+    # la venta+items en ventas a credito pero nunca el descuento de stock
+    # (ver credit_accounts/service.py). Ahora se commitea todo junto, una vez,
+    # al final, cuando la venta ya esta completa.
+    await db.commit()
     await db.refresh(sale)
     return sale
 
@@ -292,7 +318,7 @@ async def get_sales_today(db: AsyncSession, company_id: str) -> dict:
 async def create_cash_session(db: AsyncSession, data: CashSessionCreate) -> CashSession:
     session_obj = CashSession(**data.model_dump())
     db.add(session_obj)
-    await db.flush()
+    await db.commit()
     await db.refresh(session_obj)
     return session_obj
 
@@ -312,7 +338,7 @@ async def close_cash_session(db: AsyncSession, session_id: str, data: CashSessio
     session_obj.observaciones_cierre = data.observaciones
     session_obj.estado = "cerrada"
 
-    await db.flush()
+    await db.commit()
     await db.refresh(session_obj)
     return session_obj
 
@@ -354,7 +380,7 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
                 lot.cantidad += remaining
                 remaining = 0
 
-    await db.flush()
+    await db.commit()
     await db.refresh(sale)
     return sale
 
@@ -439,7 +465,7 @@ async def update_sale(db: AsyncSession, sale_id: str, data: SaleUpdate) -> Sale 
         sale.saldo = sale.total - (sale.total_pagado or 0)
 
     sale.updated_at = datetime.now(timezone.utc)
-    await db.flush()
+    await db.commit()
     await db.refresh(sale)
     return sale
 
@@ -451,8 +477,13 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
     if sale.estado in ("cancelado", "devuelto"):
         return {"error": "Venta cancelada o devuelta"}
 
-    from api.src.payments.models import Payment
+    from api.src.payments.models import Payment, PaymentMethod
     from api.src.payments.schemas import PaymentCreate
+
+    payment_method = None
+    if data.payment_method_id:
+        pm_result = await db.execute(select(PaymentMethod).where(PaymentMethod.id == data.payment_method_id))
+        payment_method = pm_result.scalar_one_or_none()
 
     payment = Payment(
         company_id=sale.company_id,
@@ -490,9 +521,26 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
     sale.updated_at = datetime.now(timezone.utc)
 
     from api.src.accounts_receivable.service import apply_payment_to_receivable
-    await apply_payment_to_receivable(db, str(sale.company_id), str(sale.id), data.monto)
+    ar_result = await apply_payment_to_receivable(db, str(sale.company_id), str(sale.id), data.monto)
 
-    await db.flush()
+    if payment_method and payment_method.tipo in ("cheque", "pagare") and data.check_numero:
+        from api.src.checks.service import record_check
+        from api.src.checks.schemas import CheckCreate
+        await record_check(db, CheckCreate(
+            company_id=sale.company_id,
+            customer_id=sale.customer_id,
+            tipo=payment_method.tipo,
+            numero=data.check_numero,
+            banco=data.check_banco,
+            titular=data.check_titular,
+            monto=data.monto,
+            moneda=sale.moneda,
+            fecha_vencimiento=data.check_fecha_vencimiento or datetime.now(timezone.utc).date(),
+            payment_id=payment.id,
+            accounts_receivable_id=uuid.UUID(ar_result["receivable_id"]) if ar_result and "receivable_id" in ar_result else None,
+        ))
+
+    await db.commit()
     await db.refresh(sale)
     return {"sale": sale, "payment": payment}
 

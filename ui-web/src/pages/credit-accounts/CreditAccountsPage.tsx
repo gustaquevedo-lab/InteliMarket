@@ -15,7 +15,7 @@ export default function CreditAccountsPage() {
   const [showMovementsModal, setShowMovementsModal] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState<CreditAccount | null>(null)
   const [movements, setMovements] = useState<CreditMovement[]>([])
-  const [form, setForm] = useState({ customer_id: "", limite_credito: "" })
+  const [form, setForm] = useState({ customer_id: "", limite_credito: "", dias_plazo: "30" })
   const [paymentForm, setPaymentForm] = useState({ monto: "", observaciones: "" })
   const [submitting, setSubmitting] = useState(false)
   const toast = useToast()
@@ -54,10 +54,10 @@ export default function CreditAccountsPage() {
     }
     setSubmitting(true)
     try {
-      await api.creditAccounts.create({ customer_id: form.customer_id, limite_credito: parseFloat(form.limite_credito) })
+      await api.creditAccounts.create({ customer_id: form.customer_id, limite_credito: parseFloat(form.limite_credito), dias_plazo: parseInt(form.dias_plazo) || 30 })
       toast.success("Creada", "Cuenta de crédito creada correctamente")
       setShowModal(false)
-      setForm({ customer_id: "", limite_credito: "" })
+      setForm({ customer_id: "", limite_credito: "", dias_plazo: "30" })
       fetchData()
     } catch {
       toast.error("Error", "No se pudo crear la cuenta")
@@ -147,15 +147,16 @@ export default function CreditAccountsPage() {
               <th className="table-cell text-right">Utilizado</th>
               <th className="table-cell text-right">Disponible</th>
               <th className="table-cell">Uso</th>
+              <th className="table-cell text-right">Plazo</th>
               <th className="table-cell">Estado</th>
               <th className="table-cell">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
+              <tr><td colSpan={8} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={7} className="text-center py-12 text-gray-400">No hay cuentas de crédito</td></tr>
+              <tr><td colSpan={8} className="text-center py-12 text-gray-400">No hay cuentas de crédito</td></tr>
             ) : (
               filtered.map((a) => {
                 const customer = customers.find(c => c.id === a.customer_id)
@@ -175,6 +176,7 @@ export default function CreditAccountsPage() {
                       </div>
                       <p className="text-xs text-gray-400 mt-1">{usoPct}%</p>
                     </td>
+                    <td className="table-td text-right text-sm text-gray-500">{a.dias_plazo ?? 30} días</td>
                     <td className="table-td">
                       <StatusBadge status={a.activo ? "activo" : "inactivo"} map={{ activo: "badge-success", inactivo: "badge-danger" }} />
                     </td>
@@ -211,6 +213,11 @@ export default function CreditAccountsPage() {
               <div>
                 <label className="input-label label-required">Límite de crédito (PYG)</label>
                 <input className="input-field" type="number" placeholder="5000000" value={form.limite_credito} onChange={(e) => setForm({ ...form, limite_credito: e.target.value })} />
+              </div>
+              <div>
+                <label className="input-label label-required">Plazo (días)</label>
+                <input className="input-field" type="number" placeholder="30" value={form.dias_plazo} onChange={(e) => setForm({ ...form, dias_plazo: e.target.value })} />
+                <p className="text-xs text-gray-400 mt-1">Días desde la venta hasta el vencimiento de la cuenta por cobrar</p>
               </div>
               <div className="flex gap-3 pt-4">
                 <button className="btn-outline flex-1" onClick={() => setShowModal(false)}>Cancelar</button>

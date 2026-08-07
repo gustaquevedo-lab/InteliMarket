@@ -7,7 +7,20 @@ from decimal import Decimal
 import uuid
 
 from api.src.credit_accounts.models import CreditAccount, CreditMovement
-from api.src.credit_accounts.schemas import CreditAccountCreate, CreditAccountUpdate, CreditPayment
+from api.src.credit_accounts.schemas import (
+    CreditAccountCreate, CreditAccountUpdate, CreditPayment, AuthorizeExcessRequest,
+)
+
+
+class CreditAuthorizationRequired(Exception):
+    """Se levanta cuando una venta a credito excede el disponible o el cliente
+    esta bloqueado por scoring — reemplaza el ValueError duro anterior (que
+    no daba forma de que un supervisor autorice el excedente, como si hacia
+    el legacy con LIMAUT). El router la traduce a un 409 con el detalle."""
+
+    def __init__(self, details: dict):
+        self.details = details
+        super().__init__(details.get("motivo", "Requiere autorizacion de credito"))
 
 
 async def create_credit_account(db: AsyncSession, data: CreditAccountCreate) -> CreditAccount:
@@ -17,6 +30,7 @@ async def create_credit_account(db: AsyncSession, data: CreditAccountCreate) -> 
         limite_credito=data.limite_credito,
         saldo_disponible=data.limite_credito,
         saldo_utilizado=0,
+        dias_plazo=data.dias_plazo,
     )
     db.add(account)
     await db.commit()
@@ -58,6 +72,8 @@ async def update_credit_account(db: AsyncSession, account_id: str, data: CreditA
         diferencia = nuevo_limite - Decimal(str(account.limite_credito))
         account.saldo_disponible = Decimal(str(account.saldo_disponible)) + diferencia
         account.limite_credito = nuevo_limite
+    if "dias_plazo" in update_data:
+        account.dias_plazo = update_data["dias_plazo"]
     if "activo" in update_data:
         account.activo = update_data["activo"]
     await db.commit()
@@ -65,14 +81,51 @@ async def update_credit_account(db: AsyncSession, account_id: str, data: CreditA
     return account
 
 
-async def process_purchase(db: AsyncSession, company_id: str, customer_id: str, monto: Decimal, sale_id: uuid.UUID) -> dict:
+async def process_purchase(
+    db: AsyncSession, company_id: str, customer_id: str, monto: Decimal, sale_id: uuid.UUID,
+    authorization_id: str | None = None,
+) -> dict:
     account = await get_credit_account_by_customer(db, company_id, customer_id)
     if not account:
         return {"error": "No credit account for customer"}
     if not account.activo:
         return {"error": "Credit account inactive"}
+
+    # Un supervisor ya autorizo este excedente antes de reintentar la venta
+    # (ver authorize_excess) — el movimiento ya aplico el saldo, solo falta
+    # linkearlo a la venta que finalmente se creo.
+    if authorization_id:
+        result = await db.execute(
+            select(CreditMovement).where(CreditMovement.id == uuid.UUID(authorization_id))
+        )
+        auth_movement = result.scalar_one_or_none()
+        if not auth_movement or auth_movement.tipo != "autorizacion_manual" or auth_movement.referencia_id is not None:
+            return {"error": "Autorizacion de credito invalida o ya utilizada"}
+        auth_movement.referencia_type = "sale"
+        auth_movement.referencia_id = sale_id
+        await db.flush()
+        return {"success": True, "account": account, "dias_plazo": account.dias_plazo}
+
+    from api.src.credit_scoring.service import get_credit_score
+    score = await get_credit_score(db, company_id, customer_id)
+    if score and score.get("is_auto_blocked"):
+        return {
+            "requiere_autorizacion": True,
+            "motivo": score.get("block_reason") or "Cliente bloqueado por evaluacion de riesgo",
+            "credit_account_id": str(account.id),
+            "disponible": float(account.saldo_disponible),
+            "monto": float(monto),
+        }
+
     if Decimal(str(account.saldo_disponible)) < monto:
-        return {"error": "Insufficient credit", "disponible": float(account.saldo_disponible), "monto": float(monto)}
+        return {
+            "requiere_autorizacion": True,
+            "motivo": "Excede el limite de credito disponible",
+            "credit_account_id": str(account.id),
+            "disponible": float(account.saldo_disponible),
+            "monto": float(monto),
+            "faltante": float(monto - Decimal(str(account.saldo_disponible))),
+        }
 
     saldo_anterior = Decimal(str(account.saldo_utilizado))
     account.saldo_utilizado += monto
@@ -90,9 +143,47 @@ async def process_purchase(db: AsyncSession, company_id: str, customer_id: str, 
         referencia_id=sale_id,
     )
     db.add(movement)
-    await db.commit()
+    # No commitea aca — process_purchase corre en medio de sales.service.create_sale,
+    # que hace un unico commit al final. Un commit intermedio aca dejaba la venta
+    # guardada a mitad de armar (sin el descuento de stock, que pasa despues).
+    await db.flush()
     await db.refresh(account)
-    return {"success": True, "account": account}
+    return {"success": True, "account": account, "dias_plazo": account.dias_plazo}
+
+
+async def authorize_excess(
+    db: AsyncSession, company_id: str, account_id: str, data: AuthorizeExcessRequest, user_id: str,
+) -> dict | None:
+    account = await get_credit_account(db, account_id)
+    if not account:
+        return None
+
+    monto = Decimal(str(data.monto))
+    saldo_anterior = Decimal(str(account.saldo_utilizado))
+    account.saldo_utilizado += monto
+    account.saldo_disponible -= monto  # puede quedar negativo — es una excepcion explicita al limite
+
+    movement = CreditMovement(
+        company_id=company_id,
+        credit_account_id=account.id,
+        customer_id=account.customer_id,
+        tipo="autorizacion_manual",
+        monto=monto,
+        saldo_anterior=saldo_anterior,
+        saldo_nuevo=account.saldo_utilizado,
+        referencia_type=None,
+        referencia_id=None,
+        observaciones=f"Autorizado por usuario {user_id}: {data.motivo}",
+    )
+    db.add(movement)
+    await db.commit()
+    await db.refresh(movement)
+    return {
+        "authorization_id": movement.id,
+        "credit_account_id": account.id,
+        "monto": float(monto),
+        "autorizado_por": user_id,
+    }
 
 
 async def process_payment(db: AsyncSession, company_id: str, customer_id: str, data: CreditPayment) -> dict:

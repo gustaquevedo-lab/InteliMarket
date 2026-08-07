@@ -33,7 +33,7 @@ async def _send_sale_wa(db: AsyncSession, sale, customer_phone: str | None, tipo
     if not customer_phone or not sale.company_id:
         return
     from uuid import UUID
-    template = await get_wa_template(db, UUID(sale.company_id), tipo)
+    template = await get_wa_template(db, UUID(str(sale.company_id)), tipo)
     if not template:
         return
     total_str = f"{float(sale.total):,.0f}" if sale.total else "0"
@@ -44,7 +44,11 @@ async def _send_sale_wa(db: AsyncSession, sale, customer_phone: str | None, tipo
 
 @router.post("/sales", response_model=SaleResponse, status_code=status.HTTP_201_CREATED)
 async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
-    sale = await service.create_sale(db, body)
+    from api.src.credit_accounts.service import CreditAuthorizationRequired
+    try:
+        sale = await service.create_sale(db, body)
+    except CreditAuthorizationRequired as e:
+        raise HTTPException(status_code=409, detail={"requiere_autorizacion": True, **e.details})
     
     try:
         await emit_sale_completed(
@@ -74,8 +78,11 @@ async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
             pass
     
     # WhatsApp notification
-    await _send_sale_wa(db, sale, customer_phone)
-    
+    try:
+        await _send_sale_wa(db, sale, customer_phone)
+    except Exception:
+        pass
+
     # Auto-generate InteliCont entry
     try:
         await generate_sale_entry(db, str(sale.id))
@@ -159,9 +166,12 @@ async def cancel_sale(sale_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="No se pudo cancelar la venta")
     # WhatsApp cancellation notice
     if result.customer_id:
-        _, customer_phone = await _get_customer_email_phone(db, str(result.customer_id))
-        if customer_phone:
-            await _send_sale_wa(db, result, customer_phone, tipo="venta.cancelada", extra={"TOTAL": f"{float(result.total):,.0f}"})
+        try:
+            _, customer_phone = await _get_customer_email_phone(db, str(result.customer_id))
+            if customer_phone:
+                await _send_sale_wa(db, result, customer_phone, tipo="venta.cancelada", extra={"TOTAL": f"{float(result.total):,.0f}"})
+        except Exception:
+            pass
     try:
         await send_webhook_async(db, "venta.anulada", {
             "sale_id": str(result.id),
@@ -194,9 +204,12 @@ async def add_payment_to_sale(sale_id: str, body: SaleAddPayment, db: AsyncSessi
     sale = result["sale"]
     # WhatsApp payment notification
     if sale.customer_id:
-        _, customer_phone = await _get_customer_email_phone(db, str(sale.customer_id))
-        if customer_phone:
-            await _send_sale_wa(db, sale, customer_phone, tipo="pago.recibido", extra={"MONTO": f"{float(body.monto):,.0f}"})
+        try:
+            _, customer_phone = await _get_customer_email_phone(db, str(sale.customer_id))
+            if customer_phone:
+                await _send_sale_wa(db, sale, customer_phone, tipo="pago.recibido", extra={"MONTO": f"{float(body.monto):,.0f}"})
+        except Exception:
+            pass
     # Auto-generate InteliCont entry if not yet created
     try:
         await generate_sale_entry(db, str(sale.id))

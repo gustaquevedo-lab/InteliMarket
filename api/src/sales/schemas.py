@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 from decimal import Decimal
 
@@ -30,6 +30,9 @@ class SaleCreate(BaseModel):
     items: list[SaleItemInput]
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None
+    # Se completa cuando un supervisor ya autorizo un excedente de credito
+    # (POST /credit-accounts/{id}/authorize-excess) y el POS reintenta la venta.
+    credit_authorization_id: Optional[UUID] = None
 
 
 class CustomerBrief(BaseModel):
@@ -118,6 +121,11 @@ class SaleAddPayment(BaseModel):
     monto: Decimal = Field(gt=0)
     referencia: Optional[str] = None
     user_id: Optional[UUID] = None
+    # Solo aplican cuando el metodo de pago resuelve a tipo "cheque"/"pagare"
+    check_numero: Optional[str] = None
+    check_banco: Optional[str] = None
+    check_titular: Optional[str] = None
+    check_fecha_vencimiento: Optional[date] = None
 
 
 class SaleLinkQuote(BaseModel):
