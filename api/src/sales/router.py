@@ -112,13 +112,14 @@ async def list_sales(
     estado: str | None = Query(None),
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
+    numero: str | None = Query(None),
     limit: int = Query(50, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     dt_desde = datetime.combine(fecha_desde, time.min, tzinfo=timezone.utc) if fecha_desde else None
     dt_hasta = datetime.combine(fecha_hasta, time.max, tzinfo=timezone.utc) if fecha_hasta else None
-    return await service.list_sales(db, company_id, customer_id, estado, dt_desde, dt_hasta, limit=limit, offset=offset)
+    return await service.list_sales(db, company_id, customer_id, estado, dt_desde, dt_hasta, numero, limit=limit, offset=offset)
 
 
 @router.get("/sales/{sale_id}", response_model=SaleResponse)

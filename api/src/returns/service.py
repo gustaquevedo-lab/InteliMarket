@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.returns.models import Return, ReturnItem
 from api.src.returns.schemas import ReturnCreate, ReturnApprove
 from api.src.inventory.models import Stock, InventoryMovement
+from api.src.sales.models import Sale, SaleItem
 
 
 RETURN_MOTIVOS = [
@@ -124,6 +125,55 @@ async def list_returns(
     return list(result.scalars().all())
 
 
+async def generate_credit_note_number(db: AsyncSession, company_id: str) -> str:
+    date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
+    result = await db.execute(
+        select(Sale).where(Sale.company_id == company_id, Sale.numero.like("NC-%"))
+        .order_by(Sale.created_at.desc()).limit(1)
+    )
+    last = result.scalar_one_or_none()
+    seq = int(last.numero.split("-")[-1]) + 1 if last else 1
+    return f"NC-{date_part}-{seq:06d}"
+
+
+async def _create_credit_note(db: AsyncSession, return_obj: Return, items: list[ReturnItem]) -> uuid.UUID:
+    """Nota de credito real vinculada a la devolucion — sin esto, aprobar
+    una devolucion reingresaba stock pero nunca afectaba ventas/AR/reportes,
+    quedaba invisible para todo lo demas del sistema (igual que las 282K NC
+    historicas migradas: sales con tipo_comprobante='notacredito' y total
+    negativo)."""
+    numero = await generate_credit_note_number(db, str(return_obj.company_id))
+    total = -abs(return_obj.total or Decimal("0"))
+    nc = Sale(
+        company_id=return_obj.company_id, branch_id=return_obj.branch_id,
+        customer_id=return_obj.customer_id, numero=numero,
+        tipo_comprobante="notacredito", condicion="contado", moneda=return_obj.moneda,
+        estado="completado", subtotal=-abs(return_obj.subtotal or Decimal("0")),
+        iva_10=-abs(return_obj.iva_10 or Decimal("0")), iva_5=-abs(return_obj.iva_5 or Decimal("0")),
+        total=total, total_pagado=0, saldo=total,
+        observaciones=f"Devolucion {return_obj.numero} — {return_obj.motivo}",
+    )
+    db.add(nc)
+    await db.flush()
+
+    sale_item_ids = {i.sale_item_id for i in items if i.sale_item_id}
+    costo_by_sale_item = {}
+    if sale_item_ids:
+        costo_result = await db.execute(select(SaleItem).where(SaleItem.id.in_(sale_item_ids)))
+        costo_by_sale_item = {si.id: si.costo_unitario for si in costo_result.scalars().all()}
+
+    for item in items:
+        item_total = -abs(item.total or Decimal("0"))
+        db.add(SaleItem(
+            sale_id=nc.id, product_id=item.product_id, variant_id=item.variant_id,
+            descripcion=item.descripcion, cantidad=item.cantidad, precio_unitario=item.precio_unitario,
+            iva_tasa=item.iva_tasa, iva_monto=-abs(item.iva_monto or Decimal("0")), total=item_total,
+            costo_unitario=costo_by_sale_item.get(item.sale_item_id),
+        ))
+    await db.flush()
+    return nc.id
+
+
 async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) -> Return | None:
     return_obj = await get_return(db, return_id)
     if not return_obj or return_obj.estado != "pendiente":
@@ -138,7 +188,10 @@ async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) 
     warehouse_id = str(data.warehouse_id or return_obj.warehouse_id or "")
 
     items_result = await db.execute(select(ReturnItem).where(ReturnItem.return_id == return_obj.id))
-    for item in items_result.scalars().all():
+    return_items = list(items_result.scalars().all())
+    return_obj.nota_credito_id = await _create_credit_note(db, return_obj, return_items)
+
+    for item in return_items:
         qty = int(item.cantidad)
         stock_result = await db.execute(
             select(Stock).where(

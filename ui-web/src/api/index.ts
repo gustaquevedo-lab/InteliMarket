@@ -322,7 +322,7 @@ export const api = {
     delete: (id: string) => client.delete<void>(`/v1/customers/${id}`),
   },
   sales: {
-    list: (params?: { fecha_desde?: string; fecha_hasta?: string; estado?: string; limit?: number; offset?: number }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
+    list: (params?: { fecha_desde?: string; fecha_hasta?: string; estado?: string; numero?: string; limit?: number; offset?: number }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
     get: (id: string) => client.get<Sale>(`/v1/sales/${id}`),
     create: (data: Partial<Sale> & { items: SaleItem[] }) => client.post<Sale>("/v1/sales", data),
     cancel: (id: string) => client.post<void>(`/v1/sales/${id}/cancel`),

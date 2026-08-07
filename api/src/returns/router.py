@@ -10,7 +10,9 @@ router = APIRouter(prefix="/api/v1", tags=["returns"])
 
 @router.post("/returns", response_model=ReturnResponse, status_code=status.HTTP_201_CREATED)
 async def create_return(body: ReturnCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_return(db, body)
+    result = await service.create_return(db, body)
+    await db.commit()
+    return result
 
 
 @router.get("/returns/motivos")
@@ -42,6 +44,7 @@ async def approve_return(return_id: str, body: ReturnApprove, db: AsyncSession =
     result = await service.approve_return(db, return_id, body)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo aprobar la devolución")
+    await db.commit()
     return result
 
 
@@ -54,4 +57,5 @@ async def reject_return(
     result = await service.reject_return(db, return_id, motivo)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo rechazar la devolución")
+    await db.commit()
     return result

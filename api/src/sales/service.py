@@ -228,6 +228,7 @@ async def list_sales(
     estado: str | None = None,
     fecha_desde: datetime | None = None,
     fecha_hasta: datetime | None = None,
+    numero: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Sale]:
@@ -240,6 +241,11 @@ async def list_sales(
         query = query.where(Sale.fecha >= fecha_desde)
     if fecha_hasta:
         query = query.where(Sale.fecha <= fecha_hasta)
+    if numero:
+        # sin esto, buscar una factura puntual entre 1,96M implicaria
+        # cargar todo el listado sin filtro — el frontend de Devoluciones
+        # necesitaba justo esto para no tener que listar todas las ventas.
+        query = query.where(Sale.numero.ilike(f"%{numero}%"))
     query = query.order_by(Sale.fecha.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     sales = list(result.scalars().all())

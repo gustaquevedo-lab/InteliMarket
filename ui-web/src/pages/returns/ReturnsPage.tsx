@@ -38,6 +38,8 @@ export default function ReturnsPage() {
   const [returnItems, setReturnItems] = useState<ReturnItemType[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [selectedSaleId, setSelectedSaleId] = useState("")
+  const [saleSearch, setSaleSearch] = useState("")
+  const [searchingSales, setSearchingSales] = useState(false)
   const [saleItems, setSaleItems] = useState<any[]>([])
   const [selectedItems, setSelectedItems] = useState<Record<string, { cantidad: number; condicion: string; motivo_detalle: string }>>({})
   const [motivo, setMotivo] = useState("")
@@ -59,14 +61,12 @@ export default function ReturnsPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [returnsData, salesData, warehousesData, motivosData] = await Promise.allSettled([
+      const [returnsData, warehousesData, motivosData] = await Promise.allSettled([
         api.returns.list({ estado: filterStatus !== "todos" ? filterStatus : undefined }),
-        api.sales.list({ estado: "confirmado" }),
         api.warehouses.list(),
         api.returns.motivos(),
       ])
       if (returnsData.status === "fulfilled") setReturns(returnsData.value)
-      if (salesData.status === "fulfilled") setSales(salesData.value)
       if (warehousesData.status === "fulfilled") setWarehouses(warehousesData.value)
       if (motivosData.status === "fulfilled") setMotivos(motivosData.value)
     } catch {
@@ -75,6 +75,22 @@ export default function ReturnsPage() {
   }
 
   useEffect(() => { fetchData() }, [filterStatus])
+
+  const handleSaleSearch = (value: string) => {
+    setSaleSearch(value)
+    setSales([])
+    if (!value.trim()) return
+    setSearchingSales(true)
+    clearTimeout((window as any).__saleSearchTimer)
+    ;(window as any).__saleSearchTimer = setTimeout(async () => {
+      try {
+        const results = await api.sales.list({ numero: value.trim(), estado: "completado", limit: 20 })
+        setSales(results)
+      } finally {
+        setSearchingSales(false)
+      }
+    }, 350)
+  }
 
   const filtered = returns.filter(r => {
     if (search && !(r.numero || "").toLowerCase().includes(search.toLowerCase())) return false
@@ -140,6 +156,8 @@ export default function ReturnsPage() {
 
   const resetCreateForm = () => {
     setSelectedSaleId("")
+    setSaleSearch("")
+    setSales([])
     setSaleItems([])
     setSelectedItems({})
     setMotivo("")
@@ -279,15 +297,41 @@ export default function ReturnsPage() {
       {/* Create Return Modal */}
       <Modal open={showCreate} onClose={() => { if (!creating) { setShowCreate(false); resetCreateForm() } }} title="Nueva devolución" size="xl">
         <div className="space-y-4">
-          {/* Sale Selector */}
+          {/* Sale Search */}
           <div>
             <label className="block text-sm font-bold mb-1">Venta de origen</label>
-            <select className="input-field w-full" value={selectedSaleId} onChange={(e) => { setSelectedSaleId(e.target.value); handleLoadSaleItems(e.target.value) }}>
-              <option value="">Seleccionar venta...</option>
-              {sales.map(s => (
-                <option key={s.id} value={s.id}>{s.numero} — {s.customer?.razon_social || "CF"} — {formatDate(s.fecha)} — {formatPYG(s.total)}</option>
-              ))}
-            </select>
+            {selectedSaleId ? (
+              <div className="input-field w-full flex items-center justify-between">
+                <span>{sales.find(s => s.id === selectedSaleId)?.numero} — {sales.find(s => s.id === selectedSaleId)?.customer?.razon_social || "CF"}</span>
+                <button type="button" className="text-xs text-red-500 font-bold" onClick={() => { setSelectedSaleId(""); setSaleItems([]); setSaleSearch("") }}>Cambiar</button>
+              </div>
+            ) : (
+              <>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    className="input-field pl-9 w-full"
+                    placeholder="Buscar por número de factura..."
+                    value={saleSearch}
+                    onChange={(e) => handleSaleSearch(e.target.value)}
+                  />
+                  {searchingSales && <Loader2 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-400" />}
+                </div>
+                {sales.length > 0 && (
+                  <div className="mt-1 border border-gray-200 dark:border-gray-700 rounded-lg max-h-48 overflow-y-auto">
+                    {sales.map(s => (
+                      <button
+                        key={s.id} type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-50 dark:border-gray-800 last:border-0"
+                        onClick={() => { setSelectedSaleId(s.id); handleLoadSaleItems(s.id) }}
+                      >
+                        <span className="font-bold">{s.numero}</span> — {s.customer?.razon_social || "Consumidor Final"} — {formatDate(s.fecha)} — {formatPYG(s.total)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {/* Items */}
