@@ -15,10 +15,20 @@ class OrderItemInput(BaseModel):
     iva_tasa: Decimal = Field(default=10)
 
 
+class OrderItemProduct(BaseModel):
+    id: UUID
+    nombre: str
+    sku: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class OrderItemResponse(BaseModel):
     id: UUID
     order_id: UUID
     product_id: UUID
+    product: Optional[OrderItemProduct] = None
     variant_id: Optional[UUID] = None
     descripcion: Optional[str] = None
     cantidad: Decimal

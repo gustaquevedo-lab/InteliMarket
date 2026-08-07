@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.sales_orders.models import SalesOrder, SalesOrderItem
 from api.src.sales_orders.schemas import SalesOrderCreate, SalesOrderUpdate
 from api.src.customers.models import Customer
+from api.src.products.models import Product
 
 
 async def _attach_customers(db: AsyncSession, orders: list[SalesOrder]) -> list[SalesOrder]:
@@ -144,12 +145,26 @@ async def get_order_with_items(db: AsyncSession, order_id: str) -> dict | None:
     if not order:
         return None
     items_result = await db.execute(select(SalesOrderItem).where(SalesOrderItem.order_id == order.id))
-    items = items_result.scalars().all()
+    items = list(items_result.scalars().all())
     await _attach_customers(db, [order])
+
+    product_ids = {item.product_id for item in items if item.product_id}
+    products_by_id = {}
+    if product_ids:
+        prod_result = await db.execute(select(Product).where(Product.id.in_(product_ids)))
+        products_by_id = {p.id: p for p in prod_result.scalars().all()}
+    items_out = []
+    for item in items:
+        p = products_by_id.get(item.product_id)
+        items_out.append({
+            **{c.name: getattr(item, c.name) for c in item.__table__.columns},
+            "product": {"id": p.id, "nombre": p.nombre, "sku": p.sku} if p else None,
+        })
+
     return {
         **{c.name: getattr(order, c.name) for c in order.__table__.columns},
         "customer": order.customer,
-        "items": items,
+        "items": items_out,
     }
 
 
