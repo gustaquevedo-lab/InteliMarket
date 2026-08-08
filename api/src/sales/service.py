@@ -42,16 +42,30 @@ def calculate_taxes(item: dict) -> dict:
 
 async def generate_sale_number(db: AsyncSession, company_id: str, branch_id: str | None) -> str:
     date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
+    branch_code = branch_id[:3].upper() if branch_id else "000"
+    prefix = f"{date_part}-{branch_code}-"
+
+    # Antes tomaba la ULTIMA venta de la empresa por created_at (sin importar
+    # su formato) y le parseaba el numero con int() — rompia con
+    # ValueError apenas la venta mas reciente era algo con otro formato (ej.
+    # una nota de credito "NC287876", sin guiones). Ahora busca especificamente
+    # dentro del mismo prefijo fecha+sucursal, que es lo unico que hay que
+    # incrementar, y nunca puede toparse con un numero de otro formato.
     result = await db.execute(
         select(Sale)
-        .where(Sale.company_id == company_id)
-        .order_by(Sale.created_at.desc())
+        .where(Sale.company_id == company_id, Sale.numero.like(f"{prefix}%"))
+        .order_by(Sale.numero.desc())
         .limit(1)
     )
     last = result.scalar_one_or_none()
-    seq = int(last.numero.split("-")[-1]) + 1 if last else 1
-    branch_code = branch_id[:3].upper() if branch_id else "000"
-    return f"{date_part}-{branch_code}-{seq:06d}"
+    if last:
+        try:
+            seq = int(last.numero[len(prefix):]) + 1
+        except ValueError:
+            seq = 1
+    else:
+        seq = 1
+    return f"{prefix}{seq:06d}"
 
 
 async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
