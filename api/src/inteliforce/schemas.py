@@ -1,9 +1,9 @@
 """Inteliforce schemas"""
 
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any
 from decimal import Decimal
-from datetime import date
+from datetime import date, datetime
 import uuid
 
 
@@ -70,3 +70,20 @@ class MobileOrderCreate(BaseModel):
     items: list[MobileOrderItem]
     observaciones: Optional[str] = None
     credit_authorization_id: Optional[uuid.UUID] = None
+
+
+class SyncRecord(BaseModel):
+    record_type: str  # tracking_log | visit | attendance
+    convex_id: str
+    employee_convex_id: Optional[str] = None
+    recorded_at: Optional[datetime] = None
+    payload: dict[str, Any]
+
+
+class SyncRequest(BaseModel):
+    records: list[SyncRecord]
+
+
+class SyncResponse(BaseModel):
+    received: int
+    upserted: int

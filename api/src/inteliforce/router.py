@@ -1,6 +1,6 @@
 """Inteliforce router — API movil consumida por la app unificada (SueldOK)"""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from datetime import date, timedelta
@@ -11,6 +11,7 @@ from api.src.inteliforce import service
 from api.src.inteliforce.schemas import (
     AuthExchangeRequest, AuthExchangeResponse, MeResponse,
     RouteStopResponse, Customer360Response, MobileOrderCreate,
+    SyncRequest, SyncResponse,
 )
 
 router = APIRouter(prefix="/api/v1/inteliforce", tags=["inteliforce"])
@@ -119,3 +120,20 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
         await db.commit()
 
     return {"id": str(sale.id), "numero": sale.numero, "total": float(sale.total), "estado": sale.estado}
+
+
+@router.post("/sync", response_model=SyncResponse)
+async def sync_from_sueldok(
+    data: SyncRequest,
+    db: AsyncSession = Depends(get_db),
+    x_inteliforce_key: str = Header(..., alias="X-Inteliforce-Key"),
+):
+    """Llamado por convex/intelimarketSync.js del lado SueldOK — nunca por
+    la app movil directamente. Autenticacion server-a-servidor via
+    inteliforce_service_keys (misma tabla que /auth/exchange, header
+    separado en vez de JWT porque no hay una sesion de empleado detras)."""
+    key = await service.get_service_key(db, x_inteliforce_key)
+    if not key:
+        raise HTTPException(status_code=401, detail="API key invalida")
+    result = await service.sync_records(db, str(key.company_id), data.records)
+    return result

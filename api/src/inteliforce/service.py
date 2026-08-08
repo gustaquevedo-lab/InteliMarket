@@ -4,9 +4,11 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
+import json
 import uuid
 
 from api.src.inteliforce.models import InteliforceServiceKey
+from api.src.inteliforce.schemas import SyncRecord
 from api.src.sales_targets.models import SalesRep
 from api.src.auth.jwt import create_access_token
 
@@ -143,3 +145,32 @@ async def get_customer_360(db: AsyncSession, company_id: str, customer_id: str) 
         "cheques_en_cartera": float(checks_total),
         "ultimas_compras": ultimas,
     }
+
+
+async def sync_records(db: AsyncSession, company_id: str, records: list[SyncRecord]) -> dict:
+    """Upsert idempotente por (record_type, convex_id) — SueldOK puede
+    reenviar el mismo evento sin duplicar (ej. si un sync nocturno se corta
+    a la mitad y se reintenta). Ver convex/intelimarketSync.js del lado
+    SueldOK, que es quien llama esto via el cron nuevo."""
+    upserted = 0
+    for r in records:
+        result = await db.execute(
+            text("""
+                INSERT INTO inteliforce_sync_records
+                    (company_id, record_type, convex_id, employee_convex_id, recorded_at, payload)
+                VALUES (:company_id, :record_type, :convex_id, :employee_convex_id, :recorded_at, :payload)
+                ON CONFLICT (record_type, convex_id)
+                DO UPDATE SET payload = EXCLUDED.payload, synced_at = now()
+            """),
+            {
+                "company_id": company_id,
+                "record_type": r.record_type,
+                "convex_id": r.convex_id,
+                "employee_convex_id": r.employee_convex_id,
+                "recorded_at": r.recorded_at,
+                "payload": json.dumps(r.payload),
+            },
+        )
+        upserted += 1
+    await db.commit()
+    return {"received": len(records), "upserted": upserted}
