@@ -33,6 +33,9 @@ class ProductLine(Base):
     nombre = Column(String(150), nullable=False)
     activo = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Inteliforce: 'paresa' | 'mix' | 'ambas' | NULL — derivado de historial
+    # real de ventas, ver scripts/migracion_casa_gonzalito/classify_lineas_rama.py
+    rama = Column(String(10))
 
 
 class SalesTarget(Base):

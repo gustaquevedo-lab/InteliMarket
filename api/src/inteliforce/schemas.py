@@ -54,6 +54,8 @@ class Customer360Response(BaseModel):
     documentos_vencidos: int
     cheques_en_cartera: float
     ultimas_compras: list[dict]
+    top_productos: list[TopProduct] = []
+    sugerencias: list[SuggestedProduct] = []
 
 
 class MobileOrderItem(BaseModel):
@@ -70,6 +72,44 @@ class MobileOrderCreate(BaseModel):
     items: list[MobileOrderItem]
     observaciones: Optional[str] = None
     credit_authorization_id: Optional[uuid.UUID] = None
+
+
+class ProductSearchResult(BaseModel):
+    id: uuid.UUID
+    sku: str
+    nombre: str
+    precio_venta: float
+    stock: float
+    unidad_medida: str
+    linea_nombre: Optional[str] = None
+
+
+class TargetLineBreakdown(BaseModel):
+    product_line_id: Optional[uuid.UUID] = None
+    nombre: str
+    meta_gs: float
+    venta_gs: float
+    pct_gs: float
+    meta_unidades: float
+    unidades: float
+    pct_unidades: float
+    cumplido: bool
+
+
+class SuggestedProduct(BaseModel):
+    product_id: uuid.UUID
+    nombre: str
+    sku: str
+    precio_venta: float
+    motivo: str  # "no_compra_hace_X_dias" | "nunca_comprado_top_linea"
+    linea_nombre: Optional[str] = None
+
+
+class TopProduct(BaseModel):
+    product_id: uuid.UUID
+    nombre: str
+    cantidad_total: float
+    ultima_compra: Optional[date] = None
 
 
 class SyncRecord(BaseModel):

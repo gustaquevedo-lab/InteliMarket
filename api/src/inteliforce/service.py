@@ -88,6 +88,165 @@ async def get_routes_today(db: AsyncSession, company_id: str, rep: SalesRep) -> 
     return [dict(row._mapping) for row in result.fetchall()]
 
 
+async def search_products(
+    db: AsyncSession, company_id: str, rama: str | None, search: str, limit: int = 30, offset: int = 0,
+) -> list[dict]:
+    """Cataloto filtrado por la rama del vendedor autenticado (viene del JWT,
+    no de un parametro del cliente — no se puede falsear pidiendo la otra
+    rama). Lineas sin clasificar (rama NULL) quedan visibles para todos."""
+    query = text("""
+        SELECT p.id, p.sku, p.nombre, p.precio_venta, p.unidad_medida,
+               pl.nombre AS linea_nombre,
+               COALESCE(SUM(st.cantidad), 0) AS stock
+        FROM products p
+        LEFT JOIN product_lines pl ON pl.id = p.linea_id
+        LEFT JOIN stock st ON st.product_id = p.id
+        WHERE p.company_id = :company_id AND p.activo = true
+        AND (pl.rama IS NULL OR pl.rama = :rama OR pl.rama = 'ambas')
+        AND (p.nombre ILIKE :search OR p.sku ILIKE :search)
+        GROUP BY p.id, p.sku, p.nombre, p.precio_venta, p.unidad_medida, pl.nombre
+        ORDER BY p.nombre ASC
+        LIMIT :limit OFFSET :offset
+    """)
+    result = await db.execute(query, {
+        "company_id": company_id, "rama": rama, "search": f"%{search}%",
+        "limit": limit, "offset": offset,
+    })
+    return [dict(row._mapping) for row in result.fetchall()]
+
+
+async def get_targets_breakdown(db: AsyncSession, rep, periodo_inicio: date, periodo_fin: date) -> list[dict]:
+    """Una fila por cada componente/linea de meta del periodo — el dueño pidio
+    especificamente ver el detalle completo, no solo un total agregado."""
+    from api.src.sales_targets.service import get_rep_progress
+    from api.src.sales_targets.models import SalesTarget
+    from sqlalchemy import select as sa_select
+
+    result = await db.execute(
+        sa_select(SalesTarget).where(
+            SalesTarget.sales_rep_id == rep.id,
+            SalesTarget.periodo_inicio == periodo_inicio,
+            SalesTarget.periodo_fin == periodo_fin,
+            SalesTarget.product_line_id.isnot(None),
+        )
+    )
+    target_rows = result.scalars().all()
+
+    breakdown = []
+    for t in target_rows:
+        from api.src.sales_targets.models import ProductLine
+        line_result = await db.execute(sa_select(ProductLine).where(ProductLine.id == t.product_line_id))
+        line = line_result.scalar_one_or_none()
+        progress = await get_rep_progress(db, rep, periodo_inicio, periodo_fin, product_line_id=str(t.product_line_id))
+        breakdown.append({
+            "product_line_id": t.product_line_id,
+            "nombre": line.nombre if line else "—",
+            "meta_gs": progress["meta_gs"], "venta_gs": progress["venta_gs"], "pct_gs": progress["pct_gs"],
+            "meta_unidades": progress["meta_unidades"], "unidades": progress["unidades"],
+            "pct_unidades": progress["pct_unidades"], "cumplido": progress["cumplido"],
+        })
+    return breakdown
+
+
+async def get_top_products(db: AsyncSession, company_id: str, customer_id: str, limit: int = 8) -> list[dict]:
+    query = text("""
+        SELECT si.product_id, p.nombre, SUM(si.cantidad) AS cantidad_total, MAX(s.fecha)::date AS ultima_compra
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        JOIN products p ON p.id = si.product_id
+        WHERE s.customer_id = :customer_id AND s.company_id = :company_id AND s.estado != 'cancelado'
+        GROUP BY si.product_id, p.nombre
+        ORDER BY cantidad_total DESC
+        LIMIT :limit
+    """)
+    result = await db.execute(query, {"customer_id": customer_id, "company_id": company_id, "limit": limit})
+    return [dict(row._mapping) for row in result.fetchall()]
+
+
+async def get_suggestions(db: AsyncSession, company_id: str, customer_id: str, limit: int = 10) -> list[dict]:
+    """Sugerencias accionables: (a) productos de sus lineas habituales que no
+    compra hace 60+ dias (win-back), (b) top-sellers de esas mismas lineas
+    que nunca compro (cross-sell). Ranking simple por frecuencia real, sin ML
+    — explicable y verificable contra los datos."""
+    habitual_lineas = await db.execute(
+        text("""
+            SELECT pl.id AS linea_id, COUNT(*) AS compras
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN products p ON p.id = si.product_id
+            JOIN product_lines pl ON pl.id = p.linea_id
+            WHERE s.customer_id = :customer_id AND s.company_id = :company_id AND s.estado != 'cancelado'
+            GROUP BY pl.id
+            HAVING COUNT(*) >= 2
+            ORDER BY compras DESC
+            LIMIT 8
+        """),
+        {"customer_id": customer_id, "company_id": company_id},
+    )
+    linea_ids = [row.linea_id for row in habitual_lineas.fetchall()]
+    if not linea_ids:
+        return []
+
+    winback = await db.execute(
+        text("""
+            SELECT p.id AS product_id, p.nombre, p.sku, p.precio_venta, pl.nombre AS linea_nombre,
+                   MAX(s.fecha)::date AS ultima_compra
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN products p ON p.id = si.product_id
+            JOIN product_lines pl ON pl.id = p.linea_id
+            WHERE s.customer_id = :customer_id AND s.company_id = :company_id AND s.estado != 'cancelado'
+            AND p.linea_id = ANY(:linea_ids) AND p.activo = true
+            GROUP BY p.id, p.nombre, p.sku, p.precio_venta, pl.nombre
+            HAVING MAX(s.fecha) < now() - interval '60 days'
+            ORDER BY MAX(s.fecha) ASC
+            LIMIT :limit
+        """),
+        {"customer_id": customer_id, "company_id": company_id, "linea_ids": linea_ids, "limit": limit},
+    )
+    sugerencias = [
+        {
+            "product_id": row.product_id, "nombre": row.nombre, "sku": row.sku,
+            "precio_venta": float(row.precio_venta or 0), "linea_nombre": row.linea_nombre,
+            "motivo": f"no_compra_desde_{row.ultima_compra}",
+        }
+        for row in winback.fetchall()
+    ]
+
+    restantes = limit - len(sugerencias)
+    if restantes > 0:
+        crosssell = await db.execute(
+            text("""
+                SELECT p.id AS product_id, p.nombre, p.sku, p.precio_venta, pl.nombre AS linea_nombre,
+                       COUNT(*) AS ventas
+                FROM sale_items si
+                JOIN sales s ON s.id = si.sale_id
+                JOIN products p ON p.id = si.product_id
+                JOIN product_lines pl ON pl.id = p.linea_id
+                WHERE s.company_id = :company_id AND s.fecha > now() - interval '90 days'
+                AND p.linea_id = ANY(:linea_ids) AND p.activo = true
+                AND NOT EXISTS (
+                    SELECT 1 FROM sale_items si2 JOIN sales s2 ON s2.id = si2.sale_id
+                    WHERE s2.customer_id = :customer_id AND si2.product_id = p.id
+                )
+                GROUP BY p.id, p.nombre, p.sku, p.precio_venta, pl.nombre
+                ORDER BY ventas DESC
+                LIMIT :limit
+            """),
+            {"company_id": company_id, "customer_id": customer_id, "linea_ids": linea_ids, "limit": restantes},
+        )
+        sugerencias += [
+            {
+                "product_id": row.product_id, "nombre": row.nombre, "sku": row.sku,
+                "precio_venta": float(row.precio_venta or 0), "linea_nombre": row.linea_nombre,
+                "motivo": "nunca_comprado_top_linea",
+            }
+            for row in crosssell.fetchall()
+        ]
+
+    return sugerencias
+
+
 async def get_customer_360(db: AsyncSession, company_id: str, customer_id: str) -> dict | None:
     cust_result = await db.execute(
         text("SELECT * FROM customers WHERE id = :id AND company_id = :company_id"),
@@ -129,6 +288,8 @@ async def get_customer_360(db: AsyncSession, company_id: str, customer_id: str) 
         {"id": customer_id, "company_id": company_id},
     )
     ultimas = [dict(row._mapping) for row in sales_result.fetchall()]
+    top_productos = await get_top_products(db, company_id, customer_id)
+    sugerencias = await get_suggestions(db, company_id, customer_id)
 
     return {
         "customer_id": customer["id"],
@@ -144,6 +305,8 @@ async def get_customer_360(db: AsyncSession, company_id: str, customer_id: str) 
         "documentos_vencidos": int(ar.vencidos),
         "cheques_en_cartera": float(checks_total),
         "ultimas_compras": ultimas,
+        "top_productos": top_productos,
+        "sugerencias": sugerencias,
     }
 
 

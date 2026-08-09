@@ -11,7 +11,7 @@ from api.src.inteliforce import service
 from api.src.inteliforce.schemas import (
     AuthExchangeRequest, AuthExchangeResponse, MeResponse,
     RouteStopResponse, Customer360Response, MobileOrderCreate,
-    SyncRequest, SyncResponse,
+    SyncRequest, SyncResponse, ProductSearchResult,
 )
 
 router = APIRouter(prefix="/api/v1/inteliforce", tags=["inteliforce"])
@@ -58,10 +58,26 @@ async def get_my_targets(
         periodo_fin = next_month - timedelta(days=1)
 
     progress = await get_rep_progress(db, rep, periodo_inicio, periodo_fin)
-    response = {"periodo_inicio": periodo_inicio, "periodo_fin": periodo_fin, "progress": progress}
+    desglose = await service.get_targets_breakdown(db, rep, periodo_inicio, periodo_fin)
+    response = {
+        "periodo_inicio": periodo_inicio, "periodo_fin": periodo_fin,
+        "progress": progress, "desglose": desglose,
+    }
     if rep.rol in ("supervisor", "gerente_comercial", "admin"):
         response["cascade"] = await get_cascade_status(db, rep, periodo_inicio, periodo_fin)
     return response
+
+
+@router.get("/products", response_model=list[ProductSearchResult])
+async def search_products(
+    search: str = "",
+    limit: int = 30,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    rep = await _current_rep(db, user)
+    return await service.search_products(db, str(rep.company_id), rep.rama, search, limit=limit, offset=offset)
 
 
 @router.get("/me/routes/today", response_model=list[RouteStopResponse])
