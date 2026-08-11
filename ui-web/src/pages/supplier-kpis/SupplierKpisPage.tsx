@@ -69,11 +69,19 @@ export default function SupplierKpisPage() {
   }, [])
 
   const selectedSupplier = suppliers.find(s => s.id === supplierId)
-  const supplierMatches = supplierSearch.trim().length === 0
-    ? []
-    : suppliers
-        .filter(s => s.razon_social?.toLowerCase().includes(supplierSearch.toLowerCase()) || s.ruc?.includes(supplierSearch))
-        .slice(0, 30)
+  const supplierMatches = (() => {
+    const term = supplierSearch.trim().toLowerCase()
+    if (term.length === 0) return []
+    return suppliers
+      .filter(s => s.razon_social?.toLowerCase().includes(term) || s.ruc?.includes(term))
+      .sort((a, b) => {
+        const aStarts = a.razon_social?.toLowerCase().startsWith(term) ? 0 : 1
+        const bStarts = b.razon_social?.toLowerCase().startsWith(term) ? 0 : 1
+        if (aStarts !== bStarts) return aStarts - bStarts
+        return (a.razon_social || "").localeCompare(b.razon_social || "")
+      })
+      .slice(0, 30)
+  })()
 
   const pickSupplier = (s: Supplier) => {
     setSupplierId(s.id)
@@ -177,14 +185,14 @@ export default function SupplierKpisPage() {
                 onFocus={() => setSupplierDropdownOpen(true)}
               />
               {supplierDropdownOpen && supplierSearch.trim().length > 0 && (
-                <div className="absolute z-10 mt-1 w-full max-h-72 overflow-y-auto card shadow-lg">
+                <div className="absolute z-50 mt-1 w-full max-h-72 overflow-y-auto bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700">
                   {supplierMatches.length === 0 ? (
                     <div className="p-3 text-sm text-secondary">Sin resultados</div>
                   ) : (
                     supplierMatches.map(s => (
                       <button
                         key={s.id}
-                        className="w-full text-left px-3 py-2 hover:bg-hover text-sm border-b border-default last:border-0"
+                        className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-slate-700 text-sm border-b border-gray-100 dark:border-gray-700 last:border-0"
                         onClick={() => pickSupplier(s)}
                       >
                         <div className="font-medium">{s.razon_social}</div>
