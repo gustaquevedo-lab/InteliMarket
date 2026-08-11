@@ -89,6 +89,9 @@ export interface PurchaseReceiptItem { id?: string; recibo_id?: string; producto
 export interface FinanceAgentRun { id: string; company_id: string; started_at: string; finished_at?: string; model?: string; status: string; diagnostico?: string; error_message?: string }
 export interface FinanceRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
 export interface Supplier { id: string; company_id?: string; ruc?: string; razon_social?: string; nombre_fantasia?: string; direccion?: string; telefono?: string; email?: string; contacto?: string; contacto_nombre?: string; contacto_telefono?: string; plazo_pago_dias?: number; tipo?: string; activo?: boolean; created_at?: string; updated_at?: string }
+export interface SupplierKpiPeriod { id: string; company_id: string; supplier_id: string; periodo: string; rebate_pct_objetivo: number; estado: string; observaciones?: string | null; created_at: string; updated_at: string }
+export interface SupplierKpiIndicator { id: string; period_id: string; codigo: string; nombre: string; peso_pct: number; meta?: number | null; resultado?: number | null; piso_minimo_pct?: number | null; orden: number; pct_cumplimiento?: number | null; aporte_ponderado_pct?: number | null }
+export interface SupplierKpiSummary { period: SupplierKpiPeriod; supplier_razon_social: string; indicadores: SupplierKpiIndicator[]; pct_cumplimiento_total: number; meta_alcanzada: boolean; venta_base_sin_iva: number; monto_rebate_calculado: number }
 export interface Quote { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_vencimiento?: string; valido_hasta?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; observaciones?: string; condiciones_pago?: string; descuento_total?: number; iva_10?: number; iva_5?: number; sale_id?: string; items?: QuoteItem[]; created_at?: string; updated_at?: string }
 export interface QuoteItem { id?: string; cotizacion_id?: string; producto_id?: string; producto?: Product; product?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; descripcion?: string; created_at?: string }
 export interface Discount { id: string; company_id?: string; nombre?: string; descripcion?: string; tipo?: string; valor?: number; aplica_a?: string; monto_minimo?: number; monto_maximo?: number; cantidad_minima?: number; fecha_inicio?: string; fecha_fin?: string; producto_ids?: string[]; categoria_ids?: string[]; cliente_ids?: string[]; activo?: boolean; created_at?: string; updated_at?: string }
@@ -2043,5 +2046,18 @@ export const api = {
       client.post<SuggestedTarget[]>(`/v1/companies/${COMPANY_ID}/sales-targets/suggest`, data),
     publishTargets: (data: { periodo_tipo: string; periodo_inicio: string; periodo_fin: string; mes_referencia: number; ajuste_manual_pct?: number }) =>
       client.post<{ metas_publicadas: number }>(`/v1/companies/${COMPANY_ID}/sales-targets/publish`, data),
+  },
+  supplierKpis: {
+    listPeriods: (supplierId?: string) => client.get<SupplierKpiPeriod[]>("/v1/supplier-kpis/periods", supplierId ? { supplier_id: supplierId } : undefined),
+    createPeriod: (data: { supplier_id: string; periodo: string; rebate_pct_objetivo?: number; observaciones?: string }) =>
+      client.post<SupplierKpiPeriod>("/v1/supplier-kpis/periods", data),
+    updatePeriod: (id: string, data: Partial<{ rebate_pct_objetivo: number; estado: string; observaciones: string }>) =>
+      client.patch<SupplierKpiPeriod>(`/v1/supplier-kpis/periods/${id}`, data),
+    getSummary: (periodId: string) => client.get<SupplierKpiSummary>(`/v1/supplier-kpis/periods/${periodId}/summary`),
+    addIndicator: (periodId: string, data: { codigo: string; nombre: string; peso_pct: number; meta?: number; resultado?: number; piso_minimo_pct?: number; orden?: number }) =>
+      client.post<SupplierKpiIndicator>(`/v1/supplier-kpis/periods/${periodId}/indicators`, data),
+    updateIndicator: (id: string, data: Partial<{ codigo: string; nombre: string; peso_pct: number; meta: number | null; resultado: number | null; piso_minimo_pct: number | null; orden: number }>) =>
+      client.patch<SupplierKpiIndicator>(`/v1/supplier-kpis/indicators/${id}`, data),
+    deleteIndicator: (id: string) => client.delete<{ ok: boolean }>(`/v1/supplier-kpis/indicators/${id}`),
   },
 }

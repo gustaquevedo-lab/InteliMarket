@@ -123,6 +123,7 @@ const navGroups: NavGroup[] = [
       { icon: Banknote, label: "Arqueo de Caja", path: "/caja" },
       { icon: Truck, label: "Liquidación Cobradores", path: "/route-cash-settlements" },
       { icon: Target, label: "Metas de Venta", path: "/sales-targets" },
+      { icon: Percent, label: "Rebates de Proveedores", path: "/proveedor-kpis" },
       { icon: Landmark, label: "Bóveda Central", path: "/boveda", feature: "supermercado" },
       { icon: Landmark, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
       { icon: HandCoins, label: "Cuentas por Pagar", path: "/payments" },
