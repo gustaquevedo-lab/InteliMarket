@@ -27,17 +27,20 @@ class IndicatorUpdate(BaseModel):
 
 
 class IndicatorResponse(BaseModel):
+    # float en la respuesta (no Decimal) -- Pydantic serializa Decimal como
+    # string en JSON y rompe el ".toFixed()" del frontend. El calculo interno
+    # en service.py sigue en Decimal para precision, esto es solo el borde.
     id: uuid.UUID
     period_id: uuid.UUID
     codigo: str
     nombre: str
-    peso_pct: Decimal
-    meta: Optional[Decimal]
-    resultado: Optional[Decimal]
-    piso_minimo_pct: Optional[Decimal]
+    peso_pct: float
+    meta: Optional[float]
+    resultado: Optional[float]
+    piso_minimo_pct: Optional[float]
     orden: int
-    pct_cumplimiento: Optional[Decimal] = None  # calculado, no persistido
-    aporte_ponderado_pct: Optional[Decimal] = None  # calculado, no persistido
+    pct_cumplimiento: Optional[float] = None  # calculado, no persistido
+    aporte_ponderado_pct: Optional[float] = None  # calculado, no persistido
 
     class Config:
         from_attributes = True
@@ -61,7 +64,7 @@ class PeriodResponse(BaseModel):
     company_id: uuid.UUID
     supplier_id: uuid.UUID
     periodo: date
-    rebate_pct_objetivo: Decimal
+    rebate_pct_objetivo: float
     estado: str
     observaciones: Optional[str]
     created_at: datetime
@@ -75,7 +78,7 @@ class PeriodSummary(BaseModel):
     period: PeriodResponse
     supplier_razon_social: str
     indicadores: list[IndicatorResponse]
-    pct_cumplimiento_total: Decimal
+    pct_cumplimiento_total: float
     meta_alcanzada: bool
-    venta_base_sin_iva: Decimal
-    monto_rebate_calculado: Decimal
+    venta_base_sin_iva: float
+    monto_rebate_calculado: float
