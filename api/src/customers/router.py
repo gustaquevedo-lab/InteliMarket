@@ -52,3 +52,15 @@ async def delete_customer(customer_id: str, db: AsyncSession = Depends(get_db)):
     deleted = await service.delete_customer(db, customer_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+
+@router.get("/companies/{company_id}/customers/{customer_id}/360")
+async def get_customer_field_360(company_id: str, customer_id: str, db: AsyncSession = Depends(get_db)):
+    """Vista 360 de campo: la misma que ve el vendedor en Inteliforce (top
+    productos, sugerencias de venta accionables, deuda/cheques) pero desde
+    el ERP web, para que un supervisor la use sin depender del celular."""
+    from api.src.inteliforce.service import get_customer_360
+    data = await get_customer_360(db, company_id, customer_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return data

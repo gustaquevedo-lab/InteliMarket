@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from "react"
-import { Search, Plus, Users, Edit, Loader2, Upload, Download, X } from "lucide-react"
-import { api, type Customer } from "../../api"
+import { Search, Plus, Users, Edit, Loader2, Upload, Download, X, Sparkles, TrendingUp, Clock, PlusCircle } from "lucide-react"
+import { api, type Customer, type CustomerField360 } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { StatusBadge } from "../../components/DataTable"
@@ -22,6 +22,23 @@ export default function CustomersPage() {
   const [importing, setImporting] = useState(false)
   const toast = useToast()
   const confirm = useConfirm()
+  const [show360, setShow360] = useState(false)
+  const [data360, setData360] = useState<CustomerField360 | null>(null)
+  const [loading360, setLoading360] = useState(false)
+
+  const openField360 = async (customer: Customer) => {
+    setShow360(true)
+    setLoading360(true)
+    setData360(null)
+    try {
+      setData360(await api.customers.field360(customer.id))
+    } catch {
+      toast.error("Error", "No se pudo cargar la vista 360 de este cliente")
+      setShow360(false)
+    } finally {
+      setLoading360(false)
+    }
+  }
 
   const fetchData = async () => {
     setLoading(true)
@@ -198,6 +215,7 @@ export default function CustomersPage() {
                   <td className="table-td"><StatusBadge status={c.activo ? "activo" : "cancelado"} /></td>
                   <td className="table-td">
                     <div className="flex items-center gap-1">
+                      <button className="btn-ghost text-primary" title="Ver 360 (campo)" onClick={(e) => { e.stopPropagation(); openField360(c) }}><Sparkles className="w-4 h-4" /></button>
                       <button className="btn-ghost" title="Editar"><Edit className="w-4 h-4" /></button>
                       <button className="btn-ghost text-red-400 hover:text-red-500" title="Eliminar" onClick={(e) => { e.stopPropagation(); handleDelete(c) }}><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
                     </div>
@@ -298,6 +316,101 @@ export default function CustomersPage() {
                   {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Importar"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Cliente 360 (campo) — la misma vista que el vendedor ve en Inteliforce */}
+      {show360 && (
+        <div className="modal-overlay" onClick={() => setShow360(false)}>
+          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-primary" /> Cliente 360 (vista de campo)
+                </h3>
+                {data360 && <p className="text-sm text-gray-500 mt-0.5">{data360.razon_social}{data360.ruc ? ` — RUC ${data360.ruc}` : ""}</p>}
+              </div>
+              <button onClick={() => setShow360(false)} className="btn-ghost"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+              {loading360 ? (
+                <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></div>
+              ) : data360 ? (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="card p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Deuda pendiente</p>
+                      <p className={`text-lg font-bold ${data360.documentos_vencidos > 0 ? "text-red-500" : "text-gray-900 dark:text-white"}`}>₲ {data360.cuentas_por_cobrar_pendiente.toLocaleString()}</p>
+                      {data360.documentos_vencidos > 0 && <p className="text-xs text-red-500">{data360.documentos_vencidos} vencido{data360.documentos_vencidos > 1 ? "s" : ""}</p>}
+                    </div>
+                    <div className="card p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Crédito disponible</p>
+                      <p className="text-lg font-bold text-gray-900 dark:text-white">₲ {data360.saldo_disponible.toLocaleString()}</p>
+                      {data360.dias_plazo != null && <p className="text-xs text-gray-400">{data360.dias_plazo} días de plazo</p>}
+                    </div>
+                    <div className="card p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Cheques en cartera</p>
+                      <p className="text-lg font-bold text-gray-900 dark:text-white">₲ {data360.cheques_en_cartera.toLocaleString()}</p>
+                    </div>
+                    <div className="card p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Crédito usado</p>
+                      <p className="text-lg font-bold text-gray-900 dark:text-white">₲ {data360.credito_usado.toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  {data360.sugerencias.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5 mb-2"><Sparkles className="w-4 h-4 text-amber-500" /> Sugerencias para ofrecer</h4>
+                      <div className="flex gap-3 overflow-x-auto pb-1">
+                        {data360.sugerencias.map(s => (
+                          <div key={s.product_id} className="min-w-[160px] card p-3">
+                            <p className="text-[10px] font-black uppercase text-amber-500">{s.motivo.startsWith("no_compra") ? "Recuperar" : "Nuevo"}</p>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white line-clamp-2 mt-1">{s.nombre}</p>
+                            {s.linea_nombre && <p className="text-xs text-gray-400">{s.linea_nombre}</p>}
+                            <p className="text-sm font-bold text-primary mt-2">₲ {s.precio_venta.toLocaleString()}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {data360.top_productos.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5 mb-2"><TrendingUp className="w-4 h-4 text-green-500" /> Lo que más compra</h4>
+                      <div className="space-y-1">
+                        {data360.top_productos.map(p => (
+                          <div key={p.product_id} className="flex justify-between text-sm py-1.5 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                            <span className="text-gray-900 dark:text-white">{p.nombre}</span>
+                            <span className="font-mono text-gray-500">{Math.round(p.cantidad_total).toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {data360.ultimas_compras.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5 mb-2"><Clock className="w-4 h-4 text-gray-400" /> Últimas compras</h4>
+                      <div className="space-y-1">
+                        {data360.ultimas_compras.map(c => (
+                          <div key={c.numero} className="flex justify-between text-sm py-1.5 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                            <div>
+                              <span className="font-mono text-gray-900 dark:text-white">{c.numero}</span>
+                              <span className="text-xs text-gray-400 ml-2">{new Date(c.fecha).toLocaleDateString("es-PY")}</span>
+                            </div>
+                            <span className={`font-mono ${c.total < 0 ? "text-red-500" : "text-gray-900 dark:text-white"}`}>₲ {c.total.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {data360.sugerencias.length === 0 && data360.top_productos.length === 0 && data360.ultimas_compras.length === 0 && (
+                    <p className="text-sm text-gray-400 text-center py-6 flex items-center justify-center gap-2"><PlusCircle className="w-4 h-4" /> Sin historial de compras todavía.</p>
+                  )}
+                </>
+              ) : null}
             </div>
           </div>
         </div>

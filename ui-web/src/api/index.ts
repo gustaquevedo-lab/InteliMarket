@@ -34,6 +34,14 @@ const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; category_id?: string | null; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; precio_venta?: number; costo_promedio?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; category?: Category; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
 export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
+export interface CustomerField360 {
+  customer_id: string; razon_social: string; ruc?: string; direccion?: string; telefono?: string;
+  credito_limite: number; credito_usado: number; saldo_disponible: number; dias_plazo?: number;
+  cuentas_por_cobrar_pendiente: number; documentos_vencidos: number; cheques_en_cartera: number;
+  ultimas_compras: { numero: string; fecha: string; total: number; estado: string }[];
+  top_productos: { product_id: string; nombre: string; cantidad_total: number; ultima_compra: string }[];
+  sugerencias: { product_id: string; nombre: string; linea_nombre?: string; precio_venta: number; motivo: string }[];
+}
 export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
 export interface SaleItem { id?: string; sale_id?: string; product_id?: string; producto?: Product; product?: Product; descripcion?: string; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; iva_monto?: number; total?: number; descuento?: number }
 export interface PaymentMethod { id: string; nombre: string; codigo?: string; tipo?: string; moneda?: string; activo?: boolean; permite_parcial?: boolean; requiere_autorizacion?: boolean; created_at?: string }
@@ -336,6 +344,7 @@ export const api = {
     create: (data: Partial<Customer>) => client.post<Customer>("/v1/customers", { ...data, company_id: COMPANY_ID }),
     update: (id: string, data: Partial<Customer>) => client.patch<Customer>(`/v1/customers/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/customers/${id}`),
+    field360: (id: string) => client.get<CustomerField360>(`/v1/companies/${COMPANY_ID}/customers/${id}/360`),
   },
   sales: {
     list: (params?: { fecha_desde?: string; fecha_hasta?: string; estado?: string; numero?: string; limit?: number; offset?: number }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
