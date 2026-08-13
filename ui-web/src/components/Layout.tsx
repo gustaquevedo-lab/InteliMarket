@@ -205,7 +205,7 @@ export default function Layout() {
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false)
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
-  const { hasFeature } = useFeatures()
+  const { hasFeature, verticalSlug } = useFeatures()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -241,11 +241,29 @@ export default function Layout() {
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
               <Logo />
-              {localStorage.getItem('demo_mode') === 'supermercado' && (
-                <span className="mt-1 text-[10px] font-bold bg-green-500 text-white px-2 py-0.5 rounded-full w-max uppercase tracking-wider">
-                  Versión: Supermercado
-                </span>
-              )}
+              {(() => {
+                // Badge real de vertical, de tenants.config (via FeatureContext) --
+                // no confundir con el 'demo_mode' de localStorage de mas abajo, que
+                // es solo un toggle de demo comercial en el navegador, no la
+                // configuracion real del cliente.
+                const VERTICAL_LABELS: Record<string, string> = {
+                  distribucion: "Distribución",
+                  retail: "Retail",
+                  supermercado: "Supermercado",
+                  farmacia: "Farmacia",
+                  boutique: "Boutique",
+                  servicios: "Servicios",
+                  full: "Full",
+                }
+                const demoOverride = localStorage.getItem('demo_mode') === 'supermercado' ? 'supermercado' : null
+                const slug = demoOverride || verticalSlug
+                if (!slug || !VERTICAL_LABELS[slug]) return null
+                return (
+                  <span className="mt-1 text-[10px] font-bold bg-green-500 text-white px-2 py-0.5 rounded-full w-max uppercase tracking-wider">
+                    {VERTICAL_LABELS[slug]}
+                  </span>
+                )
+              })()}
             </div>
             <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
           </div>
