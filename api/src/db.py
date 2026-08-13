@@ -29,6 +29,7 @@ async def get_db() -> AsyncSession:
     async with async_session_factory() as session:
         try:
             yield session
+            await session.commit()
         except Exception:
             await session.rollback()
             raise
@@ -41,6 +42,7 @@ async def get_tenant_db(schema_name: str) -> AsyncSession:
         await session.execute(text("SET search_path TO :schema, public"), {"schema": schema_name})
         try:
             yield session
+            await session.commit()
         except Exception:
             await session.rollback()
             raise
