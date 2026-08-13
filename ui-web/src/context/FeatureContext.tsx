@@ -98,8 +98,12 @@ export function FeatureProvider({ children }: { children: ReactNode }) {
 
   const hasFeature = useCallback(
     (feature: string) => {
-      // If no features loaded yet, allow everything (graceful degradation)
-      if (features.length === 0) return true
+      // Fail-closed: si no hay features (todavia cargando, o fallo el fetch),
+      // NO se muestra nada gateado. Antes devolvia true con la lista vacia
+      // ("graceful degradation") y eso hacia que, ante cualquier hiccup de
+      // red o carrera con el login, el cliente viera TODOS los modulos de
+      // TODAS las verticales -- exactamente el bug que causaba que un
+      // distribuidor viera pantallas de farmacia/retail/supermercado.
       return features.includes(feature)
     },
     [features]
@@ -107,7 +111,6 @@ export function FeatureProvider({ children }: { children: ReactNode }) {
 
   const hasAnyFeature = useCallback(
     (...featList: string[]) => {
-      if (features.length === 0) return true
       return featList.some((f) => features.includes(f))
     },
     [features]

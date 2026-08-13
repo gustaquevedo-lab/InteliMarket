@@ -22,6 +22,7 @@ interface NavItem {
   label: string
   path: string
   feature?: string
+  superadminOnly?: boolean
 }
 
 interface NavGroup {
@@ -193,8 +194,8 @@ const navGroups: NavGroup[] = [
       { icon: Settings, label: "Configuración", path: "/settings" },
       { icon: Building2, label: "Sucursales", path: "/branches", feature: "branches" },
       { icon: Shield, label: "RBAC", path: "/rbac", feature: "rbac" },
-      { icon: Crown, label: "Admin SaaS", path: "/admin" },
-      { icon: LayoutGrid, label: "Verticales", path: "/admin/verticals" },
+      { icon: Crown, label: "Admin SaaS", path: "/admin", superadminOnly: true },
+      { icon: LayoutGrid, label: "Verticales", path: "/admin/verticals", superadminOnly: true },
     ]
   }
 ]
@@ -260,6 +261,7 @@ export default function Layout() {
             const visibleItems = group.items.filter((item) => {
               const isSupermerCRM = localStorage.getItem('demo_mode') === 'supermercado' && (item.label === "Fidelidad & CRM" || item.label === "WhatsApp");
               if (item.feature && !hasFeature(item.feature) && !isSupermerCRM) return false;
+              if (item.superadminOnly && !user?.is_superadmin) return false;
               if (localStorage.getItem('demo_mode') === 'supermercado') {
                 if (
                   item.label === "SueldOK" ||
