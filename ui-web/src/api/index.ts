@@ -91,6 +91,7 @@ export interface ActivityStats { total?: number; completadas?: number; pendiente
 export interface Permission { id: string; name?: string; description?: string | null; module?: string; action?: string; created_at?: string }
 export interface Role { id: string; name?: string; description?: string | null; is_system?: boolean; is_default?: boolean; created_at?: string; permissions?: Permission[] }
 export interface PurchaseOrder { id: string; company_id?: string; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; tipo_cambio?: number; fecha_entrega_estimada?: string | null; descuento_total?: number; iva_10?: number; iva_5?: number; observaciones?: string | null; items?: PurchaseOrderItem[]; created_at?: string; updated_at?: string }
+export interface PurchaseSuggestion { id: string; company_id?: string; product_id: string; variant_id?: string; supplier_id?: string; cantidad_sugerida: number; precio_estimado?: number; total_estimado?: number; moneda?: string; motivo: string; detalle?: string; urgencia?: string; confianza?: number; stock_actual?: number; stock_seguridad?: number; demanda_diaria_promedio?: number; dias_cobertura?: number; lead_time_dias?: number; estado?: string; purchase_order_id?: string }
 export interface PurchaseOrderItem { id?: string; orden_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; recibido?: number; pendiente?: number; created_at?: string }
 export interface PurchaseReceipt { id: string; company_id?: string; orden_id?: string; order_id?: string | null; orden?: PurchaseOrder; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; user_id?: string | null; observaciones?: string | null; items?: PurchaseReceiptItem[]; created_at?: string; updated_at?: string }
 export interface PurchaseReceiptItem { id?: string; recibo_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; lote?: string; fecha_vencimiento?: string; created_at?: string }
@@ -539,6 +540,7 @@ export const api = {
     // "/v1/purchases/*", que no existe (daba 404 en todos estos).
     orders: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
     listPOs: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
+    listPurchaseSuggestions: (estado?: string) => client.get<PurchaseSuggestion[]>(`/v1/companies/${COMPANY_ID}/purchase-suggestions`, estado ? { estado } : undefined),
     getOrder: (id: string) => client.get<PurchaseOrder>(`/v1/purchase-orders/${id}`),
     createOrder: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", data),
     createPO: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", data),

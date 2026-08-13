@@ -33,6 +33,7 @@ const SpiPage = lazy(() => import("./pages/spi/SpiPage"))
 const BranchesPage = lazy(() => import("./pages/branches/BranchesPage"))
 const CreditAccountsPage = lazy(() => import("./pages/credit-accounts/CreditAccountsPage"))
 const ChecksPage = lazy(() => import("./pages/checks/ChecksPage"))
+const DepositoPage = lazy(() => import("./pages/deposito/DepositoPage"))
 const SupplierKpisPage = lazy(() => import("./pages/supplier-kpis/SupplierKpisPage"))
 const LogisticsPage = lazy(() => import("./pages/logistics/LogisticsPage"))
 const AuditPage = lazy(() => import("./pages/audit/AuditPage"))
@@ -250,6 +251,7 @@ function AppRoutes() {
         <Route path="credit-accounts" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="credit_accounts"><CreditAccountsPage /></FeatureRoute></Suspense>} />
         <Route path="checks" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="credit_accounts"><ChecksPage /></FeatureRoute></Suspense>} />
         <Route path="proveedor-kpis" element={<Suspense fallback={<PageLoader />}><SupplierKpisPage /></Suspense>} />
+        <Route path="deposito" element={<Suspense fallback={<PageLoader />}><DepositoPage /></Suspense>} />
         <Route path="logistics" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="logistics"><LogisticsPage /></FeatureRoute></Suspense>} />
         <Route path="rbac" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="rbac"><RbacPage /></FeatureRoute></Suspense>} />
         <Route path="crm" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="crm"><CrmPage /></FeatureRoute></Suspense>} />
