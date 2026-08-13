@@ -64,6 +64,8 @@ function RecepcionTab({ toast, onDone }: { toast: ReturnType<typeof useToast>; o
   const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [selected, setSelected] = useState<PurchaseOrder | null>(null)
   const [cantidades, setCantidades] = useState<Record<string, string>>({})
+  const [bonificaciones, setBonificaciones] = useState<Record<string, string>>({})
+  const [bonificacionesTocadas, setBonificacionesTocadas] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
@@ -79,19 +81,39 @@ function RecepcionTab({ toast, onDone }: { toast: ReturnType<typeof useToast>; o
       const full = await api.purchases.getOrder(o.id)
       setSelected(full)
       setCantidades({})
+      setBonificaciones({})
+      setBonificacionesTocadas(new Set())
     } catch {
       toast.error("Error", "No se pudo cargar el detalle de la orden")
     }
   }
 
+  // Al cargar una cantidad recibida, sugiere la bonificacion por volumen si
+  // hay una escala cargada para este proveedor+producto (no pisa lo que el
+  // usuario ya haya editado a mano).
+  const onCantidadChange = async (key: string, productId: string, value: string) => {
+    setCantidades(c => ({ ...c, [key]: value }))
+    if (!selected?.supplier_id || !value || Number(value) <= 0 || bonificacionesTocadas.has(key)) return
+    try {
+      const sug = await api.purchaseBonuses.suggest(selected.supplier_id, productId, Number(value))
+      if (sug.cantidad_bonificada_sugerida > 0) {
+        setBonificaciones(b => ({ ...b, [key]: String(sug.cantidad_bonificada_sugerida) }))
+      }
+    } catch { /* sin escala cargada, no pasa nada */ }
+  }
+
   const submit = async () => {
     if (!selected) return
     const items = (selected.items || [])
-      .map((it: any) => ({
-        product_id: it.product_id || it.producto_id,
-        cantidad_recibida: Number(cantidades[it.id || it.product_id] || 0),
-      }))
-      .filter(it => it.cantidad_recibida > 0)
+      .map((it: any) => {
+        const key = it.id || it.product_id
+        return {
+          product_id: it.product_id || it.producto_id,
+          cantidad_recibida: Number(cantidades[key] || 0),
+          cantidad_bonificada: Number(bonificaciones[key] || 0),
+        }
+      })
+      .filter(it => it.cantidad_recibida > 0 || it.cantidad_bonificada > 0)
     if (items.length === 0) {
       toast.info("Sin cantidades", "Ingresá al menos una cantidad recibida")
       return
@@ -129,11 +151,13 @@ function RecepcionTab({ toast, onDone }: { toast: ReturnType<typeof useToast>; o
               <th className="py-2">Pedido</th>
               <th className="py-2">Ya recibido</th>
               <th className="py-2">Recibiendo ahora</th>
+              <th className="py-2">Bonificación</th>
             </tr>
           </thead>
           <tbody>
             {(selected.items || []).map((it: any) => {
               const key = it.id || it.product_id
+              const productId = it.product_id || it.producto_id
               return (
                 <tr key={key} className="border-b border-gray-50 dark:border-gray-800">
                   <td className="py-2">{it.producto?.nombre || it.descripcion || it.product_id}</td>
@@ -141,7 +165,15 @@ function RecepcionTab({ toast, onDone }: { toast: ReturnType<typeof useToast>; o
                   <td className="py-2 font-mono text-gray-400">{it.cantidad_recibida || it.recibido || 0}</td>
                   <td className="py-2">
                     <input type="number" min={0} className="input-field w-28" value={cantidades[key] || ""}
-                      onChange={e => setCantidades(c => ({ ...c, [key]: e.target.value }))} />
+                      onChange={e => onCantidadChange(key, productId, e.target.value)} />
+                  </td>
+                  <td className="py-2">
+                    <input type="number" min={0} className="input-field w-24 text-green-600" value={bonificaciones[key] || ""}
+                      placeholder="0"
+                      onChange={e => {
+                        setBonificacionesTocadas(s => new Set(s).add(key))
+                        setBonificaciones(b => ({ ...b, [key]: e.target.value }))
+                      }} />
                   </td>
                 </tr>
               )

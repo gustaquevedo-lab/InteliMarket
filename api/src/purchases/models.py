@@ -103,6 +103,7 @@ class PurchaseOrderItem(Base):
     descripcion = Column(String(300))
     cantidad = Column(Numeric(10, 3), nullable=False)
     cantidad_recibida = Column(Numeric(10, 3), default=0)
+    cantidad_bonificada = Column(Numeric(10, 3), default=0)  # bonificacion por volumen recibida junto con el pedido
     precio_unitario = Column(Numeric(15, 0), nullable=False)
     descuento_pct = Column(Numeric(5, 2), default=0)
     iva_tasa = Column(Numeric(5, 2))
