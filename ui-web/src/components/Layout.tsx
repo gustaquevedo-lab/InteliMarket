@@ -114,6 +114,7 @@ const navGroups: NavGroup[] = [
       { icon: ShoppingBag, label: "Gestión de Compras", path: "/purchases" },
       { icon: Upload, label: "Importaciones CSV", path: "/imports", feature: "imports" },
       { icon: Briefcase, label: "Contratos Prov.", path: "/contratos-proveedores" },
+      { icon: RotateCcw, label: "Devol. a Proveedores", path: "/devoluciones-proveedores" },
       { icon: Users, label: "Acuerdos Clientes", path: "/acuerdos-clientes" },
       { icon: Globe, label: "Portal Proveedores", path: "/portal/proveedores/dashboard" },
     ]

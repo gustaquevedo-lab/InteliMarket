@@ -57,6 +57,7 @@ from api.src.portal.router import router as portal_router
 from api.src.security.router import router as security_router
 from api.src.bancard.router import router as bancard_router
 from api.src.supplier_kpis.router import router as supplier_kpis_router
+from api.src.supplier_returns.router import router as supplier_returns_router
 from api.src.spi.router import router as spi_router
 from api.src.spi.public_router import router as spi_public_router
 from api.src.dinelco.router import router as dinelco_router
@@ -214,6 +215,7 @@ app.include_router(portal_router)
 app.include_router(security_router)
 app.include_router(bancard_router)
 app.include_router(supplier_kpis_router)
+app.include_router(supplier_returns_router)
 app.include_router(spi_router)
 app.include_router(spi_public_router)
 app.include_router(dinelco_router)
