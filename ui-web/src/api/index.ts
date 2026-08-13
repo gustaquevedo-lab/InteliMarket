@@ -35,9 +35,6 @@ export interface Product { id: string; sku: string; nombre: string; descripcion?
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
 export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
 export interface CustomerField360 {
-export interface SupplierReturnItem { id: string; return_id: string; product_id: string; variant_id?: string; descripcion?: string; cantidad: number; precio_unitario: number; iva_tasa: number; iva_monto: number; total: number; motivo_detalle?: string; condicion: string; created_at: string }
-export interface SupplierReturn { id: string; company_id: string; supplier_id: string; purchase_order_id?: string; numero: string; fecha: string; motivo: string; motivo_detalle?: string; estado: string; moneda: string; tipo_cambio: number; subtotal?: number; iva_10?: number; iva_5?: number; total?: number; supplier_invoice_id?: string; warehouse_id?: string; observaciones?: string; user_id?: string; aprobado_por?: string; created_at: string; updated_at: string }
-export interface SupplierReturnWithItems extends SupplierReturn { items: SupplierReturnItem[] }
   customer_id: string; razon_social: string; ruc?: string; direccion?: string; telefono?: string;
   credito_limite: number; credito_usado: number; saldo_disponible: number; dias_plazo?: number;
   cuentas_por_cobrar_pendiente: number; documentos_vencidos: number; cheques_en_cartera: number;
@@ -45,6 +42,10 @@ export interface SupplierReturnWithItems extends SupplierReturn { items: Supplie
   top_productos: { product_id: string; nombre: string; cantidad_total: number; ultima_compra: string }[];
   sugerencias: { product_id: string; nombre: string; linea_nombre?: string; precio_venta: number; motivo: string }[];
 }
+export interface SupplierReturnItem { id: string; return_id: string; product_id: string; variant_id?: string; descripcion?: string; cantidad: number; precio_unitario: number; iva_tasa: number; iva_monto: number; total: number; motivo_detalle?: string; condicion: string; created_at: string }
+export interface SupplierReturn { id: string; company_id: string; supplier_id: string; purchase_order_id?: string; numero: string; fecha: string; motivo: string; motivo_detalle?: string; estado: string; moneda: string; tipo_cambio: number; subtotal?: number; iva_10?: number; iva_5?: number; total?: number; supplier_invoice_id?: string; warehouse_id?: string; observaciones?: string; user_id?: string; aprobado_por?: string; created_at: string; updated_at: string }
+export interface SupplierReturnWithItems extends SupplierReturn { items: SupplierReturnItem[] }
+export interface PurchaseBonusScale { id: string; company_id: string; supplier_id: string; product_id: string; cantidad_minima: number; cantidad_bonificada: number; activo: boolean; observaciones?: string; created_at: string; updated_at: string }
 export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
 export interface SaleItem { id?: string; sale_id?: string; product_id?: string; producto?: Product; product?: Product; descripcion?: string; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; iva_monto?: number; total?: number; descuento?: number }
 export interface PaymentMethod { id: string; nombre: string; codigo?: string; tipo?: string; moneda?: string; activo?: boolean; permite_parcial?: boolean; requiere_autorizacion?: boolean; created_at?: string }
@@ -2074,14 +2075,29 @@ export const api = {
       client.patch<SupplierKpiIndicator>(`/v1/supplier-kpis/indicators/${id}`, data),
     deleteIndicator: (id: string) => client.delete<{ ok: boolean }>(`/v1/supplier-kpis/indicators/${id}`),
   },
-  supplierReturns: {
+  // Distribuidora: devoluciones A proveedores (mercaderia vencida/danada).
+  // NUNCA renombrar esto de vuelta a "supplierReturns" -- esa clave ya la usa
+  // Supermercado (mas arriba, /v1/supermer/returns, Fase 2). Un objeto TS con
+  // dos propiedades iguales no tira error, la segunda pisa a la primera en
+  // silencio -- casi deja inalcanzables los metodos reales de Supermercado.
+  purchaseReturns: {
     list: (params?: { estado?: string; supplier_id?: string }) => client.get<SupplierReturn[]>(`/v1/companies/${COMPANY_ID}/supplier-returns`, params),
     get: (id: string) => client.get<SupplierReturnWithItems>(`/v1/supplier-returns/${id}`),
     create: (data: { supplier_id: string; purchase_order_id?: string; motivo: string; motivo_detalle?: string; warehouse_id?: string; observaciones?: string; items: { product_id: string; descripcion?: string; cantidad: number; precio_unitario: number; iva_tasa?: number; motivo_detalle?: string; condicion?: string }[] }) =>
-      client.post<SupplierReturn>(/v1/supplier-returns, { ...data, company_id: COMPANY_ID }),
+      client.post<SupplierReturn>(`/v1/supplier-returns`, { ...data, company_id: COMPANY_ID }),
     approve: (id: string, aprobadoPor: string, warehouseId?: string) =>
       client.post<SupplierReturn>(`/v1/supplier-returns/${id}/approve`, { aprobado_por: aprobadoPor, warehouse_id: warehouseId }),
     reject: (id: string, motivo: string) => client.post<SupplierReturn>(`/v1/supplier-returns/${id}/reject?motivo=${encodeURIComponent(motivo)}`),
-    motivos: () => client.get<string[]>(/v1/supplier-returns/motivos),
+    motivos: () => client.get<string[]>(`/v1/supplier-returns/motivos`),
+  },
+  purchaseBonuses: {
+    list: (params?: { supplier_id?: string; product_id?: string; activo?: boolean }) => client.get<PurchaseBonusScale[]>("/v1/purchase-bonus-scales", params as any),
+    create: (data: { supplier_id: string; product_id: string; cantidad_minima: number; cantidad_bonificada: number; observaciones?: string }) =>
+      client.post<PurchaseBonusScale>("/v1/purchase-bonus-scales", data),
+    update: (id: string, data: Partial<{ cantidad_minima: number; cantidad_bonificada: number; activo: boolean; observaciones: string }>) =>
+      client.patch<PurchaseBonusScale>(`/v1/purchase-bonus-scales/${id}`, data),
+    delete: (id: string) => client.delete<{ ok: boolean }>(`/v1/purchase-bonus-scales/${id}`),
+    suggest: (supplierId: string, productId: string, cantidad: number) =>
+      client.get<{ scale_id: string | null; cantidad_bonificada_sugerida: number }>("/v1/purchase-bonus-scales/suggest", { supplier_id: supplierId, product_id: productId, cantidad: String(cantidad) }),
   },
 }
