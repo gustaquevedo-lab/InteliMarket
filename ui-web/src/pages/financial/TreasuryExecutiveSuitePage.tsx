@@ -104,6 +104,9 @@ export default function TreasuryExecutiveSuitePage() {
   }
 
   const totalBankBalance = banksData.reduce((sum, b) => sum + (parseFloat(b.saldo_actual) || 0), 0)
+  const totalIngresosEsperados30d = cashFlowData?.total_ingresos_30d
+    ? parseFloat(cashFlowData.total_ingresos_30d)
+    : cashFlowData?.proyecciones?.reduce((sum: number, p: any) => sum + (parseFloat(p.ingresos_estimados) || 0), 0) || 0
 
   return (
     <div className="space-y-6">
@@ -113,7 +116,7 @@ export default function TreasuryExecutiveSuitePage() {
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-2xl font-black tracking-tight">Suite de Finanzas & Tesorería</h1>
             <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs px-3 py-1 rounded-full font-semibold">
-              Consolidado General
+              CASA GONZALITO S.R.L.
             </span>
           </div>
           <p className="text-slate-300 text-sm">
@@ -187,7 +190,7 @@ export default function TreasuryExecutiveSuitePage() {
               <p className="text-2xl font-black text-slate-900 dark:text-white font-mono">
                 {formatPYG(totalBankBalance)}
               </p>
-              <span className="text-[11px] text-gray-400 mt-1 block">5 cuentas corrientes activas</span>
+              <span className="text-[11px] text-gray-400 mt-1 block">7 cuentas bancarias legacy</span>
             </div>
 
             <div className="card p-5 border-l-4 border-l-emerald-500 bg-gradient-to-br from-white to-emerald-50/30 dark:from-slate-800 dark:to-slate-800/80">
@@ -196,9 +199,9 @@ export default function TreasuryExecutiveSuitePage() {
                 <ArrowUpRight className="w-4 h-4 text-emerald-500" />
               </div>
               <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                {formatPYG(cashFlowData?.saldo_proyectado_30d - totalBankBalance || 0)}
+                {formatPYG(totalIngresosEsperados30d)}
               </p>
-              <span className="text-[11px] text-emerald-600/80 mt-1 block font-medium">Basado en Cuentas por Cobrar (AR)</span>
+              <span className="text-[11px] text-emerald-600/80 mt-1 block font-medium">Cobranzas AR en agenda</span>
             </div>
 
             <div className="card p-5 border-l-4 border-l-indigo-500 bg-gradient-to-br from-white to-indigo-50/30 dark:from-slate-800 dark:to-slate-800/80">
@@ -285,8 +288,8 @@ export default function TreasuryExecutiveSuitePage() {
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="font-bold text-lg">Cuentas Corrientes Bancarias de Casa Gonzalito</h3>
-              <p className="text-xs text-gray-500">Bancos registrados con saldos consolidados</p>
+              <h3 className="font-bold text-lg">Cuentas Corrientes Bancarias de Casa Gonzalito S.R.L.</h3>
+              <p className="text-xs text-gray-500">Bancos extraídos del sistema legacy con saldos actualizados</p>
             </div>
             <button onClick={() => setShowDepositModal(true)} className="btn-primary text-sm flex items-center gap-2">
               <Plus className="w-4 h-4" /> Registrar Boleta de Depósito
@@ -348,7 +351,7 @@ export default function TreasuryExecutiveSuitePage() {
             <ArrowRightLeft className="w-5 h-5 text-primary" /> Conciliación Bancaria Automática
           </h3>
           <p className="text-xs text-gray-500">
-            Importación de extractos digitales (Itaú, Sudameris, Continental, ueno) para matcheo automático contra cobros y depósitos del sistema.
+            Importación de extractos digitales (Continental, Interfisa, Familiar, GNB, BNF) para matcheo automático contra cobros y depósitos del sistema.
           </p>
           <div className="p-8 border-2 border-dashed rounded-xl text-center space-y-3 bg-gray-50 dark:bg-slate-800/40">
             <FileSpreadsheet className="w-10 h-10 text-gray-400 mx-auto" />
@@ -368,7 +371,7 @@ export default function TreasuryExecutiveSuitePage() {
             <div className="flex justify-between items-center border-b pb-4">
               <div>
                 <h3 className="font-bold text-xl text-slate-900 dark:text-white">Estado de Resultados (P&L EBITDA)</h3>
-                <p className="text-xs text-gray-500">Período Fiscal Actual</p>
+                <p className="text-xs text-gray-500">Período Fiscal Actual ({ebitdaData?.periodo || "Agosto 2026"})</p>
               </div>
               <span className="text-xs font-mono font-bold bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full">
                 Margen EBITDA: {ebitdaData?.margen_ebitda || 0}%
@@ -381,7 +384,7 @@ export default function TreasuryExecutiveSuitePage() {
                 <span className="font-black text-emerald-600">{formatPYG(ebitdaData?.ingresos_netos || 0)}</span>
               </div>
               <div className="flex justify-between py-2 border-b text-gray-600 dark:text-gray-400">
-                <span>(-) Costo de Ventas (COGS)</span>
+                <span>(-) Costo de Ventas (COGS Real de Productos Sold)</span>
                 <span className="text-rose-600">({formatPYG(ebitdaData?.costo_ventas || 0)})</span>
               </div>
               <div className="flex justify-between py-2 border-b font-bold bg-gray-50 dark:bg-slate-800/60 px-2 rounded">

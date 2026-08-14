@@ -610,17 +610,11 @@ async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
     )
     saldo_bancario = Decimal(str(accounts_result.scalar() or "0"))
 
-    proj_result = await db.execute(
-        select(CashFlowProjection).where(
-            CashFlowProjection.company_id == cid,
-            CashFlowProjection.fecha >= today,
-        ).order_by(CashFlowProjection.fecha.asc()).limit(30)
-    )
-    projections = list(proj_result.scalars().all())
+    projections = await generate_projection(db, company_id, 30)
 
-    hoy = next((p for p in projections if p.fecha == today), None)
-    ingresos_hoy = hoy.ingresos_estimados if hoy else Decimal("0")
-    egresos_hoy = hoy.egresos_estimados if hoy else Decimal("0")
+    total_ingresos_30d = sum((p.ingresos_estimados or Decimal("0") for p in projections), Decimal("0"))
+    total_egresos_30d = sum((p.egresos_estimados or Decimal("0") for p in projections), Decimal("0"))
+    saldo_30d = projections[-1].saldo_final_proyectado if projections else saldo_bancario
 
     proyecciones_list = []
     for p in projections:
@@ -633,14 +627,13 @@ async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
             "fuente": p.fuente,
         })
 
-    saldo_7d = projections[6].saldo_final_proyectado if len(projections) > 6 else saldo_bancario
-    saldo_30d = projections[-1].saldo_final_proyectado if projections else saldo_bancario
-
     return {
         "saldo_bancario": saldo_bancario,
-        "ingresos_hoy": ingresos_hoy,
-        "egresos_hoy": egresos_hoy,
-        "saldo_proyectado_7d": saldo_7d,
+        "ingresos_hoy": projections[0].ingresos_estimados if projections else Decimal("0"),
+        "egresos_hoy": projections[0].egresos_estimados if projections else Decimal("0"),
+        "total_ingresos_30d": total_ingresos_30d,
+        "total_egresos_30d": total_egresos_30d,
+        "saldo_proyectado_7d": projections[6].saldo_final_proyectado if len(projections) > 6 else saldo_bancario,
         "saldo_proyectado_30d": saldo_30d,
         "proyecciones": proyecciones_list,
     }

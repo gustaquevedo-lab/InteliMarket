@@ -606,47 +606,48 @@ async def recalculate_score(db: AsyncSession, company_id: str, customer_id: str)
 
 async def compute_ebitda(db: AsyncSession, company_id: str, month: str | None = None) -> dict:
     cid = uuid.UUID(company_id)
-
-    from api.src.sales.models import Sale
-
     today = _today()
     current_month = month or today.strftime("%Y-%m")
     year, mes_num = current_month.split("-")
     y, m = int(year), int(mes_num)
     inicio, fin = _month_range(y, m)
 
+    # 1. Ventas Netas del Mes
     sales_r = await db.execute(
-        select(func.coalesce(func.sum(Sale.total), 0)).where(
-            Sale.company_id == cid,
-            Sale.estado != 'anulado',
-            func.date(Sale.fecha) >= inicio,
-            func.date(Sale.fecha) <= fin,
-        )
+        text("""
+            SELECT COALESCE(SUM(total), 0) FROM sales
+            WHERE company_id = :cid AND estado != 'anulado'
+            AND fecha >= :inicio AND fecha <= :fin
+        """),
+        {"cid": cid, "inicio": inicio, "fin": fin},
     )
     ingresos_netos = float(sales_r.scalar() or 0)
 
-    from api.src.financial.models import SupplierInvoice
-    purchases_r = await db.execute(
-        select(func.coalesce(func.sum(SupplierInvoice.total), 0)).where(
-            SupplierInvoice.company_id == cid,
-            SupplierInvoice.fecha_emision >= inicio,
-            SupplierInvoice.fecha_emision <= fin,
-        )
+    # 2. Costo de Ventas (COGS real basado en productos vendidos)
+    cogs_r = await db.execute(
+        text("""
+            SELECT COALESCE(SUM(si.cantidad * CASE WHEN p.costo_promedio > 0 THEN p.costo_promedio ELSE si.precio_unitario * 0.8 END), 0)
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            LEFT JOIN products p ON p.id = si.product_id
+            WHERE s.company_id = :cid AND s.estado != 'anulado'
+            AND s.fecha >= :inicio AND s.fecha <= :fin
+        """),
+        {"cid": cid, "inicio": inicio, "fin": fin},
     )
-    costo_ventas = float(purchases_r.scalar() or 0)
+    costo_ventas = float(cogs_r.scalar() or (ingresos_netos * 0.8))
 
-    gastos_operativos = 0
-    expense_cats = ["gasto", "servicio", "alquiler", "salario", "marketing", "administrativo"]
-    for cat in expense_cats:
-        cat_r = await db.execute(
-            select(func.coalesce(func.sum(SupplierInvoice.total), 0)).where(
-                SupplierInvoice.company_id == cid,
-                SupplierInvoice.fecha_emision >= inicio,
-                SupplierInvoice.fecha_emision <= fin,
-                SupplierInvoice.concepto.ilike(f"%{cat}%"),
-            )
-        )
-        gastos_operativos += float(cat_r.scalar() or 0)
+    # 3. Gastos Operativos de Administración y Ventas
+    gastos_r = await db.execute(
+        text("""
+            SELECT COALESCE(SUM(total), 0) FROM supplier_invoices
+            WHERE company_id = :cid
+            AND fecha_emision >= :inicio AND fecha_emision <= :fin
+            AND (concepto ILIKE '%gasto%' OR concepto ILIKE '%servicio%' OR concepto ILIKE '%alquiler%' OR concepto ILIKE '%salario%')
+        """),
+        {"cid": cid, "inicio": inicio, "fin": fin},
+    )
+    gastos_operativos = float(gastos_r.scalar() or 0)
 
     resultado_bruto = ingresos_netos - costo_ventas
     ebitda = resultado_bruto - gastos_operativos
