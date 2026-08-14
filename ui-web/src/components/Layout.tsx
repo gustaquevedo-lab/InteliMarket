@@ -124,8 +124,7 @@ const navGroups: NavGroup[] = [
     title: "Finanzas & Tesorería",
     items: [
       { icon: Sparkles, label: "Gerente Financiero", path: "/finance-agent" },
-      { icon: Banknote, label: "Arqueo de Caja", path: "/caja" },
-      { icon: Truck, label: "Liquidación Cobradores", path: "/route-cash-settlements" },
+      { icon: Banknote, label: "Cajas & Arqueos", path: "/caja" },
       { icon: Target, label: "Metas de Venta", path: "/sales-targets" },
       { icon: Percent, label: "Rebates de Proveedores", path: "/proveedor-kpis" },
       { icon: Landmark, label: "Bóveda Central", path: "/boveda", feature: "supermercado" },

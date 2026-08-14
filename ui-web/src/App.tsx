@@ -208,7 +208,7 @@ function AppRoutes() {
           ["reports", <ReportsPage />],
           ["settings", <SettingsPage />],
           ["caja", <CajaPage />],
-          ["route-cash-settlements", <RouteCashSettlementsPage />],
+          ["route-cash-settlements", <CajaPage />],
           ["sales-targets", <SalesTargetsPage />],
           ["admin", <AdminPage />],
           ["admin/verticals", <VerticalsPage />],

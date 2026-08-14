@@ -3,7 +3,7 @@ import {
   Wallet, TrendingUp, DollarSign, CheckCircle2, XCircle, AlertTriangle, 
   CreditCard, Search, Plus, Eye, RefreshCw, Truck, Store, ShieldCheck, 
   History, Calendar, FileText, ArrowUpRight, ArrowDownRight, User, Building2,
-  Clock, Lock, Check, Calculator, ChevronRight, X
+  Clock, Lock, Check, Calculator, ChevronRight, X, Filter
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -23,7 +23,11 @@ const DENOMINATIONS = [
 ]
 
 export default function CajaPage() {
-  const [activeTab, setActiveTab] = useState<"salon" | "cobradores" | "tesoreria" | "historial">("cobradores")
+  const [activeTab, setActiveTab] = useState<"cobradores" | "salon" | "tesoreria" | "historial">("cobradores")
+  const [periodPreset, setPeriodPreset] = useState<"today" | "yesterday" | "week" | "month" | "all">("today")
+  const [dateFrom, setDateFrom] = useState<string>("2026-08-14")
+  const [dateTo, setDateTo] = useState<string>("2026-08-14")
+  
   const [summary, setSummary] = useState<any>(null)
   const [settlements, setSettlements] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,17 +58,42 @@ export default function CajaPage() {
   const [newObs, setNewObs] = useState<string>("")
 
   // Treasury Auth state
-  const [authTesorero, setAuthTesorero] = useState<string>("Joel - Tesorería")
+  const [authTesorero, setAuthTesorero] = useState<string>("Joel - Tesorería Central")
   const [authObs, setAuthObs] = useState<string>("")
 
   const toast = useToast()
 
+  const handlePeriodChange = (preset: "today" | "yesterday" | "week" | "month" | "all") => {
+    setPeriodPreset(preset)
+    const today = "2026-08-14"
+    if (preset === "today") {
+      setDateFrom(today)
+      setDateTo(today)
+    } else if (preset === "yesterday") {
+      setDateFrom("2026-08-13")
+      setDateTo("2026-08-13")
+    } else if (preset === "week") {
+      setDateFrom("2026-08-08")
+      setDateTo(today)
+    } else if (preset === "month") {
+      setDateFrom("2026-08-01")
+      setDateTo(today)
+    } else if (preset === "all") {
+      setDateFrom("")
+      setDateTo("")
+    }
+  }
+
   const loadData = async () => {
     setLoading(true)
     try {
+      const params: any = {}
+      if (dateFrom) params.fecha_desde = dateFrom
+      if (dateTo) params.fecha_hasta = dateTo
+
       const [sumRes, settRes] = await Promise.allSettled([
-        api.routeCashSettlements.summary(),
-        api.routeCashSettlements.list({ limit: 100 }),
+        api.routeCashSettlements.summary(params),
+        api.routeCashSettlements.list({ ...params, limit: 150 }),
       ])
       if (sumRes.status === "fulfilled") setSummary(sumRes.value)
       if (settRes.status === "fulfilled") setSettlements(settRes.value || [])
@@ -77,7 +106,7 @@ export default function CajaPage() {
 
   useEffect(() => {
     loadData()
-  }, [])
+  }, [dateFrom, dateTo])
 
   // Calculate calculated cash from denominations
   const totalCashCounted = Object.entries(billCounts).reduce((acc, [denom, qty]) => {
@@ -194,7 +223,7 @@ export default function CajaPage() {
       return s.cobrador_codigo === "0" || (s.observaciones || "").toLowerCase().includes("maxi") || (s.observaciones || "").toLowerCase().includes("salon") || (s.observaciones || "").toLowerCase().includes("caja")
     }
     if (activeTab === "cobradores") {
-      return s.cobrador_codigo !== "0" && !s.cerrado
+      return s.cobrador_codigo !== "0"
     }
     if (activeTab === "tesoreria") {
       return s.cerrado && !s.usuario_cierre
@@ -211,19 +240,19 @@ export default function CajaPage() {
             <span className="badge badge-primary text-[10px] font-black uppercase tracking-widest">
               Tesorería & Cajas Operativas
             </span>
-            <span className="text-xs text-gray-400 font-mono">262.871 Sesiones Reales Legacy</span>
+            <span className="text-xs text-gray-400 font-mono">Control Unificado Salón + Rutas</span>
           </div>
           <h1 className="text-2xl font-black text-gray-900 dark:text-white mt-1">
-            Arqueo de Caja & Liquidación de Cobradores
+            Cajas, Arqueos & Liquidaciones
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Control integral de aperturas, arqueos ciegos, rendición de cobradores en ruta y auditoría de Tesorería Central
+            Módulo integral para cajas de salón, liquidación de cobradores/reparto y auditoría de Tesorería Central
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button onClick={loadData} className="btn-ghost p-2" title="Recargar datos">
-            <RefreshCw className="w-4 h-4 text-gray-500" />
+            <RefreshCw className={`w-4 h-4 text-gray-500 ${loading ? "animate-spin" : ""}`} />
           </button>
           <button onClick={() => setShowOpenModal(true)} className="btn-primary flex items-center gap-1.5 text-xs">
             <Plus className="w-4 h-4" />
@@ -232,17 +261,72 @@ export default function CajaPage() {
         </div>
       </div>
 
-      {/* Top Financial KPI Summary Cards */}
+      {/* Date Range Selector Toolbar */}
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-white dark:bg-slate-800 p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] uppercase font-black tracking-wider text-gray-400 mr-1 flex items-center gap-1">
+            <Calendar className="w-3.5 h-3.5 text-primary" />
+            Período:
+          </span>
+          {[
+            { id: "today", label: "Hoy (14 Ago)" },
+            { id: "yesterday", label: "Ayer (13 Ago)" },
+            { id: "week", label: "Últimos 7 Días" },
+            { id: "month", label: "Este Mes (Agosto)" },
+            { id: "all", label: "Todo el Historial" },
+          ].map(p => (
+            <button
+              key={p.id}
+              onClick={() => handlePeriodChange(p.id as any)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                periodPreset === p.id
+                  ? "bg-primary text-white shadow-sm"
+                  : "bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Custom Date Inputs */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-gray-400 text-[11px]">Desde:</span>
+          <input
+            type="date"
+            className="input-field text-xs p-1 font-mono w-32"
+            value={dateFrom}
+            onChange={(e) => {
+              setDateFrom(e.target.value)
+              setPeriodPreset("all")
+            }}
+          />
+          <span className="text-gray-400 text-[11px]">Hasta:</span>
+          <input
+            type="date"
+            className="input-field text-xs p-1 font-mono w-32"
+            value={dateTo}
+            onChange={(e) => {
+              setDateTo(e.target.value)
+              setPeriodPreset("all")
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Top Financial KPI Summary Cards (Acotado al período) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="card p-3.5 border-l-4 border-l-blue-500 bg-blue-50/40 dark:bg-blue-950/20">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] uppercase font-black tracking-widest text-gray-400">Activas Hoy</span>
+            <span className="text-[10px] uppercase font-black tracking-widest text-gray-400">Cajas del Período</span>
             <Store className="w-4 h-4 text-blue-500" />
           </div>
           <p className="text-xl font-black font-mono text-blue-900 dark:text-blue-200 mt-1">
-            {summary ? (summary.activas_hoy || 0).toLocaleString() : "—"}
+            {summary ? (summary.total_liquidaciones || 0).toLocaleString() : "—"}
           </p>
-          <span className="text-[10px] text-gray-400 mt-0.5 block">Cajas & Rutas abiertas</span>
+          <span className="text-[10px] text-gray-400 mt-0.5 block">
+            {summary?.activas_hoy || 0} abiertas / {summary?.cerradas || 0} cerradas
+          </span>
         </div>
 
         <div className="card p-3.5 border-l-4 border-l-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20">
@@ -253,7 +337,7 @@ export default function CajaPage() {
           <p className="text-base font-black font-mono text-indigo-900 dark:text-indigo-200 mt-1">
             {summary ? formatPYG(summary.total_a_rendir) : "—"}
           </p>
-          <span className="text-[10px] text-gray-400 mt-0.5 block">Monto a rendir</span>
+          <span className="text-[10px] text-gray-400 mt-0.5 block">Monto a rendir en facturas</span>
         </div>
 
         <div className="card p-3.5 border-l-4 border-l-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20">
@@ -275,12 +359,12 @@ export default function CajaPage() {
           <p className="text-base font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
             {summary ? formatPYG(summary.efectivo) : "—"}
           </p>
-          <span className="text-[10px] text-gray-400 mt-0.5 block">Billetaje en caja</span>
+          <span className="text-[10px] text-gray-400 mt-0.5 block">Billetaje contado</span>
         </div>
 
         <div className="card p-3.5 border-l-4 border-l-purple-500 bg-purple-50/40 dark:bg-purple-950/20">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] uppercase font-black tracking-widest text-gray-400">Pagarés & Cheques</span>
+            <span className="text-[10px] uppercase font-black tracking-widest text-gray-400">Pagarés / Crédito</span>
             <CreditCard className="w-4 h-4 text-purple-500" />
           </div>
           <p className="text-base font-black font-mono text-purple-900 dark:text-purple-200 mt-1">
@@ -305,10 +389,10 @@ export default function CajaPage() {
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 pb-2">
         <div className="flex items-center gap-2 overflow-x-auto">
           {[
-            { id: "cobradores", label: "🚚 Liquidación de Cobradores & Rutas", count: settlements.filter(s => s.cobrador_codigo !== "0" && !s.cerrado).length },
+            { id: "cobradores", label: "🚚 Liquidación de Cobradores & Rutas", count: settlements.filter(s => s.cobrador_codigo !== "0").length },
             { id: "salon", label: "🖥️ Cajas de Salón y Terminales POS", count: settlements.filter(s => s.cobrador_codigo === "0").length },
             { id: "tesoreria", label: "🏛️ Auditoría & Tesorería Central", count: settlements.filter(s => s.cerrado && !s.usuario_cierre).length },
-            { id: "historial", label: "📜 Historial de Rendiciones (262k)", count: settlements.length },
+            { id: "historial", label: "📜 Todas las Sesiones del Período", count: settlements.length },
           ].map(tab => (
             <button
               key={tab.id}
@@ -363,7 +447,7 @@ export default function CajaPage() {
               {loading ? (
                 <tr><td colSpan={10} className="text-center py-12 text-gray-400">Cargando sesiones de caja...</td></tr>
               ) : filteredSettlements.length === 0 ? (
-                <tr><td colSpan={10} className="text-center py-12 text-gray-400">No se encontraron liquidaciones para esta vista</td></tr>
+                <tr><td colSpan={10} className="text-center py-12 text-gray-400">No se encontraron liquidaciones para los filtros seleccionados</td></tr>
               ) : (
                 filteredSettlements.map((s) => {
                   const dif = Number(s.diferencia || 0)

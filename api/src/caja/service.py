@@ -267,12 +267,18 @@ async def get_route_settlement_detail(db: AsyncSession, company_id: str, settlem
 async def get_route_settlements_summary(db: AsyncSession, company_id: str, fecha_desde=None, fecha_hasta=None) -> dict:
     where = "company_id = :company_id"
     params = {"company_id": company_id}
+    
+    # If no dates specified, default to latest operating date (CURRENT_DATE)
     if fecha_desde:
         where += " AND fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
         where += " AND fecha <= :fecha_hasta"
         params["fecha_hasta"] = fecha_hasta
+
+    if not fecha_desde and not fecha_hasta:
+        # Default to today so KPIs reflect current day operations
+        where += " AND fecha = CURRENT_DATE"
 
     result = await db.execute(
         text(f"""
@@ -298,7 +304,9 @@ async def get_route_settlements_summary(db: AsyncSession, company_id: str, fecha
         params,
     )
     row = result.first()
-    return dict(row._mapping) if row else {}
+    res = dict(row._mapping) if row else {}
+    res["fecha_filtro_aplicada"] = str(fecha_desde or "hoy (CURRENT_DATE)")
+    return res
 
 
 async def authorize_route_settlement(db: AsyncSession, company_id: str, settlement_id: str, usuario_tesorero: str = "Tesoreria Central", observaciones: str | None = None) -> dict | None:
