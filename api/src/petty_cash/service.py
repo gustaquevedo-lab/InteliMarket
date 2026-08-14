@@ -1,8 +1,8 @@
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import uuid
 
-from sqlalchemy import select, func as sa_func, and_
+from sqlalchemy import select, text, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.petty_cash.models import Expense, ExpenseCategory
@@ -58,22 +58,45 @@ async def list_expenses(
     db: AsyncSession, company_id: str, branch_id: str | None = None,
     category_id: str | None = None, estado: str | None = None,
     desde: date | None = None, hasta: date | None = None,
-    limit: int = 50, offset: int = 0,
-) -> list[Expense]:
-    query = select(Expense).where(Expense.company_id == uuid.UUID(company_id))
+    limit: int = 100, offset: int = 0,
+) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    where_clauses = ["e.company_id = :cid"]
+    params: dict = {"cid": cid, "limit": limit, "offset": offset}
+
     if branch_id:
-        query = query.where(Expense.branch_id == uuid.UUID(branch_id))
+        where_clauses.append("e.branch_id = :branch_id")
+        params["branch_id"] = uuid.UUID(branch_id)
     if category_id:
-        query = query.where(Expense.category_id == uuid.UUID(category_id))
+        where_clauses.append("e.category_id = :category_id")
+        params["category_id"] = uuid.UUID(category_id)
     if estado:
-        query = query.where(Expense.estado == estado)
+        where_clauses.append("e.estado = :estado")
+        params["estado"] = estado
     if desde:
-        query = query.where(Expense.fecha_gasto >= desde)
+        where_clauses.append("e.fecha_gasto >= :desde")
+        params["desde"] = desde
     if hasta:
-        query = query.where(Expense.fecha_gasto <= hasta)
-    query = query.order_by(Expense.created_at.desc()).limit(limit).offset(offset)
-    result = await db.execute(query)
-    return list(result.scalars().all())
+        where_clauses.append("e.fecha_gasto <= :hasta")
+        params["hasta"] = hasta
+
+    where_stmt = " AND ".join(where_clauses)
+
+    query = text(f"""
+        SELECT 
+            e.id, e.company_id, e.branch_id, e.category_id, c.nombre as category_name,
+            e.monto, e.descripcion, e.proveedor, e.comprobante_url, e.tipo_pago,
+            e.fecha_gasto, e.registrado_por, e.aprobado_por, e.estado, e.notas, e.created_at
+        FROM expenses e
+        LEFT JOIN expense_categories c ON c.id = e.category_id
+        WHERE {where_stmt}
+        ORDER BY e.fecha_gasto DESC, e.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """)
+
+    res = await db.execute(query, params)
+    rows = res.fetchall()
+    return [dict(r._mapping) for r in rows]
 
 
 async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate) -> Expense | None:
@@ -100,6 +123,8 @@ async def delete_expense(db: AsyncSession, expense_id: str) -> bool:
 async def get_summary(db: AsyncSession, company_id: str) -> ExpenseSummary:
     cid = uuid.UUID(company_id)
     today = date.today()
+    week_start = today - timedelta(days=7)
+    month_start = today.replace(day=1)
 
     # Daily total
     r1 = await db.execute(
@@ -108,28 +133,33 @@ async def get_summary(db: AsyncSession, company_id: str) -> ExpenseSummary:
     )
     total_dia = float(r1.scalar())
 
-    # Weekly total
+    # Weekly total (last 7 days)
     r2 = await db.execute(
         select(sa_func.coalesce(sa_func.sum(Expense.monto), 0))
-        .where(Expense.company_id == cid, Expense.fecha_gasto >= today)
+        .where(Expense.company_id == cid, Expense.fecha_gasto >= week_start)
     )
     total_semana = float(r2.scalar())
 
     # Monthly total
-    month_start = today.replace(day=1)
     r3 = await db.execute(
         select(sa_func.coalesce(sa_func.sum(Expense.monto), 0))
         .where(Expense.company_id == cid, Expense.fecha_gasto >= month_start)
     )
     total_mes = float(r3.scalar())
 
-    # By category
-    r4 = await db.execute(
-        select(Expense.category_id, sa_func.sum(Expense.monto))
-        .where(Expense.company_id == cid, Expense.fecha_gasto >= month_start)
-        .group_by(Expense.category_id)
-    )
-    por_categoria = [{"category_id": str(k) if k else None, "total": float(v)} for k, v in r4.all()]
+    # By category (with category name join)
+    query_cat = text("""
+        SELECT 
+            COALESCE(c.nombre, 'Sin Categoría') as category_name,
+            SUM(e.monto) as total
+        FROM expenses e
+        LEFT JOIN expense_categories c ON c.id = e.category_id
+        WHERE e.company_id = :cid AND e.fecha_gasto >= :month_start
+        GROUP BY c.nombre
+        ORDER BY total DESC
+    """)
+    res_cat = await db.execute(query_cat, {"cid": cid, "month_start": month_start})
+    por_categoria = [{"category_id": r.category_name, "total": float(r.total)} for r in res_cat.fetchall()]
 
     # By branch
     r5 = await db.execute(
