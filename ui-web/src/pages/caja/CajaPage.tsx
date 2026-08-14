@@ -138,18 +138,32 @@ export default function CajaPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><DollarSign className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Cajas activas</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{totalRegisters}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="card p-4 border-l-4 border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Cajas Registradoras</span>
+            <Wallet className="w-4 h-4 text-primary" />
+          </div>
+          <p className="text-xl font-bold font-mono text-gray-900 dark:text-white">{totalRegisters}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Puntos de cobro habilitados</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><CheckCircle className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Sesiones abiertas</span></div>
-          <p className="text-2xl font-bold text-green-500">{openSessions}</p>
+
+        <div className="card p-4 border-l-4 border-l-emerald-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Sesiones Abiertas</span>
+            <CheckCircle className="w-4 h-4 text-emerald-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">{openSessions}</p>
+          <span className="text-[10px] text-emerald-600/80 mt-1 block font-semibold">Cajeros operando en vivo</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><TrendingUp className="w-5 h-5 text-secondary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Monto apertura</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatPYG(totalApertura)}</p>
+
+        <div className="card p-4 border-l-4 border-l-blue-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Fondo Fijo de Apertura</span>
+            <DollarSign className="w-4 h-4 text-blue-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-blue-600 dark:text-blue-400">{formatPYG(totalApertura)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Total efectivo asignado al inicio</span>
         </div>
       </div>
 

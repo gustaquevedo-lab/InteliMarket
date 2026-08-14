@@ -87,37 +87,41 @@ export default function RouteCashSettlementsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><DollarSign className="w-4 h-4 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Liquidado</span></div>
-          <p className="text-xl font-bold text-green-500">{formatPYG(summary?.total || 0)}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="card p-4 border-l-4 border-l-emerald-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Total Liquidado</span>
+            <DollarSign className="w-4 h-4 text-emerald-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(summary?.total || 0)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Rendición total del período</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><Wallet className="w-4 h-4 text-blue-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Efectivo</span></div>
-          <p className="text-xl font-bold text-blue-500">{formatPYG(summary?.efectivo || 0)}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><HandCoins className="w-4 h-4 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Anticipos</span></div>
-          <p className="text-xl font-bold text-amber-500">{formatPYG(summary?.anticipo || 0)}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><Users className="w-4 h-4 text-purple-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Cobradores Activos</span></div>
-          <p className="text-xl font-bold text-purple-500">{summary?.cobradores ?? 0}</p>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><ArrowDownRight className="w-4 h-4 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Otros Egresos</span></div>
-          <p className="text-lg font-bold text-red-500">{formatPYG(summary?.otro_egreso || 0)}</p>
+        <div className="card p-4 border-l-4 border-l-blue-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Efectivo Rendido</span>
+            <Wallet className="w-4 h-4 text-blue-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-blue-600 dark:text-blue-400">{formatPYG(summary?.efectivo || 0)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Ingreso de caja en billetes</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><ArrowUpRight className="w-4 h-4 text-emerald-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Otros Ingresos</span></div>
-          <p className="text-lg font-bold text-emerald-500">{formatPYG(summary?.otro_ingreso || 0)}</p>
+
+        <div className="card p-4 border-l-4 border-l-amber-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Anticipos / Cheques</span>
+            <HandCoins className="w-4 h-4 text-amber-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400">{formatPYG(summary?.anticipo || 0)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Anticipos y valores entregados</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1"><CheckCircle2 className="w-4 h-4 text-gray-400" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Cerradas</span></div>
-          <p className="text-lg font-bold text-gray-700 dark:text-gray-200">{summary?.cerradas ?? 0} / {summary?.total_liquidaciones ?? 0}</p>
+
+        <div className="card p-4 border-l-4 border-l-purple-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Cobradores Activos</span>
+            <Users className="w-4 h-4 text-purple-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-purple-600 dark:text-purple-400">{summary?.cobradores ?? 0}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Fuerza de cobranza en ruta</span>
         </div>
       </div>
 

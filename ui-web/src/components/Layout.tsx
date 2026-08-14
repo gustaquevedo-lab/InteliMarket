@@ -342,7 +342,7 @@ export default function Layout() {
                     const active = location.pathname === item.path
                     return (
                       <button key={item.path} onClick={() => { navigate(item.path); setSidebarOpen(false) }}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${active ? "bg-white/20 text-white shadow-lg" : "text-white/70 hover:text-white hover:bg-white/10"}`}>
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-left leading-snug transition-all duration-200 ${active ? "bg-white/20 text-white shadow-lg" : "text-white/70 hover:text-white hover:bg-white/10"}`}>
                         <item.icon className="w-5 h-5 flex-shrink-0" />{item.label}
                       </button>
                     )
