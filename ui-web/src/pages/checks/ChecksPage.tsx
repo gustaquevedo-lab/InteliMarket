@@ -125,14 +125,24 @@ export default function ChecksPage() {
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Cartera de cheques y pagarés recibidos de clientes</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><Banknote className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">En cartera</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatPYG(totalCartera)}</p>
+      {/* KPI Cards - Unified Financial Style */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="card p-4 border-l-4 border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>En Cartera / Depositado</span>
+            <Banknote className="w-4 h-4 text-primary" />
+          </div>
+          <p className="text-xl font-bold font-mono text-gray-900 dark:text-white">{formatPYG(totalCartera)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Cheques y pagarés activos</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><XCircle className="w-5 h-5 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Rechazados</span></div>
-          <p className="text-2xl font-bold text-red-500">{formatPYG(totalRechazado)}</p>
+
+        <div className="card p-4 border-l-4 border-l-red-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Cheques Rechazados</span>
+            <XCircle className="w-4 h-4 text-red-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-red-600 dark:text-red-400">{formatPYG(totalRechazado)}</p>
+          <span className="text-[10px] text-red-500/80 mt-1 block font-semibold">Exigen gestión cobro judicial</span>
         </div>
       </div>
 

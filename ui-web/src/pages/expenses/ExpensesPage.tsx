@@ -93,19 +93,21 @@ export default function ExpensesPage() {
         <>
           {tab === "dashboard" && summary && (
             <div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              {/* KPI Cards - Unified Financial Style */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
                 {[
-                  { label: "Hoy", value: summary.total_dia, icon: DollarSign, color: "text-red-600" },
-                  { label: "Semana", value: summary.total_semana, icon: TrendingUp, color: "text-amber-600" },
-                  { label: "Mes", value: summary.total_mes, icon: BarChart3, color: "text-blue-600" },
-                  { label: "Pendientes", value: summary.pendientes_aprobacion, icon: Clock, color: "text-purple-600", suffix: " aprob." },
+                  { label: "Gastos Hoy", value: formatPYG(summary.total_dia), icon: DollarSign, color: "border-l-red-500 text-red-600", sub: "Gasto diario acumulado" },
+                  { label: "Gastos Semana", value: formatPYG(summary.total_semana), icon: TrendingUp, color: "border-l-amber-500 text-amber-600", sub: "Gasto semanal acumulado" },
+                  { label: "Gastos Mes", value: formatPYG(summary.total_mes), icon: BarChart3, color: "border-l-blue-500 text-blue-600", sub: "Gasto mensual acumulado" },
+                  { label: "Pendientes Aprobación", value: summary.pendientes_aprobacion, icon: Clock, color: "border-l-purple-500 text-purple-600", sub: "Requieren autorización" },
                 ].map((c, i) => (
-                  <div key={i} className="card p-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-sm text-gray-500 font-medium">{c.label}</span>
-                      <c.icon className={`w-5 h-5 ${c.color}`} />
+                  <div key={i} className={`card p-4 border-l-4 ${c.color.split(" ")[0]} flex flex-col justify-between transition-all hover:shadow-md`}>
+                    <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+                      <span>{c.label}</span>
+                      <c.icon className={`w-4 h-4 ${c.color.split(" ")[1]}`} />
                     </div>
-                    <div className={`text-2xl font-bold ${c.color}`}>Gs {Number(c.value).toLocaleString("es-PY")}{(c as any).suffix || ""}</div>
+                    <p className={`text-xl font-bold font-mono ${c.color.split(" ")[1]}`}>{c.value}</p>
+                    <span className="text-[10px] text-gray-400 mt-1 block">{c.sub}</span>
                   </div>
                 ))}
               </div>

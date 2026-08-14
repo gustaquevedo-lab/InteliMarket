@@ -185,27 +185,42 @@ export default function AccountsReceivablePage() {
         </button>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="card p-5 border-l-4 border-amber-500">
-          <div className="flex items-center gap-3 mb-2"><DollarSign className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Pendiente</span></div>
-          <p className="text-2xl font-bold text-amber-500">{formatPYG(summary?.total_pendiente || 0)}</p>
-          <p className="text-xs text-gray-400 mt-1">{summary?.pendientes || 0} documentos pendientes</p>
+      {/* KPI Cards - Unified Financial Style */}
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="card p-4 border-l-4 border-l-amber-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Total Pendiente</span>
+            <DollarSign className="w-4 h-4 text-amber-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-amber-500">{formatPYG(summary?.total_pendiente || 0)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">{summary?.pendientes || 0} documentos pendientes</span>
         </div>
-        <div className="card p-5 border-l-4 border-red-500">
-          <div className="flex items-center gap-3 mb-2"><AlertTriangle className="w-5 h-5 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Documentos Vencidos</span></div>
-          <p className="text-2xl font-bold text-red-500">{summary?.vencidos || 0}</p>
-          <p className="text-xs text-red-400 mt-1">Con mora acumulada</p>
+
+        <div className="card p-4 border-l-4 border-l-red-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Documentos Vencidos</span>
+            <AlertTriangle className="w-4 h-4 text-red-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-red-600 dark:text-red-400">{summary?.vencidos || 0}</p>
+          <span className="text-[10px] text-red-500/80 mt-1 block font-semibold">Con mora acumulada</span>
         </div>
-        <div className="card p-5 border-l-4 border-red-600">
-          <div className="flex items-center gap-3 mb-2"><Clock className="w-5 h-5 text-red-600" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Monto Vencido</span></div>
-          <p className="text-2xl font-bold text-red-600">{formatPYG(summary?.monto_vencido || 0)}</p>
-          <p className="text-xs text-gray-400 mt-1">Exige acción de cobro</p>
+
+        <div className="card p-4 border-l-4 border-l-red-600 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Monto Vencido</span>
+            <Clock className="w-4 h-4 text-red-600" />
+          </div>
+          <p className="text-xl font-bold font-mono text-red-600 dark:text-red-400">{formatPYG(summary?.monto_vencido || 0)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Exige acción de cobro</span>
         </div>
-        <div className="card p-5 border-l-4 border-blue-500">
-          <div className="flex items-center gap-3 mb-2"><FileText className="w-5 h-5 text-blue-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Documentos Totales</span></div>
-          <p className="text-2xl font-bold text-blue-500">{summary?.total || 0}</p>
-          <p className="text-xs text-gray-400 mt-1">Histórico general</p>
+
+        <div className="card p-4 border-l-4 border-l-blue-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Documentos Totales</span>
+            <FileText className="w-4 h-4 text-blue-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-blue-600 dark:text-blue-400">{summary?.total || 0}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Histórico general</span>
         </div>
       </div>
 

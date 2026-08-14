@@ -130,58 +130,58 @@ export default function ConsolidatedDebtsPage() {
         </button>
       </div>
 
-      {/* Metric Cards Grid - Uniform & Elegant Reduced Sizes */}
+      {/* Metric Cards Grid - Unified Financial Style */}
       <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-        <div className="card p-4 border-l-4 border-l-primary flex flex-col justify-between">
-          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+        <div className="card p-4 border-l-4 border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
             <span>Deuda Total ERP</span>
             <DollarSign className="w-4 h-4 text-primary" />
           </div>
-          <p className="text-lg font-bold text-gray-900 dark:text-white font-mono">
+          <p className="text-xl font-bold font-mono text-gray-900 dark:text-white">
             {formatPYG(summary.deuda_total_sistema)}
           </p>
           <span className="text-[10px] text-gray-400 mt-1 block">Consolidado global</span>
         </div>
 
-        <div className="card p-4 border-l-4 border-l-red-500 flex flex-col justify-between">
-          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+        <div className="card p-4 border-l-4 border-l-red-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
             <span>Facturas Vencidas</span>
             <AlertCircle className="w-4 h-4 text-red-500" />
           </div>
-          <p className="text-lg font-bold text-red-600 dark:text-red-400 font-mono">
+          <p className="text-xl font-bold font-mono text-red-600 dark:text-red-400">
             {formatPYG(summary.total_monto_vencido)}
           </p>
-          <span className="text-[10px] text-red-500/80 mt-1 block">Exige gestión de cobro</span>
+          <span className="text-[10px] text-red-500/80 mt-1 block font-semibold">Exige gestión de cobro</span>
         </div>
 
-        <div className="card p-4 border-l-4 border-l-rose-600 flex flex-col justify-between">
-          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+        <div className="card p-4 border-l-4 border-l-rose-600 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
             <span>Cheques Rechazados</span>
             <ShieldAlert className="w-4 h-4 text-rose-600" />
           </div>
-          <p className="text-lg font-bold text-rose-600 dark:text-rose-400 font-mono">
+          <p className="text-xl font-bold font-mono text-rose-600 dark:text-rose-400">
             {formatPYG(summary.total_cheques_rechazados)}
           </p>
           <span className="text-[10px] text-rose-600/80 mt-1 block font-semibold">Riesgo Financiero</span>
         </div>
 
-        <div className="card p-4 border-l-4 border-l-amber-500 flex flex-col justify-between">
-          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+        <div className="card p-4 border-l-4 border-l-amber-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
             <span>Cheques Cartera</span>
             <CreditCard className="w-4 h-4 text-amber-500" />
           </div>
-          <p className="text-lg font-bold text-amber-600 dark:text-amber-400 font-mono">
+          <p className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400">
             {formatPYG(summary.total_cheques_cartera)}
           </p>
           <span className="text-[10px] text-gray-400 mt-1 block">Pendiente depósito</span>
         </div>
 
-        <div className="card p-4 border-l-4 border-l-indigo-500 flex flex-col justify-between">
-          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+        <div className="card p-4 border-l-4 border-l-indigo-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
             <span>Pagarés Activos</span>
             <FileText className="w-4 h-4 text-indigo-500" />
           </div>
-          <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400 font-mono">
+          <p className="text-xl font-bold font-mono text-indigo-600 dark:text-indigo-400">
             {formatPYG(summary.total_pagares)}
           </p>
           <span className="text-[10px] text-gray-400 mt-1 block">Documentos pagares</span>
