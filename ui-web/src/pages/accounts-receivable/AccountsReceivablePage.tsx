@@ -42,6 +42,8 @@ export default function AccountsReceivablePage() {
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState<string>("todos")
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null)
+  const [showReciboModal, setShowReciboModal] = useState(false)
+  const [reciboForm, setReciboForm] = useState({ cliente: "", monto: "", medio: "efectivo", ref: "", obs: "" })
   const toast = useToast()
 
   const fetchData = async () => {
@@ -81,9 +83,12 @@ export default function AccountsReceivablePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><ReceiptText className="w-6 h-6 text-primary" />Cuentas por Cobrar</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{docs.length} documentos registrados</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><ReceiptText className="w-6 h-6 text-primary" />Cuentas por Cobrar (AR)</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{docs.length} documentos registrados en gestión</p>
         </div>
+        <button onClick={() => setShowReciboModal(true)} className="btn-primary flex items-center gap-2">
+          <span>+ Emitir Recibo de Cobranza Oficial N°</span>
+        </button>
       </div>
 
       {/* KPI Cards */}

@@ -120,7 +120,7 @@ export default function ChecksPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
           <Landmark className="w-6 h-6 text-primary" />
-          Cheques y Pagarés
+          Cartera de Cheques & Pagarés Operativos
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Cartera de cheques y pagarés recibidos de clientes</p>
       </div>
