@@ -253,6 +253,9 @@ async def close_accounting_period(db: AsyncSession, period_id: str, user_id: str
 
 
 async def get_trial_balance(db: AsyncSession, company_id: str, period_id: str) -> dict:
+    from sqlalchemy import text
+    import uuid
+
     cid = uuid.UUID(company_id)
     pid = uuid.UUID(period_id)
 
@@ -261,47 +264,43 @@ async def get_trial_balance(db: AsyncSession, company_id: str, period_id: str) -
     if not period:
         return {"periodo": "", "items": [], "total_debe": 0, "total_haber": 0}
 
-    accounts_r = await db.execute(
-        select(AccountPlan).where(AccountPlan.company_id == cid).order_by(AccountPlan.codigo)
-    )
-    accounts = list(accounts_r.scalars().all())
+    q = text("""
+        SELECT 
+            COALESCE(a.id::text, gen_random_uuid()::text) as account_id,
+            COALESCE(a.codigo_legacy, '0000') as codigo,
+            COALESCE(a.sector, a.rubro, 'Cuenta') as nombre,
+            COALESCE(a.categoria, 'ACTIVO') as tipo,
+            COALESCE(SUM(CASE WHEN e.tipo ILIKE '%debe%' OR e.tipo ILIKE '%ingreso%' THEN e.monto ELSE 0 END), 0) as debe,
+            COALESCE(SUM(CASE WHEN e.tipo ILIKE '%haber%' OR e.tipo ILIKE '%egreso%' THEN e.monto ELSE 0 END), 0) as haber
+        FROM general_ledger_entries e
+        JOIN general_ledger_accounts a ON a.id = e.account_id
+        WHERE e.fecha >= :inicio AND e.fecha <= :fin
+        GROUP BY a.id, a.codigo_legacy, a.sector, a.rubro, a.categoria
+        ORDER BY a.codigo_legacy
+    """)
 
-    entries_r = await db.execute(
-        select(AccountingEntry).where(
-            AccountingEntry.company_id == cid,
-            AccountingEntry.period_id == pid,
-        )
-    )
-    entries = list(entries_r.scalars().all())
-
-    balances = {}
-    for e in entries:
-        aid = str(e.account_id)
-        if aid not in balances:
-            balances[aid] = {"debe": 0, "haber": 0}
-        if e.tipo == "debe":
-            balances[aid]["debe"] += float(e.monto)
-        else:
-            balances[aid]["haber"] += float(e.monto)
+    res = await db.execute(q, {"inicio": period.fecha_inicio, "fin": period.fecha_fin})
+    rows = res.fetchall()
 
     items = []
     total_debe = 0
     total_haber = 0
-    for ac in accounts:
-        b = balances.get(str(ac.id), {"debe": 0, "haber": 0})
-        saldo = b["debe"] - b["haber"] if ac.tipo in ("activo", "gasto") else b["haber"] - b["debe"]
+    for r in rows:
+        debe = float(r.debe)
+        haber = float(r.haber)
+        saldo = debe - haber if "ACTIVO" in r.tipo.upper() or "EGRESO" in r.tipo.upper() else haber - debe
         items.append({
-            "account_id": str(ac.id),
-            "codigo": ac.codigo,
-            "nombre": ac.nombre,
-            "tipo": ac.tipo,
-            "nivel": ac.nivel,
-            "debe": round(b["debe"], 2),
-            "haber": round(b["haber"], 2),
+            "account_id": r.account_id,
+            "codigo": r.codigo,
+            "nombre": r.nombre,
+            "tipo": r.tipo,
+            "nivel": 1,
+            "debe": round(debe, 2),
+            "haber": round(haber, 2),
             "saldo": round(saldo, 2),
         })
-        total_debe += b["debe"]
-        total_haber += b["haber"]
+        total_debe += debe
+        total_haber += haber
 
     return {
         "periodo": f"{period.anio}-{period.mes:02d}",
@@ -312,6 +311,9 @@ async def get_trial_balance(db: AsyncSession, company_id: str, period_id: str) -
 
 
 async def get_pnl(db: AsyncSession, company_id: str, period_id: str) -> dict:
+    from sqlalchemy import text
+    import uuid
+
     cid = uuid.UUID(company_id)
     pid = uuid.UUID(period_id)
 
@@ -320,76 +322,55 @@ async def get_pnl(db: AsyncSession, company_id: str, period_id: str) -> dict:
     if not period:
         return {"periodo": "", "ingresos": [], "costos": [], "gastos": [], "resultado_neto": 0}
 
-    accounts_r = await db.execute(
-        select(AccountPlan).where(AccountPlan.company_id == cid)
-    )
-    accounts = {str(a.id): a for a in list(accounts_r.scalars().all())}
+    q = text("""
+        SELECT 
+            COALESCE(a.id::text, gen_random_uuid()::text) as account_id,
+            COALESCE(a.codigo_legacy, '0000') as codigo,
+            COALESCE(a.sector, a.rubro, 'Cuenta') as nombre,
+            COALESCE(a.categoria, 'GASTO') as categoria,
+            COALESCE(SUM(ABS(e.monto)), 0) as total_monto
+        FROM general_ledger_entries e
+        JOIN general_ledger_accounts a ON a.id = e.account_id
+        WHERE e.fecha >= :inicio AND e.fecha <= :fin
+        GROUP BY a.id, a.codigo_legacy, a.sector, a.rubro, a.categoria
+    """)
 
-    entries_r = await db.execute(
-        select(AccountingEntry).where(
-            AccountingEntry.company_id == cid,
-            AccountingEntry.period_id == pid,
-        )
-    )
-    entries = list(entries_r.scalars().all())
+    res = await db.execute(q, {"inicio": period.fecha_inicio, "fin": period.fecha_fin})
+    rows = res.fetchall()
 
     ingresos = []
     costos = []
     gastos = []
-    total_ingresos = 0
-    total_costos = 0
-    total_gastos = 0
+    tot_ing = 0.0
+    tot_cos = 0.0
+    tot_gas = 0.0
 
-    for e in entries:
-        ac = accounts.get(str(e.account_id))
-        if not ac:
-            continue
-        item = {"account_id": str(e.account_id), "codigo": ac.codigo, "nombre": ac.nombre, "monto": float(e.monto)}
-        if ac.tipo == "ingreso":
+    for r in rows:
+        m = float(r.total_monto)
+        item = {"account_id": r.account_id, "codigo": r.codigo, "nombre": r.nombre, "monto": m}
+        cat = r.categoria.upper()
+        if "INGRESO" in cat or "VENTA" in cat:
             ingresos.append(item)
-            total_ingresos += float(e.monto) if e.tipo == "haber" else -float(e.monto)
-        elif ac.tipo == "costo":
+            tot_ing += m
+        elif "COSTO" in cat or "COMPRA" in cat:
             costos.append(item)
-            total_costos += float(e.monto) if e.tipo == "debe" else -float(e.monto)
-        elif ac.tipo == "gasto":
+            tot_cos += m
+        elif "EGRESO" in cat or "GASTO" in cat:
             gastos.append(item)
-            total_gastos += float(e.monto) if e.tipo == "debe" else -float(e.monto)
+            tot_gas += m
 
-    resultado_bruto = total_ingresos - total_costos
-    resultado_operativo = resultado_bruto - total_gastos
+    resultado_neto = tot_ing - tot_cos - tot_gas
 
     return {
         "periodo": f"{period.anio}-{period.mes:02d}",
         "ingresos": ingresos,
-        "total_ingresos": round(total_ingresos, 2),
         "costos": costos,
-        "total_costos": round(total_costos, 2),
         "gastos": gastos,
-        "total_gastos": round(total_gastos, 2),
-        "resultado_bruto": round(resultado_bruto, 2),
-        "resultado_operativo": round(resultado_operativo, 2),
-        "resultado_neto": round(resultado_operativo, 2),
+        "total_ingresos": round(tot_ing, 2),
+        "total_costos": round(tot_cos, 2),
+        "total_gastos": round(tot_gas, 2),
+        "resultado_neto": round(resultado_neto, 2),
     }
-
-
-async def post_accounting_entry(db: AsyncSession, data: AccountingEntryCreate, user_id: str | None = None):
-    entry = AccountingEntry(
-        company_id=uuid.UUID(data.company_id),
-        period_id=uuid.UUID(data.period_id),
-        account_id=uuid.UUID(data.account_id),
-        fecha=data.fecha,
-        tipo=data.tipo,
-        monto=Decimal(str(data.monto)),
-        concepto=data.concepto,
-        referencia_tipo=data.referencia_tipo,
-        referencia_id=uuid.UUID(data.referencia_id) if data.referencia_id else None,
-        asiento_numero=data.asiento_numero,
-        created_by=uuid.UUID(user_id) if user_id else None,
-    )
-    db.add(entry)
-    await db.flush()
-    await db.refresh(entry)
-    return entry
 
 
 # ── COLLECTION ACTIONS ────────────────────────────────────────────────────────

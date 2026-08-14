@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import UUID
 
 
 # ── Withholding ──────────────────────────────────────────────────────────────
@@ -25,9 +26,9 @@ class WithholdingConfigUpdate(BaseModel):
     activo: Optional[bool] = None
 
 class WithholdingConfigResponse(BaseModel):
-    id: str
-    company_id: str
-    supplier_id: str
+    id: UUID
+    company_id: UUID
+    supplier_id: UUID
     tipo: str
     activo: bool
     categoria: Optional[str] = None
@@ -53,10 +54,10 @@ class WithholdingDocumentCreate(BaseModel):
     notas: Optional[str] = None
 
 class WithholdingDocumentResponse(BaseModel):
-    id: str
-    company_id: str
-    supplier_id: str
-    invoice_id: str
+    id: UUID
+    company_id: UUID
+    supplier_id: UUID
+    invoice_id: UUID
     tipo: str
     numero_documento: Optional[str] = None
     cdc: Optional[str] = None
@@ -93,13 +94,13 @@ class AccountPlanCreate(BaseModel):
     acepta_asientos: bool = True
 
 class AccountPlanResponse(BaseModel):
-    id: str
-    company_id: str
+    id: UUID
+    company_id: UUID
     codigo: str
     nombre: str
     tipo: str
     nivel: int
-    padre_id: Optional[str] = None
+    padre_id: Optional[UUID] = None
     acepta_asientos: bool
     activo: bool
 
@@ -115,8 +116,8 @@ class AccountingPeriodCreate(BaseModel):
     mes: int
 
 class AccountingPeriodResponse(BaseModel):
-    id: str
-    company_id: str
+    id: UUID
+    company_id: UUID
     anio: int
     mes: int
     fecha_inicio: date
@@ -145,10 +146,10 @@ class AccountingEntryCreate(BaseModel):
     asiento_numero: Optional[str] = None
 
 class AccountingEntryResponse(BaseModel):
-    id: str
-    company_id: str
-    period_id: str
-    account_id: str
+    id: UUID
+    company_id: UUID
+    period_id: UUID
+    account_id: UUID
     fecha: date
     tipo: str
     monto: float
@@ -209,10 +210,10 @@ class CollectionActionCreate(BaseModel):
     monto_comprometido: Optional[float] = None
 
 class CollectionActionResponse(BaseModel):
-    id: str
-    company_id: str
-    customer_id: str
-    receivable_id: Optional[str] = None
+    id: UUID
+    company_id: UUID
+    customer_id: UUID
+    receivable_id: Optional[UUID] = None
     tipo: str
     fecha: date
     resultado: Optional[str] = None
@@ -220,7 +221,7 @@ class CollectionActionResponse(BaseModel):
     proximo_contacto: Optional[date] = None
     compromiso_pago: Optional[date] = None
     monto_comprometido: Optional[float] = None
-    created_by: Optional[str] = None
+    created_by: Optional[UUID] = None
     created_at: Optional[datetime] = None
 
     class Config:
@@ -230,9 +231,9 @@ class CollectionActionResponse(BaseModel):
 # ── Customer Scoring ─────────────────────────────────────────────────────────
 
 class CustomerScoreResponse(BaseModel):
-    id: str
-    company_id: str
-    customer_id: str
+    id: UUID
+    company_id: UUID
+    customer_id: UUID
     score: int
     pago_puntual: float
     dias_mora_promedio: float

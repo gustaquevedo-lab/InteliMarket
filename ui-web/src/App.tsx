@@ -231,7 +231,9 @@ function AppRoutes() {
           ["gerencial", <GerencialPage />],
           ["promociones", <PromotionsPage />],
           ["gastos", <ExpensesPage />],
-          ["financiero", <FinancialPage />],
+          ["contabilidad", <IntegratedFinancePage />],
+          ["integrated-finance", <IntegratedFinancePage />],
+          ["financiero", <IntegratedFinancePage />],
           ["contratos-proveedores", <SupplierContractsPage />],
           ["acuerdos-clientes", <CustomerAgreementsPage />],
         ].map(([path, el]) => (

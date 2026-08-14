@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     app_secret_key: str = "dev-secret-key-change-in-production"
 
     # Database
-    database_url: str = "postgresql+asyncpg://intelimarket:password@localhost:5432/intelimarket"
+    database_url: str = "postgresql+asyncpg://intelimarket:intelimarket_dev@localhost:5432/intelimarket"
     db_pool_size: int = 20
     db_max_overflow: int = 10
 

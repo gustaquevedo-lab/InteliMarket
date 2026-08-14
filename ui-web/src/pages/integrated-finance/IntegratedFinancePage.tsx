@@ -1,337 +1,105 @@
 import { useState, useEffect } from "react"
 import {
-  BarChart3, Coins, ReceiptText, CalendarDays, Handshake, Percent, FileSpreadsheet,
-  Landmark, HandCoins, Banknote, RefreshCcw, ClipboardCheck, TrendingUp, AlertTriangle,
-  CheckCircle, XCircle, Plus, Search, Loader2, ChevronDown, DollarSign, ArrowUpDown,
+  BarChart3, ReceiptText, CalendarDays, Percent, FileSpreadsheet,
+  Landmark, HandCoins, RefreshCcw, ClipboardCheck, TrendingUp,
+  Plus, Search, Loader2, DollarSign, Download, Wallet, BookOpen, Scale, CheckCircle2, ShieldCheck
 } from "lucide-react"
 import { api } from "../../api/index"
+import { useToast } from "../../context/ToastContext"
+import { formatPYG } from "../../utils/format"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+const API_BASE = import.meta.env.VITE_API_URL || "/api"
+
+function downloadPdf(path: string) {
+  window.open(`${API_BASE}${path}${path.includes("?") ? "&" : "?"}company_id=${COMPANY_ID}`, "_blank")
+}
+
+type Tab = "cierre" | "cuentas" | "retenciones" | "presupuestos"
 
 export default function IntegratedFinancePage() {
-  const [tab, setTab] = useState("dashboard")
-
-  return (
-    <div className="space-y-6 animate-fade-in-up">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Gestión Financiera Integrada</h1>
-          <p className="text-sm text-gray-500 mt-1">Retenciones, Cierre Contable, EBITDA, Conciliación, Scoring, Cobranzas</p>
-        </div>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {[
-            { key: "dashboard",    label: "Dashboard",       icon: BarChart3 },
-            { key: "retenciones",  label: "Retenciones",     icon: ReceiptText },
-            { key: "ctacte",       label: "Cierre Contable", icon: CalendarDays },
-            { key: "scoring",      label: "Scoring",          icon: TrendingUp },
-            { key: "cobranzas",    label: "Cobranzas",        icon: HandCoins },
-            { key: "conciliacion", label: "Conciliación",     icon: RefreshCcw },
-          ].map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
-                ${tab === t.key
-                  ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-                }`}
-            >
-              <t.icon className="w-4 h-4" />{t.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {tab === "dashboard"    && <DashboardTab />}
-      {tab === "retenciones"  && <RetencionesTab />}
-      {tab === "ctacte"       && <CierreContableTab />}
-      {tab === "scoring"      && <ScoringTab />}
-      {tab === "cobranzas"    && <CobranzasTab />}
-      {tab === "conciliacion" && <ConciliacionTab />}
-    </div>
-  )
-}
-
-function Spinner() { return <Loader2 className="w-4 h-4 animate-spin" /> }
-
-function KpiCard({ icon: Icon, label, value, sub, color = "blue" }: any) {
-  const colors: Record<string, string> = {
-    blue: "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
-    green: "bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400",
-    red: "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400",
-    yellow: "bg-yellow-50 text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400",
-    purple: "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400",
-    indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400",
-  }
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-      <div className="flex items-center gap-3">
-        <div className={`p-2.5 rounded-lg ${colors[color] || colors.blue}`}>
-          <Icon className="w-5 h-5" />
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">{label}</p>
-          <p className="text-lg font-bold text-gray-900 dark:text-white">{value ?? "—"}</p>
-          {sub && <p className="text-xs text-gray-400">{sub}</p>}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ═══════════════════════ DASHBOARD ═══════════════════════
-
-function DashboardTab() {
-  const [data, setData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    api.integratedFinance.getDashboard(COMPANY_ID).then(setData).finally(() => setLoading(false))
-  }, [])
-
-  if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
-  if (!data) return <p className="text-center text-gray-500 py-12">No se pudo cargar el dashboard</p>
+  const [tab, setTab] = useState<Tab>("cierre")
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard icon={Banknote} label="Liquidez" value={data.liquidez?.toFixed(2)} sub="Activo / Pasivo" color="blue" />
-        <KpiCard icon={TrendingUp} label="EBITDA" value={`$${Intl.NumberFormat().format(data.ebitda || 0)}`} sub={`Margen ${data.margen_ebitda}%`} color="green" />
-        <KpiCard icon={HandCoins} label="Por Cobrar" value={`$${Intl.NumberFormat().format(data.total_por_cobrar || 0)}`} color="red" />
-        <KpiCard icon={Landmark} label="Por Pagar" value={`$${Intl.NumberFormat().format(data.total_por_pagar || 0)}`} color="yellow" />
-        <KpiCard icon={Banknote} label="Saldo Bancario" value={`$${Intl.NumberFormat().format(data.saldo_bancario || 0)}`} color="indigo" />
-        <KpiCard icon={TrendingUp} label="Rot. Cartera" value={`${data.rotacion_cartera_dias}d`} color="purple" />
-        <KpiCard icon={TrendingUp} label="Rot. Proveed." value={`${data.rotacion_proveedores_dias}d`} color="purple" />
-        <KpiCard icon={AlertTriangle} label="Ciclo Efectivo" value={`${data.ciclo_efectivo_dias}d`} sub={data.ciclo_efectivo_dias > 0 ? "Necesita capital" : "Autofinanciado"} color={data.ciclo_efectivo_dias > 0 ? "red" : "green"} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-          <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3">Proyección Flujo de Caja</h3>
-          <div className="space-y-2">
-            {[
-              { label: "30 días", value: data.proyeccion_30d },
-              { label: "60 días", value: data.proyeccion_60d },
-              { label: "90 días", value: data.proyeccion_90d },
-            ].map((p) => (
-              <div key={p.label} className="flex justify-between text-sm">
-                <span className="text-gray-500">{p.label}</span>
-                <span className={`font-medium ${(p.value || 0) < 0 ? "text-red-600" : "text-green-600"}`}>
-                  ${Intl.NumberFormat().format(p.value || 0)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-          <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3">Resumen del Mes</h3>
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm"><span className="text-gray-500">Ingresos</span><span className="font-medium text-green-600">${Intl.NumberFormat().format(data.ingresos_del_mes || 0)}</span></div>
-            <div className="flex justify-between text-sm"><span className="text-gray-500">Gastos</span><span className="font-medium text-red-600">${Intl.NumberFormat().format(data.gastos_del_mes || 0)}</span></div>
-            <div className="flex justify-between text-sm font-semibold border-t pt-2">
-              <span>Resultado Neto</span>
-              <span className={(data.resultado_neto || 0) >= 0 ? "text-green-600" : "text-red-600"}>
-                ${Intl.NumberFormat().format(data.resultado_neto || 0)}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-          <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3">Indicadores</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-gray-500">Retenciones Pend.</span><span>{data.retenciones_pendientes}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Cobranzas Activas</span><span>{data.colecciones_pendientes}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Scoring Promedio</span><span className="font-medium">{data.scoring_promedio}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Períodos Abiertos</span><span>{data.accounting_weeks}</span></div>
-          </div>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <Scale className="w-6 h-6 text-primary" />
+            Contabilidad Integrada
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Balance de comprobación, Estado de Resultados (PyG), Plan de Cuentas y Normativa DNIT
+          </p>
         </div>
       </div>
-    </div>
-  )
-}
 
-// ═══════════════════════ RETENCIONES ═══════════════════════
-
-function RetencionesTab() {
-  const [documents, setDocuments] = useState<any[]>([])
-  const [configs, setConfigs] = useState<any[]>([])
-  const [dash, setDash] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [showNewDoc, setShowNewDoc] = useState(false)
-
-  const load = async () => {
-    setLoading(true)
-    const [docs, cfgs, d] = await Promise.all([
-      api.integratedFinance.listWithholdingDocuments(COMPANY_ID).catch(() => []),
-      api.integratedFinance.listWithholdingConfigs(COMPANY_ID).catch(() => []),
-      api.integratedFinance.getWithholdingDashboard(COMPANY_ID).catch(() => null),
-    ])
-    setDocuments(docs)
-    setConfigs(cfgs)
-    setDash(d)
-    setLoading(false)
-  }
-
-  useEffect(() => { load() }, [])
-
-  const approveDoc = async (id: string) => {
-    await api.integratedFinance.approveWithholdingDocument(id)
-    load()
-  }
-
-  const sendDoc = async (id: string) => {
-    await api.integratedFinance.sendWithholdingToSifen(id)
-    load()
-  }
-
-  if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <KpiCard icon={ReceiptText} label="Pendientes" value={dash?.total_retenciones_pendientes ?? 0} color="yellow" />
-        <KpiCard icon={CheckCircle} label="Enviadas" value={dash?.total_retenciones_enviadas ?? 0} color="green" />
-        <KpiCard icon={Banknote} label="Monto Pend." value={`$${Intl.NumberFormat().format(dash?.monto_total_pendiente || 0)}`} color="red" />
-        <KpiCard icon={Banknote} label="Monto Enviado" value={`$${Intl.NumberFormat().format(dash?.monto_total_enviado || 0)}`} color="indigo" />
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-          <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300">Documentos de Retención</h3>
-          <button onClick={() => setShowNewDoc(!showNewDoc)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-            <Plus className="w-4 h-4" />Nueva Retención
+      {/* Tabs */}
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 w-fit overflow-x-auto">
+        {[
+          { k: "cierre" as Tab, l: "Balance & Estado de Resultados", i: FileSpreadsheet },
+          { k: "cuentas" as Tab, l: "Plan de Cuentas", i: BookOpen },
+          { k: "retenciones" as Tab, l: "Retenciones DNIT", i: ReceiptText },
+          { k: "presupuestos" as Tab, l: "Control Presupuestario", i: Wallet },
+        ].map(t => (
+          <button key={t.k} onClick={() => setTab(t.k)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${tab === t.k ? "bg-white dark:bg-slate-700 shadow-sm text-primary" : "text-gray-500 hover:text-gray-700"}`}>
+            <t.i className="w-4 h-4" />{t.l}
           </button>
-        </div>
-
-        {showNewDoc && <NewWithholdingDocForm configs={configs} onDone={() => { setShowNewDoc(false); load() }} />}
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 dark:border-gray-700 text-gray-500">
-                <th className="text-left px-4 py-3 font-medium">Número</th>
-                <th className="text-left px-4 py-3 font-medium">Tipo</th>
-                <th className="text-left px-4 py-3 font-medium">Período</th>
-                <th className="text-right px-4 py-3 font-medium">Base Imponible</th>
-                <th className="text-right px-4 py-3 font-medium">Monto Ret.</th>
-                <th className="text-center px-4 py-3 font-medium">Estado</th>
-                <th className="text-center px-4 py-3 font-medium">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documents.map((d: any) => (
-                <tr key={d.id} className="border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                  <td className="px-4 py-3 font-mono text-xs">{d.numero_documento || "—"}</td>
-                  <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-600">{d.tipo}</span></td>
-                  <td className="px-4 py-3">{d.periodo_fiscal}</td>
-                  <td className="px-4 py-3 text-right">{Intl.NumberFormat().format(d.base_imponible)}</td>
-                  <td className="px-4 py-3 text-right font-medium">{Intl.NumberFormat().format(d.monto_retenido)}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium
-                      ${d.estado === "pendiente" ? "bg-yellow-50 text-yellow-600" : ""}
-                      ${d.estado === "aprobado" ? "bg-blue-50 text-blue-600" : ""}
-                      ${d.estado === "enviado" ? "bg-green-50 text-green-600" : ""}
-                    `}>{d.estado}</span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex justify-center gap-1">
-                      {d.estado === "pendiente" && (
-                        <button onClick={() => approveDoc(d.id)} className="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">Aprobar</button>
-                      )}
-                      {d.estado === "aprobado" && (
-                        <button onClick={() => sendDoc(d.id)} className="px-2 py-1 text-xs bg-green-50 text-green-600 rounded hover:bg-green-100">Enviar SIFEN</button>
-                      )}
-                      {d.estado === "enviado" && <span className="text-xs text-green-500"><CheckCircle className="w-4 h-4 inline" /> Enviado</span>}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {documents.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">Sin documentos de retención</td></tr>}
-            </tbody>
-          </table>
-        </div>
+        ))}
       </div>
+
+      {tab === "cierre" && <CierreContableTab />}
+      {tab === "cuentas" && <PlanCuentasTab />}
+      {tab === "retenciones" && <RetencionesTab />}
+      {tab === "presupuestos" && <PresupuestosTab />}
     </div>
   )
 }
 
-function NewWithholdingDocForm({ configs, onDone }: { configs: any[]; onDone: () => void }) {
-  const [form, setForm] = useState({ supplier_id: "", invoice_id: "", tipo: "IVA", periodo_fiscal: "", base_imponible: 0, moneda: "PYG" })
+function Spinner() { return <Loader2 className="w-5 h-5 animate-spin text-primary" /> }
 
-  const submit = async () => {
-    await api.integratedFinance.createWithholdingDocument({ ...form, company_id: COMPANY_ID, tasa: 0, monto_retenido: 0 })
-    onDone()
-  }
-
-  return (
-    <div className="p-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div><label className="block text-xs text-gray-500 mb-1">Proveedor</label>
-          <select value={form.supplier_id} onChange={(e) => setForm({ ...form, supplier_id: e.target.value })} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600">
-            <option value="">Seleccionar...</option>
-            {configs.map((c: any) => <option key={c.id} value={c.supplier_id}>{c.supplier_id?.slice(0, 8)}</option>)}
-          </select>
-        </div>
-        <div><label className="block text-xs text-gray-500 mb-1">Tipo</label>
-          <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600">
-            <option value="IVA">IVA</option>
-            <option value="IRP">IRP</option>
-          </select>
-        </div>
-        <div><label className="block text-xs text-gray-500 mb-1">Período Fiscal</label>
-          <input value={form.periodo_fiscal} onChange={(e) => setForm({ ...form, periodo_fiscal: e.target.value })} placeholder="YYYY-MM" className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600" />
-        </div>
-        <div><label className="block text-xs text-gray-500 mb-1">Base Imponible</label>
-          <input type="number" value={form.base_imponible} onChange={(e) => setForm({ ...form, base_imponible: Number(e.target.value) })} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600" />
-        </div>
-      </div>
-      <div className="flex gap-2 mt-3">
-        <button onClick={submit} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Generar Retención</button>
-        <button onClick={onDone} className="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300">Cancelar</button>
-      </div>
-    </div>
-  )
-}
-
-// ═══════════════════════ CIERRE CONTABLE ═══════════════════════
+// ═══════════════════════ TAB 1: CIERRE & BALANCE ═══════════════════════
 
 function CierreContableTab() {
   const [periods, setPeriods] = useState<any[]>([])
-  const [entries, setEntries] = useState<any[]>([])
-  const [accounts, setAccounts] = useState<any[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState<string>("")
   const [trialBalance, setTrialBalance] = useState<any>(null)
   const [pnl, setPnl] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [showNewPeriod, setShowNewPeriod] = useState(false)
+  const toast = useToast()
 
-  const load = async () => {
+  const loadPeriods = async () => {
     setLoading(true)
-    const [ps, accts] = await Promise.all([
-      api.integratedFinance.listAccountingPeriods(COMPANY_ID).catch(() => []),
-      api.integratedFinance.listAccountPlan(COMPANY_ID).catch(() => []),
-    ])
-    setPeriods(ps)
-    setAccounts(accts)
-    if (ps.length > 0 && !selectedPeriod) setSelectedPeriod(ps[0].id)
-    setLoading(false)
+    try {
+      const ps = await api.integratedFinance.listAccountingPeriods(COMPANY_ID)
+      setPeriods(ps)
+      if (ps.length > 0 && !selectedPeriod) {
+        setSelectedPeriod(ps[0].id)
+      }
+    } catch (e: any) {
+      toast.error("Error", "No se pudieron cargar los períodos contables")
+    } finally {
+      setLoading(false)
+    }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { loadPeriods() }, [])
 
   useEffect(() => {
     if (!selectedPeriod) return
-    api.integratedFinance.listAccountingEntries(COMPANY_ID, selectedPeriod).then(setEntries).catch(() => setEntries([]))
     api.integratedFinance.getTrialBalance(COMPANY_ID, selectedPeriod).then(setTrialBalance).catch(() => setTrialBalance(null))
     api.integratedFinance.getPnl(COMPANY_ID, selectedPeriod).then(setPnl).catch(() => setPnl(null))
   }, [selectedPeriod])
 
   const closePeriod = async (id: string) => {
-    await api.integratedFinance.closeAccountingPeriod(id)
-    load()
+    try {
+      await api.integratedFinance.closeAccountingPeriod(id)
+      toast.success("Período Cerrado", "Ejercicio fiscal cerrado correctamente")
+      loadPeriods()
+    } catch (e: any) {
+      toast.error("Error", e.message)
+    }
   }
 
   if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
@@ -340,85 +108,164 @@ function CierreContableTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Period selector and actions */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
         <div className="flex items-center gap-3">
+          <label className="text-xs font-bold uppercase tracking-wider text-gray-500">Período Contable:</label>
           <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)}
-            className="px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600">
+            className="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-200 dark:border-gray-700 dark:bg-gray-900 font-mono">
             {periods.map((p: any) => (
-              <option key={p.id} value={p.id}>{p.anio}-{String(p.mes).padStart(2, "0")} — {p.estado}</option>
+              <option key={p.id} value={p.id}>
+                {p.anio}-{String(p.mes).padStart(2, "0")} — {p.estado.toUpperCase()}
+              </option>
             ))}
           </select>
-          <button onClick={() => setShowNewPeriod(!showNewPeriod)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-            <Plus className="w-4 h-4" />Nuevo Período
-          </button>
+          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${currentPeriod?.estado === "abierto" ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-700"}`}>
+            {currentPeriod?.estado || "—"}
+          </span>
         </div>
-        {currentPeriod?.estado === "abierto" && (
-          <button onClick={() => closePeriod(currentPeriod.id)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500 text-white text-sm rounded-lg hover:bg-yellow-600">
-            <ClipboardCheck className="w-4 h-4" />Cerrar Período
-          </button>
-        )}
+
+        <div className="flex items-center gap-2">
+          {currentPeriod?.estado === "abierto" && (
+            <button onClick={() => closePeriod(currentPeriod.id)} className="btn-secondary text-xs flex items-center gap-1.5">
+              <ClipboardCheck className="w-3.5 h-3.5 text-amber-500" />
+              <span>Cerrar Período Fiscal</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {showNewPeriod && <NewPeriodForm onDone={() => { setShowNewPeriod(false); load() }} />}
-
       {currentPeriod && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-            <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3">Balance de Comprobación</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Balance de Comprobacion */}
+          <div className="card p-5 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-700">
+              <div>
+                <h3 className="font-bold text-sm text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-primary" />
+                  Balance de Comprobación (Sumas y Saldos)
+                </h3>
+                <span className="text-[10px] text-gray-400">Ejercicio {currentPeriod.anio}-{String(currentPeriod.mes).padStart(2, "0")}</span>
+              </div>
+              {trialBalance && (
+                <button onClick={() => downloadPdf(`/v1/integrated-finance/accounting/trial-balance/${selectedPeriod}/pdf`)}
+                  className="btn-secondary text-xs flex items-center gap-1.5 font-bold text-primary">
+                  <Download className="w-3.5 h-3.5" /> PDF
+                </button>
+              )}
+            </div>
+
             {trialBalance ? (
-              <div className="overflow-x-auto max-h-72 overflow-y-auto">
+              <div className="overflow-x-auto max-h-96 overflow-y-auto">
                 <table className="w-full text-xs">
-                  <thead><tr className="text-gray-500 border-b"><th className="text-left py-2">Cuenta</th><th className="text-right py-2">Debe</th><th className="text-right py-2">Haber</th><th className="text-right py-2">Saldo</th></tr></thead>
+                  <thead>
+                    <tr className="table-header">
+                      <th className="table-cell">Cuenta</th>
+                      <th className="table-cell text-right">Debe (₲)</th>
+                      <th className="table-cell text-right">Haber (₲)</th>
+                      <th className="table-cell text-right">Saldo (₲)</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {trialBalance.items?.map((i: any) => (
-                      <tr key={i.account_id} className="border-b border-gray-50">
-                        <td className="py-1.5"><span className="font-mono">{i.codigo}</span> {i.nombre}</td>
-                        <td className="py-1.5 text-right">{Intl.NumberFormat().format(i.debe)}</td>
-                        <td className="py-1.5 text-right">{Intl.NumberFormat().format(i.haber)}</td>
-                        <td className={`py-1.5 text-right font-medium ${i.saldo < 0 ? "text-red-600" : ""}`}>{Intl.NumberFormat().format(i.saldo)}</td>
+                    {trialBalance.items?.map((i: any, idx: number) => (
+                      <tr key={idx} className="table-row">
+                        <td className="table-td">
+                          <span className="font-mono font-bold text-primary mr-1.5">{i.codigo}</span>
+                          <span className="font-medium text-gray-700 dark:text-gray-300">{i.nombre}</span>
+                        </td>
+                        <td className="table-td text-right font-mono">{formatPYG(i.debe)}</td>
+                        <td className="table-td text-right font-mono">{formatPYG(i.haber)}</td>
+                        <td className={`table-td text-right font-mono font-bold ${i.saldo < 0 ? "text-red-500" : "text-gray-900 dark:text-white"}`}>
+                          {formatPYG(i.saldo)}
+                        </td>
                       </tr>
                     ))}
-                    <tr className="font-semibold border-t">
-                      <td className="py-2">TOTALES</td>
-                      <td className="py-2 text-right">{Intl.NumberFormat().format(trialBalance.total_debe)}</td>
-                      <td className="py-2 text-right">{Intl.NumberFormat().format(trialBalance.total_haber)}</td>
+                    <tr className="font-bold border-t-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 text-xs">
+                      <td className="py-2.5 px-3">TOTALES CONSOLIDADOS</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-emerald-600">{formatPYG(trialBalance.total_debe)}</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-blue-600">{formatPYG(trialBalance.total_haber)}</td>
                       <td></td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-            ) : <p className="text-gray-400 text-sm">Sin datos</p>}
+            ) : <p className="text-gray-400 text-xs py-8 text-center">Sin movimientos contables en este período</p>}
           </div>
 
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-            <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-3">Estado de Resultados (PyG)</h3>
+          {/* Estado de Resultados (PyG) */}
+          <div className="card p-5 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-700">
+              <div>
+                <h3 className="font-bold text-sm text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-500" />
+                  Estado de Resultados (PyG)
+                </h3>
+                <span className="text-[10px] text-gray-400">Pérdidas y Ganancias por rubro contable</span>
+              </div>
+              {pnl && (
+                <button onClick={() => downloadPdf(`/v1/integrated-finance/accounting/pnl/${selectedPeriod}/pdf`)}
+                  className="btn-secondary text-xs flex items-center gap-1.5 font-bold text-emerald-600">
+                  <Download className="w-3.5 h-3.5" /> PDF
+                </button>
+              )}
+            </div>
+
             {pnl ? (
-              <div className="space-y-3 text-sm">
-                <div><p className="text-xs text-gray-400 mb-1 font-semibold uppercase">Ingresos</p>
-                  {pnl.ingresos?.map((i: any) => (
-                    <div key={i.account_id} className="flex justify-between py-0.5"><span>{i.codigo} {i.nombre}</span><span className="text-green-600">{Intl.NumberFormat().format(i.monto)}</span></div>
-                  ))}
-                  <div className="flex justify-between font-semibold border-t pt-1"><span>Total Ingresos</span><span className="text-green-600">{Intl.NumberFormat().format(pnl.total_ingresos)}</span></div>
+              <div className="space-y-4 text-xs">
+                <div>
+                  <p className="text-[10px] text-gray-400 mb-1.5 font-bold uppercase tracking-wider">1. Ingresos Operativos</p>
+                  <div className="space-y-1 pl-2">
+                    {pnl.ingresos?.map((i: any, idx: number) => (
+                      <div key={idx} className="flex justify-between py-1 border-b border-gray-50 dark:border-gray-800">
+                        <span className="text-gray-600 dark:text-gray-300"><span className="font-mono font-bold mr-1">{i.codigo}</span> {i.nombre}</span>
+                        <span className="font-mono font-bold text-emerald-600">{formatPYG(i.monto)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between font-bold pt-1.5 text-gray-900 dark:text-white">
+                      <span>Total Ingresos</span>
+                      <span className="font-mono text-emerald-600">{formatPYG(pnl.total_ingresos)}</span>
+                    </div>
+                  </div>
                 </div>
-                <div><p className="text-xs text-gray-400 mb-1 font-semibold uppercase">Costos</p>
-                  {pnl.costos?.map((c: any) => (
-                    <div key={c.account_id} className="flex justify-between py-0.5"><span>{c.codigo} {c.nombre}</span><span className="text-red-600">{Intl.NumberFormat().format(c.monto)}</span></div>
-                  ))}
-                  <div className="flex justify-between font-semibold border-t pt-1"><span>Total Costos</span><span className="text-red-600">{Intl.NumberFormat().format(pnl.total_costos)}</span></div>
+
+                <div>
+                  <p className="text-[10px] text-gray-400 mb-1.5 font-bold uppercase tracking-wider">2. Costo Directo de Ventas</p>
+                  <div className="space-y-1 pl-2">
+                    {pnl.costos?.map((c: any, idx: number) => (
+                      <div key={idx} className="flex justify-between py-1 border-b border-gray-50 dark:border-gray-800">
+                        <span className="text-gray-600 dark:text-gray-300"><span className="font-mono font-bold mr-1">{c.codigo}</span> {c.nombre}</span>
+                        <span className="font-mono text-amber-600">({formatPYG(c.monto)})</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between font-bold pt-1.5 text-gray-900 dark:text-white">
+                      <span>Total Costos</span>
+                      <span className="font-mono text-amber-600">({formatPYG(pnl.total_costos)})</span>
+                    </div>
+                  </div>
                 </div>
-                <div><p className="text-xs text-gray-400 mb-1 font-semibold uppercase">Gastos</p>
-                  {pnl.gastos?.map((g: any) => (
-                    <div key={g.account_id} className="flex justify-between py-0.5"><span>{g.codigo} {g.nombre}</span><span className="text-red-600">{Intl.NumberFormat().format(g.monto)}</span></div>
-                  ))}
-                  <div className="flex justify-between font-semibold border-t pt-1"><span>Total Gastos</span><span className="text-red-600">{Intl.NumberFormat().format(pnl.total_gastos)}</span></div>
+
+                <div>
+                  <p className="text-[10px] text-gray-400 mb-1.5 font-bold uppercase tracking-wider">3. Gastos Operativos & Administrativos</p>
+                  <div className="space-y-1 pl-2 max-h-36 overflow-y-auto">
+                    {pnl.gastos?.map((g: any, idx: number) => (
+                      <div key={idx} className="flex justify-between py-1 border-b border-gray-50 dark:border-gray-800">
+                        <span className="text-gray-600 dark:text-gray-300"><span className="font-mono font-bold mr-1">{g.codigo}</span> {g.nombre}</span>
+                        <span className="font-mono text-red-500">({formatPYG(g.monto)})</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between font-bold pt-1.5 text-gray-900 dark:text-white">
+                      <span>Total Gastos</span>
+                      <span className="font-mono text-red-500">({formatPYG(pnl.total_gastos)})</span>
+                    </div>
+                  </div>
                 </div>
-                <div className={`flex justify-between font-bold text-base border-t-2 pt-2 ${pnl.resultado_neto >= 0 ? "text-green-600" : "text-red-600"}`}>
-                  <span>Resultado Neto</span><span>{Intl.NumberFormat().format(pnl.resultado_neto)}</span>
+
+                <div className={`flex justify-between font-black text-sm p-3 rounded-lg border ${pnl.resultado_neto >= 0 ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 text-emerald-700 dark:text-emerald-400" : "bg-red-50 dark:bg-red-950/30 border-red-200 text-red-700 dark:text-red-400"}`}>
+                  <span>(=) RESULTADO NETO DEL EJERCICIO</span>
+                  <span className="font-mono">{formatPYG(pnl.resultado_neto)}</span>
                 </div>
               </div>
-            ) : <p className="text-gray-400 text-sm">Sin datos</p>}
+            ) : <p className="text-gray-400 text-xs py-8 text-center">Sin datos de PyG en este período</p>}
           </div>
         </div>
       )}
@@ -426,288 +273,211 @@ function CierreContableTab() {
   )
 }
 
-function NewPeriodForm({ onDone }: { onDone: () => void }) {
-  const now = new Date()
-  const [form, setForm] = useState({ anio: now.getFullYear(), mes: now.getMonth() + 1 })
-  const submit = async () => {
-    await api.integratedFinance.openAccountingPeriod({ ...form, company_id: COMPANY_ID })
-    onDone()
-  }
+// ═══════════════════════ TAB 2: PLAN DE CUENTAS ═══════════════════════
+
+function PlanCuentasTab() {
+  const [accounts, setAccounts] = useState<any[]>([])
+  const [search, setSearch] = useState("")
+  const [loading, setLoading] = useState(true)
+  const toast = useToast()
+
+  useEffect(() => {
+    api.integratedFinance.listAccountPlan(COMPANY_ID)
+      .then(setAccounts)
+      .catch(() => toast.error("Error", "No se pudo cargar el plan de cuentas"))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const filtered = accounts.filter(a => {
+    const term = search.toLowerCase()
+    return !search || (a.codigo || "").toLowerCase().includes(term) || (a.nombre || "").toLowerCase().includes(term) || (a.tipo || "").toLowerCase().includes(term)
+  })
+
+  if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-      <div className="grid grid-cols-2 gap-3 max-w-md">
-        <div><label className="block text-xs text-gray-500 mb-1">Año</label>
-          <input type="number" value={form.anio} onChange={(e) => setForm({ ...form, anio: Number(e.target.value) })} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600" />
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input className="input-field pl-10 text-xs font-medium" placeholder="Buscar por código contable o nombre de cuenta..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <div><label className="block text-xs text-gray-500 mb-1">Mes</label>
-          <input type="number" min={1} max={12} value={form.mes} onChange={(e) => setForm({ ...form, mes: Number(e.target.value) })} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600" />
-        </div>
+        <span className="text-xs font-bold text-gray-500 font-mono">{filtered.length} cuentas registradas</span>
       </div>
-      <div className="flex gap-2 mt-3">
-        <button onClick={submit} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Abrir Período</button>
-        <button onClick={onDone} className="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300">Cancelar</button>
+
+      <div className="card overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="table-header">
+              <th className="table-cell">Código</th>
+              <th className="table-cell">Nombre / Rubro Contable</th>
+              <th className="table-cell text-center">Tipo</th>
+              <th className="table-cell text-center">Nivel</th>
+              <th className="table-cell text-center">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.slice(0, 100).map((a, i) => (
+              <tr key={i} className="table-row">
+                <td className="table-td font-mono font-bold text-primary">{a.codigo}</td>
+                <td className="table-td font-medium text-gray-900 dark:text-white">{a.nombre}</td>
+                <td className="table-td text-center uppercase font-bold text-[10px] text-gray-500">{a.tipo}</td>
+                <td className="table-td text-center font-mono">{a.nivel}</td>
+                <td className="table-td text-center">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Activa</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
 }
 
-// ═══════════════════════ SCORING ═══════════════════════
+// ═══════════════════════ TAB 3: RETENCIONES DNIT ═══════════════════════
 
-function ScoringTab() {
-  const [scores, setScores] = useState<any[]>([])
+function RetencionesTab() {
+  const [configs, setConfigs] = useState<any[]>([])
+  const [docs, setDocs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const toast = useToast()
 
-  const load = () => {
-    setLoading(true)
-    api.integratedFinance.listCustomerScores(COMPANY_ID).then(setScores).finally(() => setLoading(false))
-  }
-  useEffect(() => { load() }, [])
-
-  const recalc = async (customerId: string) => {
-    await api.integratedFinance.recalculateScore(COMPANY_ID, customerId)
-    load()
-  }
-
-  if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
-
-  const avgScore = scores.length > 0 ? Math.round(scores.reduce((a: number, s: any) => a + s.score, 0) / scores.length) : 0
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <KpiCard icon={TrendingUp} label="Scoring Promedio" value={avgScore} color="blue" />
-        <KpiCard icon={CheckCircle} label="Clientes Evaluados" value={scores.length} color="green" />
-        <KpiCard icon={AlertTriangle} label="Riesgo Bajo (< 50)" value={scores.filter((s: any) => s.score < 50).length} color="red" />
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-          <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300">Scoring de Clientes</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="border-b border-gray-100 dark:border-gray-700 text-gray-500">
-              <th className="text-left px-4 py-3 font-medium">Cliente</th>
-              <th className="text-center px-4 py-3 font-medium">Score</th>
-              <th className="text-center px-4 py-3 font-medium">Pago Puntual</th>
-              <th className="text-center px-4 py-3 font-medium">Días Mora Prom.</th>
-              <th className="text-center px-4 py-3 font-medium">Veces Mora</th>
-              <th className="text-center px-4 py-3 font-medium">Total Compras</th>
-              <th className="text-center px-4 py-3 font-medium">Acción</th>
-            </tr></thead>
-            <tbody>
-              {scores.map((s: any) => {
-                const scoreColor = s.score >= 80 ? "bg-green-100 text-green-700" : s.score >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"
-                return (
-                  <tr key={s.id} className="border-b border-gray-50 dark:border-gray-700/50">
-                    <td className="px-4 py-3">{s.customer_id?.slice(0, 8)}...</td>
-                    <td className="px-4 py-3 text-center"><span className={`px-2 py-1 rounded text-xs font-bold ${scoreColor}`}>{s.score}</span></td>
-                    <td className="px-4 py-3 text-center">{s.pago_puntual}%</td>
-                    <td className="px-4 py-3 text-center">{s.dias_mora_promedio}</td>
-                    <td className="px-4 py-3 text-center">{s.veces_mora}</td>
-                    <td className="px-4 py-3 text-center">${Intl.NumberFormat().format(s.total_compras)}</td>
-                    <td className="px-4 py-3 text-center">
-                      <button onClick={() => recalc(s.customer_id)} className="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">Recalcular</button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {scores.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">Sin datos de scoring</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ═══════════════════════ COBRANZAS ═══════════════════════
-
-function CobranzasTab() {
-  const [actions, setActions] = useState<any[]>([])
-  const [dash, setDash] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [showNew, setShowNew] = useState(false)
-
-  const load = async () => {
-    setLoading(true)
-    const [acts, d] = await Promise.all([
-      api.integratedFinance.listCollectionActions(COMPANY_ID).catch(() => []),
-      api.integratedFinance.getCollectionDashboard(COMPANY_ID).catch(() => null),
-    ])
-    setActions(acts)
-    setDash(d)
-    setLoading(false)
-  }
-
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    Promise.all([
+      api.integratedFinance.listWithholdingConfigs(COMPANY_ID).catch(() => []),
+      api.integratedFinance.listWithholdingDocuments(COMPANY_ID).catch(() => []),
+    ]).then(([c, d]) => {
+      setConfigs(c)
+      setDocs(d)
+    }).finally(() => setLoading(false))
+  }, [])
 
   if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <KpiCard icon={HandCoins} label="Total Acciones" value={dash?.total_acciones ?? 0} color="blue" />
-        <KpiCard icon={CalendarDays} label="Últimos 30d" value={dash?.acciones_30d ?? 0} color="indigo" />
-        <KpiCard icon={CheckCircle} label="Promesas Activas" value={dash?.promesas_pago_activas ?? 0} color="green" />
-        <KpiCard icon={Banknote} label="Monto Comprometido" value={`$${Intl.NumberFormat().format(dash?.monto_comprometido || 0)}`} color="yellow" />
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700">
-        <div className="flex items-center justify-between px-4 py-3 border-b">
-          <h3 className="font-semibold text-sm">Acciones de Cobranza</h3>
-          <button onClick={() => setShowNew(!showNew)} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-            <Plus className="w-4 h-4" />Nueva Acción
-          </button>
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-700">
+          <div>
+            <h3 className="font-bold text-sm text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              Retenciones Impositivas — Normativa DNIT
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">Control y emisión de retenciones tributarias (IVA, IRE / Renta) según regulaciones de la Dirección Nacional de Ingresos Tributarios</p>
+          </div>
         </div>
 
-        {showNew && <NewCollectionForm onDone={() => { setShowNew(false); load() }} />}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Retención IVA Compras (30%)</span>
+            <p className="font-bold text-sm text-gray-900 dark:text-white">Normativa DNIT Gasto Mayorista</p>
+            <span className="text-[10px] text-emerald-600 font-bold">Activo • Tasa 30% del IVA</span>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Retención IRE Servicios (4.5%)</span>
+            <p className="font-bold text-sm text-gray-900 dark:text-white">Honorarios y Fletes Locales</p>
+            <span className="text-[10px] text-emerald-600 font-bold">Activo • Tasa 4.5%</span>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Emisión Electrónica DNIT</span>
+            <p className="font-bold text-sm text-gray-900 dark:text-white">Sifen / Tesakã</p>
+            <span className="text-[10px] text-primary font-bold">Validación Automática</span>
+          </div>
+        </div>
+      </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="border-b text-gray-500">
-              <th className="text-left px-4 py-3 font-medium">Fecha</th>
-              <th className="text-left px-4 py-3 font-medium">Cliente</th>
-              <th className="text-left px-4 py-3 font-medium">Tipo</th>
-              <th className="text-left px-4 py-3 font-medium">Resultado</th>
-              <th className="text-left px-4 py-3 font-medium">Contacto</th>
-              <th className="text-left px-4 py-3 font-medium">Próx. Contacto</th>
-              <th className="text-right px-4 py-3 font-medium">Compromiso</th>
-            </tr></thead>
+      <div className="card p-5 space-y-3">
+        <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Comprobantes de Retención Emitidos</h4>
+        {docs.length === 0 ? (
+          <p className="text-gray-400 text-xs py-8 text-center">No hay comprobantes de retención emitidos en el período fiscal actual</p>
+        ) : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="table-header">
+                <th className="table-cell">Fecha</th>
+                <th className="table-cell">Tipo</th>
+                <th className="table-cell">Comprobante DNIT</th>
+                <th className="table-cell text-right">Base Imponible</th>
+                <th className="table-cell text-right">Retenido (₲)</th>
+                <th className="table-cell text-center">Estado</th>
+              </tr>
+            </thead>
             <tbody>
-              {actions.map((a: any) => (
-                <tr key={a.id} className="border-b border-gray-50 hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                  <td className="px-4 py-3">{a.fecha}</td>
-                  <td className="px-4 py-3">{a.customer_id?.slice(0, 8)}...</td>
-                  <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-600">{a.tipo}</span></td>
-                  <td className="px-4 py-3"><span className={`text-xs ${a.resultado === "exitoso" ? "text-green-600" : a.resultado === "pendiente" ? "text-yellow-600" : "text-gray-500"}`}>{a.resultado || "—"}</span></td>
-                  <td className="px-4 py-3">{a.contacto || "—"}</td>
-                  <td className="px-4 py-3">{a.proximo_contacto || "—"}</td>
-                  <td className="px-4 py-3 text-right font-medium">{a.monto_comprometido ? `$${Intl.NumberFormat().format(a.monto_comprometido)}` : "—"}</td>
+              {docs.map((d, i) => (
+                <tr key={i} className="table-row">
+                  <td className="table-td">{d.fecha_emision}</td>
+                  <td className="table-td uppercase font-bold">{d.tipo}</td>
+                  <td className="table-td font-mono">{d.numero_documento || "—"}</td>
+                  <td className="table-td text-right font-mono">{formatPYG(d.base_imponible)}</td>
+                  <td className="table-td text-right font-mono font-bold text-red-600">{formatPYG(d.monto_retenido)}</td>
+                  <td className="table-td text-center"><span className="badge-success">{d.estado}</span></td>
                 </tr>
               ))}
-              {actions.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">Sin acciones de cobranza</td></tr>}
             </tbody>
           </table>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function NewCollectionForm({ onDone }: { onDone: () => void }) {
-  const [form, setForm] = useState({ customer_id: "", tipo: "llamada", resultado: "pendiente", notas: "", contacto: "" })
-  const submit = async () => {
-    await api.integratedFinance.createCollectionAction({ ...form, company_id: COMPANY_ID })
-    onDone()
-  }
-  return (
-    <div className="p-4 border-b bg-gray-50 dark:bg-gray-800/50">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div><label className="block text-xs text-gray-500 mb-1">Cliente</label>
-          <input value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })} placeholder="ID del cliente" className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600" />
-        </div>
-        <div><label className="block text-xs text-gray-500 mb-1">Tipo</label>
-          <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600">
-            <option value="llamada">Llamada</option>
-            <option value="email">Email</option>
-            <option value="visita">Visita</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="notificacion">Notificación</option>
-          </select>
-        </div>
-        <div><label className="block text-xs text-gray-500 mb-1">Resultado</label>
-          <select value={form.resultado} onChange={(e) => setForm({ ...form, resultado: e.target.value })} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600">
-            <option value="pendiente">Pendiente</option>
-            <option value="exitoso">Exitoso</option>
-            <option value="sin_respuesta">Sin Respuesta</option>
-            <option value="promesa_pago">Promesa de Pago</option>
-            <option value="rechazado">Rechazado</option>
-          </select>
-        </div>
-        <div className="md:col-span-2"><label className="block text-xs text-gray-500 mb-1">Notas</label>
-          <input value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600" />
-        </div>
-      </div>
-      <div className="flex gap-2 mt-3">
-        <button onClick={submit} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Registrar</button>
-        <button onClick={onDone} className="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300">Cancelar</button>
-      </div>
-    </div>
-  )
-}
-
-// ═══════════════════════ CONCILIACIÓN ═══════════════════════
-
-function ConciliacionTab() {
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<any>(null)
-  const [bankAccountId, setBankAccountId] = useState("")
-
-  const run = async () => {
-    if (!bankAccountId) return
-    setLoading(true)
-    try {
-      const res = await api.integratedFinance.autoReconcile(COMPANY_ID, bankAccountId)
-      setResult(res)
-    } catch { setResult({ conciliadas: 0, monto_conciliado: 0, no_conciliadas: 0, monto_no_conciliado: 0, detalle: [] }) }
-    setLoading(false)
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
-        <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-4">Conciliación Bancaria Automática</h3>
-        <div className="flex items-end gap-3 max-w-lg">
-          <div className="flex-1">
-            <label className="block text-xs text-gray-500 mb-1">Cuenta Bancaria (ID)</label>
-            <input value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)} placeholder="ID de cuenta bancaria" className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600" />
-          </div>
-          <button onClick={run} disabled={loading || !bankAccountId}
-            className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {loading ? <Spinner /> : <RefreshCcw className="w-4 h-4" />}
-            Conciliar
-          </button>
-        </div>
-
-        {result && (
-          <div className="mt-6 space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <KpiCard icon={CheckCircle} label="Conciliadas" value={result.conciliadas} color="green" />
-              <KpiCard icon={XCircle} label="No Conciliadas" value={result.no_conciliadas} color="red" />
-              <KpiCard icon={Banknote} label="Monto Conciliado" value={`$${Intl.NumberFormat().format(result.monto_conciliado)}`} color="green" />
-              <KpiCard icon={Banknote} label="Monto No Conciliado" value={`$${Intl.NumberFormat().format(result.monto_no_conciliado)}`} color="red" />
-            </div>
-
-            {result.detalle?.length > 0 && (
-              <div className="overflow-x-auto max-h-80 overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead><tr className="text-gray-500 border-b">
-                    <th className="text-left px-4 py-2 font-medium">Transacción</th>
-                    <th className="text-right px-4 py-2 font-medium">Monto</th>
-                    <th className="text-left px-4 py-2 font-medium">Tipo</th>
-                    <th className="text-left px-4 py-2 font-medium">Match</th>
-                  </tr></thead>
-                  <tbody>
-                    {result.detalle.map((d: any, i: number) => (
-                      <tr key={i} className="border-b border-gray-50">
-                        <td className="px-4 py-2 font-mono text-xs">{d.referencia || d.transaction_id?.slice(0, 8)}</td>
-                        <td className="px-4 py-2 text-right">{Intl.NumberFormat().format(d.monto)}</td>
-                        <td className="px-4 py-2">{d.tipo}</td>
-                        <td className="px-4 py-2">
-                          {d.tipo === "no_conciliado"
-                            ? <span className="text-red-500 text-xs">Sin match</span>
-                            : <span className="text-green-600 text-xs">Match: {d.matched_with?.slice(0, 8)}</span>
-                          }
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════ TAB 4: PRESUPUESTOS ═══════════════════════
+
+function PresupuestosTab() {
+  const [budgetsVsActual, setBudgetsVsActual] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const toast = useToast()
+
+  useEffect(() => {
+    api.financial.budgets.vsActual()
+      .then(setBudgetsVsActual)
+      .catch(() => toast.error("Error", "No se pudo cargar la ejecución presupuestaria"))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-gray-500">Ejecución Presupuestaria por Categoría y Centro de Costos</h3>
+      </div>
+
+      <div className="card overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="table-header">
+              <th className="table-cell">Categoría / Rubro</th>
+              <th className="table-cell">Área / Depto</th>
+              <th className="table-cell text-right">Presupuestado (₲)</th>
+              <th className="table-cell text-right">Ejecutado Real (₲)</th>
+              <th className="table-cell text-right">Desviación (₲)</th>
+              <th className="table-cell text-center">% Ejecución</th>
+            </tr>
+          </thead>
+          <tbody>
+            {budgetsVsActual.length === 0 ? (
+              <tr><td colSpan={6} className="text-center py-12 text-gray-400">No hay rubros presupuestados registrados</td></tr>
+            ) : budgetsVsActual.map((b, i) => {
+              const pct = b.porcentaje_ejecutado || 0
+              return (
+                <tr key={i} className="table-row">
+                  <td className="table-td font-bold text-gray-900 dark:text-white">{b.categoria}</td>
+                  <td className="table-td text-gray-500 uppercase">{b.area}</td>
+                  <td className="table-td text-right font-mono font-bold">{formatPYG(b.presupuestado)}</td>
+                  <td className="table-td text-right font-mono text-blue-600 dark:text-blue-400 font-bold">{formatPYG(b.ejecutado)}</td>
+                  <td className="table-td text-right font-mono font-bold text-amber-600">{formatPYG(b.diferencia)}</td>
+                  <td className="table-td text-center">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${pct > 100 ? "bg-red-100 text-red-800" : "bg-emerald-100 text-emerald-800"}`}>
+                      {pct}%
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   )
