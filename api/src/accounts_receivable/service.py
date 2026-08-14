@@ -48,7 +48,7 @@ async def get_aging_report(db: AsyncSession, company_id: str) -> dict:
         LEFT JOIN customers c ON c.id = ar.customer_id
         WHERE ar.company_id = :company_id
         AND ar.estado = 'pendiente'
-        ORDER BY ar.fecha_vencimiento ASC NULLS LAST
+        ORDER BY ar.fecha_vencimiento DESC NULLS LAST
     """)
     result = await db.execute(query, {"company_id": company_id, "today": today})
     rows = result.fetchall()
@@ -175,7 +175,7 @@ async def get_accounts_receivable(
     if estado:
         query = text(query.text + " AND ar.estado = :estado")
         params["estado"] = estado
-    query = text(query.text + " ORDER BY ar.fecha_vencimiento ASC NULLS LAST LIMIT :limit OFFSET :offset")
+    query = text(query.text + " ORDER BY ar.fecha_vencimiento DESC NULLS LAST LIMIT :limit OFFSET :offset")
     params["limit"] = limit
     params["offset"] = offset
 

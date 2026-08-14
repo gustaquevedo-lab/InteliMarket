@@ -40,7 +40,7 @@ export default function AccountsReceivablePage() {
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
-  const [filterStatus, setFilterStatus] = useState<string>("todos")
+  const [filterStatus, setFilterStatus] = useState<string>("pendiente")
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null)
   const [showReciboModal, setShowReciboModal] = useState(false)
   const [reciboForm, setReciboForm] = useState({ cliente: "", monto: "", medio: "efectivo", ref: "", obs: "" })
@@ -50,7 +50,7 @@ export default function AccountsReceivablePage() {
     setLoading(true)
     try {
       const [docsData, agingData, summaryData] = await Promise.all([
-        api.accountsReceivable.list({ estado: filterStatus !== "todos" ? filterStatus : undefined }),
+        api.accountsReceivable.list({ estado: filterStatus }),
         api.accountsReceivable.aging(),
         api.accountsReceivable.summary(),
       ])
@@ -192,14 +192,14 @@ export default function AccountsReceivablePage() {
               <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
                 {aging.buckets.map(b => {
                   const barColor =
-                    b.rango === "Al día" ? "bg-green-500" :
-                    b.rango === "1-30" ? "bg-yellow-500" :
-                    b.rango === "31-60" ? "bg-orange-500" :
-                    b.rango === "61-90" ? "bg-red-500" : "bg-red-700"
+                    b.rango.toLowerCase().includes("al dia") || b.rango.toLowerCase().includes("al día") ? "bg-green-500" :
+                    b.rango.includes("1-30") ? "bg-yellow-500" :
+                    b.rango.includes("31-60") ? "bg-orange-500" :
+                    b.rango.includes("61-90") ? "bg-red-500" : "bg-red-700"
                   return (
                     <div key={b.rango} className="card p-5 flex flex-col">
                       <span className="text-xs font-black uppercase tracking-widest text-gray-400 mb-1">{b.rango}</span>
-                      <p className={`text-lg font-bold ${b.rango === "Al día" ? "text-green-500" : "text-red-500"}`}>{formatPYG(b.monto)}</p>
+                      <p className={`text-lg font-bold ${b.rango.toLowerCase().includes("al dia") || b.rango.toLowerCase().includes("al día") ? "text-green-500" : "text-red-500"}`}>{formatPYG(b.monto)}</p>
                       <p className="text-xs text-gray-400 mb-3">{b.cantidad} docs · {formatPercentage(b.porcentaje)}</p>
                       <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-auto">
                         <div className={`h-2.5 rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${Math.min(b.porcentaje, 100)}%` }} />
@@ -313,10 +313,10 @@ export default function AccountsReceivablePage() {
                   const val = bucketMap[b.rango] || 0
                   const pct = matching?.saldo_total ? (val / matching.saldo_total) * 100 : 0
                   const barColor =
-                    b.rango === "Al día" ? "bg-green-500" :
-                    b.rango === "1-30" ? "bg-yellow-500" :
-                    b.rango === "31-60" ? "bg-orange-500" :
-                    b.rango === "61-90" ? "bg-red-500" : "bg-red-700"
+                    b.rango.toLowerCase().includes("al dia") || b.rango.toLowerCase().includes("al día") ? "bg-green-500" :
+                    b.rango.includes("1-30") ? "bg-yellow-500" :
+                    b.rango.includes("31-60") ? "bg-orange-500" :
+                    b.rango.includes("61-90") ? "bg-red-500" : "bg-red-700"
                   return (
                     <div key={b.rango}>
                       <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
