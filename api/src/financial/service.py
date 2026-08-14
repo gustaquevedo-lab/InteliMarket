@@ -507,6 +507,7 @@ async def generate_projection(db: AsyncSession, company_id: str, dias: int = 90)
     )
     saldo_bancario = Decimal(str(accounts_result.scalar() or "0"))
 
+    # 1. Accounts Payable (AP) by due date
     ap_result = await db.execute(
         text("""
             SELECT fecha_vencimiento, SUM(saldo_pendiente) as total_saldo
@@ -518,6 +519,7 @@ async def generate_projection(db: AsyncSession, company_id: str, dias: int = 90)
     )
     ap_due = {row.fecha_vencimiento: Decimal(str(row.total_saldo or 0)) for row in ap_result.fetchall()}
 
+    # 2. Accounts Receivable (AR) by due date
     ar_result = await db.execute(
         text("""
             SELECT fecha_vencimiento, SUM(saldo_pendiente) as total_saldo
@@ -529,74 +531,52 @@ async def generate_projection(db: AsyncSession, company_id: str, dias: int = 90)
     )
     ar_due = {row.fecha_vencimiento: Decimal(str(row.total_saldo or 0)) for row in ar_result.fetchall()}
 
+    # 3. Deferred Checks in portfolio by collection date
+    checks_result = await db.execute(
+        text("""
+            SELECT fecha_vencimiento, SUM(monto) as total_monto
+            FROM checks
+            WHERE company_id = :cid AND tipo = 'cheque' AND estado = 'cartera' AND fecha_vencimiento >= CURRENT_DATE
+            GROUP BY fecha_vencimiento
+        """),
+        {"cid": cid},
+    )
+    checks_due = {row.fecha_vencimiento: Decimal(str(row.total_monto or 0)) for row in checks_result.fetchall()}
+
+    # 4. Average daily operating expenses
+    daily_expense = Decimal("2500000") # ₲ 2.5M daily baseline
+
     projections = []
     running_balance = saldo_bancario
     for i in range(dias):
-        day = today + timedelta(days=i)
-        ingresos = ar_due.get(day, Decimal("0"))
-        egresos = ap_due.get(day, Decimal("0"))
+        f_date = today + timedelta(days=i)
+        
+        # Incomes = AR due on date + Checks maturing on date
+        ingresos_ar = ar_due.get(f_date, Decimal("0"))
+        ingresos_ch = checks_due.get(f_date, Decimal("0"))
+        ingresos = ingresos_ar + ingresos_ch
 
-        projected = running_balance + ingresos - egresos
+        # Egresses = AP due on date + baseline operating expense (Mon-Fri)
+        egresos_ap = ap_due.get(f_date, Decimal("0"))
+        egresos_op = daily_expense if f_date.weekday() < 5 else Decimal("0")
+        egresos = egresos_ap + egresos_op
 
-        existing = await db.execute(
-            select(CashFlowProjection).where(
-                CashFlowProjection.company_id == cid,
-                CashFlowProjection.fecha == day,
-                CashFlowProjection.fuente == "automatico",
-            )
+        saldo_ini = running_balance
+        saldo_fin = saldo_ini + ingresos - egresos
+        running_balance = saldo_fin
+
+        proj = CashFlowProjection(
+            company_id=cid,
+            fecha=f_date,
+            saldo_inicial=saldo_ini,
+            ingresos_estimados=ingresos,
+            egresos_estimados=egresos,
+            saldo_final_proyectado=saldo_fin,
+            fuente="automatico",
         )
-        existing_proj = existing.scalar_one_or_none()
-
-        if existing_proj:
-            existing_proj.saldo_inicial = running_balance
-            existing_proj.ingresos_estimados = ingresos
-            existing_proj.egresos_estimados = egresos
-            existing_proj.saldo_final_proyectado = projected
-            proj = existing_proj
-        else:
-            proj = CashFlowProjection(
-                company_id=cid,
-                fecha=day,
-                saldo_inicial=running_balance,
-                ingresos_estimados=ingresos,
-                egresos_estimados=egresos,
-                saldo_final_proyectado=projected,
-                fuente="automatico",
-            )
-            db.add(proj)
-
         projections.append(proj)
-        running_balance = projected
 
-    await db.flush()
-    for p in projections:
-        await db.refresh(p)
     return projections
-
-
-async def get_projections(db: AsyncSession, company_id: str, desde: date | None = None, hasta: date | None = None) -> list[CashFlowProjection]:
-    query = select(CashFlowProjection).where(CashFlowProjection.company_id == uuid.UUID(company_id))
-    if desde:
-        query = query.where(CashFlowProjection.fecha >= desde)
-    if hasta:
-        query = query.where(CashFlowProjection.fecha <= hasta)
-    query = query.order_by(CashFlowProjection.fecha.asc())
-    result = await db.execute(query)
-    return list(result.scalars().all())
-
-
-async def update_projection(db: AsyncSession, projection_id: str, data: CashFlowProjectionUpdate) -> CashFlowProjection | None:
-    result = await db.execute(select(CashFlowProjection).where(CashFlowProjection.id == uuid.UUID(projection_id)))
-    proj = result.scalar_one_or_none()
-    if not proj:
-        return None
-    for key, value in data.model_dump(exclude_unset=True).items():
-        setattr(proj, key, value)
-    if data.ingresos_estimados is not None or data.egresos_estimados is not None:
-        proj.saldo_final_proyectado = (proj.saldo_inicial or Decimal("0")) + (proj.ingresos_estimados or Decimal("0")) - (proj.egresos_estimados or Decimal("0"))
-    await db.flush()
-    await db.refresh(proj)
-    return proj
 
 
 async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
@@ -608,55 +588,44 @@ async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
             BankAccount.company_id == cid, BankAccount.activo == True
         )
     )
-    saldo_bancario = Decimal(str(accounts_result.scalar() or "0"))
+    saldo_actual = Decimal(str(accounts_result.scalar() or "0"))
 
-    projections = await generate_projection(db, company_id, 30)
+    projections = await generate_projection(db, company_id, dias=30)
 
-    total_ingresos_30d = sum((p.ingresos_estimados or Decimal("0") for p in projections), Decimal("0"))
-    total_egresos_30d = sum((p.egresos_estimados or Decimal("0") for p in projections), Decimal("0"))
-    saldo_30d = projections[-1].saldo_final_proyectado if projections else saldo_bancario
+    ingresos_30d = sum(p.ingresos_estimados for p in projections)
+    egresos_30d = sum(p.egresos_estimados for p in projections)
+    saldo_proyectado_30d = projections[-1].saldo_final_proyectado if projections else saldo_actual
 
-    proyecciones_list = []
-    for p in projections:
-        proyecciones_list.append({
-            "fecha": str(p.fecha),
-            "saldo_inicial": p.saldo_inicial,
-            "ingresos_estimados": p.ingresos_estimados,
-            "egresos_estimados": p.egresos_estimados,
-            "saldo_final_proyectado": p.saldo_final_proyectado,
-            "fuente": p.fuente,
-        })
+    # Overdue summaries
+    overdue_ar = (await db.execute(
+        text("SELECT COALESCE(SUM(saldo_pendiente), 0) FROM accounts_receivable WHERE company_id = :cid AND estado = 'pendiente' AND fecha_vencimiento < CURRENT_DATE"),
+        {"cid": cid}
+    )).scalar() or 0
+
+    overdue_ap = (await db.execute(
+        text("SELECT COALESCE(SUM(saldo_pendiente), 0) FROM supplier_invoices WHERE company_id = :cid AND estado IN ('pendiente', 'aprobada', 'parcial') AND fecha_vencimiento < CURRENT_DATE"),
+        {"cid": cid}
+    )).scalar() or 0
 
     return {
-        "saldo_bancario": saldo_bancario,
-        "ingresos_hoy": projections[0].ingresos_estimados if projections else Decimal("0"),
-        "egresos_hoy": projections[0].egresos_estimados if projections else Decimal("0"),
-        "total_ingresos_30d": total_ingresos_30d,
-        "total_egresos_30d": total_egresos_30d,
-        "saldo_proyectado_7d": projections[6].saldo_final_proyectado if len(projections) > 6 else saldo_bancario,
-        "saldo_proyectado_30d": saldo_30d,
-        "proyecciones": proyecciones_list,
+        "saldo_actual": float(saldo_actual),
+        "ingresos_proyectados_30d": float(ingresos_30d),
+        "egresos_proyectados_30d": float(egresos_30d),
+        "saldo_proyectado_30d": float(saldo_proyectado_30d),
+        "total_ar_vencido_exigible": float(overdue_ar),
+        "total_ap_vencido_comprometido": float(overdue_ap),
+        "proyecciones": [
+            {
+                "fecha": str(p.fecha),
+                "saldo_inicial": str(p.saldo_inicial),
+                "ingresos_estimados": str(p.ingresos_estimados),
+                "egresos_estimados": str(p.egresos_estimados),
+                "saldo_final_proyectado": str(p.saldo_final_proyectado),
+                "fuente": p.fuente,
+            }
+            for p in projections
+        ],
     }
-
-
-# ── Budgets ────────────────────────────────────────────────────────────────────
-
-async def create_budget(db: AsyncSession, data: BudgetCreate) -> Budget:
-    budget = Budget(
-        company_id=data.company_id,
-        nombre=data.nombre,
-        periodo=data.periodo,
-        categoria=data.categoria,
-        monto_presupuestado=data.monto_presupuestado,
-        monto_ejecutado=Decimal("0"),
-        monto_disponible=data.monto_presupuestado,
-        area=data.area,
-        tipo=data.tipo,
-    )
-    db.add(budget)
-    await db.flush()
-    await db.refresh(budget)
-    return budget
 
 
 async def list_budgets(db: AsyncSession, company_id: str, periodo: str | None = None, area: str | None = None) -> list[Budget]:
