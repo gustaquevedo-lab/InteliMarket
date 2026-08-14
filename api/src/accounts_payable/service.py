@@ -32,6 +32,8 @@ async def get_accounts_payable(
             where_clauses.append("inv.saldo_pendiente > 0 AND inv.fecha_vencimiento < :today")
         elif estado == "pendiente":
             where_clauses.append("inv.saldo_pendiente > 0")
+        elif estado in ("pagado", "pagada"):
+            where_clauses.append("(inv.estado IN ('pagado', 'pagada') OR inv.saldo_pendiente = 0)")
         else:
             where_clauses.append("inv.estado = :estado")
             params["estado"] = estado
@@ -87,7 +89,7 @@ async def get_ap_aging_report(db: AsyncSession, company_id: str) -> Dict[str, An
             SUM(CASE WHEN fecha_vencimiento < :today AND (:today - fecha_vencimiento) > 90 THEN saldo_pendiente ELSE 0 END) as days_91_plus,
             COUNT(CASE WHEN fecha_vencimiento < :today AND (:today - fecha_vencimiento) > 90 THEN id END) as cant_91_plus
         FROM supplier_invoices
-        WHERE company_id = :company_id AND saldo_pendiente > 0 AND estado != 'pagado'
+        WHERE company_id = :company_id AND saldo_pendiente > 0 
     """)
 
     res = await db.execute(query_buckets, params)
@@ -121,7 +123,7 @@ async def get_ap_aging_report(db: AsyncSession, company_id: str) -> Dict[str, An
             SUM(CASE WHEN inv.fecha_vencimiento < :today AND (:today - inv.fecha_vencimiento) > 90 THEN inv.saldo_pendiente ELSE 0 END) as days_91_plus
         FROM supplier_invoices inv
         LEFT JOIN suppliers s ON s.id = inv.supplier_id
-        WHERE inv.company_id = :company_id AND inv.saldo_pendiente > 0 AND inv.estado != 'pagado'
+        WHERE inv.company_id = :company_id AND inv.saldo_pendiente > 0 
         GROUP BY inv.supplier_id, s.razon_social
         ORDER BY saldo_total DESC
         LIMIT 100
@@ -146,7 +148,7 @@ async def get_ap_summary(db: AsyncSession, company_id: str) -> Dict[str, Any]:
             COUNT(id) as total,
             SUM(total) as monto_total_historico,
             SUM(saldo_pendiente) as total_pendiente,
-            COUNT(CASE WHEN estado = 'pagado' OR saldo_pendiente = 0 THEN id END) as pagados,
+            COUNT(CASE WHEN estado IN ('pagado', 'pagada') OR saldo_pendiente = 0 THEN id END) as pagados,
             COUNT(CASE WHEN saldo_pendiente > 0 THEN id END) as pendientes,
             COUNT(CASE WHEN saldo_pendiente > 0 AND fecha_vencimiento < :today THEN id END) as vencidos,
             SUM(CASE WHEN saldo_pendiente > 0 AND fecha_vencimiento < :today THEN saldo_pendiente ELSE 0 END) as monto_vencido
