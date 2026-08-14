@@ -2,7 +2,7 @@ from sqlalchemy import select, delete, func as sa_func, and_, desc, extract
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
 from typing import Optional
-import uuid, math, statistics, random
+import uuid, math, statistics
 from collections import defaultdict
 
 from api.src.demand_forecast.models import (
@@ -13,6 +13,7 @@ from api.src.demand_forecast.schemas import (
     ForecastConfigCreate, ForecastConfigUpdate, ForecastGenerateRequest,
     ForecastOverrideCreate, PurchaseSuggestionUpdate, AnomalyReviewRequest,
 )
+from api.src.sales.models import Sale, SaleItem
 
 
 # ===== FORECAST CONFIG =====
@@ -53,22 +54,38 @@ async def update_config(db: AsyncSession, company_id: str, config_id: str, data:
 
 # ===== FORECAST ENGINE =====
 
-async def generate_forecast(db: AsyncSession, company_id: str, req: ForecastGenerateRequest) -> dict:
-    """Generate demand forecasts using statistical time-series methods."""
-    cid = uuid.UUID(company_id)
-    config = await get_or_create_config(db, company_id)
-    horizon = req.horizon_days or config["horizon_days"]
+FORECAST_PRODUCT_BATCH_SIZE = 300  # productos por lote cuando no se acota product_ids
+FORECAST_SAMPLE_SIZE = 50  # cuantas predicciones devolver como muestra en la respuesta
 
-    # Get sales history for the company
-    sales = await _get_sales_history(db, cid, req.product_ids, req.customer_ids, req.zones)
 
+async def _get_distinct_products_with_sales(
+    db: AsyncSession, company_id: uuid.UUID,
+    customer_ids: Optional[list[str]] = None,
+) -> list[str]:
+    """Productos con ventas confirmadas en el ultimo ano, para poder procesar el forecast por lotes."""
+    one_year_ago = date.today() - timedelta(days=365)
+    q = select(SaleItem.product_id).join(Sale, Sale.id == SaleItem.sale_id).where(
+        Sale.company_id == company_id,
+        Sale.fecha >= one_year_ago,
+        Sale.estado == "confirmado",
+    )
+    if customer_ids:
+        q = q.where(Sale.customer_id.in_([uuid.UUID(c) for c in customer_ids if c]))
+    q = q.distinct()
+    result = await db.execute(q)
+    return [str(row[0]) for row in result.all()]
+
+
+async def _generate_forecast_batch(
+    db: AsyncSession, cid: uuid.UUID, config: dict, horizon: int,
+    product_ids: Optional[list[str]], customer_ids: Optional[list[str]], zones: Optional[list[str]],
+) -> list["ForecastPrediction"]:
+    sales = await _get_sales_history(db, cid, product_ids, customer_ids, zones)
     if not sales:
-        return {"message": "No sales history found", "predictions_generated": 0, "predictions": []}
+        return []
 
-    # Group sales by product_id (and optionally customer_id / zone)
     grouped = _group_sales(sales)
-
-    predictions = []
+    predictions: list[ForecastPrediction] = []
     now = date.today()
 
     for key, history in grouped.items():
@@ -76,10 +93,8 @@ async def generate_forecast(db: AsyncSession, company_id: str, req: ForecastGene
         if not history:
             continue
 
-        # Sort by date
         history.sort(key=lambda x: x[0])
 
-        # Apply forecasting model
         if config["model_type"] == "moving_average":
             forecast_values = _moving_average_forecast(history, horizon, config)
         elif config["model_type"] == "seasonal_decompose":
@@ -105,14 +120,60 @@ async def generate_forecast(db: AsyncSession, company_id: str, req: ForecastGene
             db.add(pred)
             predictions.append(pred)
 
-    await db.flush()
-    for p in predictions:
-        await db.refresh(p)
+    return predictions
+
+
+async def generate_forecast(db: AsyncSession, company_id: str, req: ForecastGenerateRequest) -> dict:
+    """Generate demand forecasts using statistical time-series methods.
+
+    Cuando se pide un product_ids explicito (acotado por el que llama), se procesa en un
+    solo lote como antes. Cuando NO se acota (product_ids vacio = "todos los productos"),
+    se procesa producto por producto en lotes chicos con su propio flush/commit -- generar
+    todo de una sola vez para ~11k productos x sus clientes acumulaba cientos de miles de
+    filas en memoria antes de persistir y casi agota la RAM del servidor (confirmado: 3
+    productos x 30 dias ya generan ~109k filas).
+    """
+    cid = uuid.UUID(company_id)
+    config = await get_or_create_config(db, company_id)
+    horizon = req.horizon_days or config["horizon_days"]
+
+    if req.product_ids:
+        predictions = await _generate_forecast_batch(db, cid, config, horizon, req.product_ids, req.customer_ids, req.zones)
+        if not predictions:
+            return {"message": "No sales history found", "predictions_generated": 0, "predictions": []}
+        await db.flush()
+        for p in predictions:
+            await db.refresh(p)
+        return {
+            "message": "Forecast generated successfully",
+            "predictions_generated": len(predictions),
+            "predictions": [_prediction_to_dict(p) for p in predictions],
+        }
+
+    all_product_ids = await _get_distinct_products_with_sales(db, cid, req.customer_ids)
+    if not all_product_ids:
+        return {"message": "No sales history found", "predictions_generated": 0, "predictions": []}
+
+    total_generated = 0
+    sample: list[ForecastPrediction] = []
+    for i in range(0, len(all_product_ids), FORECAST_PRODUCT_BATCH_SIZE):
+        batch_ids = all_product_ids[i:i + FORECAST_PRODUCT_BATCH_SIZE]
+        batch_predictions = await _generate_forecast_batch(db, cid, config, horizon, batch_ids, req.customer_ids, req.zones)
+        if not batch_predictions:
+            continue
+        await db.flush()
+        total_generated += len(batch_predictions)
+        remaining = FORECAST_SAMPLE_SIZE - len(sample)
+        if remaining > 0:
+            for p in batch_predictions[:remaining]:
+                await db.refresh(p)
+                sample.append(p)
+        await db.commit()
 
     return {
         "message": "Forecast generated successfully",
-        "predictions_generated": len(predictions),
-        "predictions": [_prediction_to_dict(p) for p in predictions],
+        "predictions_generated": total_generated,
+        "predictions": [_prediction_to_dict(p) for p in sample],
     }
 
 
@@ -583,7 +644,10 @@ async def generate_purchase_suggestions(db: AsyncSession, company_id: str) -> di
     # Get current stock for each product
     stock_map = await _get_current_stock(db, cid, list(product_demand.keys()))
 
-    # Get supplier for each product
+    # Cantidad ya pedida y en camino (OCs abiertas) -- no sobre-pedir lo que ya viene
+    pending_map = await _get_pending_po_qty(db, cid, list(product_demand.keys()))
+
+    # Candidatos de proveedor por producto, con precio real y lead time real
     supplier_map = await _get_supplier_for_products(db, cid, list(product_demand.keys()))
 
     # Get cost for each product
@@ -593,21 +657,25 @@ async def generate_purchase_suggestions(db: AsyncSession, company_id: str) -> di
     for pid_str, total_demand in product_demand.items():
         pid = uuid.UUID(pid_str)
         current_stock = stock_map.get(pid_str, 0)
+        pending_qty = pending_map.get(pid_str, 0)
+        effective_stock = current_stock + pending_qty
         cost = cost_map.get(pid_str, 0)
-        supplier_id = supplier_map.get(pid_str)
-        lead_time = 7  # default 7 days
+        candidates = supplier_map.get(pid_str, [])
+        best = candidates[0] if candidates else None
+        supplier_id = best["supplier_id"] if best else None
+        lead_time = best["lead_time_dias"] if best else 7
 
         # Calculate quantity to order
         projected_during_lead = total_demand * (lead_time / (reorder_weeks * 7 + safety_days))
         safety_stock_qty = total_demand * (safety_days / (reorder_weeks * 7 + safety_days))
-        suggested_qty = max(0, projected_during_lead + safety_stock_qty - current_stock)
-        stock_after_lead = current_stock + suggested_qty - projected_during_lead
+        suggested_qty = max(0, projected_during_lead + safety_stock_qty - effective_stock)
+        stock_after_lead = effective_stock + suggested_qty - projected_during_lead
 
         if suggested_qty <= 0:
             continue
 
-        expected_price = cost * (1 + markup_pct / 100)
-        confidence = 70.0  # base
+        expected_price = best["precio"] if best else (cost * (1 + markup_pct / 100) if cost > 0 else 0)
+        confidence = 80.0 if best else 70.0  # mas confianza cuando hay proveedor real con precio
 
         sug = PurchaseSuggestion(
             company_id=cid,
@@ -615,13 +683,14 @@ async def generate_purchase_suggestions(db: AsyncSession, company_id: str) -> di
             supplier_id=uuid.UUID(supplier_id) if supplier_id else None,
             suggested_qty=round(suggested_qty, 2),
             suggested_date=today + timedelta(days=lead_time),
-            expected_price=round(expected_price, 2) if cost > 0 else None,
-            expected_total=round(expected_price * suggested_qty, 2) if cost > 0 else None,
+            expected_price=round(expected_price, 2) if expected_price > 0 else None,
+            expected_total=round(expected_price * suggested_qty, 2) if expected_price > 0 else None,
             confidence_score=round(confidence, 1),
             forecast_demand=round(total_demand, 2),
             current_stock=current_stock,
             stock_after_lead=round(stock_after_lead, 2),
             lead_time_days=lead_time,
+            supplier_candidates=candidates or None,
         )
         db.add(sug)
         suggestions.append(sug)
@@ -875,58 +944,32 @@ async def _get_sales_history(
     customer_ids: Optional[list[str]] = None,
     zones: Optional[list[str]] = None,
 ) -> list:
-    """Get sales history from the sales table for the last 365 days."""
-    try:
-        from api.src.sales.models import Sale, SaleItem
-        one_year_ago = date.today() - timedelta(days=365)
+    """Get real sales history from the sales table for the last 365 days."""
+    one_year_ago = date.today() - timedelta(days=365)
 
-        q = select(
-            SaleItem.product_id,
-            Sale.customer_id,
-            sa_func.date(Sale.fecha),
-            sa_func.sum(SaleItem.cantidad).label("total_qty"),
-        ).join(Sale, Sale.id == SaleItem.sale_id).where(
-            Sale.company_id == company_id,
-            Sale.fecha >= one_year_ago,
-            Sale.estado.in_(["completado", "entregado", "facturado"]),
-        )
+    q = select(
+        SaleItem.product_id,
+        Sale.customer_id,
+        sa_func.date(Sale.fecha),
+        sa_func.sum(SaleItem.cantidad).label("total_qty"),
+    ).join(Sale, Sale.id == SaleItem.sale_id).where(
+        Sale.company_id == company_id,
+        Sale.fecha >= one_year_ago,
+        Sale.estado == "confirmado",
+    )
 
-        if product_ids:
-            uuids = [uuid.UUID(p) for p in product_ids if p]
-            q = q.where(SaleItem.product_id.in_(uuids))
+    if product_ids:
+        uuids = [uuid.UUID(p) for p in product_ids if p]
+        q = q.where(SaleItem.product_id.in_(uuids))
 
-        q = q.group_by(SaleItem.product_id, Sale.customer_id, sa_func.date(Sale.fecha))
-        q = q.order_by(sa_func.date(Sale.fecha).asc())
-        result = await db.execute(q)
-        rows = result.all()
-        return [
-            (r[2], float(r[3]), str(r[0]), str(r[1]) if r[1] else None)
-            for r in rows
-        ]
-    except Exception:
-        # Fallback: generate synthetic data for demo
-        return _generate_synthetic_history(product_ids)
-
-
-def _generate_synthetic_history(product_ids: Optional[list] = None) -> list:
-    """Generate realistic synthetic sales history for demo purposes."""
-    today = date.today()
-    history = []
-    products = product_ids or ["00000000-0000-0000-0000-000000000001"]
-    for pid in products:
-        base = random.uniform(10, 100)
-        for day_offset in range(1, 365):
-            d = today - timedelta(days=day_offset)
-            # Weekly seasonality: weekends lower
-            dow = d.weekday()
-            dow_factor = 0.6 if dow >= 5 else 1.0
-            # Trend: slight upward
-            trend = 1 + (day_offset / 365) * 0.1
-            # Noise
-            noise = random.gauss(0, base * 0.2)
-            qty = max(0, base * dow_factor * trend + noise)
-            history.append((d, round(qty, 2), pid, None))
-    return history
+    q = q.group_by(SaleItem.product_id, Sale.customer_id, sa_func.date(Sale.fecha))
+    q = q.order_by(sa_func.date(Sale.fecha).asc())
+    result = await db.execute(q)
+    rows = result.all()
+    return [
+        (r[2], float(r[3]), str(r[0]), str(r[1]) if r[1] else None)
+        for r in rows
+    ]
 
 
 def _group_sales(sales: list) -> dict:
@@ -960,26 +1003,122 @@ async def _get_current_stock(
     return stock_map
 
 
+async def _get_pending_po_qty(
+    db: AsyncSession, company_id: uuid.UUID, product_ids: list[str]
+) -> dict[str, float]:
+    """Cantidad ya pedida y todavia no recibida (OCs abiertas), para no sobre-sugerir."""
+    if not product_ids:
+        return {}
+    from api.src.purchases.models import PurchaseOrder, PurchaseOrderItem
+    pids = [uuid.UUID(p) for p in product_ids]
+    result = await db.execute(
+        select(
+            PurchaseOrderItem.product_id,
+            sa_func.sum(PurchaseOrderItem.cantidad - PurchaseOrderItem.cantidad_recibida),
+        )
+        .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.purchase_order_id)
+        .where(
+            PurchaseOrder.company_id == company_id,
+            PurchaseOrder.estado.in_(["borrador", "enviada", "confirmada", "parcial"]),
+            PurchaseOrderItem.product_id.in_(pids),
+        )
+        .group_by(PurchaseOrderItem.product_id)
+    )
+    return {str(pid): max(0.0, float(qty or 0)) for pid, qty in result.all()}
+
+
 async def _get_supplier_for_products(
     db: AsyncSession, company_id: uuid.UUID, product_ids: list[str]
-) -> dict[str, Optional[str]]:
-    """Get default supplier for each product."""
-    supplier_map = {}
-    try:
-        from api.src.products.models import Product
-        for pid_str in product_ids:
-            result = await db.execute(
-                select(Product.id).where(
-                    Product.id == uuid.UUID(pid_str),
-                    Product.company_id == company_id,
-                ).limit(1)
+) -> dict[str, list[dict]]:
+    """Candidatos de proveedor por producto, ordenados por mejor precio, con lead time real.
+
+    Fuente de precio: ultimo precio en supplier_price_history por proveedor; si un producto no
+    tiene historial de precios, se usa el ultimo precio pagado en una orden de compra real.
+    Fuente de lead time: Supplier.plazo_entrega_promedio si esta configurado; si no, el promedio
+    empirico real (fecha_entrega_real - fecha de la orden) sobre el historial de ese proveedor;
+    si tampoco hay historial, 7 dias por defecto.
+    """
+    if not product_ids:
+        return {}
+    from api.src.purchases.models import Supplier, SupplierPriceHistory, PurchaseOrder, PurchaseOrderItem
+
+    pids = [uuid.UUID(p) for p in product_ids]
+
+    ph_result = await db.execute(
+        select(
+            SupplierPriceHistory.product_id, SupplierPriceHistory.supplier_id,
+            SupplierPriceHistory.precio, SupplierPriceHistory.moneda, SupplierPriceHistory.fecha,
+        ).where(
+            SupplierPriceHistory.company_id == company_id,
+            SupplierPriceHistory.product_id.in_(pids),
+        )
+    )
+    latest_price: dict[tuple[str, str], tuple[float, str, object]] = {}
+    products_with_history: set[str] = set()
+    for pid, sid, precio, moneda, fecha in ph_result.all():
+        key = (str(pid), str(sid))
+        products_with_history.add(str(pid))
+        if key not in latest_price or fecha > latest_price[key][2]:
+            latest_price[key] = (float(precio), moneda or "PYG", fecha)
+
+    missing_pids = [uuid.UUID(p) for p in product_ids if p not in products_with_history]
+    if missing_pids:
+        po_result = await db.execute(
+            select(
+                PurchaseOrderItem.product_id, PurchaseOrder.supplier_id,
+                PurchaseOrderItem.precio_unitario, PurchaseOrder.moneda, PurchaseOrder.fecha,
             )
-            if result.scalar_one_or_none():
-                # No direct supplier field on Product, leave empty
-                pass
-    except Exception:
-        pass
-    return supplier_map
+            .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.purchase_order_id)
+            .where(PurchaseOrder.company_id == company_id, PurchaseOrderItem.product_id.in_(missing_pids))
+        )
+        for pid, sid, precio, moneda, fecha in po_result.all():
+            key = (str(pid), str(sid))
+            if key not in latest_price or fecha > latest_price[key][2]:
+                latest_price[key] = (float(precio), moneda or "PYG", fecha)
+
+    if not latest_price:
+        return {}
+
+    supplier_ids = {uuid.UUID(sid) for _pid, sid in latest_price.keys()}
+    sup_result = await db.execute(select(Supplier).where(Supplier.id.in_(supplier_ids)))
+    suppliers = {str(s.id): s for s in sup_result.scalars().all()}
+
+    suppliers_needing_empirical = [uuid.UUID(sid) for sid, s in suppliers.items() if not s.plazo_entrega_promedio]
+    empirical_lead: dict[str, int] = {}
+    if suppliers_needing_empirical:
+        lt_result = await db.execute(
+            select(PurchaseOrder.supplier_id, PurchaseOrder.fecha, PurchaseOrderItem.fecha_entrega_real)
+            .join(PurchaseOrderItem, PurchaseOrderItem.purchase_order_id == PurchaseOrder.id)
+            .where(
+                PurchaseOrder.company_id == company_id,
+                PurchaseOrder.supplier_id.in_(suppliers_needing_empirical),
+                PurchaseOrderItem.fecha_entrega_real.isnot(None),
+            )
+        )
+        lead_days_by_supplier: dict[str, list[int]] = defaultdict(list)
+        for sid, order_fecha, entrega_real in lt_result.all():
+            if order_fecha and entrega_real:
+                days = (entrega_real - order_fecha.date()).days
+                if days >= 0:
+                    lead_days_by_supplier[str(sid)].append(days)
+        empirical_lead = {sid: round(statistics.mean(days)) for sid, days in lead_days_by_supplier.items() if days}
+
+    candidates_by_product: dict[str, list[dict]] = defaultdict(list)
+    for (pid, sid), (precio, moneda, _fecha) in latest_price.items():
+        sup = suppliers.get(sid)
+        if not sup:
+            continue
+        lead = int(sup.plazo_entrega_promedio or empirical_lead.get(sid) or 7)
+        candidates_by_product[pid].append({
+            "supplier_id": sid, "nombre": sup.razon_social,
+            "precio": precio, "moneda": moneda, "lead_time_dias": lead,
+        })
+
+    result_map: dict[str, list[dict]] = {}
+    for pid, candidates in candidates_by_product.items():
+        candidates.sort(key=lambda c: c["precio"])
+        result_map[pid] = candidates[:3]
+    return result_map
 
 
 async def _get_product_costs(
@@ -1104,5 +1243,6 @@ def _suggestion_to_dict(s: PurchaseSuggestion) -> dict:
         "stock_after_lead": float(s.stock_after_lead) if s.stock_after_lead else None,
         "lead_time_days": s.lead_time_days, "status": s.status,
         "converted_order_id": str(s.converted_order_id) if s.converted_order_id else None,
-        "notes": s.notes, "created_at": s.created_at,
+        "notes": s.notes, "supplier_candidates": s.supplier_candidates,
+        "created_at": s.created_at,
     }

@@ -146,6 +146,8 @@ class PurchaseReceipt(Base):
     estado = Column(String(20), default="completado")
     observaciones = Column(Text)
     user_id = Column(UUID(as_uuid=True))
+    requiere_revision = Column(Boolean, default=False)
+    motivo_revision = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     items = relationship("PurchaseReceiptItem", back_populates="receipt", cascade="all, delete-orphan")
@@ -165,6 +167,8 @@ class PurchaseReceiptItem(Base):
     costo_unitario = Column(Numeric(15, 0), nullable=False)
     total = Column(Numeric(15, 0))
     batch_id = Column(UUID(as_uuid=True))
+    cantidad_rechazada = Column(Numeric(10, 3))
+    motivo_rechazo = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     receipt = relationship("PurchaseReceipt", back_populates="items")
@@ -388,3 +392,70 @@ class PurchaseBudget(Base):
     user_id = Column(UUID(as_uuid=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PurchaseRfq(Base):
+    __tablename__ = "purchase_rfqs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    requisition_id = Column(UUID(as_uuid=True))
+    numero = Column(String(20), nullable=False, unique=True)
+    fecha = Column(DateTime(timezone=True), server_default=func.now())
+    fecha_limite = Column(Date)
+    estado = Column(String(20), nullable=False, default="enviada")  # enviada, evaluando, adjudicada, cancelada
+    motivo = Column(Text)
+    observaciones = Column(Text)
+    ganador_supplier_id = Column(UUID(as_uuid=True))
+    purchase_order_id = Column(UUID(as_uuid=True))
+    user_id = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    items = relationship("PurchaseRfqItem", back_populates="rfq", cascade="all, delete-orphan")
+    responses = relationship("PurchaseRfqResponse", back_populates="rfq", cascade="all, delete-orphan")
+
+
+class PurchaseRfqItem(Base):
+    __tablename__ = "purchase_rfq_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    rfq_id = Column(UUID(as_uuid=True), ForeignKey("purchase_rfqs.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), nullable=False)
+    variant_id = Column(UUID(as_uuid=True))
+    descripcion = Column(String(300))
+    cantidad_solicitada = Column(Numeric(10, 3), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    rfq = relationship("PurchaseRfq", back_populates="items")
+
+
+class PurchaseRfqResponse(Base):
+    __tablename__ = "purchase_rfq_responses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    rfq_id = Column(UUID(as_uuid=True), ForeignKey("purchase_rfqs.id"), nullable=False)
+    supplier_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    estado = Column(String(20), nullable=False, default="invitada")  # invitada, respondida, ganadora, descartada
+    fecha_respuesta = Column(DateTime(timezone=True))
+    plazo_entrega_dias = Column(Integer)
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    rfq = relationship("PurchaseRfq", back_populates="responses")
+    items = relationship("PurchaseRfqResponseItem", back_populates="response", cascade="all, delete-orphan")
+
+
+class PurchaseRfqResponseItem(Base):
+    __tablename__ = "purchase_rfq_response_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    response_id = Column(UUID(as_uuid=True), ForeignKey("purchase_rfq_responses.id"), nullable=False)
+    rfq_item_id = Column(UUID(as_uuid=True), ForeignKey("purchase_rfq_items.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), nullable=False)
+    precio_unitario = Column(Numeric(15, 0), nullable=False)
+    plazo_entrega_dias = Column(Integer)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    response = relationship("PurchaseRfqResponse", back_populates="items")

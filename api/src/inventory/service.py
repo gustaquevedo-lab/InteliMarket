@@ -38,9 +38,41 @@ async def get_stock(db: AsyncSession, warehouse_id: str, product_id: str) -> Sto
     return result.scalar_one_or_none()
 
 
-async def get_stock_by_warehouse(db: AsyncSession, warehouse_id: str) -> list[Stock]:
-    result = await db.execute(select(Stock).where(Stock.warehouse_id == warehouse_id))
-    return list(result.scalars().all())
+async def get_stock_by_warehouse(db: AsyncSession, warehouse_id: str) -> list[dict]:
+    # El frontend siempre esperó s.product?.nombre / s.product?.sku (y
+    # s.warehouse?.nombre), pero este endpoint nunca devolvió esa relación
+    # -- StockResponse solo tenía product_id crudo. Resultado: en Inventario
+    # nunca se veían nombres de producto, solo el ID, en toda la pantalla.
+    result = await db.execute(
+        select(Stock, Product, Warehouse)
+        .join(Product, Stock.product_id == Product.id)
+        .join(Warehouse, Stock.warehouse_id == Warehouse.id)
+        .where(Stock.warehouse_id == warehouse_id)
+    )
+    rows = result.all()
+    return [
+        {
+            "id": s.id,
+            "warehouse_id": s.warehouse_id,
+            "product_id": s.product_id,
+            "variant_id": s.variant_id,
+            "cantidad": s.cantidad,
+            "cantidad_reservada": s.cantidad_reservada,
+            "costo_unitario": s.costo_unitario,
+            "updated_at": s.updated_at,
+            "nombre": p.nombre,
+            "sku": p.sku,
+            "costo_promedio": p.costo_promedio,
+            "product": {
+                "id": p.id, "sku": p.sku, "nombre": p.nombre, "categoria_id": p.categoria_id,
+                "codigo_barra": p.codigo_barra, "unidad_medida": p.unidad_medida,
+                "precio_venta": p.precio_venta, "costo_promedio": p.costo_promedio,
+                "activo": p.activo, "created_at": p.created_at, "updated_at": p.updated_at,
+            },
+            "warehouse": {"id": w.id, "nombre": w.nombre, "codigo": w.codigo, "company_id": w.company_id, "activo": w.activo},
+        }
+        for s, p, w in rows
+    ]
 
 
 async def get_low_stock(db: AsyncSession, company_id: str) -> list[dict]:

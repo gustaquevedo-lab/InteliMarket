@@ -4,13 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.products.schemas import (
     ProductCreate, ProductUpdate, ProductResponse,
     CategoryCreate, CategoryResponse,
 )
 from api.src.products import service
 
-router = APIRouter(prefix="/api/v1", tags=["products"])
+router = APIRouter(prefix="/api/v1", tags=["products"], dependencies=[Depends(require_auth)])
 
 
 # Categories
@@ -36,14 +37,14 @@ async def create_product(body: ProductCreate, db: AsyncSession = Depends(get_db)
 @router.get("/companies/{company_id}/products", response_model=list[ProductResponse])
 async def list_products(
     company_id: str,
-    category_id: str | None = Query(None),
+    categoria_id: str | None = Query(None),
     search: str | None = Query(None),
     activo: bool | None = Query(None),
     limit: int = Query(100, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_products(db, company_id, category_id, search, activo, limit, offset)
+    return await service.list_products(db, company_id, categoria_id, search, activo, limit, offset)
 
 
 @router.get("/products/{product_id}", response_model=ProductResponse)

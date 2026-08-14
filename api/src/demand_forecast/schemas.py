@@ -147,6 +147,7 @@ class PurchaseSuggestionResponse(BaseModel):
     status: str
     converted_order_id: Optional[str]
     notes: Optional[str]
+    supplier_candidates: Optional[list[dict[str, Any]]] = None
     created_at: datetime
 
     class Config:

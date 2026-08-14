@@ -1,6 +1,7 @@
 """Product service"""
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.products.models import Product, ProductCategory
@@ -34,13 +35,17 @@ async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
     product = Product(**data.model_dump())
     db.add(product)
     await db.flush()
-    await db.refresh(product)
-    return product
+    # ProductResponse ahora incluye la relacion "categoria" -- un refresh
+    # simple no la carga (lazy load async no permitido fuera del engine),
+    # asi que se relee con el mismo selectinload que list/get ya usan.
+    return await get_product(db, str(product.id))
 
 
 async def get_product(db: AsyncSession, product_id: str) -> Product | None:
     import uuid
-    result = await db.execute(select(Product).where(Product.id == uuid.UUID(product_id)))
+    result = await db.execute(
+        select(Product).where(Product.id == uuid.UUID(product_id)).options(selectinload(Product.categoria))
+    )
     return result.scalar_one_or_none()
 
 
@@ -61,15 +66,15 @@ async def get_product_by_barcode(db: AsyncSession, company_id: str, codigo_barra
 async def list_products(
     db: AsyncSession,
     company_id: str,
-    category_id: str | None = None,
+    categoria_id: str | None = None,
     search: str | None = None,
     activo: bool | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[Product]:
-    query = select(Product).where(Product.company_id == company_id)
-    if category_id:
-        query = query.where(Product.category_id == category_id)
+    query = select(Product).where(Product.company_id == company_id).options(selectinload(Product.categoria))
+    if categoria_id:
+        query = query.where(Product.categoria_id == categoria_id)
     if search:
         query = query.where(
             (Product.nombre.ilike(f"%{search}%")) |
@@ -91,8 +96,7 @@ async def update_product(db: AsyncSession, product_id: str, data: ProductUpdate)
     for key, value in update_data.items():
         setattr(product, key, value)
     await db.flush()
-    await db.refresh(product)
-    return product
+    return await get_product(db, product_id)
 
 
 async def delete_product(db: AsyncSession, product_id: str) -> bool:

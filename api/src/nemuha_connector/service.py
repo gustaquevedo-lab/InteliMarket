@@ -69,6 +69,7 @@ contra la base real antes de extender este archivo.
 """
 
 import asyncio
+import re
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -93,7 +94,8 @@ from api.src.returns.models import Return, ReturnItem
 from api.src.currency.models import ExchangeRate
 from api.src.inventory.models import Warehouse, Stock, InventoryAdjustment, InventoryAdjustmentItem
 from api.src.credit_accounts.models import CreditAccount
-from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement
+from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff
+from api.src.companies.models import Company
 from api.src.fiscal.models import FiscalConfig, PuntoEmisionSecuencia
 from api.src.fiscal import service as fiscal_service
 from api.src.sifen.models import SifenTimbrado
@@ -257,7 +259,7 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
     for r in rows:
         supplier_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "supplier")
         cancelado = bool(r["BO_CANCELADO"])
-        saldo = Decimal(str(r["VL_APAGAR"]))
+        saldo = Decimal(str(r["VL_APAGAR"])).quantize(Decimal("1"))
         estado = _ap_estado(saldo, cancelado)
 
         existing_id = await _get_mapped_target(db, company_id, "fin_conta_pagar", r["ID_CONTA_PAGAR"])
@@ -338,6 +340,40 @@ async def sync_supplier_invoice_payments(db: AsyncSession, company_id: str, sinc
         db.add(payment)
         await db.flush()
         await _save_map(db, company_id, "fin_pagamento", r["ID_PAGAMENTO"], "supplier_invoice_payments", payment.id)
+
+        if metodo == "CHEQUE":
+            # El legado nunca tuvo columna de numero de cheque real (mismo
+            # motivo del backfill historico de Bancos Fase 4) -- se
+            # estructura igual, con numero sintetico y numero_confiable=False,
+            # para que el pago con cheque no vuelva a quedar como texto
+            # libre sin cheque asociado.
+            inv_result = await db.execute(
+                select(SupplierInvoice.company_id, SupplierInvoice.supplier_id, SupplierInvoice.numero_factura)
+                .where(SupplierInvoice.id == invoice_id)
+            )
+            inv_row = inv_result.first()
+            if inv_row:
+                supplier_nombre = None
+                if inv_row.supplier_id:
+                    sup_result = await db.execute(select(Supplier.razon_social).where(Supplier.id == inv_row.supplier_id))
+                    supplier_nombre = sup_result.scalar_one_or_none()
+                from api.src.cheques.service import create_cheque_from_legacy_payment
+                await create_cheque_from_legacy_payment(
+                    db, str(inv_row.company_id),
+                    numero=f"BACKFILL-{str(payment.id)[:8]}",
+                    numero_confiable=False,
+                    beneficiario=supplier_nombre or "Proveedor sin nombre",
+                    supplier_id=str(inv_row.supplier_id) if inv_row.supplier_id else None,
+                    monto=payment.monto,
+                    fecha_emision=payment.fecha_pago,
+                    fecha_pago=payment.fecha_pago,
+                    bank_account_id=str(bank_account_id) if bank_account_id else None,
+                    invoice_payment_id=str(payment.id),
+                    estado="cobrado",
+                    concepto=f"Pago factura {inv_row.numero_factura}" if inv_row.numero_factura else None,
+                    notas="Sincronizado automáticamente desde el sistema legado -- número de cheque no disponible en el origen.",
+                )
+
         count += 1
 
     return count
@@ -356,29 +392,40 @@ async def sync_accounts_receivable(db: AsyncSession, company_id: str, since: dat
     count = 0
     for r in rows:
         customer_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "customer")
-        saldo = Decimal(str(r["VL_ARECEBER"]))
+        saldo = Decimal(str(r["VL_ARECEBER"])).quantize(Decimal("1"))
         estado = _ar_estado(saldo)
+        # fin_conta_receber.ID_VENDA referencia la venta real que generó este
+        # cobro — antes se ignoraba por completo, dejando sale_id siempre NULL
+        # en altas nuevas (el detalle de factura en el módulo de AR quedaba
+        # sin contenido para mostrar).
+        sale_id = await _get_mapped_target(db, company_id, "ven_venda", r["ID_VENDA"]) if r["ID_VENDA"] else None
 
         existing_id = await _get_mapped_target(db, company_id, "fin_conta_receber", r["ID_CONTA_RECEBER"])
         if existing_id:
             await db.execute(
-                text("UPDATE accounts_receivable SET saldo_pendiente = :saldo, estado = :estado, updated_at = now() WHERE id = :id"),
-                {"saldo": saldo, "estado": estado, "id": str(existing_id)},
+                text("""
+                    UPDATE accounts_receivable
+                    SET saldo_pendiente = :saldo, estado = :estado, updated_at = now(),
+                        sale_id = COALESCE(sale_id, :sale_id)
+                    WHERE id = :id
+                """),
+                {"saldo": saldo, "estado": estado, "id": str(existing_id), "sale_id": str(sale_id) if sale_id else None},
             )
         else:
             result = await db.execute(
                 text("""
                     INSERT INTO accounts_receivable
-                        (company_id, customer_id, numero_documento, fecha_emision,
+                        (company_id, customer_id, sale_id, numero_documento, fecha_emision,
                          fecha_vencimiento, moneda, monto_original, saldo_pendiente, tipo, estado)
                     VALUES
-                        (:company_id, :customer_id, :numero_documento, :fecha_emision,
+                        (:company_id, :customer_id, :sale_id, :numero_documento, :fecha_emision,
                          :fecha_vencimiento, 'PYG', :monto, :saldo, 'factura', :estado)
                     RETURNING id
                 """),
                 {
                     "company_id": company_id,
                     "customer_id": str(customer_id),
+                    "sale_id": str(sale_id) if sale_id else None,
                     "numero_documento": r["NR_DOCUMENTO"] or f"CR-{r['ID_CONTA_RECEBER']}",
                     "fecha_emision": r["DT_EMISSAO"],
                     "fecha_vencimiento": r["DT_VENCIMENTO"],
@@ -423,6 +470,43 @@ async def sync_bank_accounts(db: AsyncSession, company_id: str, since: date | No
     return count
 
 
+# Categorización por patrón de descripción — fallback para movimientos que no
+# enlazan a ninguna FK conocida en bc_operacao_banco (el 99.9% de los reales,
+# verificado contra producción: 25525/25539 caían en "otros"). Patrones
+# derivados de un muestreo real de (tipo, descripcion, count) agrupado sobre
+# la company piloto — no son adivinados.
+_CATEGORY_PATTERNS: list[tuple[str, "re.Pattern[str]"]] = [
+    ("liquidacion_tarjeta", re.compile(
+        r"EXTRA SUPERMERCADO|PAGO A COMERCIO PIX|CREDITOS? AUTOMATICO A COMERCIOS?"
+        r"|CLEARING DE PROCESADORAS|PAGO COMPRA PIX|DEP[OÓ]SITO POR TARJETA"
+        r"|BANCARD-?MATRIZ|REV\.? EXTRA SUPERMERCADO",
+        re.IGNORECASE,
+    )),
+    ("transferencia_recibida", re.compile(
+        r"TRANSF\.? RECIBIDA POR CLIENTE|TRANSFERENCIA DE FONDOS CC",
+        re.IGNORECASE,
+    )),
+    ("transferencia_interna", re.compile(
+        r"TRANSF\.? ENTRE CUENTAS|TRANSF\.? OTORGADA WEB",
+        re.IGNORECASE,
+    )),
+    ("deposito_efectivo", re.compile(
+        r"DEP[OÓ]SITO BANCARIO|DEP[OÓ]SITO EN EFECTIVO",
+        re.IGNORECASE,
+    )),
+    ("pago_proveedor", re.compile(r"^\s*PAGO A ", re.IGNORECASE)),
+]
+
+
+def categorize_by_descripcion(descripcion: str | None) -> str | None:
+    if not descripcion:
+        return None
+    for categoria, pattern in _CATEGORY_PATTERNS:
+        if pattern.search(descripcion):
+            return categoria
+    return None
+
+
 async def sync_bank_transactions(db: AsyncSession, company_id: str, since: date | None) -> int:
     # bc_operacao_banco no trae su propia moneda — hereda la de la cuenta (bc_conta_banco.ID_MOEDA).
     cuentas = await _fetch("SELECT ID_CONTA, ID_MOEDA FROM bc_conta_banco")
@@ -465,7 +549,7 @@ async def sync_bank_transactions(db: AsyncSession, company_id: str, since: date 
         # Categoría real según qué FK trae poblada bc_operacao_banco — verificado
         # contra datos reales: 74% de los movimientos (6039/8167) enlazan a un
         # cierre de caja puntual vía ID_FECHAMENTO_CAIXA_CHICA.
-        categoria = "otro"
+        categoria = "otros"
         descripcion = r["OBSERVACAO"]
         contraparte = None
         if r.get("ID_FECHAMENTO_CAIXA_CHICA") is not None:
@@ -484,6 +568,8 @@ async def sync_bank_transactions(db: AsyncSession, company_id: str, since: date 
         elif r.get("ID_ENTRADA_CAIXA") is not None:
             categoria = "ingreso_caja"
             descripcion = descripcion or "Ingreso de caja"
+        else:
+            categoria = categorize_by_descripcion(descripcion) or "otros"
 
         txn = BankTransaction(
             company_id=company_id,
@@ -511,6 +597,8 @@ async def sync_bank_transactions(db: AsyncSession, company_id: str, since: date 
 # si no es así, falta un saldo inicial que solo el cliente puede confirmar
 # (ver pendiente de conciliación bancaria con el cliente).
 async def sync_bank_balances(db: AsyncSession, company_id: str, since: date | None) -> int:
+    from api.src.financial.service import check_balance_divergence
+
     accounts = (
         await db.execute(select(BankAccount).where(BankAccount.company_id == company_id))
     ).scalars().all()
@@ -524,7 +612,18 @@ async def sync_bank_balances(db: AsyncSession, company_id: str, since: date | No
             ).where(BankTransaction.bank_account_id == acc.id)
         )
         creditos, debitos = row.one()
-        acc.saldo_actual = acc.saldo_inicial + Decimal(str(creditos)) - Decimal(str(debitos))
+        saldo_calculado = acc.saldo_inicial + Decimal(str(creditos)) - Decimal(str(debitos))
+
+        # Si la cuenta tiene un saldo verificado a mano y el recalculo automatico
+        # diverge mas alla de tolerancia, no lo pisamos a ciegas -- se genera una
+        # solicitud de correccion con doble aprobacion en su lugar (Bancos Fase 5,
+        # endurece el mismo tipo de bug de saldo corrupto ya corregido dos veces
+        # a mano esta sesion).
+        if await check_balance_divergence(db, acc, saldo_calculado):
+            count += 1
+            continue
+
+        acc.saldo_actual = saldo_calculado
         db.add(acc)
         count += 1
 
@@ -639,6 +738,11 @@ async def sync_cash_register_arqueo(db: AsyncSession, company_id: str, since: da
         params = (since,)
     rows = await _fetch(sql, params)
 
+    register_result = await db.execute(
+        select(CashRegister.diferencia_maxima_tolerada).where(CashRegister.company_id == company_id).limit(1)
+    )
+    _ARQUEO_TOLERANCIA_PYG = register_result.scalar() or Decimal("50000")
+
     count = 0
     system_run = None
     for r in rows:
@@ -651,13 +755,21 @@ async def sync_cash_register_arqueo(db: AsyncSession, company_id: str, since: da
             "USD": Decimal(str(r["VL_DIFERENCA_DOLAR"])),
             "BRL": Decimal(str(r["VL_DIFERENCA_REAL"])),
         }
-        diffs_no_cero = {m: v for m, v in diffs.items() if v != 0}
+        # Umbrales de materialidad — antes se generaba una recomendacion por
+        # CUALQUIER diferencia distinta de cero (hasta Gs. 76), inundando el
+        # backlog de Finance Agent con 1.917 de 2.216 recomendaciones (86%)
+        # sin valor real de decision. Se usa la misma tolerancia del register
+        # ("Caja Principal") que ya gobierna requiere_revision en Caja, mas
+        # pisos razonables para USD/BRL (no hay tolerancia configurada para
+        # esas monedas todavia).
+        _THRESHOLDS = {"PYG": _ARQUEO_TOLERANCIA_PYG, "USD": Decimal("1"), "BRL": Decimal("5")}
+        diffs_no_cero = {m: v for m, v in diffs.items() if abs(v) > _THRESHOLDS[m]}
         if not diffs_no_cero:
-            # sin diferencia -> no genera recomendación, pero igual se marca
-            # como procesado para no reprocesar en cada corrida. No hay fila
-            # real que apuntar, así que se usa un UUID sintético (no un id de
-            # tabla real) solo como marca de "ya visto".
-            await _save_map(db, company_id, "fin_fechamento_caixa_chica", r["ID_FECHAMENTO_CAIXA_CHICA"], "none:sin_diferencia", uuid.uuid4())
+            # sin diferencia material -> no genera recomendación, pero igual
+            # se marca como procesado para no reprocesar en cada corrida. No
+            # hay fila real que apuntar, así que se usa un UUID sintético
+            # (no un id de tabla real) solo como marca de "ya visto".
+            await _save_map(db, company_id, "fin_fechamento_caixa_chica", r["ID_FECHAMENTO_CAIXA_CHICA"], "none:sin_diferencia_material", uuid.uuid4())
             continue
 
         if system_run is None:
@@ -1202,6 +1314,17 @@ async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> i
         else:
             db.add(Stock(warehouse_id=warehouse_id, product_id=product_id, cantidad=cantidad, costo_unitario=costo))
 
+        # vlCustoMedioGs es el costo promedio real del legado -- antes se
+        # guardaba solo en Stock.costo_unitario y nunca se propagaba a
+        # Product.costo_promedio, dejando el 100% de los productos (11.163)
+        # con costo cero: sin margen ni valuacion de inventario posible.
+        if costo > 0:
+            product_result = await db.execute(select(Product).where(Product.id == product_id))
+            product = product_result.scalar_one_or_none()
+            if product and product.costo_promedio != costo:
+                product.costo_promedio = costo
+                product.ultimo_costo = costo
+
         count += 1
 
     await db.flush()
@@ -1377,6 +1500,44 @@ async def sync_purchase_orders(db: AsyncSession, company_id: str, since: date | 
     for o in ordenes:
         existing_id = await _get_mapped_target(db, company_id, "est_ordem_compra", o["ID_ORDEM_COMPRA"])
         if existing_id:
+            # La orden ya fue sincronizada, pero su estado en el legado sigue
+            # avanzando despues (confirmado -> parcial -> completado/cancelado)
+            # a medida que llegan recepciones — sin esto, quedaba congelada en
+            # el primer estado visto para siempre, aunque ya estuviera recibida.
+            items_rows = await _fetch(
+                "SELECT * FROM est_item_ordem_compra WHERE ID_ORDEM_COMPRA = %s",
+                (o["ID_ORDEM_COMPRA"],),
+            )
+            cancelado = bool(o["BO_CANCELADO"])
+            finalizado = bool(o["BO_FINALIZADO"])
+            confirmado = bool(o["BO_CONFIRMADO"])
+            algo_entregado = any((it["QTD_PRODUTO_ENTREGUE"] or 0) > 0 for it in items_rows)
+            if cancelado:
+                estado_actual = "cancelado"
+            elif finalizado:
+                estado_actual = "completado"
+            elif algo_entregado:
+                estado_actual = "parcial"
+            elif confirmado:
+                estado_actual = "confirmado"
+            else:
+                estado_actual = "borrador"
+
+            await db.execute(
+                text("UPDATE purchase_orders SET estado = :estado, updated_at = now() WHERE id = :id AND estado != :estado"),
+                {"estado": estado_actual, "id": str(existing_id)},
+            )
+            for it in items_rows:
+                tasa_it = Decimal(str(it["IVA"])) if it["IVA"] is not None else Decimal("10")
+                product_id = await _resolve_producto(db, company_id, it["ID_PRODUTO"], it["CODIGO_BARRA"], tasa_it)
+                await db.execute(
+                    text("""
+                        UPDATE purchase_order_items
+                        SET cantidad_recibida = :cant
+                        WHERE purchase_order_id = :po_id AND product_id = :product_id
+                    """),
+                    {"cant": Decimal(str(it["QTD_PRODUTO_ENTREGUE"] or 0)), "po_id": str(existing_id), "product_id": str(product_id)},
+                )
             count += 1
             continue
 
@@ -1534,6 +1695,54 @@ async def sync_purchase_receipts(db: AsyncSession, company_id: str, since: date 
 # una unica "Caja Principal" por empresa, igual que el deposito unico.
 # STATUS_CAIXA: 'AB' = abierta (20 reales), 'FE' = fechada/cerrada (2.041).
 
+async def _flag_and_handoff(db: AsyncSession, company_id: str, register, session_obj, count: "CashCount") -> None:
+    """Replica la logica real de caja.service.close_session que el insert
+    directo del conector se salteaba: marca requiere_revision contra la
+    tolerancia del register, abre la custodia cajera->supervisor
+    (CashHandoff) y notifica si corresponde. Antes de este fix, TODA la
+    sincronizacion (2.113 sesiones reales) entraba directo a la tabla sin
+    pasar por este control — 0 handoffs, 0 revisiones marcadas, pese a que
+    el 95% de los cierres reales tiene una diferencia de caja."""
+    diferencia = count.diferencia or Decimal("0")
+    requiere_revision = bool(
+        register and register.diferencia_maxima_tolerada is not None
+        and abs(diferencia) > register.diferencia_maxima_tolerada
+    )
+    count.requiere_revision = requiere_revision
+    await db.flush()
+
+    handoff = CashHandoff(
+        company_id=register.company_id if register else company_id,
+        session_id=session_obj.id,
+        cash_count_id=count.id,
+        entregado_por=session_obj.user_id,
+        entregado_por_nombre=session_obj.cajero_nombre,
+        monto_pyg=count.monto_efectivo,
+        monto_usd=count.monto_efectivo_usd,
+        monto_brl=count.monto_efectivo_brl,
+        requiere_revision=requiere_revision,
+        estado="pendiente",
+    )
+    db.add(handoff)
+    await db.flush()
+
+    if requiere_revision:
+        try:
+            company_result = await db.execute(select(Company.tenant_id).where(Company.id == uuid.UUID(str(company_id))))
+            tenant_id = company_result.scalar_one_or_none()
+            if tenant_id:
+                from api.src.notifications import service as notifications_service
+                await notifications_service.create_notification_for_role(
+                    db, tenant_id, "Administrador",
+                    title="Descuadre de caja requiere revisión",
+                    body=f"{session_obj.cajero_nombre or 'Un cajero'} cerró con una diferencia de {diferencia:,.0f} Gs. que supera la tolerancia configurada.",
+                    tipo="alerta_caja",
+                    link="/caja",
+                )
+        except Exception:
+            pass
+
+
 async def sync_cash_sessions(db: AsyncSession, company_id: str, since: date | None) -> int:
     usuarios = {r["id_usuario"]: r["NM_USUARIO"] for r in await _fetch("SELECT id_usuario, NM_USUARIO FROM sys_usuario")}
 
@@ -1552,15 +1761,45 @@ async def sync_cash_sessions(db: AsyncSession, company_id: str, since: date | No
         await _save_map(db, company_id, "cash_register:principal", 1, "cash_registers", register.id)
         register_id = register.id
 
+    register = (await db.execute(select(CashRegister).where(CashRegister.id == register_id))).scalar_one_or_none()
+
     count = 0
     for r in rows:
+        estado = "abierta" if r["STATUS_CAIXA"] == "AB" else "cerrada"
         existing_id = await _get_mapped_target(db, company_id, "fin_caixa_chica", r["ID_CAIXA_CHICA"])
+
         if existing_id:
+            # Ya sincronizada antes. fin_caixa_chica se actualiza in-place cuando
+            # el cajero cierra turno (STATUS_CAIXA AB->FE) — si la sincronizamos
+            # mientras seguia abierta, tenemos que revisar si ya se cerro en el
+            # legado y reflejar el cierre real, en vez de dejarla abierta para
+            # siempre (bug real: 8 sesiones quedaron "abiertas" pese a estar
+            # cerradas hace dias en el sistema anterior).
+            existing = (await db.execute(
+                select(CashSession).where(CashSession.id == existing_id)
+            )).scalar_one_or_none()
+            if existing and existing.estado == "abierta" and estado == "cerrada":
+                existing.fecha_cierre = r["DT_FECHAMENTO"]
+                existing.monto_cierre = Decimal(str(r["VL_FECHAMENTO_GUARANI"]))
+                existing.estado = "cerrada"
+                new_count = CashCount(
+                    session_id=existing.id,
+                    monto_efectivo=Decimal(str(r["VL_FECHAMENTO_GUARANI"])),
+                    monto_total=Decimal(str(r["VL_FECHAMENTO_GUARANI"])),
+                    diferencia=Decimal(str(r["VL_DIFERENCA_GUARANI"])),
+                    monto_efectivo_usd=Decimal(str(r["VL_FECHAMENTO_DOLAR"])),
+                    monto_efectivo_brl=Decimal(str(r["VL_FECHAMENTO_REAL"])),
+                    diferencia_usd=Decimal(str(r["VL_DIFERENCA_DOLAR"])),
+                    diferencia_brl=Decimal(str(r["VL_DIFERENCA_REAL"])),
+                )
+                db.add(new_count)
+                await db.flush()
+                await db.refresh(new_count)
+                await _flag_and_handoff(db, company_id, register, existing, new_count)
             count += 1
             continue
 
         cajero = usuarios.get(r["ID_USUARIO"], f"Usuario {r['ID_USUARIO']}")
-        estado = "abierta" if r["STATUS_CAIXA"] == "AB" else "cerrada"
 
         session = CashSession(
             register_id=register_id,
@@ -1579,7 +1818,7 @@ async def sync_cash_sessions(db: AsyncSession, company_id: str, since: date | No
             # fin_caixa_chica ya trae el cierre en las 3 monedas (guarani/dolar/real)
             # — antes solo se migraba guarani y se perdia el resto (~96% de los
             # cierres reales de este cliente incluyen Real, zona de frontera).
-            db.add(CashCount(
+            new_count = CashCount(
                 session_id=session.id,
                 monto_efectivo=Decimal(str(r["VL_FECHAMENTO_GUARANI"])),
                 monto_total=Decimal(str(r["VL_FECHAMENTO_GUARANI"])),
@@ -1588,7 +1827,11 @@ async def sync_cash_sessions(db: AsyncSession, company_id: str, since: date | No
                 monto_efectivo_brl=Decimal(str(r["VL_FECHAMENTO_REAL"])),
                 diferencia_usd=Decimal(str(r["VL_DIFERENCA_DOLAR"])),
                 diferencia_brl=Decimal(str(r["VL_DIFERENCA_REAL"])),
-            ))
+            )
+            db.add(new_count)
+            await db.flush()
+            await db.refresh(new_count)
+            await _flag_and_handoff(db, company_id, register, session, new_count)
 
         await _save_map(db, company_id, "fin_caixa_chica", r["ID_CAIXA_CHICA"], "cash_sessions", session.id)
         count += 1

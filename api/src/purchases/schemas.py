@@ -187,6 +187,7 @@ class POResponse(BaseModel):
     updated_by_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    supplier: Optional[SupplierResponse] = None
 
     class Config:
         from_attributes = True
@@ -241,11 +242,14 @@ class ReceiptItemInput(BaseModel):
     cantidad_recibida: Decimal = Field(ge=Decimal("0.001"))
     costo_unitario: Decimal = Field(ge=0)
     batch_id: Optional[UUID] = None
+    cantidad_rechazada: Optional[Decimal] = None
+    motivo_rechazo: Optional[str] = None
 
 
 class ReceiptCreate(BaseModel):
     company_id: UUID
     purchase_order_id: Optional[UUID] = None
+    supplier_id: UUID
     warehouse_id: UUID
     proveedor_ref: Optional[str] = None
     items: list[ReceiptItemInput]
@@ -257,13 +261,18 @@ class ReceiptResponse(BaseModel):
     id: UUID
     company_id: UUID
     purchase_order_id: Optional[UUID] = None
+    supplier_id: UUID
     warehouse_id: UUID
     numero: str
     fecha: datetime
+    total: Decimal
     proveedor_ref: Optional[str] = None
     estado: str
     observaciones: Optional[str] = None
+    requiere_revision: bool = False
+    motivo_revision: Optional[str] = None
     created_at: datetime
+    supplier: Optional[SupplierResponse] = None
 
     class Config:
         from_attributes = True
@@ -282,6 +291,8 @@ class ReceiptItemResponse(BaseModel):
     cantidad_recibida: Decimal
     costo_unitario: Decimal
     batch_id: Optional[UUID] = None
+    cantidad_rechazada: Optional[Decimal] = None
+    motivo_rechazo: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -736,4 +747,108 @@ class PurchaseKPIsResponse(BaseModel):
     ordenes_atrasadas: int
     ahorro_estimado: Decimal
     cumplimiento_rate: Optional[Decimal] = None
+
+
+# ── RFQ / Cotizacion comparativa ────────────────────────────────────────────────
+
+class RfqItemInput(BaseModel):
+    product_id: UUID
+    variant_id: Optional[UUID] = None
+    descripcion: Optional[str] = None
+    cantidad_solicitada: Decimal
+
+
+class RfqCreate(BaseModel):
+    company_id: UUID
+    requisition_id: Optional[UUID] = None
+    fecha_limite: Optional[date] = None
+    motivo: Optional[str] = None
+    observaciones: Optional[str] = None
+    items: Optional[list[RfqItemInput]] = None  # si no se manda, se toman de la requisicion
+    supplier_ids: list[UUID] = Field(min_length=2)
+    user_id: Optional[UUID] = None
+
+
+class RfqItemResponse(BaseModel):
+    id: UUID
+    rfq_id: UUID
+    product_id: UUID
+    variant_id: Optional[UUID] = None
+    descripcion: Optional[str] = None
+    cantidad_solicitada: Decimal
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RfqResponseItemInput(BaseModel):
+    product_id: UUID
+    precio_unitario: Decimal = Field(ge=0)
+    plazo_entrega_dias: Optional[int] = None
+
+
+class RfqResponseSubmit(BaseModel):
+    plazo_entrega_dias: Optional[int] = None
+    observaciones: Optional[str] = None
+    items: list[RfqResponseItemInput]
+
+
+class RfqResponseItemResponse(BaseModel):
+    id: UUID
+    response_id: UUID
+    rfq_item_id: UUID
+    product_id: UUID
+    precio_unitario: Decimal
+    plazo_entrega_dias: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RfqResponseResponse(BaseModel):
+    id: UUID
+    rfq_id: UUID
+    supplier_id: UUID
+    estado: str
+    fecha_respuesta: Optional[datetime] = None
+    plazo_entrega_dias: Optional[int] = None
+    observaciones: Optional[str] = None
+    supplier: Optional[SupplierResponse] = None
+    items: list[RfqResponseItemResponse] = []
+    total_cotizado: Optional[Decimal] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RfqResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    requisition_id: Optional[UUID] = None
+    numero: str
+    fecha: datetime
+    fecha_limite: Optional[date] = None
+    estado: str
+    motivo: Optional[str] = None
+    observaciones: Optional[str] = None
+    ganador_supplier_id: Optional[UUID] = None
+    purchase_order_id: Optional[UUID] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RfqWithDetail(RfqResponse):
+    items: list[RfqItemResponse] = []
+    responses: list[RfqResponseResponse] = []
+
+
+class RfqAwardRequest(BaseModel):
+    supplier_id: UUID
+    user_id: Optional[UUID] = None
+    user_name: Optional[str] = None
  

@@ -104,6 +104,7 @@ class PurchaseSuggestion(Base):
     status = Column(String(20), default="pending")  # pending, suggested, converted, rejected
     converted_order_id = Column(UUID(as_uuid=True), nullable=True)
     notes = Column(Text, nullable=True)
+    supplier_candidates = Column(JSON, nullable=True)  # [{supplier_id, nombre, precio, moneda, lead_time_dias}, ...] ordenados por mejor precio
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -20,7 +20,7 @@ export default function ProductsPage() {
   const [saving, setSaving] = useState(false)
   const [formTab, setFormTab] = useState<"general" | "precios" | "perecederos">("general")
   const [form, setForm] = useState({
-    sku: "", nombre: "", codigo_barra: "", category_id: "",
+    sku: "", nombre: "", codigo_barra: "", categoria_id: "",
     tipo: "producto", unidad_medida: "UN", iva_tasa: 10,
     stock_minimo: 0, descripcion: "", costo: 0, precio: 0,
     plu_codigo: "", es_perecedero: false, vida_util_dias: 0,
@@ -50,7 +50,7 @@ export default function ProductsPage() {
       setCategories(cats)
       setPerishableConfigs(pConfigs)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver datos reales")
+      toast.error("Error de conexión", "Conectá el backend para ver datos reales")
       setProducts([])
       setCategories([])
     } finally {
@@ -114,7 +114,7 @@ export default function ProductsPage() {
       sku: product.sku,
       nombre: product.nombre,
       codigo_barra: product.codigo_barra || "",
-      category_id: product.category_id || "",
+      categoria_id: product.categoria_id || "",
       tipo: product.tipo || "producto",
       unidad_medida: product.unidad_medida || "UN",
       iva_tasa: product.iva_tasa ?? 10,
@@ -155,7 +155,7 @@ export default function ProductsPage() {
 
       toast.success("Producto creado", form.nombre)
       setShowForm(false)
-      setForm({ sku: "", nombre: "", codigo_barra: "", category_id: "", tipo: "producto", unidad_medida: "UN", iva_tasa: 10, stock_minimo: 0, descripcion: "", costo: 0, precio: 0, plu_codigo: "", es_perecedero: false, vida_util_dias: 0, temperatura_min: 0, temperatura_max: 0, markdown_opt_in: false })
+      setForm({ sku: "", nombre: "", codigo_barra: "", categoria_id: "", tipo: "producto", unidad_medida: "UN", iva_tasa: 10, stock_minimo: 0, descripcion: "", costo: 0, precio: 0, plu_codigo: "", es_perecedero: false, vida_util_dias: 0, temperatura_min: 0, temperatura_max: 0, markdown_opt_in: false })
       fetchData()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error al crear producto"
@@ -175,7 +175,7 @@ export default function ProductsPage() {
         sku: form.sku,
         nombre: form.nombre,
         codigo_barra: form.codigo_barra || undefined,
-        category_id: form.category_id || undefined,
+        categoria_id: form.categoria_id || undefined,
         tipo: form.tipo,
         unidad_medida: form.unidad_medida,
         iva_tasa: form.iva_tasa,
@@ -318,7 +318,7 @@ export default function ProductsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="input-label">Categoría</label>
-                  <select className="input-field" value={form.category_id} onChange={(e) => setForm({...form, category_id: e.target.value})}>
+                  <select className="input-field" value={form.categoria_id} onChange={(e) => setForm({...form, categoria_id: e.target.value})}>
                     <option value="">Sin categoría</option>
                     {categories.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                   </select>
@@ -772,7 +772,7 @@ export default function ProductsPage() {
               <button onClick={() => { setShowImport(false); setImportFile(null); setImportResult(null) }} className="btn-ghost"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-sm text-gray-500">Subí un archivo CSV con las columnes: sku, nombre, codigo_barra, descripcion, unidad_medida, iva_tasa, stock_minimo, category_id</p>
+              <p className="text-sm text-gray-500">Subí un archivo CSV con las columnes: sku, nombre, codigo_barra, descripcion, unidad_medida, iva_tasa, stock_minimo, categoria_id</p>
               <a href={`${import.meta.env.VITE_API_URL || "/api"}/v1/imports/template/products`} className="text-sm text-primary hover:underline flex items-center gap-1" download>
                 <Download className="w-3 h-3" /> Descargar plantilla
               </a>

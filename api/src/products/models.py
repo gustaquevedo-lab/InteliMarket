@@ -51,7 +51,7 @@ class Product(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    category = relationship("ProductCategory")
+    categoria = relationship("ProductCategory")
 
 
 # Alias expected by some modules (customer360, etc.)

@@ -29,7 +29,7 @@ class CategoryResponse(BaseModel):
 
 class ProductCreate(BaseModel):
     company_id: UUID
-    category_id: Optional[UUID] = None
+    categoria_id: Optional[UUID] = None
     sku: str = Field(min_length=1, max_length=50)
     codigo_barra: Optional[str] = Field(default=None, max_length=50)
     nombre: str = Field(min_length=1, max_length=200)
@@ -52,7 +52,7 @@ class ProductCreate(BaseModel):
 
 
 class ProductUpdate(BaseModel):
-    category_id: Optional[UUID] = None
+    categoria_id: Optional[UUID] = None
     codigo_barra: Optional[str] = None
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
@@ -77,7 +77,7 @@ class ProductUpdate(BaseModel):
 class ProductResponse(BaseModel):
     id: UUID
     company_id: UUID
-    category_id: Optional[UUID] = None
+    categoria_id: Optional[UUID] = None
     sku: str
     codigo_barra: Optional[str] = None
     nombre: str
@@ -100,6 +100,7 @@ class ProductResponse(BaseModel):
     activo: bool
     created_at: datetime
     updated_at: datetime
+    categoria: Optional[CategoryResponse] = None
 
     class Config:
         from_attributes = True

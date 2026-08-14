@@ -31,6 +31,34 @@ class WarehouseResponse(BaseModel):
         from_attributes = True
 
 
+class StockProductSummary(BaseModel):
+    id: UUID
+    sku: str
+    nombre: str
+    categoria_id: Optional[UUID] = None
+    codigo_barra: Optional[str] = None
+    unidad_medida: Optional[str] = None
+    precio_venta: Optional[Decimal] = None
+    costo_promedio: Optional[Decimal] = None
+    activo: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class StockWarehouseSummary(BaseModel):
+    id: UUID
+    nombre: str
+    codigo: str
+    company_id: UUID
+    activo: bool
+
+    class Config:
+        from_attributes = True
+
+
 class StockResponse(BaseModel):
     id: UUID
     warehouse_id: UUID
@@ -40,6 +68,11 @@ class StockResponse(BaseModel):
     cantidad_reservada: int
     costo_unitario: Optional[Decimal] = None
     updated_at: datetime
+    nombre: Optional[str] = None
+    sku: Optional[str] = None
+    costo_promedio: Optional[Decimal] = None
+    product: Optional[StockProductSummary] = None
+    warehouse: Optional[StockWarehouseSummary] = None
 
     class Config:
         from_attributes = True

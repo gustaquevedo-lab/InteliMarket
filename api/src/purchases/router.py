@@ -1,9 +1,16 @@
 """Purchases API router — suppliers, orders, receipts, requisitions, contracts, forecasting, suggestions, budgets, reports"""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
+
 from api.src.db import get_db
+from api.src.purchases import pdf_reports as purchases_pdf_reports
 from api.src.purchases.schemas import (
     SupplierCreate, SupplierUpdate, SupplierResponse,
     POItemInput, POCreate, POUpdate, POResponse, POWithItems, POItemResponse, POHistoryResponse,
@@ -15,6 +22,7 @@ from api.src.purchases.schemas import (
     PurchaseSuggestionResponse,
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetConsumptionResponse,
     SpendBySupplierResponse, SpendByCategoryResponse, PriceVarianceResponse, PurchaseKPIsResponse,
+    RfqCreate, RfqResponse, RfqWithDetail, RfqResponseSubmit, RfqAwardRequest,
 )
 from api.src.purchases import service
 
@@ -265,7 +273,15 @@ async def convert_requisition_to_po(
 
 @router.post("/purchase-receipts", response_model=ReceiptResponse, status_code=status.HTTP_201_CREATED)
 async def create_receipt(body: ReceiptCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_receipt(db, body)
+    receipt = await service.create_receipt(db, body)
+    if receipt.purchase_order_id and not receipt.requiere_revision:
+        try:
+            async with db.begin_nested():
+                from api.src.financial.service import auto_create_invoice_from_receipt
+                await auto_create_invoice_from_receipt(db, str(receipt.id))
+        except Exception:
+            logger.exception("No se pudo auto-generar la factura de proveedor para la recepción %s", receipt.id)
+    return receipt
 
 
 @router.get("/companies/{company_id}/purchase-receipts", response_model=list[ReceiptResponse])
@@ -278,14 +294,20 @@ async def get_receipt(receipt_id: str, db: AsyncSession = Depends(get_db)):
     receipt = await service.get_receipt(db, receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="Recepción no encontrada")
-    items = await service.get_receipt_items(db, receipt_id)
-    receipt.items = items
     return receipt
 
 
 @router.get("/purchase-receipts/{receipt_id}/items", response_model=list[ReceiptItemResponse])
 async def get_receipt_items(receipt_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_receipt_items(db, receipt_id)
+
+
+@router.post("/purchase-receipts/{receipt_id}/cancel", response_model=ReceiptResponse)
+async def cancel_receipt(receipt_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await service.cancel_receipt(db, receipt_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── Forecasting ───────────────────────────────────────────────────────────────
@@ -393,6 +415,13 @@ async def update_budget(budget_id: str, body: BudgetUpdate, db: AsyncSession = D
     return result
 
 
+@router.delete("/purchase-budgets/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_budget(budget_id: str, db: AsyncSession = Depends(get_db)):
+    deleted = await service.delete_budget(db, budget_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+
+
 @router.get("/companies/{company_id}/purchase-budgets/consumption", response_model=list[BudgetConsumptionResponse])
 async def get_budget_consumption(
     company_id: str,
@@ -422,3 +451,71 @@ async def price_variance(company_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/companies/{company_id}/purchase-reports/kpis", response_model=PurchaseKPIsResponse)
 async def purchase_kpis(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_purchase_kpis(db, company_id)
+
+
+async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
+    r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    row = r.first()
+    return {"razon_social": row.razon_social, "ruc": row.ruc, "logo_url": row.logo_url} if row else {"razon_social": "Empresa", "ruc": "N/A"}
+
+
+@router.get("/companies/{company_id}/purchase-reports/export/spend-by-supplier.pdf")
+async def export_spend_by_supplier_pdf(company_id: str, db: AsyncSession = Depends(get_db)):
+    kpis = await service.get_purchase_kpis(db, company_id)
+    spend_rows = await service.get_spend_by_supplier(db, company_id)
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = purchases_pdf_reports.generate_spend_by_supplier_pdf(company, kpis, spend_rows)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=gasto_por_proveedor.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/companies/{company_id}/purchase-reports/export/price-variance.pdf")
+async def export_price_variance_pdf(company_id: str, db: AsyncSession = Depends(get_db)):
+    variance_rows = await service.get_price_variance(db, company_id)
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = purchases_pdf_reports.generate_price_variance_pdf(company, variance_rows)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=varianza_de_precios.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+# ── RFQ / Cotizacion comparativa ────────────────────────────────────────────────
+
+@router.post("/purchase-rfqs", response_model=RfqWithDetail, status_code=status.HTTP_201_CREATED)
+async def create_rfq(body: RfqCreate, db: AsyncSession = Depends(get_db)):
+    result = await service.create_rfq(db, body)
+    if not result:
+        raise HTTPException(status_code=400, detail="Se requieren al menos 2 proveedores y al menos un producto (desde una requisicion o una lista de items)")
+    return result
+
+
+@router.get("/companies/{company_id}/purchase-rfqs", response_model=list[RfqResponse])
+async def list_rfqs(company_id: str, estado: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_rfqs(db, company_id, estado)
+
+
+@router.get("/purchase-rfqs/{rfq_id}", response_model=RfqWithDetail)
+async def get_rfq(rfq_id: str, db: AsyncSession = Depends(get_db)):
+    rfq = await service.get_rfq(db, rfq_id)
+    if not rfq:
+        raise HTTPException(status_code=404, detail="Cotizacion no encontrada")
+    return rfq
+
+
+@router.post("/purchase-rfqs/{rfq_id}/responses/{supplier_id}", response_model=RfqWithDetail)
+async def submit_rfq_response(rfq_id: str, supplier_id: str, body: RfqResponseSubmit, db: AsyncSession = Depends(get_db)):
+    result = await service.submit_rfq_response(db, rfq_id, supplier_id, body)
+    if not result:
+        raise HTTPException(status_code=400, detail="No se pudo registrar la respuesta. Verifique que la cotizacion siga abierta y el proveedor este invitado")
+    return result
+
+
+@router.post("/purchase-rfqs/{rfq_id}/award", response_model=POResponse)
+async def award_rfq(rfq_id: str, body: RfqAwardRequest, db: AsyncSession = Depends(get_db)):
+    result = await service.award_rfq(db, rfq_id, str(body.supplier_id), str(body.user_id) if body.user_id else None, body.user_name)
+    if not result:
+        raise HTTPException(status_code=400, detail="No se pudo adjudicar. El proveedor debe tener una respuesta cargada y la cotizacion debe seguir abierta")
+    return result
