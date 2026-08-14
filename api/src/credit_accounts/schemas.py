@@ -9,6 +9,8 @@ import uuid
 class CreditAccountCreate(BaseModel):
     company_id: uuid.UUID
     customer_id: uuid.UUID
+    customer_name: Optional[str] = None
+    customer_ruc: Optional[str] = None
     limite_credito: float = 0
     dias_plazo: int = 30
 
@@ -23,6 +25,8 @@ class CreditAccountResponse(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     customer_id: uuid.UUID
+    customer_name: Optional[str] = None
+    customer_ruc: Optional[str] = None
     limite_credito: float
     saldo_disponible: float
     saldo_utilizado: float
@@ -58,6 +62,8 @@ class CreditMovementResponse(BaseModel):
     company_id: uuid.UUID
     credit_account_id: uuid.UUID
     customer_id: uuid.UUID
+    customer_name: Optional[str] = None
+    customer_ruc: Optional[str] = None
     tipo: str
     monto: float
     saldo_anterior: float

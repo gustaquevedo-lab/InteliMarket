@@ -38,13 +38,37 @@ async def create_credit_account(db: AsyncSession, data: CreditAccountCreate) -> 
     return account
 
 
-async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Optional[bool] = None) -> list[CreditAccount]:
-    query = select(CreditAccount).where(CreditAccount.company_id == company_id)
+async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Optional[bool] = None) -> list[dict]:
+    from sqlalchemy import text
+    cid = uuid.UUID(company_id)
+    where_stmt = "WHERE ca.company_id = :cid"
+    params = {"cid": cid}
     if activo is not None:
-        query = query.where(CreditAccount.activo == activo)
-    query = query.order_by(CreditAccount.saldo_utilizado.desc())
-    result = await db.execute(query)
-    return list(result.scalars().all())
+        where_stmt += " AND ca.activo = :activo"
+        params["activo"] = activo
+
+    query = text(f"""
+        SELECT 
+            ca.id, ca.company_id, ca.customer_id, c.razon_social as customer_name, c.ruc as customer_ruc,
+            ca.limite_credito,
+            COALESCE(ar.total_deuda, ca.saldo_utilizado, 0) as saldo_utilizado,
+            GREATEST(0, ca.limite_credito - COALESCE(ar.total_deuda, ca.saldo_utilizado, 0)) as saldo_disponible,
+            ca.dias_plazo, ca.activo, ca.created_at, ca.updated_at
+        FROM credit_accounts ca
+        LEFT JOIN customers c ON c.id = ca.customer_id
+        LEFT JOIN (
+            SELECT customer_id, SUM(saldo_pendiente) as total_deuda
+            FROM accounts_receivable
+            WHERE estado = 'pendiente'
+            GROUP BY customer_id
+        ) ar ON ar.customer_id = ca.customer_id
+        {where_stmt}
+        ORDER BY COALESCE(ar.total_deuda, ca.saldo_utilizado, 0) DESC, ca.limite_credito DESC
+    """)
+
+    res = await db.execute(query, params)
+    rows = res.fetchall()
+    return [dict(r._mapping) for r in rows]
 
 
 async def get_credit_account(db: AsyncSession, account_id: str) -> CreditAccount | None:

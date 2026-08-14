@@ -1,19 +1,19 @@
 import { useState, useEffect } from "react"
-import { Wallet, Plus, Search, Loader2, X, Check, DollarSign, TrendingUp, TrendingDown, History } from "lucide-react"
+import { Wallet, Plus, Search, Loader2, X, DollarSign, TrendingUp, TrendingDown, History, AlertTriangle } from "lucide-react"
 import { api, type CreditAccount, type CreditMovement, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { StatusBadge } from "../../components/DataTable"
 import { formatPYG } from "../../utils/format"
 
 export default function CreditAccountsPage() {
-  const [accounts, setAccounts] = useState<CreditAccount[]>([])
+  const [accounts, setAccounts] = useState<any[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showMovementsModal, setShowMovementsModal] = useState(false)
-  const [selectedAccount, setSelectedAccount] = useState<CreditAccount | null>(null)
+  const [selectedAccount, setSelectedAccount] = useState<any | null>(null)
   const [movements, setMovements] = useState<CreditMovement[]>([])
   const [form, setForm] = useState({ customer_id: "", limite_credito: "", dias_plazo: "30" })
   const [paymentForm, setPaymentForm] = useState({ monto: "", observaciones: "" })
@@ -30,7 +30,7 @@ export default function CreditAccountsPage() {
       if (accountsData.status === "fulfilled") setAccounts(accountsData.value)
       if (customersData.status === "fulfilled") setCustomers(customersData.value)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver cuentas de crédito")
+      toast.info("Sin datos", "Conectá el backend para ver cuentas de crédito")
     } finally {
       setLoading(false)
     }
@@ -39,8 +39,10 @@ export default function CreditAccountsPage() {
   useEffect(() => { fetchData() }, [])
 
   const filtered = accounts.filter(a => {
-    const customer = customers.find(c => c.id === a.customer_id)
-    return !search || (customer?.razon_social?.toLowerCase().includes(search.toLowerCase()) ?? false) || (customer?.ruc?.includes(search) ?? false)
+    const custName = a.customer_name || customers.find(c => c.id === a.customer_id)?.razon_social || ""
+    const custRuc = a.customer_ruc || customers.find(c => c.id === a.customer_id)?.ruc || ""
+    const term = search.toLowerCase()
+    return !search || custName.toLowerCase().includes(term) || custRuc.toLowerCase().includes(term)
   })
 
   const totalCredito = accounts.reduce((sum, a) => sum + (a.limite_credito || 0), 0)
@@ -88,7 +90,7 @@ export default function CreditAccountsPage() {
     }
   }
 
-  const handleViewMovements = async (account: CreditAccount) => {
+  const handleViewMovements = async (account: any) => {
     setSelectedAccount(account)
     try {
       const data = await api.creditAccounts.movements(account.id)
@@ -101,89 +103,123 @@ export default function CreditAccountsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
             <Wallet className="w-6 h-6 text-primary" />
-            Cuentas de Crédito
+            Líneas y Cuentas de Crédito
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Gestión de crédito para clientes</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Gestión de cupos crediticios, saldos utilizados y cobranzas</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="btn-primary">
+        <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2">
           <Plus className="w-4 h-4" />
-          Nueva cuenta
+          <span>+ Nueva Línea de Crédito</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><DollarSign className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Crédito Total</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatPYG(totalCredito)}</p>
+      {/* Unified Financial KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="card p-4 border-l-4 border-l-blue-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Crédito Total Concedido</span>
+            <DollarSign className="w-4 h-4 text-blue-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-blue-600 dark:text-blue-400">{formatPYG(totalCredito)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Línea de crédito autorizada</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><TrendingUp className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Utilizado</span></div>
-          <p className="text-2xl font-bold text-amber-500">{formatPYG(totalUtilizado)}</p>
+
+        <div className="card p-4 border-l-4 border-l-amber-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Crédito Utilizado</span>
+            <TrendingUp className="w-4 h-4 text-amber-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400">{formatPYG(totalUtilizado)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Deuda cliente en cartera</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><TrendingDown className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Disponible</span></div>
-          <p className="text-2xl font-bold text-green-500">{formatPYG(totalDisponible)}</p>
+
+        <div className="card p-4 border-l-4 border-l-emerald-500 flex flex-col justify-between transition-all hover:shadow-md">
+          <div className="flex justify-between items-center text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
+            <span>Crédito Disponible</span>
+            <TrendingDown className="w-4 h-4 text-emerald-500" />
+          </div>
+          <p className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(totalDisponible)}</p>
+          <span className="text-[10px] text-gray-400 mt-1 block">Margen disponible para ventas</span>
         </div>
       </div>
 
       <div className="flex gap-3 items-center">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input-field pl-10" placeholder="Buscar por cliente o RUC..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="input-field pl-10 text-xs font-medium" placeholder="Buscar por Razón Social de Cliente o RUC..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <button onClick={fetchData} className="btn-outline">Actualizar</button>
+        <button onClick={fetchData} className="btn-outline text-xs">Actualizar</button>
       </div>
 
       <div className="card overflow-hidden">
-        <table className="w-full">
+        <table className="w-full text-xs">
           <thead>
             <tr className="table-header">
               <th className="table-cell">Cliente</th>
-              <th className="table-cell text-right">Límite</th>
-              <th className="table-cell text-right">Utilizado</th>
+              <th className="table-cell text-right">Límite Crédito</th>
+              <th className="table-cell text-right">Utilizado (Deuda)</th>
               <th className="table-cell text-right">Disponible</th>
-              <th className="table-cell">Uso</th>
+              <th className="table-cell text-center min-w-[140px]">Consumo Cupo</th>
               <th className="table-cell text-right">Plazo</th>
-              <th className="table-cell">Estado</th>
-              <th className="table-cell">Acciones</th>
+              <th className="table-cell text-center">Estado</th>
+              <th className="table-cell text-center">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr><td colSpan={8} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} className="text-center py-12 text-gray-400">No hay cuentas de crédito</td></tr>
+              <tr><td colSpan={8} className="text-center py-12 text-gray-400">No hay cuentas de crédito registradas</td></tr>
             ) : (
               filtered.map((a) => {
-                const customer = customers.find(c => c.id === a.customer_id)
-                const usoPct = (a.limite_credito || 0) > 0 ? Math.round(((a.saldo_utilizado || 0) / (a.limite_credito || 1)) * 100) : 0
+                const custName = a.customer_name || customers.find(c => c.id === a.customer_id)?.razon_social || "Cliente Sin Nombre"
+                const custRuc = a.customer_ruc || customers.find(c => c.id === a.customer_id)?.ruc || "Sin RUC"
+                
+                const usoPct = (a.limite_credito || 0) > 0 ? Math.round(((a.saldo_utilizado || 0) / a.limite_credito) * 100) : ((a.saldo_utilizado || 0) > 0 ? 100 : 0)
+                const isOverflow = (a.limite_credito || 0) > 0 && a.saldo_utilizado > a.limite_credito
+
                 return (
                   <tr key={a.id} className="table-row">
                     <td className="table-td">
-                      <p className="text-sm font-medium">{customer?.razon_social || "—"}</p>
-                      <p className="text-xs text-gray-400">{customer?.ruc || customer?.ci || ""}</p>
+                      <p className="font-bold text-gray-900 dark:text-white">{custName}</p>
+                      <p className="text-[11px] text-gray-400 font-mono">RUC: {custRuc}</p>
                     </td>
                     <td className="table-td text-right font-mono font-bold">{formatPYG(a.limite_credito)}</td>
-                    <td className="table-td text-right font-mono text-amber-500">{formatPYG(a.saldo_utilizado)}</td>
-                    <td className="table-td text-right font-mono text-green-500">{formatPYG(a.saldo_disponible)}</td>
-                    <td className="table-td">
-                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                        <div className={`h-2 rounded-full ${usoPct > 80 ? "bg-red-500" : usoPct > 50 ? "bg-amber-500" : "bg-green-500"}`} style={{ width: `${usoPct}%` }} />
+                    <td className="table-td text-right font-mono font-bold text-amber-500">{formatPYG(a.saldo_utilizado)}</td>
+                    <td className="table-td text-right font-mono font-bold text-emerald-500">{formatPYG(a.saldo_disponible)}</td>
+                    <td className="table-td text-center">
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-2 rounded-full transition-all duration-300 ${isOverflow ? "bg-red-600" : usoPct > 80 ? "bg-amber-500" : "bg-emerald-500"}`}
+                          style={{ width: `${Math.min(Math.max(usoPct, 0), 100)}%` }}
+                        />
                       </div>
-                      <p className="text-xs text-gray-400 mt-1">{usoPct}%</p>
+                      <div className="mt-1 flex items-center justify-center gap-1">
+                        {isOverflow ? (
+                          <span className="px-1.5 py-0.2 bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 font-black rounded text-[9px] uppercase tracking-wider">
+                            Excedido ({usoPct}%)
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-gray-400 font-mono font-medium">{usoPct}%</span>
+                        )}
+                      </div>
                     </td>
-                    <td className="table-td text-right text-sm text-gray-500">{a.dias_plazo ?? 30} días</td>
-                    <td className="table-td">
+                    <td className="table-td text-right font-mono text-gray-500">{a.dias_plazo ?? 30} días</td>
+                    <td className="table-td text-center">
                       <StatusBadge status={a.activo ? "activo" : "inactivo"} map={{ activo: "badge-success", inactivo: "badge-danger" }} />
                     </td>
-                    <td className="table-td">
-                      <div className="flex items-center gap-1">
-                        <button className="btn-ghost text-green-500" title="Registrar pago" onClick={() => { setSelectedAccount(a); setPaymentForm({ monto: "", observaciones: "" }); setShowPaymentModal(true) }}><DollarSign className="w-4 h-4" /></button>
-                        <button className="btn-ghost" title="Ver movimientos" onClick={() => handleViewMovements(a)}><History className="w-4 h-4" /></button>
+                    <td className="table-td text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button className="btn-ghost text-emerald-600 hover:text-emerald-700 p-1.5" title="Registrar entrega de valor / pago" onClick={() => { setSelectedAccount(a); setPaymentForm({ monto: "", observaciones: "" }); setShowPaymentModal(true) }}>
+                          <DollarSign className="w-4 h-4" />
+                        </button>
+                        <button className="btn-ghost p-1.5" title="Ver historial de movimientos" onClick={() => handleViewMovements(a)}>
+                          <History className="w-4 h-4 text-primary" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -199,30 +235,30 @@ export default function CreditAccountsPage() {
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Nueva cuenta de crédito</h3>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Nueva Línea de Crédito</h3>
               <button onClick={() => setShowModal(false)} className="btn-ghost"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 text-xs">
               <div>
-                <label className="input-label label-required">Cliente</label>
-                <select className="input-field" value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })}>
-                  <option value="">Seleccionar cliente...</option>
-                  {customers.map(c => <option key={c.id} value={c.id}>{c.razon_social} {c.ruc ? `(${c.ruc})` : ""}</option>)}
+                <label className="input-label label-required uppercase tracking-wider font-bold">Cliente</label>
+                <select className="input-field font-medium text-sm" value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })}>
+                  <option value="">-- Seleccionar cliente --</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.razon_social} ({c.ruc || "Sin RUC"})</option>)}
                 </select>
               </div>
               <div>
-                <label className="input-label label-required">Límite de crédito (PYG)</label>
-                <input className="input-field" type="number" placeholder="5000000" value={form.limite_credito} onChange={(e) => setForm({ ...form, limite_credito: e.target.value })} />
+                <label className="input-label label-required uppercase tracking-wider font-bold">Límite de Crédito (₲)</label>
+                <input className="input-field font-mono text-sm" type="number" placeholder="5000000" value={form.limite_credito} onChange={(e) => setForm({ ...form, limite_credito: e.target.value })} />
               </div>
               <div>
-                <label className="input-label label-required">Plazo (días)</label>
-                <input className="input-field" type="number" placeholder="30" value={form.dias_plazo} onChange={(e) => setForm({ ...form, dias_plazo: e.target.value })} />
-                <p className="text-xs text-gray-400 mt-1">Días desde la venta hasta el vencimiento de la cuenta por cobrar</p>
+                <label className="input-label label-required uppercase tracking-wider font-bold">Plazo de Pago (Días)</label>
+                <input className="input-field font-mono text-sm" type="number" placeholder="30" value={form.dias_plazo} onChange={(e) => setForm({ ...form, dias_plazo: e.target.value })} />
+                <p className="text-gray-400 mt-1 text-[11px]">Días desde la emisión de la factura hasta el vencimiento</p>
               </div>
-              <div className="flex gap-3 pt-4">
-                <button className="btn-outline flex-1" onClick={() => setShowModal(false)}>Cancelar</button>
-                <button className="btn-primary flex-1" onClick={handleSubmit} disabled={submitting}>
-                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Crear"}
+              <div className="pt-4 flex justify-end gap-2 border-t border-gray-100 dark:border-gray-700">
+                <button onClick={() => setShowModal(false)} className="btn-secondary">Cancelar</button>
+                <button onClick={handleSubmit} disabled={submitting} className="btn-primary">
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Crear Línea"}
                 </button>
               </div>
             </div>
@@ -235,28 +271,26 @@ export default function CreditAccountsPage() {
         <div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
           <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Registrar pago</h3>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Registrar Pago a la Cuenta</h3>
               <button onClick={() => setShowPaymentModal(false)} className="btn-ghost"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-                <p className="text-sm text-gray-500">Cliente</p>
-                <p className="font-bold">{customers.find(c => c.id === selectedAccount.customer_id)?.razon_social || "—"}</p>
-                <p className="text-sm text-gray-500 mt-2">Saldo actual</p>
-                <p className="text-xl font-bold text-amber-500">{formatPYG(selectedAccount.saldo_utilizado)}</p>
+            <div className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <p className="font-bold text-sm text-gray-900 dark:text-white">{selectedAccount.customer_name || "Cliente"}</p>
+                <p className="text-gray-400">Saldo Utilizado: <span className="font-mono font-bold text-amber-500">{formatPYG(selectedAccount.saldo_utilizado)}</span></p>
               </div>
               <div>
-                <label className="input-label label-required">Monto (PYG)</label>
-                <input className="input-field" type="number" placeholder="1000000" value={paymentForm.monto} onChange={(e) => setPaymentForm({ ...paymentForm, monto: e.target.value })} />
+                <label className="input-label label-required uppercase tracking-wider font-bold">Monto del Pago (₲)</label>
+                <input className="input-field font-mono text-lg text-emerald-600 font-bold" type="number" placeholder="Monto a abonar" value={paymentForm.monto} onChange={(e) => setPaymentForm({ ...paymentForm, monto: e.target.value })} />
               </div>
               <div>
-                <label className="input-label">Observaciones</label>
-                <input className="input-field" placeholder="Referencia del pago..." value={paymentForm.observaciones} onChange={(e) => setPaymentForm({ ...paymentForm, observaciones: e.target.value })} />
+                <label className="input-label uppercase tracking-wider font-bold">Observaciones / Referencia</label>
+                <input className="input-field font-medium" placeholder="Ej. Recibo de dinero N° 1082" value={paymentForm.observaciones} onChange={(e) => setPaymentForm({ ...paymentForm, observaciones: e.target.value })} />
               </div>
-              <div className="flex gap-3 pt-4">
-                <button className="btn-outline flex-1" onClick={() => setShowPaymentModal(false)}>Cancelar</button>
-                <button className="btn-primary flex-1" onClick={handlePayment} disabled={submitting}>
-                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar pago"}
+              <div className="pt-4 flex justify-end gap-2 border-t border-gray-100 dark:border-gray-700">
+                <button onClick={() => setShowPaymentModal(false)} className="btn-secondary">Cancelar</button>
+                <button onClick={handlePayment} disabled={submitting} className="btn-primary">
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar Pago"}
                 </button>
               </div>
             </div>
@@ -267,38 +301,43 @@ export default function CreditAccountsPage() {
       {/* Movements Modal */}
       {showMovementsModal && selectedAccount && (
         <div className="modal-overlay" onClick={() => setShowMovementsModal(false)}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-2xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <History className="w-5 h-5" />
-                Movimientos
-              </h3>
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-primary">Historial de Cuenta de Crédito</span>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mt-0.5">{selectedAccount.customer_name || "Cliente"}</h3>
+              </div>
               <button onClick={() => setShowMovementsModal(false)} className="btn-ghost"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-6">
-              {movements.length === 0 ? (
-                <p className="text-center text-gray-400 py-8">Sin movimientos</p>
-              ) : (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {movements.map(m => (
-                    <div key={m.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          {m.tipo === "compra" ? <TrendingUp className="w-4 h-4 text-red-500" /> : <TrendingDown className="w-4 h-4 text-green-500" />}
-                          <span className="text-sm font-bold capitalize">{m.tipo}</span>
-                        </div>
-                        {m.observaciones && <p className="text-xs text-gray-400 mt-1">{m.observaciones}</p>}
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-sm font-mono font-bold ${m.tipo === "compra" ? "text-red-500" : "text-green-500"}`}>
-                          {m.tipo === "compra" ? "+" : "-"}{formatPYG(m.monto)}
-                        </p>
-                        <p className="text-xs text-gray-400">{m.created_at ? new Date(m.created_at).toLocaleDateString("es-PY") : "—"}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div className="p-6 space-y-4 text-xs">
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead>
+                    <tr className="table-header">
+                      <th className="table-cell">Fecha</th>
+                      <th className="table-cell">Tipo</th>
+                      <th className="table-cell text-right">Monto</th>
+                      <th className="table-cell text-right">Saldo Ant.</th>
+                      <th className="table-cell text-right">Saldo Nuevo</th>
+                      <th className="table-cell">Ref / Obs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movements.length === 0 ? (
+                      <tr><td colSpan={6} className="text-center py-8 text-gray-400">Sin movimientos registrados</td></tr>
+                    ) : movements.map(m => (
+                      <tr key={m.id} className="table-row">
+                        <td className="table-td text-gray-500">{new Date(m.created_at).toLocaleString("es-PY")}</td>
+                        <td className="table-td font-bold uppercase">{m.tipo}</td>
+                        <td className="table-td text-right font-mono font-bold">{formatPYG(m.monto)}</td>
+                        <td className="table-td text-right font-mono text-gray-400">{formatPYG(m.saldo_anterior)}</td>
+                        <td className="table-td text-right font-mono font-bold text-primary">{formatPYG(m.saldo_nuevo)}</td>
+                        <td className="table-td text-gray-500">{m.observaciones || m.referencia_type || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
