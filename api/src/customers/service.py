@@ -132,6 +132,31 @@ async def get_customer_consolidated_debt(db: AsyncSession, company_id: str, cust
     )
     last_sale = sales_res.fetchone()
 
+    # Fetch detailed invoices
+    inv_res = await db.execute(
+        text("""
+            SELECT id, numero_documento, fecha_emision, fecha_vencimiento, monto_original, saldo_pendiente,
+                   CASE WHEN fecha_vencimiento < CURRENT_DATE THEN (CURRENT_DATE - fecha_vencimiento)::int ELSE 0 END as dias_mora
+            FROM accounts_receivable
+            WHERE customer_id = :cust_id AND estado = 'pendiente'
+            ORDER BY fecha_vencimiento ASC NULLS LAST
+        """),
+        {"cust_id": cust_id},
+    )
+    facturas_detalle = [dict(r._mapping) for r in inv_res.fetchall()]
+
+    # Fetch detailed cheques & pagares
+    ch_res = await db.execute(
+        text("""
+            SELECT id, numero, banco, fecha_vencimiento, monto, tipo, estado, titular
+            FROM checks
+            WHERE customer_id = :cust_id
+            ORDER BY fecha_vencimiento DESC NULLS LAST
+        """),
+        {"cust_id": cust_id},
+    )
+    cheques_detalle = [dict(r._mapping) for r in ch_res.fetchall()]
+
     facturas_p = float(row.facturas_pendiente) if row else 0.0
     monto_v = float(row.monto_vencido) if row else 0.0
     dias_mora = int(row.dias_mora_max) if row else 0
@@ -156,6 +181,8 @@ async def get_customer_consolidated_debt(db: AsyncSession, company_id: str, cust
         "limite_credito": float(row.limite_credito) if row else 0.0,
         "saldo_utilizado": float(row.saldo_utilizado) if row else 0.0,
         "saldo_disponible": float(row.saldo_disponible) if row else 0.0,
+        "facturas_detalle": facturas_detalle,
+        "cheques_detalle": cheques_detalle,
         "ultima_compra": {
             "numero": last_sale.numero if last_sale else None,
             "fecha": last_sale.fecha.isoformat() if (last_sale and last_sale.fecha) else None,
