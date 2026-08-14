@@ -1,5 +1,6 @@
+from uuid import UUID
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from typing import Optional, Union
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -13,7 +14,7 @@ class ExpenseCategoryCreate(BaseModel):
 class ExpenseCategoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
+    id: Union[UUID, str]
     nombre: str
     descripcion: Optional[str] = None
     presupuesto_mensual: Optional[float] = None
@@ -23,7 +24,7 @@ class ExpenseCategoryResponse(BaseModel):
 
 class ExpenseCreate(BaseModel):
     branch_id: Optional[str] = None
-    category_id: Optional[str] = None
+    category_id: Optional[Union[UUID, str]] = None
     monto: Decimal
     descripcion: str
     proveedor: Optional[str] = None
@@ -33,7 +34,7 @@ class ExpenseCreate(BaseModel):
 
 
 class ExpenseUpdate(BaseModel):
-    category_id: Optional[str] = None
+    category_id: Optional[Union[UUID, str]] = None
     monto: Optional[Decimal] = None
     descripcion: Optional[str] = None
     proveedor: Optional[str] = None
@@ -45,10 +46,10 @@ class ExpenseUpdate(BaseModel):
 class ExpenseResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
-    company_id: Optional[str] = None
+    id: Union[UUID, str]
+    company_id: Optional[Union[UUID, str]] = None
     branch_id: Optional[str] = None
-    category_id: Optional[str] = None
+    category_id: Optional[Union[UUID, str]] = None
     monto: float
     descripcion: str
     proveedor: Optional[str] = None

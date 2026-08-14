@@ -31,8 +31,8 @@ async def get_current_user(
             "email": "demo@intelimarket.py",
             "nombre": "Demo",
             "rol": "admin",
-            "company_id": "11111111-1111-1111-1111-111111111111",
-            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "company_id": "00000000-0000-0000-0000-000000000010",
+            "tenant_id": "00000000-0000-0000-0000-000000000010",
         }
 
     try:
