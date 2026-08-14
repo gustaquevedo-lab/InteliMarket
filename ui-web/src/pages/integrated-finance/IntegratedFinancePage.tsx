@@ -280,58 +280,189 @@ function CierreContableTab() {
 function PlanCuentasTab() {
   const [accounts, setAccounts] = useState<any[]>([])
   const [search, setSearch] = useState("")
+  const [filterLevel, setFilterLevel] = useState<number | 0>(0)
+  const [filterType, setFilterType] = useState<string>("all")
   const [loading, setLoading] = useState(true)
   const toast = useToast()
 
   useEffect(() => {
     api.integratedFinance.listAccountPlan(COMPANY_ID)
-      .then(setAccounts)
+      .then(res => setAccounts(Array.isArray(res) ? res : []))
       .catch(() => toast.error("Error", "No se pudo cargar el plan de cuentas"))
       .finally(() => setLoading(false))
   }, [])
 
   const filtered = accounts.filter(a => {
     const term = search.toLowerCase()
-    return !search || (a.codigo || "").toLowerCase().includes(term) || (a.nombre || "").toLowerCase().includes(term) || (a.tipo || "").toLowerCase().includes(term)
+    const matchSearch = !search || (a.codigo || "").toLowerCase().includes(term) || (a.nombre || "").toLowerCase().includes(term) || (a.tipo || "").toLowerCase().includes(term)
+    const matchLevel = filterLevel === 0 || a.nivel === filterLevel
+    const matchType = filterType === "all" || (a.tipo || "").toLowerCase() === filterType.toLowerCase()
+    return matchSearch && matchLevel && matchType
   })
+
+  const getLevelBadge = (nivel: number, acepta: boolean) => {
+    switch (nivel) {
+      case 1:
+        return <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-slate-900 text-white dark:bg-slate-700">N1 · Grupo</span>
+      case 2:
+        return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-700 text-white dark:bg-blue-600">N2 · Rubro</span>
+      case 3:
+        return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">N3 · Subrubro</span>
+      case 4:
+        return <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300">N4 · Mayor</span>
+      case 5:
+      default:
+        return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">N5 · Imputable</span>
+    }
+  }
+
+  const getTypeBadge = (tipo: string) => {
+    const t = (tipo || "").toLowerCase()
+    if (t === "activo") return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-50 text-blue-700 border border-blue-200">Activo</span>
+    if (t === "pasivo") return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">Pasivo</span>
+    if (t === "patrimonio") return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-purple-50 text-purple-700 border border-purple-200">Patrimonio</span>
+    if (t === "ingreso") return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">Ingreso</span>
+    if (t === "gasto") return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-50 text-rose-700 border border-rose-200">Gasto / Costo</span>
+    return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-100 text-gray-700">{tipo}</span>
+  }
 
   if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
+      {/* Controls Bar */}
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
+        <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input-field pl-10 text-xs font-medium" placeholder="Buscar por código contable o nombre de cuenta..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input
+            className="input-field pl-10 text-xs font-medium w-full"
+            placeholder="Buscar por código (ej: 11110) o nombre de cuenta..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
-        <span className="text-xs font-bold text-gray-500 font-mono">{filtered.length} cuentas registradas</span>
+
+        {/* Level Filters */}
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mr-1">Nivel:</span>
+          {[
+            { l: "Todos", v: 0 },
+            { l: "N1 Grupo", v: 1 },
+            { l: "N2 Rubro", v: 2 },
+            { l: "N3 Subrubro", v: 3 },
+            { l: "N4 Mayor", v: 4 },
+            { l: "N5 Imputable", v: 5 },
+          ].map(lvl => (
+            <button
+              key={lvl.v}
+              onClick={() => setFilterLevel(lvl.v)}
+              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all ${
+                filterLevel === lvl.v
+                  ? "bg-primary text-white shadow-sm"
+                  : "bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200"
+              }`}
+            >
+              {lvl.l}
+            </button>
+          ))}
+        </div>
+
+        {/* Type Filter */}
+        <select
+          value={filterType}
+          onChange={(e) => setFilterType(e.target.value)}
+          className="input-field text-xs font-medium w-36"
+        >
+          <option value="all">Todos los Tipos</option>
+          <option value="activo">Solo Activo</option>
+          <option value="pasivo">Solo Pasivo</option>
+          <option value="ingreso">Solo Ingresos</option>
+          <option value="gasto">Solo Egresos</option>
+        </select>
       </div>
 
+      <div className="flex justify-between items-center px-1 text-xs text-gray-400">
+        <span>Mostrando <strong>{filtered.length}</strong> de <strong>{accounts.length}</strong> cuentas contables</span>
+        <span className="font-mono text-[11px]">Estructura Contable Jerárquica N1 ➔ N5</span>
+      </div>
+
+      {/* Main Table */}
       <div className="card overflow-hidden">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="table-header">
-              <th className="table-cell">Código</th>
-              <th className="table-cell">Nombre / Rubro Contable</th>
-              <th className="table-cell text-center">Tipo</th>
-              <th className="table-cell text-center">Nivel</th>
-              <th className="table-cell text-center">Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.slice(0, 100).map((a, i) => (
-              <tr key={i} className="table-row">
-                <td className="table-td font-mono font-bold text-primary">{a.codigo}</td>
-                <td className="table-td font-medium text-gray-900 dark:text-white">{a.nombre}</td>
-                <td className="table-td text-center uppercase font-bold text-[10px] text-gray-500">{a.tipo}</td>
-                <td className="table-td text-center font-mono">{a.nivel}</td>
-                <td className="table-td text-center">
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Activa</span>
-                </td>
+        <div className="overflow-x-auto max-h-[650px] overflow-y-auto">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-gray-50 dark:bg-slate-900 z-10">
+              <tr className="table-header">
+                <th className="table-cell w-32">Código</th>
+                <th className="table-cell">Nomenclatura / Descripción de la Cuenta</th>
+                <th className="table-cell text-center w-28">Clasificación</th>
+                <th className="table-cell text-center w-28">Jerarquía</th>
+                <th className="table-cell text-center w-24">Imputable</th>
+                <th className="table-cell text-center w-20">Estado</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 font-sans">
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-12 text-gray-400">
+                    No se encontraron cuentas con los filtros seleccionados
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((a, i) => {
+                  const isHeader = a.nivel <= 3
+                  const isMayor = a.nivel === 4
+                  const indentClass =
+                    a.nivel === 1 ? "pl-2 font-black text-sm text-gray-900 dark:text-white uppercase" :
+                    a.nivel === 2 ? "pl-6 font-bold text-xs text-gray-800 dark:text-gray-200 uppercase" :
+                    a.nivel === 3 ? "pl-10 font-bold text-xs text-blue-900 dark:text-blue-300" :
+                    a.nivel === 4 ? "pl-14 font-semibold text-xs text-gray-700 dark:text-gray-300" :
+                    "pl-18 font-normal text-xs text-gray-600 dark:text-gray-400"
+
+                  const rowBg =
+                    a.nivel === 1 ? "bg-slate-100/80 dark:bg-slate-800/80 border-t-2 border-slate-300 dark:border-slate-700" :
+                    a.nivel === 2 ? "bg-blue-50/40 dark:bg-blue-950/20" :
+                    a.nivel === 3 ? "bg-slate-50/60 dark:bg-slate-900/30" :
+                    "hover:bg-gray-50/60 dark:hover:bg-slate-800/40"
+
+                  return (
+                    <tr key={a.id || i} className={`table-row transition-colors ${rowBg}`}>
+                      <td className="table-td font-mono font-bold text-primary whitespace-nowrap">
+                        {a.codigo}
+                      </td>
+                      <td className={`table-td ${indentClass}`}>
+                        <div className="flex items-center gap-1.5">
+                          {a.nivel === 1 && <span className="w-2 h-2 rounded-full bg-slate-800 dark:bg-white inline-block mr-1"></span>}
+                          {a.nivel === 2 && <span className="w-1.5 h-1.5 rounded-full bg-blue-600 inline-block mr-1"></span>}
+                          {a.nivel >= 3 && a.nivel < 5 && <span className="text-gray-300 dark:text-gray-600 mr-1 font-mono">├─</span>}
+                          {a.nivel === 5 && <span className="text-gray-400 dark:text-gray-600 mr-1 font-mono pl-2">└─</span>}
+                          <span>{a.nombre}</span>
+                        </div>
+                      </td>
+                      <td className="table-td text-center whitespace-nowrap">
+                        {getTypeBadge(a.tipo)}
+                      </td>
+                      <td className="table-td text-center whitespace-nowrap">
+                        {getLevelBadge(a.nivel, a.acepta_asientos)}
+                      </td>
+                      <td className="table-td text-center whitespace-nowrap font-mono text-[11px]">
+                        {a.acepta_asientos ? (
+                          <span className="text-emerald-600 font-bold">Sí (Asientos)</span>
+                        ) : (
+                          <span className="text-gray-400 font-medium">No (Título)</span>
+                        )}
+                      </td>
+                      <td className="table-td text-center whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                          Activa
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )
