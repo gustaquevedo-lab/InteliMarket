@@ -17,7 +17,6 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, nombre: string, tenant_nombre: string) => Promise<void>
   logout: () => void
-  loginDemo: () => void
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -28,10 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const token = localStorage.getItem("access_token")
-    if (token === "demo-token") {
-      setUser({ id: "00000000-0000-0000-0000-0000000000d1", email: "demo@intelimarket.py", nombre: "Demo", rol: "admin", is_superadmin: true, tenant_id: "00000000-0000-0000-0000-000000000001", tenant_slug: "supermercado-demo" })
-      setLoading(false)
-    } else if (token) {
+    if (token) {
       api.auth.me().then((u) => {
         const claims = decodeToken(token)
         setUser({
@@ -91,14 +87,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
-  const loginDemo = () => {
-    localStorage.setItem("access_token", "demo-token")
-    localStorage.setItem("user_email", "demo@intelimarket.py")
-    setUser({ id: "00000000-0000-0000-0000-0000000000d1", email: "demo@intelimarket.py", nombre: "Demo", rol: "admin", tenant_id: "00000000-0000-0000-0000-000000000001", tenant_slug: "supermercado-demo" })
-  }
-
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, loginDemo }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   )

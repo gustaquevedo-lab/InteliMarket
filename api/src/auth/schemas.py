@@ -11,6 +11,18 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=6)
 
 
+class VerifySupervisorRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class VerifySupervisorResponse(BaseModel):
+    valid: bool
+    id: Optional[str] = None
+    nombre: Optional[str] = None
+    rol: Optional[str] = None
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
@@ -37,3 +49,55 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=6)
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: Optional[str] = Field(default=None, min_length=6)
+
+
+class ResetPasswordResponse(BaseModel):
+    temporary_password: Optional[str] = None
+    message: str
+
+
+class AdminCreateUserRequest(BaseModel):
+    email: EmailStr
+    password: Optional[str] = Field(default=None, min_length=6)
+    nombre: str = Field(min_length=2, max_length=100)
+    telefono: Optional[str] = None
+    rol: str = "operador"
+    role_id: Optional[UUID] = None
+
+
+class AdminCreateUserResponse(BaseModel):
+    id: UUID
+    email: str
+    nombre: str
+    rol: str
+    temporary_password: Optional[str] = None
+
+
+class UpdateUserRequest(BaseModel):
+    nombre: Optional[str] = None
+    telefono: Optional[str] = None
+    rol: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class TenantUserResponse(BaseModel):
+    id: UUID
+    email: str
+    nombre: str
+    telefono: Optional[str] = None
+    rol: str
+    activo: bool
+    is_superadmin: bool
+    last_login: Optional[datetime] = None
+    created_at: datetime
+    tenant_rol: str
+    role_names: list[str] = []

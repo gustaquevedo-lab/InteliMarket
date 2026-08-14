@@ -1,6 +1,6 @@
 ﻿import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ShoppingBag, Eye, EyeOff, Loader2, Zap } from "lucide-react"
+import { ShoppingBag, Eye, EyeOff, Loader2 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 
 export default function Login() {
@@ -12,7 +12,7 @@ export default function Login() {
   const [mode, setMode] = useState<"login" | "register">("login")
   const [nombre, setNombre] = useState("")
   const [tenantNombre, setTenantNombre] = useState("")
-  const { login, register, loginDemo } = useAuth()
+  const { login, register } = useAuth()
   const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -141,14 +141,6 @@ export default function Login() {
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={() => { loginDemo(); navigate("/") }}
-              className="btn-outline w-full flex items-center justify-center gap-2 border-green-300 dark:border-green-700 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
-            >
-              <Zap className="w-4 h-4" />
-              Acceso directo (demo)
-            </button>
           </form>
 
           <div className="mt-6 text-center">

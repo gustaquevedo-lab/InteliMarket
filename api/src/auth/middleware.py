@@ -18,18 +18,6 @@ async def get_current_user(
     if not credentials:
         raise HTTPException(status_code=401, detail="No se proporcionó token de autenticación")
 
-    # Acceso directo de demo (ui-web AuthContext.loginDemo) — string fijo, no un
-    # JWT real. Solo el frontend de demo lo emite; no es un login real.
-    if credentials.credentials == "demo-token":
-        return {
-            "id": "00000000-0000-0000-0000-0000000000d1",
-            "email": "demo@intelimarket.py",
-            "nombre": "Demo",
-            "rol": "admin",
-            "company_id": "00000000-0000-0000-0000-000000000010",
-            "tenant_id": "00000000-0000-0000-0000-000000000001",
-        }
-
     try:
         user = get_current_user_from_token(credentials.credentials)
         if "sub" in user and "id" not in user:

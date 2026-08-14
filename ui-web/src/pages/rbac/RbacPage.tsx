@@ -111,7 +111,7 @@ export default function RbacPage() {
       setRoles(rolesData)
       setPermissions(permsData)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver RBAC")
+      toast.error("Error de conexión", "Conectá el backend para ver RBAC")
     } finally {
       setLoading(false)
     }
