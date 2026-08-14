@@ -30,6 +30,8 @@ async def get_accounts_payable(
     if estado and estado != "todos":
         if estado == "vencido":
             where_clauses.append("inv.saldo_pendiente > 0 AND inv.fecha_vencimiento < :today")
+        elif estado == "pendiente":
+            where_clauses.append("inv.saldo_pendiente > 0")
         else:
             where_clauses.append("inv.estado = :estado")
             params["estado"] = estado
@@ -53,7 +55,7 @@ async def get_accounts_payable(
         FROM supplier_invoices inv
         LEFT JOIN suppliers s ON s.id = inv.supplier_id
         WHERE {where_stmt}
-        ORDER BY inv.fecha_vencimiento DESC NULLS LAST
+        ORDER BY inv.saldo_pendiente DESC, inv.fecha_vencimiento ASC NULLS LAST
         LIMIT :limit OFFSET :offset
     """)
 

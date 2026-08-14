@@ -268,7 +268,7 @@ async def get_trial_balance(db: AsyncSession, company_id: str, period_id: str) -
         SELECT 
             COALESCE(a.id::text, gen_random_uuid()::text) as account_id,
             COALESCE(a.codigo_legacy, '0000') as codigo,
-            COALESCE(a.sector, a.rubro, 'Cuenta') as nombre,
+            CASE WHEN a.subrubro IS NOT NULL AND a.subrubro != '' AND a.subrubro != 'INACTIVO' AND UPPER(a.subrubro) != UPPER(a.sector) THEN a.sector || ' — ' || a.subrubro ELSE COALESCE(a.sector, a.rubro, 'Cuenta') END as nombre,
             COALESCE(a.categoria, 'ACTIVO') as tipo,
             COALESCE(SUM(CASE WHEN e.tipo ILIKE '%debe%' OR e.tipo ILIKE '%ingreso%' THEN e.monto ELSE 0 END), 0) as debe,
             COALESCE(SUM(CASE WHEN e.tipo ILIKE '%haber%' OR e.tipo ILIKE '%egreso%' THEN e.monto ELSE 0 END), 0) as haber
@@ -326,7 +326,7 @@ async def get_pnl(db: AsyncSession, company_id: str, period_id: str) -> dict:
         SELECT 
             COALESCE(a.id::text, gen_random_uuid()::text) as account_id,
             COALESCE(a.codigo_legacy, '0000') as codigo,
-            COALESCE(a.sector, a.rubro, 'Cuenta') as nombre,
+            CASE WHEN a.subrubro IS NOT NULL AND a.subrubro != '' AND a.subrubro != 'INACTIVO' AND UPPER(a.subrubro) != UPPER(a.sector) THEN a.sector || ' — ' || a.subrubro ELSE COALESCE(a.sector, a.rubro, 'Cuenta') END as nombre,
             COALESCE(a.categoria, 'GASTO') as categoria,
             COALESCE(SUM(ABS(e.monto)), 0) as total_monto
         FROM general_ledger_entries e
