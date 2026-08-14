@@ -1,5 +1,6 @@
 """Checks/pagares router"""
 
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,17 +26,30 @@ async def create_check(
 async def list_checks(
     customer_id: str | None = Query(None),
     estado: str | None = Query(None),
-    limit: int = Query(50, le=200),
+    tipo: str | None = Query(None),
+    search: str | None = Query(None),
+    vigente_only: bool = Query(False),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_checks(db, user["company_id"], customer_id, estado, limit=limit, offset=offset)
+    return await service.list_checks(
+        db, user["company_id"], customer_id, estado, tipo, search, vigente_only, fecha_desde, fecha_hasta, limit=limit, offset=offset
+    )
 
 
 @router.get("/summary")
-async def get_summary(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
-    return await service.get_checks_summary(db, user["company_id"])
+async def get_summary(
+    vigente_only: bool = Query(False),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_checks_summary(db, user["company_id"], vigente_only, fecha_desde, fecha_hasta)
 
 
 @router.get("/cartera")

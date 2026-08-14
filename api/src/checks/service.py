@@ -55,21 +55,43 @@ async def get_check(db: AsyncSession, check_id: str) -> Check | None:
 
 
 async def list_checks(
-    db: AsyncSession, company_id: str, customer_id: str | None = None,
-    estado: str | None = None, search: str | None = None, limit: int = 200, offset: int = 0,
+    db: AsyncSession,
+    company_id: str,
+    customer_id: str | None = None,
+    estado: str | None = None,
+    tipo: str | None = None,
+    search: str | None = None,
+    vigente_only: bool = False,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[dict]:
-    cid = uuid.UUID(company_id)
     where_clauses = ["ch.company_id = :cid"]
-    params = {"cid": cid, "limit": limit, "offset": offset}
+    params: dict = {"cid": uuid.UUID(company_id), "limit": limit, "offset": offset}
 
     if customer_id:
-        where_clauses.append("ch.customer_id = :customer_id")
-        params["customer_id"] = uuid.UUID(customer_id)
+        where_clauses.append("ch.customer_id = :cust_id")
+        params["cust_id"] = uuid.UUID(customer_id)
     if estado:
         where_clauses.append("ch.estado = :estado")
         params["estado"] = estado
+    if tipo:
+        where_clauses.append("ch.tipo = :tipo")
+        params["tipo"] = tipo
+    if vigente_only:
+        where_clauses.append("ch.fecha_vencimiento >= '2026-01-01'")
+    if fecha_desde:
+        where_clauses.append("ch.fecha_vencimiento >= :f_desde")
+        params["f_desde"] = fecha_desde
+    if fecha_hasta:
+        where_clauses.append("ch.fecha_vencimiento <= :f_hasta")
+        params["f_hasta"] = fecha_hasta
     if search:
-        where_clauses.append("(ch.numero ILIKE :search OR c.razon_social ILIKE :search OR c.ruc ILIKE :search)")
+        where_clauses.append(
+            "(ch.numero ILIKE :search OR ch.banco ILIKE :search OR ch.titular ILIKE :search "
+            "OR c.razon_social ILIKE :search OR c.ruc ILIKE :search OR ch.observaciones ILIKE :search)"
+        )
         params["search"] = f"%{search}%"
 
     where_stmt = " AND ".join(where_clauses)
@@ -79,13 +101,21 @@ async def list_checks(
             ch.id, ch.company_id, ch.customer_id, c.razon_social as customer_name, c.ruc as customer_ruc,
             ch.tipo, ch.numero, ch.banco, ch.titular, ch.monto, ch.moneda,
             ch.fecha_emision, ch.fecha_vencimiento, ch.payment_id, ch.accounts_receivable_id,
-            ch.reemplaza_check_id, ch.estado, ch.observaciones, ch.created_at, ch.updated_at
+            ch.reemplaza_check_id, ch.estado, ch.observaciones, ch.created_at, ch.updated_at,
+            CASE 
+                WHEN ch.fecha_vencimiento IS NOT NULL AND ch.fecha_vencimiento < CURRENT_DATE THEN (CURRENT_DATE - ch.fecha_vencimiento)::int 
+                ELSE 0 
+            END as dias_vencido,
+            CASE 
+                WHEN ch.fecha_vencimiento > CURRENT_DATE THEN (ch.fecha_vencimiento - CURRENT_DATE)::int 
+                ELSE 0 
+            END as dias_para_cobro
         FROM checks ch
         LEFT JOIN customers c ON c.id = ch.customer_id
         WHERE {where_stmt}
         ORDER BY 
-            CASE WHEN ch.fecha_vencimiento IS NOT NULL AND ch.fecha_vencimiento >= '1950-01-01' THEN 0 ELSE 1 END ASC,
-            ch.fecha_vencimiento DESC,
+            CASE WHEN ch.estado = 'rechazado' THEN 0 WHEN ch.estado = 'cartera' THEN 1 WHEN ch.estado = 'depositado' THEN 2 ELSE 3 END ASC,
+            ch.fecha_vencimiento ASC,
             ch.created_at DESC
         LIMIT :limit OFFSET :offset
     """)
@@ -94,34 +124,69 @@ async def list_checks(
     return [dict(r._mapping) for r in rows]
 
 
-async def get_checks_summary(db: AsyncSession, company_id: str) -> dict:
-    query = text("""
+async def get_checks_summary(db: AsyncSession, company_id: str, vigente_only: bool = False, fecha_desde: date | None = None, fecha_hasta: date | None = None) -> dict:
+    where_extra = ""
+    params: dict = {"cid": uuid.UUID(company_id)}
+    if vigente_only:
+        where_extra += " AND fecha_vencimiento >= '2026-01-01'"
+    if fecha_desde:
+        where_extra += " AND fecha_vencimiento >= :f_desde"
+        params["f_desde"] = fecha_desde
+    if fecha_hasta:
+        where_extra += " AND fecha_vencimiento <= :f_hasta"
+        params["f_hasta"] = fecha_hasta
+
+    query = text(f"""
         SELECT 
             COUNT(id) as total_documentos,
-            COALESCE(SUM(CASE WHEN estado IN ('cartera', 'depositado') THEN monto ELSE 0 END), 0) as total_cartera,
-            COALESCE(COUNT(CASE WHEN estado IN ('cartera', 'depositado') THEN id END), 0) as cant_cartera,
-            COALESCE(SUM(CASE WHEN estado = 'rechazado' THEN monto ELSE 0 END), 0) as total_rechazado,
-            COALESCE(COUNT(CASE WHEN estado = 'rechazado' THEN id END), 0) as cant_rechazado,
-            COALESCE(SUM(CASE WHEN estado = 'acreditado' THEN monto ELSE 0 END), 0) as total_acreditado,
-            COALESCE(COUNT(CASE WHEN estado = 'acreditado' THEN id END), 0) as cant_acreditado,
-            COALESCE(SUM(CASE WHEN tipo = 'pagare' AND estado != 'reemplazado' THEN monto ELSE 0 END), 0) as total_pagares
+            
+            -- Cartera (Custodia)
+            COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado = 'cartera' THEN monto ELSE 0 END), 0) as total_cartera,
+            COALESCE(COUNT(CASE WHEN tipo = 'cheque' AND estado = 'cartera' THEN id END), 0) as cant_cartera,
+            COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado = 'cartera' AND fecha_vencimiento <= CURRENT_DATE THEN monto ELSE 0 END), 0) as total_cartera_al_dia,
+            COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado = 'cartera' AND fecha_vencimiento > CURRENT_DATE THEN monto ELSE 0 END), 0) as total_cartera_diferido,
+            
+            -- Depositados (En Clearing Bancario)
+            COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado = 'depositado' THEN monto ELSE 0 END), 0) as total_depositado,
+            COALESCE(COUNT(CASE WHEN tipo = 'cheque' AND estado = 'depositado' THEN id END), 0) as cant_depositado,
+            
+            -- Acreditados (Fondos Cobrados)
+            COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado = 'acreditado' THEN monto ELSE 0 END), 0) as total_acreditado,
+            COALESCE(COUNT(CASE WHEN tipo = 'cheque' AND estado = 'acreditado' THEN id END), 0) as cant_acreditado,
+            
+            -- Rechazados (Riesgo y Deuda Reabierta)
+            COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado = 'rechazado' THEN monto ELSE 0 END), 0) as total_rechazado,
+            COALESCE(COUNT(CASE WHEN tipo = 'cheque' AND estado = 'rechazado' THEN id END), 0) as cant_rechazado,
+            
+            -- Pagarés
+            COALESCE(SUM(CASE WHEN tipo = 'pagare' AND estado IN ('cartera', 'depositado') THEN monto ELSE 0 END), 0) as total_pagares_activos,
+            COALESCE(COUNT(CASE WHEN tipo = 'pagare' AND estado IN ('cartera', 'depositado') THEN id END), 0) as cant_pagares_activos,
+            COALESCE(SUM(CASE WHEN tipo = 'pagare' AND estado = 'rechazado' THEN monto ELSE 0 END), 0) as total_pagares_vencidos,
+            COALESCE(COUNT(CASE WHEN tipo = 'pagare' AND estado = 'rechazado' THEN id END), 0) as cant_pagares_vencidos,
+            COALESCE(SUM(CASE WHEN tipo = 'pagare' THEN monto ELSE 0 END), 0) as total_pagares_historico
         FROM checks
-        WHERE company_id = :cid
+        WHERE company_id = :cid {where_extra}
     """)
-    res = await db.execute(query, {"cid": uuid.UUID(company_id)})
+    res = await db.execute(query, params)
     r = res.fetchone()
     return {
         "total_documentos": int(r.total_documentos or 0),
         "total_cartera": float(r.total_cartera or 0),
         "cant_cartera": int(r.cant_cartera or 0),
-        "total_rechazado": float(r.total_rechazado or 0),
-        "cant_rechazado": int(r.cant_rechazado or 0),
+        "total_cartera_al_dia": float(r.total_cartera_al_dia or 0),
+        "total_cartera_diferido": float(r.total_cartera_diferido or 0),
+        "total_depositado": float(r.total_depositado or 0),
+        "cant_depositado": int(r.cant_depositado or 0),
         "total_acreditado": float(r.total_acreditado or 0),
         "cant_acreditado": int(r.cant_acreditado or 0),
-        "total_pagares": float(r.total_pagares or 0),
+        "total_rechazado": float(r.total_rechazado or 0),
+        "cant_rechazado": int(r.cant_rechazado or 0),
+        "total_pagares_activos": float(r.total_pagares_activos or 0),
+        "cant_pagares_activos": int(r.cant_pagares_activos or 0),
+        "total_pagares_vencidos": float(r.total_pagares_vencidos or 0),
+        "cant_pagares_vencidos": int(r.cant_pagares_vencidos or 0),
+        "total_pagares": float(r.total_pagares_activos or 0),
     }
-
-
 
 async def get_cartera(db: AsyncSession, company_id: str, dias: int = 30) -> list[dict]:
     """Cheques/pagares en cartera o depositados con vencimiento dentro de `dias`

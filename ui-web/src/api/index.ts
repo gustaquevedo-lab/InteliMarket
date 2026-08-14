@@ -462,8 +462,10 @@ export const api = {
       client.post<{ authorization_id: string; credit_account_id: string; monto: number; autorizado_por: string }>(`/v1/credit-accounts/${id}/authorize-excess`, data),
   },
   checks: {
-    summary: () => client.get<any>("/v1/checks/summary"),
-    list: (params?: { customer_id?: string; estado?: string; limit?: number; offset?: number }) => client.get<Check[]>("/v1/checks", params),
+    summary: (params?: { vigente_only?: boolean; fecha_desde?: string; fecha_hasta?: string }) =>
+      client.get<any>("/v1/checks/summary", params),
+    list: (params?: { customer_id?: string; estado?: string; tipo?: string; search?: string; vigente_only?: boolean; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
+      client.get<Check[]>("/v1/checks", params),
     get: (id: string) => client.get<Check>(`/v1/checks/${id}`),
     cartera: (dias?: number) => client.get<Check[]>("/v1/checks/cartera", dias ? { dias } : undefined),
     events: (id: string) => client.get<CheckEvent[]>(`/v1/checks/${id}/events`),
