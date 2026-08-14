@@ -155,9 +155,9 @@ export default function RouteCashSettlementsPage() {
             ) : filtered.slice(0, 200).map(s => (
               <tr key={s.id} className="table-row">
                 <td className="table-td text-gray-500">{formatDate(s.fecha)}</td>
-                <td className="table-td font-mono font-bold text-primary">{s.cobrador_codigo}</td>
-                <td className="table-td font-mono text-gray-400">{s.funcionario_codigo || "—"}</td>
-                <td className="table-td text-right font-mono font-bold">{formatPYG(s.total)}</td>
+                <td className="table-td font-mono font-bold text-primary">{s.funcionario_codigo || s.cobrador_codigo}</td>
+                <td className="table-td font-mono text-gray-400">{s.codigo_legacy || "Ruta"}</td>
+                <td className="table-td text-right font-mono font-bold">{formatPYG(s.a_rendir || s.total)}</td>
                 <td className="table-td text-right font-mono text-blue-500">{formatPYG(s.efectivo)}</td>
                 <td className="table-td text-right font-mono text-amber-500">{s.anticipo > 0 ? formatPYG(s.anticipo) : "—"}</td>
                 <td className="table-td text-right font-mono text-red-500">{s.descuentos > 0 ? formatPYG(s.descuentos) : "—"}</td>

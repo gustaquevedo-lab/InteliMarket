@@ -8,7 +8,7 @@ from decimal import Decimal
 
 
 class CashRegisterCreate(BaseModel):
-    branch_id: UUID
+    branch_id: Optional[UUID] = None
     nombre: str
     tipo: str = "principal"
 
@@ -21,9 +21,9 @@ class CashRegisterUpdate(BaseModel):
 
 class CashRegisterResponse(BaseModel):
     id: UUID
-    branch_id: UUID
+    branch_id: Optional[UUID] = None
     nombre: str
-    tipo: str
+    tipo: Optional[str] = "principal"
     activo: bool
     created_at: datetime
 
