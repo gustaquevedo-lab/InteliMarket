@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/v1/integrated-finance", tags=["integrated-financ
 
 @router.get("/withholding/configs", response_model=list[WithholdingConfigResponse])
 async def list_withholding_configs(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     tipo: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -44,7 +44,7 @@ async def update_withholding_config(config_id: str, body: WithholdingConfigUpdat
 
 
 @router.get("/withholding/dashboard", response_model=WithholdingDashboard)
-async def get_withholding_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_withholding_dashboard(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_withholding_dashboard(db, company_id)
 
 
@@ -52,7 +52,7 @@ async def get_withholding_dashboard(company_id: str = Query(), db: AsyncSession 
 
 @router.get("/withholding/documents", response_model=list[WithholdingDocumentResponse])
 async def list_withholding_documents(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     tipo: str | None = Query(None),
     estado: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
@@ -89,7 +89,7 @@ async def send_withholding_to_sifen(doc_id: str, db: AsyncSession = Depends(get_
 # ── ACCOUNT PLAN ──────────────────────────────────────────────────────────────
 
 @router.get("/account-plan", response_model=list[AccountPlanResponse])
-async def list_account_plans(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def list_account_plans(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.list_account_plans(db, company_id)
 
 
@@ -101,7 +101,7 @@ async def create_account_plan(body: AccountPlanCreate, db: AsyncSession = Depend
 # ── ACCOUNTING PERIODS ────────────────────────────────────────────────────────
 
 @router.get("/accounting/periods", response_model=list[AccountingPeriodResponse])
-async def list_accounting_periods(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def list_accounting_periods(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.list_accounting_periods(db, company_id)
 
 
@@ -122,7 +122,7 @@ async def close_accounting_period(period_id: str, user_id: str | None = Query(No
 
 @router.get("/accounting/entries", response_model=list[AccountingEntryResponse])
 async def list_accounting_entries(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     period_id: str = Query(),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -146,7 +146,7 @@ async def post_accounting_entry(body: AccountingEntryCreate, user_id: str | None
 
 @router.get("/accounting/trial-balance", response_model=dict)
 async def get_trial_balance(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     period_id: str = Query(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -155,7 +155,7 @@ async def get_trial_balance(
 
 @router.get("/accounting/pnl", response_model=dict)
 async def get_pnl(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     period_id: str = Query(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -166,7 +166,7 @@ async def get_pnl(
 
 @router.get("/collection", response_model=list[CollectionActionResponse])
 async def list_collection_actions(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     customer_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -181,7 +181,7 @@ async def create_collection_action(body: CollectionActionCreate, user_id: str | 
 
 
 @router.get("/collection/dashboard", response_model=dict)
-async def get_collection_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_collection_dashboard(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_collection_dashboard(db, company_id)
 
 
@@ -189,7 +189,7 @@ async def get_collection_dashboard(company_id: str = Query(), db: AsyncSession =
 
 @router.get("/scoring", response_model=list[CustomerScoreResponse])
 async def list_customer_scores(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     min_score: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -197,7 +197,7 @@ async def list_customer_scores(
 
 
 @router.get("/scoring/{customer_id}", response_model=CustomerScoreResponse)
-async def get_customer_score(company_id: str = Query(), customer_id: str = Path(), db: AsyncSession = Depends(get_db)):
+async def get_customer_score(company_id: str = Query("00000000-0000-0000-0000-000000000010"), customer_id: str = Path(), db: AsyncSession = Depends(get_db)):
     result = await service.get_customer_score(db, company_id, customer_id)
     if not result:
         raise HTTPException(status_code=404, detail="Score no encontrado. Recalcule primero")
@@ -206,7 +206,7 @@ async def get_customer_score(company_id: str = Query(), customer_id: str = Path(
 
 @router.post("/scoring/{customer_id}/recalculate", response_model=CustomerScoreResponse)
 async def recalculate_score(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     customer_id: str = Path(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -217,7 +217,7 @@ async def recalculate_score(
 
 @router.get("/ebitda", response_model=EbitdaResponse)
 async def get_ebitda(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     periodo: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -228,7 +228,7 @@ async def get_ebitda(
 
 @router.post("/reconciliation/auto", response_model=AutoReconcileResult)
 async def auto_reconcile(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     bank_account_id: str = Query(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -238,5 +238,5 @@ async def auto_reconcile(
 # ── CONSOLIDATED DASHBOARD ────────────────────────────────────────────────────
 
 @router.get("/dashboard", response_model=ConsolidatedDashboard)
-async def get_consolidated_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_consolidated_dashboard(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_consolidated_dashboard(db, company_id)

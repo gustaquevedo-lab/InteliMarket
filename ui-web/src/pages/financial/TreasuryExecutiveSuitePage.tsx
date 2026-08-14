@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react"
 import {
-  Landmark, DollarSign, ArrowUpRight, ArrowDownRight, RefreshCw, CreditCard, ShieldCheck,
-  TrendingUp, Calendar, FileText, PieChart, Layers, Download, CheckCircle, AlertTriangle,
-  Building, Plus, Search, Filter, Lock, ArrowRightLeft, FileSpreadsheet, Sparkles
+  Landmark, DollarSign, ArrowUpRight, ArrowDownRight, RefreshCw, CreditCard,
+  TrendingUp, Calendar, FileText, Plus, Search, Filter, ArrowRightLeft, FileSpreadsheet,
+  Building2, CheckCircle2, ShieldCheck
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -33,30 +33,43 @@ export default function TreasuryExecutiveSuitePage() {
 
   async function loadAllFinancialData() {
     setLoading(true)
+    
+    // Call 1: Banks
     try {
-      // 1. Bank Accounts
-      const banks = await api.financial.banks.list()
+      const banks = await api.financial.banks.list(COMPANY_ID)
       setBanksData(banks || [])
       if (banks && banks.length > 0 && !depositForm.bank_account_id) {
         setDepositForm((prev) => ({ ...prev, bank_account_id: banks[0].id }))
       }
-
-      // 2. Cash Flow Projections & Dashboard
-      const cfDash = await api.financial.cashFlow.dashboard()
-      setCashFlowData(cfDash)
-
-      // 3. EBITDA P&L
-      const eb = await (api as any).integratedFinance.ebitda()
-      setEbitdaData(eb)
-
-      // 4. Consolidated Integrated Finance Dashboard
-      const cDash = await (api as any).integratedFinance.dashboard()
-      setConsolidatedDash(cDash)
-    } catch (err: any) {
-      toast.error("Error", "No se pudieron cargar todos los indicadores de tesorería")
-    } finally {
-      setLoading(false)
+    } catch {
+      setBanksData([])
     }
+
+    // Call 2: Cash Flow
+    try {
+      const cfDash = await api.financial.cashFlow.dashboard(COMPANY_ID)
+      setCashFlowData(cfDash)
+    } catch {
+      setCashFlowData(null)
+    }
+
+    // Call 3: EBITDA P&L
+    try {
+      const eb = await (api as any).integratedFinance.getEbitda(COMPANY_ID)
+      setEbitdaData(eb)
+    } catch {
+      setEbitdaData(null)
+    }
+
+    // Call 4: Consolidated Dashboard
+    try {
+      const cDash = await (api as any).integratedFinance.getDashboard(COMPANY_ID)
+      setConsolidatedDash(cDash)
+    } catch {
+      setConsolidatedDash(null)
+    }
+
+    setLoading(false)
   }
 
   useEffect(() => {
@@ -70,7 +83,7 @@ export default function TreasuryExecutiveSuitePage() {
     }
     setSavingDeposit(true)
     try {
-      await (api as any).financial.banks.importTransactions(depositForm.bank_account_id, [
+      await (api as any).financial.banks.import(depositForm.bank_account_id, [
         {
           fecha: new Date().toISOString().split("T")[0],
           monto: parseFloat(depositForm.monto),
@@ -98,28 +111,21 @@ export default function TreasuryExecutiveSuitePage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white p-6 rounded-2xl shadow-xl border border-slate-800">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-2xl font-black tracking-tight">Suite de Finanzas & Tesorería Enterprise</h1>
-            <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wide flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5" /> Estado del Arte (DNIT PY)
+            <h1 className="text-2xl font-black tracking-tight">Suite de Finanzas & Tesorería</h1>
+            <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs px-3 py-1 rounded-full font-semibold">
+              Consolidado General
             </span>
           </div>
           <p className="text-slate-300 text-sm">
-            Control de cuentas corrientes bancarias, flujo de caja proyectado a 30 días, conciliación e indicadores P&L EBITDA
+            Centro de Control Financiero, Flujo de Caja Proyectado y Cuentas Corrientes Bancarias
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowDepositModal(true)}
-            className="btn-primary text-sm flex items-center gap-2 shadow-lg shadow-primary/20"
-          >
-            <Plus className="w-4 h-4" /> Registrar Boleta de Depósito
-          </button>
-          <button
             onClick={loadAllFinancialData}
-            className="p-2.5 bg-white/10 hover:bg-white/20 rounded-xl transition border border-white/10"
-            title="Actualizar datos"
+            className="px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-semibold transition flex items-center gap-2 border border-white/10"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Actualizar
           </button>
         </div>
       </div>
@@ -132,7 +138,7 @@ export default function TreasuryExecutiveSuitePage() {
             activeTab === "cfo" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
           }`}
         >
-          <TrendingUp className="w-4 h-4" /> Tablero CFO & Flujo de Caja
+          <TrendingUp className="w-4 h-4" /> Resumen Ejecutivo & Flujo de Caja
         </button>
         <button
           onClick={() => setActiveTab("banks")}
@@ -148,7 +154,7 @@ export default function TreasuryExecutiveSuitePage() {
             activeTab === "cajas" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
           }`}
         >
-          <CreditCard className="w-4 h-4" /> Cajas & Rendición de Cobradores
+          <CreditCard className="w-4 h-4" /> Cajas & Rendición de Rutas
         </button>
         <button
           onClick={() => setActiveTab("reconciliation")}
@@ -164,7 +170,7 @@ export default function TreasuryExecutiveSuitePage() {
             activeTab === "reports" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
           }`}
         >
-          <FileSpreadsheet className="w-4 h-4" /> P&L (EBITDA) & Estados DNIT
+          <FileSpreadsheet className="w-4 h-4" /> Estado de Resultados P&L
         </button>
       </div>
 
@@ -181,7 +187,7 @@ export default function TreasuryExecutiveSuitePage() {
               <p className="text-2xl font-black text-slate-900 dark:text-white font-mono">
                 {formatPYG(totalBankBalance)}
               </p>
-              <span className="text-[11px] text-gray-400 mt-1 block">5 cuentas activas en Paraguay</span>
+              <span className="text-[11px] text-gray-400 mt-1 block">5 cuentas corrientes activas</span>
             </div>
 
             <div className="card p-5 border-l-4 border-l-emerald-500 bg-gradient-to-br from-white to-emerald-50/30 dark:from-slate-800 dark:to-slate-800/80">
@@ -192,7 +198,7 @@ export default function TreasuryExecutiveSuitePage() {
               <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
                 {formatPYG(cashFlowData?.saldo_proyectado_30d - totalBankBalance || 0)}
               </p>
-              <span className="text-[11px] text-emerald-600/80 mt-1 block font-medium">Cobranzas AR en agenda</span>
+              <span className="text-[11px] text-emerald-600/80 mt-1 block font-medium">Basado en Cuentas por Cobrar (AR)</span>
             </div>
 
             <div className="card p-5 border-l-4 border-l-indigo-500 bg-gradient-to-br from-white to-indigo-50/30 dark:from-slate-800 dark:to-slate-800/80">
@@ -210,13 +216,13 @@ export default function TreasuryExecutiveSuitePage() {
 
             <div className="card p-5 border-l-4 border-l-amber-500 bg-gradient-to-br from-white to-amber-50/30 dark:from-slate-800 dark:to-slate-800/80">
               <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                <span>Facturas por Cobrar (AR)</span>
+                <span>Ventas Netas del Mes</span>
                 <DollarSign className="w-4 h-4 text-amber-500" />
               </div>
               <p className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono">
-                {formatPYG(consolidatedDash?.ingresos_del_mes || 0)}
+                {formatPYG(ebitdaData?.ingresos_netos || consolidatedDash?.ingresos_del_mes || 0)}
               </p>
-              <span className="text-[11px] text-gray-400 mt-1 block">Facturación acumulada del mes</span>
+              <span className="text-[11px] text-gray-400 mt-1 block">Facturación del período</span>
             </div>
           </div>
 
@@ -228,7 +234,7 @@ export default function TreasuryExecutiveSuitePage() {
                   <Calendar className="w-5 h-5 text-primary" /> Proyección de Flujo de Caja (30 Días)
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Calculado dinámicamente con los vencimientos de cuentas por cobrar y facturas de proveedores
+                  Calculado dinámicamente según vencimientos de cuentas por cobrar (Ventas) y cuentas por pagar (Compras)
                 </p>
               </div>
               <span className="text-xs font-mono font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-3 py-1 rounded-full">
@@ -280,7 +286,7 @@ export default function TreasuryExecutiveSuitePage() {
           <div className="flex justify-between items-center">
             <div>
               <h3 className="font-bold text-lg">Cuentas Corrientes Bancarias de Casa Gonzalito</h3>
-              <p className="text-xs text-gray-500">Bancos autorizados en Paraguay con saldos actualizados en tiempo real</p>
+              <p className="text-xs text-gray-500">Bancos registrados con saldos consolidados</p>
             </div>
             <button onClick={() => setShowDepositModal(true)} className="btn-primary text-sm flex items-center gap-2">
               <Plus className="w-4 h-4" /> Registrar Boleta de Depósito
@@ -323,13 +329,13 @@ export default function TreasuryExecutiveSuitePage() {
       {activeTab === "cajas" && (
         <div className="card p-8 text-center space-y-4">
           <CreditCard className="w-12 h-12 text-primary mx-auto opacity-80" />
-          <h3 className="text-lg font-bold">Módulo de Rendición de Cobradores & Vales de Caja</h3>
+          <h3 className="text-lg font-bold">Arqueo de Cajas & Rendición de Rutas</h3>
           <p className="text-sm text-gray-500 max-w-xl mx-auto">
-            Accedé al panel de Arqueo de Cajas para rendición de planillas de cobranza en ruta, cheques al día vs diferidos y vales de caja chica.
+            Accedé al panel operativo para la rendición diaria de planillas de cobradores y cajas de sucursal.
           </p>
           <div className="pt-2">
             <a href="/caja" className="btn-primary text-sm inline-flex items-center gap-2">
-              Ir a Panel de Arqueo de Cajas
+              Ir a Arqueo de Cajas
             </a>
           </div>
         </div>
@@ -342,12 +348,12 @@ export default function TreasuryExecutiveSuitePage() {
             <ArrowRightLeft className="w-5 h-5 text-primary" /> Conciliación Bancaria Automática
           </h3>
           <p className="text-xs text-gray-500">
-            Cargá el extracto bancario digital en formato CSV o Excel para matchear automáticamente los depósitos y créditos con el ERP.
+            Importación de extractos digitales (Itaú, Sudameris, Continental, ueno) para matcheo automático contra cobros y depósitos del sistema.
           </p>
           <div className="p-8 border-2 border-dashed rounded-xl text-center space-y-3 bg-gray-50 dark:bg-slate-800/40">
             <FileSpreadsheet className="w-10 h-10 text-gray-400 mx-auto" />
             <div>
-              <p className="text-sm font-semibold">Arrastrá aquí tu archivo de Extracto Bancario (Itaú, Sudameris, Continental, ueno)</p>
+              <p className="text-sm font-semibold">Arrastrá aquí el archivo de Extracto Bancario</p>
               <p className="text-xs text-gray-400 mt-1">Formatos compatibles: .CSV, .XLSX, .TXT</p>
             </div>
             <button className="btn-outline text-xs">Seleccionar Archivo de Extracto</button>
@@ -362,10 +368,10 @@ export default function TreasuryExecutiveSuitePage() {
             <div className="flex justify-between items-center border-b pb-4">
               <div>
                 <h3 className="font-bold text-xl text-slate-900 dark:text-white">Estado de Resultados (P&L EBITDA)</h3>
-                <p className="text-xs text-gray-500">Período Fiscal Actual • Normas DNIT / Paraguay</p>
+                <p className="text-xs text-gray-500">Período Fiscal Actual</p>
               </div>
               <span className="text-xs font-mono font-bold bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full">
-                EBITDA Margen: {ebitdaData?.margen_ebitda || 0}%
+                Margen EBITDA: {ebitdaData?.margen_ebitda || 0}%
               </span>
             </div>
 
