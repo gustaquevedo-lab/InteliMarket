@@ -74,8 +74,10 @@ function CierreContableTab() {
     try {
       const ps = await api.integratedFinance.listAccountingPeriods(COMPANY_ID)
       setPeriods(ps)
-      if (ps.length > 0 && !selectedPeriod) {
-        setSelectedPeriod(ps[0].id)
+      if (ps.length > 0) {
+        // Default to August 2026 (current active month) or first open
+        const aug2026 = ps.find((p: any) => p.anio === 2026 && p.mes === 8)
+        setSelectedPeriod(aug2026 ? aug2026.id : ps[0].id)
       }
     } catch (e: any) {
       toast.error("Error", "No se pudieron cargar los períodos contables")
@@ -155,7 +157,7 @@ function CierreContableTab() {
               )}
             </div>
 
-            {trialBalance ? (
+            {trialBalance && trialBalance.items?.length > 0 ? (
               <div className="overflow-x-auto max-h-96 overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead>
@@ -189,7 +191,7 @@ function CierreContableTab() {
                   </tbody>
                 </table>
               </div>
-            ) : <p className="text-gray-400 text-xs py-8 text-center">Sin movimientos contables en este período</p>}
+            ) : <p className="text-gray-400 text-xs py-8 text-center">Sin movimientos contables registrados en este período</p>}
           </div>
 
           {/* Estado de Resultados (PyG) */}
@@ -368,54 +370,54 @@ function RetencionesTab() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Retención IVA Compras (30%)</span>
-            <p className="font-bold text-sm text-gray-900 dark:text-white">Normativa DNIT Gasto Mayorista</p>
-            <span className="text-[10px] text-emerald-600 font-bold">Activo • Tasa 30% del IVA</span>
-          </div>
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Retención IRE Servicios (4.5%)</span>
-            <p className="font-bold text-sm text-gray-900 dark:text-white">Honorarios y Fletes Locales</p>
-            <span className="text-[10px] text-emerald-600 font-bold">Activo • Tasa 4.5%</span>
-          </div>
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Emisión Electrónica DNIT</span>
-            <p className="font-bold text-sm text-gray-900 dark:text-white">Sifen / Tesakã</p>
-            <span className="text-[10px] text-primary font-bold">Validación Automática</span>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {configs.map((cfg, i) => (
+            <div key={i} className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{cfg.categoria || cfg.tipo?.toUpperCase()}</span>
+              <p className="font-bold text-sm text-gray-900 dark:text-white">{cfg.regimen?.toUpperCase()} • Tasa {cfg.tasa}%</p>
+              <span className="text-[10px] text-emerald-600 font-bold">Activo • DNIT</span>
+            </div>
+          ))}
         </div>
       </div>
 
       <div className="card p-5 space-y-3">
-        <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Comprobantes de Retención Emitidos</h4>
+        <div className="flex justify-between items-center">
+          <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Comprobantes de Retención Emitidos ({docs.length})</h4>
+        </div>
         {docs.length === 0 ? (
           <p className="text-gray-400 text-xs py-8 text-center">No hay comprobantes de retención emitidos en el período fiscal actual</p>
         ) : (
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="table-header">
-                <th className="table-cell">Fecha</th>
-                <th className="table-cell">Tipo</th>
-                <th className="table-cell">Comprobante DNIT</th>
-                <th className="table-cell text-right">Base Imponible</th>
-                <th className="table-cell text-right">Retenido (₲)</th>
-                <th className="table-cell text-center">Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {docs.map((d, i) => (
-                <tr key={i} className="table-row">
-                  <td className="table-td">{d.fecha_emision}</td>
-                  <td className="table-td uppercase font-bold">{d.tipo}</td>
-                  <td className="table-td font-mono">{d.numero_documento || "—"}</td>
-                  <td className="table-td text-right font-mono">{formatPYG(d.base_imponible)}</td>
-                  <td className="table-td text-right font-mono font-bold text-red-600">{formatPYG(d.monto_retenido)}</td>
-                  <td className="table-td text-center"><span className="badge-success">{d.estado}</span></td>
+          <div className="overflow-x-auto max-h-96 overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="table-header">
+                  <th className="table-cell">Fecha</th>
+                  <th className="table-cell">Tipo</th>
+                  <th className="table-cell">Comprobante DNIT</th>
+                  <th className="table-cell">CDC Electrónico</th>
+                  <th className="table-cell text-right">Base Imponible</th>
+                  <th className="table-cell text-right">Retenido (₲)</th>
+                  <th className="table-cell text-center">Estado</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {docs.map((d, i) => (
+                  <tr key={i} className="table-row">
+                    <td className="table-td">{d.fecha_emision}</td>
+                    <td className="table-td uppercase font-bold text-primary">{d.tipo}</td>
+                    <td className="table-td font-mono font-bold">{d.numero_documento || "—"}</td>
+                    <td className="table-td font-mono text-[10px] text-gray-400">{d.cdc ? `${d.cdc.slice(0, 16)}...` : "—"}</td>
+                    <td className="table-td text-right font-mono">{formatPYG(d.base_imponible)}</td>
+                    <td className="table-td text-right font-mono font-bold text-emerald-600">{formatPYG(d.monto_retenido)}</td>
+                    <td className="table-td text-center">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 uppercase">{d.estado}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
@@ -430,7 +432,7 @@ function PresupuestosTab() {
   const toast = useToast()
 
   useEffect(() => {
-    api.financial.budgets.vsActual()
+    api.financial.budgets.vsActual("2026-08")
       .then(setBudgetsVsActual)
       .catch(() => toast.error("Error", "No se pudo cargar la ejecución presupuestaria"))
       .finally(() => setLoading(false))
@@ -441,18 +443,18 @@ function PresupuestosTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-gray-500">Ejecución Presupuestaria por Categoría y Centro de Costos</h3>
+        <h3 className="text-sm font-bold uppercase tracking-wider text-gray-500">Ejecución Presupuestaria por Categoría y Centro de Costos (Agosto 2026)</h3>
       </div>
 
       <div className="card overflow-hidden">
         <table className="w-full text-xs">
           <thead>
             <tr className="table-header">
-              <th className="table-cell">Categoría / Rubro</th>
-              <th className="table-cell">Área / Depto</th>
+              <th className="table-cell">Rubro / Partida Presupuestaria</th>
+              <th className="table-cell">Área / Centro de Costos</th>
               <th className="table-cell text-right">Presupuestado (₲)</th>
               <th className="table-cell text-right">Ejecutado Real (₲)</th>
-              <th className="table-cell text-right">Desviación (₲)</th>
+              <th className="table-cell text-right">Saldo Disponible (₲)</th>
               <th className="table-cell text-center">% Ejecución</th>
             </tr>
           </thead>
@@ -460,16 +462,19 @@ function PresupuestosTab() {
             {budgetsVsActual.length === 0 ? (
               <tr><td colSpan={6} className="text-center py-12 text-gray-400">No hay rubros presupuestados registrados</td></tr>
             ) : budgetsVsActual.map((b, i) => {
-              const pct = b.porcentaje_ejecutado || 0
+              const pct = parseFloat(b.porcentaje_ejecutado) || 0
+              const pres = parseFloat(b.monto_presupuestado) || 0
+              const ejec = parseFloat(b.monto_ejecutado) || 0
+              const disp = parseFloat(b.monto_disponible) || 0
               return (
                 <tr key={i} className="table-row">
-                  <td className="table-td font-bold text-gray-900 dark:text-white">{b.categoria}</td>
-                  <td className="table-td text-gray-500 uppercase">{b.area}</td>
-                  <td className="table-td text-right font-mono font-bold">{formatPYG(b.presupuestado)}</td>
-                  <td className="table-td text-right font-mono text-blue-600 dark:text-blue-400 font-bold">{formatPYG(b.ejecutado)}</td>
-                  <td className="table-td text-right font-mono font-bold text-amber-600">{formatPYG(b.diferencia)}</td>
+                  <td className="table-td font-bold text-gray-900 dark:text-white">{b.nombre || b.categoria}</td>
+                  <td className="table-td text-gray-500 uppercase font-medium">{b.area}</td>
+                  <td className="table-td text-right font-mono font-bold">{formatPYG(pres)}</td>
+                  <td className="table-td text-right font-mono text-blue-600 dark:text-blue-400 font-bold">{formatPYG(ejec)}</td>
+                  <td className={`table-td text-right font-mono font-bold ${disp < 0 ? "text-red-500" : "text-emerald-600"}`}>{formatPYG(disp)}</td>
                   <td className="table-td text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${pct > 100 ? "bg-red-100 text-red-800" : "bg-emerald-100 text-emerald-800"}`}>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${pct > 100 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
                       {pct}%
                     </span>
                   </td>

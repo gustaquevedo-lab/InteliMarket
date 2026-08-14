@@ -218,7 +218,7 @@ async def delete_budget(budget_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/budgets/vs-actual", response_model=list[BudgetVsActual])
-async def get_budget_vs_actual(company_id: str = Query("00000000-0000-0000-0000-000000000010"), periodo: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_budget_vs_actual(company_id: str = Query("00000000-0000-0000-0000-000000000010"), periodo: str = Query(default="2026-08"), db: AsyncSession = Depends(get_db)):
     return await service.get_budget_vs_actual(db, company_id, periodo)
 
 
