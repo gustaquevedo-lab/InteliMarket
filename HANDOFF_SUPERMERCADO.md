@@ -84,17 +84,25 @@ Este mismo negocio de InteliMarket tiene **otro agente trabajando en paralelo, e
 
 ---
 
-## 3. ⚠️ ALERTA: hay ~190 archivos sin commitear en la VM
+## 3. Estado de git — ya está todo commiteado (actualizado tras el handoff inicial)
 
-Al momento de escribir esto, `git status` en `~/intelimarket` (rama `vertical/supermercado`) muestra **190 archivos modificados/nuevos sin commitear** (150 modificados, 39 nuevos, 1 borrado). Es el trabajo acumulado de esta sesión (y probablemente de sesiones previas) que nunca se subió a git.
+En la primera versión de este documento había ~190 archivos sin commitear acumulados de esta sesión. El usuario pidió commitearlos antes de cerrar, así que ya están en git, agrupados en 6 commits temáticos sobre `vertical/supermercado` (mirá `git log --oneline -10` al conectarte para confirmar que seguís sobre esa base):
 
-**Esto es un riesgo real de pérdida de trabajo.** No hice commit de todo esto porque la instrucción del usuario para esta sesión fue específicamente "guardá el handoff en el repo", no "commiteá todo lo pendiente" — y la política de este proyecto es no commitear sin que el usuario lo pida explícitamente.
+```
+e735eea fix: barrido general de fabricacion de datos y desconexiones -- Retail Hub, Cold Chain, Shrinkage, PyG Diario, Gerencial (retirado), Transferencias, CRM/Loyalty reales, POS (bypasses de seguridad + fix categoria), navegacion dinamica por vertical, Reportes/Contabilidad Integrada PDF
+8add1f3 fix(supermer): convertir servicios restantes de sync db.query a AsyncSession; fixes operativos en Desposte, Promociones, Retail Hub POS
+98c15ff feat(auth): endpoints de gestion de usuarios, cambio/reset de password, pagina Usuarios; roles de aprobacion RBAC; fix 3 mismatches RBAC frontend/backend; eliminar backdoor de login demo-token
+7429abb feat(compras): overhaul completo state-of-the-art -- motor unico de sugerencias con proveedor/precio real, scorecard de proveedor, costo landed por linea + control 3 vias, rebates de volumen (fix schema commercial_agreements), RFQ/cotizacion comparativa, presupuesto de compras, reportes reales+PDF; fix category_id/categoria_id drift, costeo real de productos, solicitudes de compra
+fd1c336 feat(finanzas): overhaul completo Bancos (conciliacion, posicion de caja, extractos), Cuentas por Pagar (lotes de pago, aprobacion doble firma, presupuestos, auto-factura), Cuentas por Cobrar (pagos con reparto, DSO, scoring), activos fijos, Finance Agent triage
+650ff38 feat(caja): boveda con doble aprobacion en depositos, caja chica completa (fondo, aprobacion por umbral, reposicion, comprobantes, arqueo), reportes PDF de caja
+3b54e1c docs: handoff completo para continuar en Antigravity
+```
 
-**Primera acción recomendada para el próximo agente (o para el usuario cuando vuelva):** revisar `git status` y `git diff --stat`, y decidir junto con el usuario cómo commitear este trabajo (probablemente en varios commits temáticos, seat`git log` reciente para ver el estilo de mensajes que ya se usa en este repo — son commits chicos y descriptivos tipo `fix(modulo): que estaba roto y como se soluciono`).
+**No se pusheó a `origin`** — quedó solo local en la VM (no se pidió pushear, y es una decisión que conviene tomar con el usuario, sobre todo mirando el punto de seguridad de abajo). Si en algún momento hace falta, `git push origin vertical/supermercado` desde la VM.
 
-Este mismo archivo (`HANDOFF_SUPERMERCADO.md`) sí se commiteó individualmente, para que quede visible en el historial aunque el resto no.
+**Se excluyó a propósito** del commit el archivo `.env.sync-override` (queda como no-trackeado en `git status`, contenido inofensivo — solo `APP_DEBUG=false` — pero por convención los `.env.*` no se versionan). Si en algún momento necesitás ese valor, está en el filesystem de la VM, no en git.
 
-Nota aparte de seguridad: `git remote -v` en esta VM muestra la URL de origin con un **token de GitHub embebido en texto plano**. No lo repitas ni lo pegues en ningún lado (chats, código, otros archivos) — si en algún momento tenés oportunidad, comentale al usuario que convendría rotarlo y mover la credencial a un config no versionado/no logueado.
+**Nota de seguridad pendiente:** `git remote -v` en esta VM muestra la URL de `origin` con un **token de GitHub embebido en texto plano**. No lo repitas ni lo pegues en ningún lado (chats, código, otros archivos, ni en un futuro `git push` que quede logueado). Convendría que el usuario rote ese token en algún momento y mueva la credencial a una config no versionada/no logueada (por ejemplo un credential helper o una variable de entorno fuera del repo).
 
 ---
 
