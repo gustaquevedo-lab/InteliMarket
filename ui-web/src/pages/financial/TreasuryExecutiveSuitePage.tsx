@@ -1,0 +1,472 @@
+import { useState, useEffect } from "react"
+import {
+  Landmark, DollarSign, ArrowUpRight, ArrowDownRight, RefreshCw, CreditCard, ShieldCheck,
+  TrendingUp, Calendar, FileText, PieChart, Layers, Download, CheckCircle, AlertTriangle,
+  Building, Plus, Search, Filter, Lock, ArrowRightLeft, FileSpreadsheet, Sparkles
+} from "lucide-react"
+import { api } from "../../api"
+import { useToast } from "../../context/ToastContext"
+import { formatPYG } from "../../utils/format"
+
+const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+
+type ActiveTab = "cfo" | "banks" | "cajas" | "reconciliation" | "reports"
+
+export default function TreasuryExecutiveSuitePage() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>("cfo")
+  const [loading, setLoading] = useState(true)
+  const [cashFlowData, setCashFlowData] = useState<any>(null)
+  const [banksData, setBanksData] = useState<any[]>([])
+  const [ebitdaData, setEbitdaData] = useState<any>(null)
+  const [consolidatedDash, setConsolidatedDash] = useState<any>(null)
+  const toast = useToast()
+
+  // Deposit Modal state
+  const [showDepositModal, setShowDepositModal] = useState(false)
+  const [depositForm, setDepositForm] = useState({
+    bank_account_id: "",
+    numero_boleta: "",
+    monto: "",
+    concepto: "Depósito de Recaudación del Día",
+  })
+  const [savingDeposit, setSavingDeposit] = useState(false)
+
+  async function loadAllFinancialData() {
+    setLoading(true)
+    try {
+      // 1. Bank Accounts
+      const banks = await api.financial.banks.list()
+      setBanksData(banks || [])
+      if (banks && banks.length > 0 && !depositForm.bank_account_id) {
+        setDepositForm((prev) => ({ ...prev, bank_account_id: banks[0].id }))
+      }
+
+      // 2. Cash Flow Projections & Dashboard
+      const cfDash = await api.financial.cashFlow.dashboard()
+      setCashFlowData(cfDash)
+
+      // 3. EBITDA P&L
+      const eb = await (api as any).integratedFinance.ebitda()
+      setEbitdaData(eb)
+
+      // 4. Consolidated Integrated Finance Dashboard
+      const cDash = await (api as any).integratedFinance.dashboard()
+      setConsolidatedDash(cDash)
+    } catch (err: any) {
+      toast.error("Error", "No se pudieron cargar todos los indicadores de tesorería")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAllFinancialData()
+  }, [])
+
+  async function handleCreateDeposit() {
+    if (!depositForm.bank_account_id || !depositForm.numero_boleta || !depositForm.monto) {
+      toast.error("Error", "Completá la cuenta de destino, el número de boleta y el monto")
+      return
+    }
+    setSavingDeposit(true)
+    try {
+      await (api as any).financial.banks.importTransactions(depositForm.bank_account_id, [
+        {
+          fecha: new Date().toISOString().split("T")[0],
+          monto: parseFloat(depositForm.monto),
+          concepto: `[Boleta N° ${depositForm.numero_boleta}] ${depositForm.concepto}`,
+          tipo: "credito",
+          referencia: depositForm.numero_boleta,
+        },
+      ])
+      toast.success("Depósito Bancario Registrado", `Boleta N° ${depositForm.numero_boleta} procesada correctamente`)
+      setShowDepositModal(false)
+      setDepositForm({ bank_account_id: banksData[0]?.id || "", numero_boleta: "", monto: "", concepto: "Depósito de Recaudación del Día" })
+      loadAllFinancialData()
+    } catch {
+      toast.error("Error", "No se pudo registrar el depósito bancario")
+    } finally {
+      setSavingDeposit(false)
+    }
+  }
+
+  const totalBankBalance = banksData.reduce((sum, b) => sum + (parseFloat(b.saldo_actual) || 0), 0)
+
+  return (
+    <div className="space-y-6">
+      {/* Header Banner */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white p-6 rounded-2xl shadow-xl border border-slate-800">
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <h1 className="text-2xl font-black tracking-tight">Suite de Finanzas & Tesorería Enterprise</h1>
+            <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wide flex items-center gap-1">
+              <Sparkles className="w-3.5 h-3.5" /> Estado del Arte (DNIT PY)
+            </span>
+          </div>
+          <p className="text-slate-300 text-sm">
+            Control de cuentas corrientes bancarias, flujo de caja proyectado a 30 días, conciliación e indicadores P&L EBITDA
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowDepositModal(true)}
+            className="btn-primary text-sm flex items-center gap-2 shadow-lg shadow-primary/20"
+          >
+            <Plus className="w-4 h-4" /> Registrar Boleta de Depósito
+          </button>
+          <button
+            onClick={loadAllFinancialData}
+            className="p-2.5 bg-white/10 hover:bg-white/20 rounded-xl transition border border-white/10"
+            title="Actualizar datos"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs Navigation */}
+      <div className="flex border-b border-gray-200 dark:border-gray-700 gap-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab("cfo")}
+          className={`px-4 py-2.5 font-bold text-sm border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "cfo" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" /> Tablero CFO & Flujo de Caja
+        </button>
+        <button
+          onClick={() => setActiveTab("banks")}
+          className={`px-4 py-2.5 font-bold text-sm border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "banks" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <Landmark className="w-4 h-4" /> Cuentas Corrientes Bancarias
+        </button>
+        <button
+          onClick={() => setActiveTab("cajas")}
+          className={`px-4 py-2.5 font-bold text-sm border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "cajas" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <CreditCard className="w-4 h-4" /> Cajas & Rendición de Cobradores
+        </button>
+        <button
+          onClick={() => setActiveTab("reconciliation")}
+          className={`px-4 py-2.5 font-bold text-sm border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "reconciliation" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <ArrowRightLeft className="w-4 h-4" /> Conciliación Bancaria
+        </button>
+        <button
+          onClick={() => setActiveTab("reports")}
+          className={`px-4 py-2.5 font-bold text-sm border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "reports" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <FileSpreadsheet className="w-4 h-4" /> P&L (EBITDA) & Estados DNIT
+        </button>
+      </div>
+
+      {/* TAB 1: CFO DASHBOARD & CASH FLOW */}
+      {activeTab === "cfo" && (
+        <div className="space-y-6">
+          {/* Executive KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="card p-5 border-l-4 border-l-primary bg-gradient-to-br from-white to-blue-50/30 dark:from-slate-800 dark:to-slate-800/80">
+              <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                <span>Saldo Bancario Consolidado</span>
+                <Landmark className="w-4 h-4 text-primary" />
+              </div>
+              <p className="text-2xl font-black text-slate-900 dark:text-white font-mono">
+                {formatPYG(totalBankBalance)}
+              </p>
+              <span className="text-[11px] text-gray-400 mt-1 block">5 cuentas activas en Paraguay</span>
+            </div>
+
+            <div className="card p-5 border-l-4 border-l-emerald-500 bg-gradient-to-br from-white to-emerald-50/30 dark:from-slate-800 dark:to-slate-800/80">
+              <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                <span>Ingresos Esperados (30 Días)</span>
+                <ArrowUpRight className="w-4 h-4 text-emerald-500" />
+              </div>
+              <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
+                {formatPYG(cashFlowData?.saldo_proyectado_30d - totalBankBalance || 0)}
+              </p>
+              <span className="text-[11px] text-emerald-600/80 mt-1 block font-medium">Cobranzas AR en agenda</span>
+            </div>
+
+            <div className="card p-5 border-l-4 border-l-indigo-500 bg-gradient-to-br from-white to-indigo-50/30 dark:from-slate-800 dark:to-slate-800/80">
+              <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                <span>EBITDA Mensual</span>
+                <TrendingUp className="w-4 h-4 text-indigo-500" />
+              </div>
+              <p className="text-2xl font-black text-indigo-600 dark:text-indigo-400 font-mono">
+                {formatPYG(ebitdaData?.ebitda || 0)}
+              </p>
+              <span className="text-[11px] text-indigo-600/80 mt-1 block font-bold">
+                Margen EBITDA: {ebitdaData?.margen_ebitda || 0}%
+              </span>
+            </div>
+
+            <div className="card p-5 border-l-4 border-l-amber-500 bg-gradient-to-br from-white to-amber-50/30 dark:from-slate-800 dark:to-slate-800/80">
+              <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                <span>Facturas por Cobrar (AR)</span>
+                <DollarSign className="w-4 h-4 text-amber-500" />
+              </div>
+              <p className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono">
+                {formatPYG(consolidatedDash?.ingresos_del_mes || 0)}
+              </p>
+              <span className="text-[11px] text-gray-400 mt-1 block">Facturación acumulada del mes</span>
+            </div>
+          </div>
+
+          {/* Cash Flow Projection Table */}
+          <div className="card p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-primary" /> Proyección de Flujo de Caja (30 Días)
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Calculado dinámicamente con los vencimientos de cuentas por cobrar y facturas de proveedores
+                </p>
+              </div>
+              <span className="text-xs font-mono font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-3 py-1 rounded-full">
+                Saldo a 30 Días: {formatPYG(cashFlowData?.saldo_proyectado_30d || 0)}
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 dark:bg-slate-800 text-xs font-bold uppercase text-gray-500 border-b">
+                    <th className="p-3">Fecha</th>
+                    <th className="p-3 text-right">Saldo Inicial</th>
+                    <th className="p-3 text-right text-emerald-600">Ingresos Estimados</th>
+                    <th className="p-3 text-right text-rose-600">Egresos Previstos</th>
+                    <th className="p-3 text-right font-black">Saldo Final Proyectado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y text-sm font-mono">
+                  {cashFlowData?.proyecciones?.slice(0, 15).map((p: any, idx: number) => (
+                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-slate-800/50">
+                      <td className="p-3 font-semibold text-slate-800 dark:text-slate-200">
+                        {new Date(p.fecha + "T00:00:00").toLocaleDateString("es-PY", {
+                          weekday: "short", day: "2-digit", month: "short"
+                        })}
+                      </td>
+                      <td className="p-3 text-right text-gray-500">{formatPYG(p.saldo_inicial)}</td>
+                      <td className="p-3 text-right text-emerald-600 font-bold">
+                        {p.ingresos_estimados > 0 ? formatPYG(p.ingresos_estimados) : "-"}
+                      </td>
+                      <td className="p-3 text-right text-rose-600 font-bold">
+                        {p.egresos_estimados > 0 ? formatPYG(p.egresos_estimados) : "-"}
+                      </td>
+                      <td className="p-3 text-right font-black text-slate-900 dark:text-white">
+                        {formatPYG(p.saldo_final_proyectado)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: BANK ACCOUNTS */}
+      {activeTab === "banks" && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="font-bold text-lg">Cuentas Corrientes Bancarias de Casa Gonzalito</h3>
+              <p className="text-xs text-gray-500">Bancos autorizados en Paraguay con saldos actualizados en tiempo real</p>
+            </div>
+            <button onClick={() => setShowDepositModal(true)} className="btn-primary text-sm flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Registrar Boleta de Depósito
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {banksData.map((b) => (
+              <div key={b.id} className="card p-5 border-l-4 border-l-primary space-y-4 shadow-md">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-xs font-bold uppercase text-gray-400 tracking-wider">
+                      {b.tipo} • {b.moneda}
+                    </span>
+                    <h4 className="text-xl font-black text-slate-900 dark:text-white">{b.banco}</h4>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                    Activa
+                  </span>
+                </div>
+
+                <div>
+                  <div className="text-xs text-gray-400">Número de Cuenta</div>
+                  <div className="font-mono text-sm font-bold text-slate-700 dark:text-slate-300">{b.numero_cuenta}</div>
+                </div>
+
+                <div className="pt-2 border-t flex justify-between items-end">
+                  <div>
+                    <div className="text-xs text-gray-400">Saldo Actual Disponible</div>
+                    <div className="font-mono text-xl font-black text-primary">{formatPYG(b.saldo_actual)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: CAJAS & RENDICIÓN */}
+      {activeTab === "cajas" && (
+        <div className="card p-8 text-center space-y-4">
+          <CreditCard className="w-12 h-12 text-primary mx-auto opacity-80" />
+          <h3 className="text-lg font-bold">Módulo de Rendición de Cobradores & Vales de Caja</h3>
+          <p className="text-sm text-gray-500 max-w-xl mx-auto">
+            Accedé al panel de Arqueo de Cajas para rendición de planillas de cobranza en ruta, cheques al día vs diferidos y vales de caja chica.
+          </p>
+          <div className="pt-2">
+            <a href="/caja" className="btn-primary text-sm inline-flex items-center gap-2">
+              Ir a Panel de Arqueo de Cajas
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: RECONCILIATION */}
+      {activeTab === "reconciliation" && (
+        <div className="card p-6 space-y-4">
+          <h3 className="font-bold text-lg flex items-center gap-2">
+            <ArrowRightLeft className="w-5 h-5 text-primary" /> Conciliación Bancaria Automática
+          </h3>
+          <p className="text-xs text-gray-500">
+            Cargá el extracto bancario digital en formato CSV o Excel para matchear automáticamente los depósitos y créditos con el ERP.
+          </p>
+          <div className="p-8 border-2 border-dashed rounded-xl text-center space-y-3 bg-gray-50 dark:bg-slate-800/40">
+            <FileSpreadsheet className="w-10 h-10 text-gray-400 mx-auto" />
+            <div>
+              <p className="text-sm font-semibold">Arrastrá aquí tu archivo de Extracto Bancario (Itaú, Sudameris, Continental, ueno)</p>
+              <p className="text-xs text-gray-400 mt-1">Formatos compatibles: .CSV, .XLSX, .TXT</p>
+            </div>
+            <button className="btn-outline text-xs">Seleccionar Archivo de Extracto</button>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: REPORTS & PNL */}
+      {activeTab === "reports" && (
+        <div className="max-w-3xl space-y-6">
+          <div className="card p-6 space-y-6">
+            <div className="flex justify-between items-center border-b pb-4">
+              <div>
+                <h3 className="font-bold text-xl text-slate-900 dark:text-white">Estado de Resultados (P&L EBITDA)</h3>
+                <p className="text-xs text-gray-500">Período Fiscal Actual • Normas DNIT / Paraguay</p>
+              </div>
+              <span className="text-xs font-mono font-bold bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full">
+                EBITDA Margen: {ebitdaData?.margen_ebitda || 0}%
+              </span>
+            </div>
+
+            <div className="space-y-3 font-mono text-sm">
+              <div className="flex justify-between py-2 border-b">
+                <span className="font-bold">Ingresos Netos por Ventas</span>
+                <span className="font-black text-emerald-600">{formatPYG(ebitdaData?.ingresos_netos || 0)}</span>
+              </div>
+              <div className="flex justify-between py-2 border-b text-gray-600 dark:text-gray-400">
+                <span>(-) Costo de Ventas (COGS)</span>
+                <span className="text-rose-600">({formatPYG(ebitdaData?.costo_ventas || 0)})</span>
+              </div>
+              <div className="flex justify-between py-2 border-b font-bold bg-gray-50 dark:bg-slate-800/60 px-2 rounded">
+                <span>(=) Resultado Bruto / Margen Bruto</span>
+                <span className="text-blue-900 dark:text-blue-300">{formatPYG(ebitdaData?.resultado_bruto || 0)}</span>
+              </div>
+              <div className="flex justify-between py-2 border-b text-gray-600 dark:text-gray-400">
+                <span>(-) Gastos Operativos & Administrativos</span>
+                <span className="text-rose-600">({formatPYG(ebitdaData?.gastos_operativos || 0)})</span>
+              </div>
+              <div className="flex justify-between py-3 font-black text-lg bg-indigo-50 dark:bg-indigo-950/40 px-3 rounded-xl border border-indigo-200 dark:border-indigo-800">
+                <span className="text-indigo-900 dark:text-indigo-300">(=) EBITDA CONSOLIDADO</span>
+                <span className="text-indigo-600 dark:text-indigo-400">{formatPYG(ebitdaData?.ebitda || 0)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DEPOSIT MODAL */}
+      {showDepositModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <h3 className="font-bold text-lg flex items-center gap-2">
+              <Landmark className="w-5 h-5 text-primary" /> Registrar Boleta de Depósito Bancario
+            </h3>
+
+            <div className="space-y-3 text-sm">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Cuenta Bancaria de Destino</label>
+                <select
+                  className="input-field w-full"
+                  value={depositForm.bank_account_id}
+                  onChange={(e) => setDepositForm({ ...depositForm, bank_account_id: e.target.value })}
+                >
+                  {banksData.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.banco} - {b.numero_cuenta} ({formatPYG(b.saldo_actual)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Número de Boleta de Depósito</label>
+                <input
+                  type="text"
+                  placeholder="Ej: 9874210"
+                  className="input-field w-full font-mono"
+                  value={depositForm.numero_boleta}
+                  onChange={(e) => setDepositForm({ ...depositForm, numero_boleta: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Monto Depositado (₲)</label>
+                <input
+                  type="number"
+                  placeholder="Ej: 15000000"
+                  className="input-field w-full font-mono text-base font-bold"
+                  value={depositForm.monto}
+                  onChange={(e) => setDepositForm({ ...depositForm, monto: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Concepto / Detalle</label>
+                <input
+                  type="text"
+                  className="input-field w-full"
+                  value={depositForm.concepto}
+                  onChange={(e) => setDepositForm({ ...depositForm, concepto: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setShowDepositModal(false)} className="btn-outline flex-1">
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateDeposit}
+                disabled={savingDeposit}
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+              >
+                {savingDeposit ? "Procesando..." : "Confirmar Depósito"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

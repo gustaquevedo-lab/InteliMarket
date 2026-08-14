@@ -1,4 +1,4 @@
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import select, func, and_, text, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
@@ -810,25 +810,17 @@ async def get_consolidated_dashboard(db: AsyncSession, company_id: str) -> dict:
         ar_aging.append({"customer_id": str(row[0]), "estado": row[1], "monto": float(row[2] or 0)})
 
     ap_aging_q = await db.execute(
-        select(
-            func.case(
-                (SupplierInvoice.fecha_vencimiento < today, "vencido"),
-                else_="por_vencer"
-            ),
-            func.sum(SupplierInvoice.saldo_pendiente),
-        ).where(
-            SupplierInvoice.company_id == cid,
-            SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
-        ).group_by(
-            func.case(
-                (SupplierInvoice.fecha_vencimiento < today, "vencido"),
-                else_="por_vencer"
-            ),
-        )
+        text("""
+            SELECT 
+                CASE WHEN fecha_vencimiento < CURRENT_DATE THEN 'vencido' ELSE 'por_vencer' END as estado,
+                COALESCE(SUM(saldo_pendiente), 0) as monto
+            FROM supplier_invoices
+            WHERE company_id = :cid AND estado IN ('pendiente', 'aprobada', 'parcial')
+            GROUP BY 1
+        """),
+        {"cid": cid},
     )
-    ap_aging = []
-    for row in ap_aging_q:
-        ap_aging.append({"estado": row[0], "monto": float(row[1] or 0)})
+    ap_aging = [{"estado": row.estado, "monto": float(row.monto or 0)} for row in ap_aging_q.fetchall()]
 
     ebitda = 0
     ebitda_margin = 0

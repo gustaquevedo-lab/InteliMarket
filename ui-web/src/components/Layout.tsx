@@ -123,6 +123,7 @@ const navGroups: NavGroup[] = [
   {
     title: "Finanzas & Tesorería",
     items: [
+      { icon: Sparkles, label: "Suite Finanzas & Tesorería", path: "/tesoreria" },
       { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
       { icon: Banknote, label: "Arqueo de Caja", path: "/caja" },
       { icon: Truck, label: "Liquidación Cobradores", path: "/route-cash-settlements" },

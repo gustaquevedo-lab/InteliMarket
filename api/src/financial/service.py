@@ -1,6 +1,6 @@
 """Financial service — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
@@ -508,31 +508,32 @@ async def generate_projection(db: AsyncSession, company_id: str, dias: int = 90)
     saldo_bancario = Decimal(str(accounts_result.scalar() or "0"))
 
     ap_result = await db.execute(
-        select(SupplierInvoice).where(
-            SupplierInvoice.company_id == cid,
-            SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
-        )
+        text("""
+            SELECT fecha_vencimiento, SUM(saldo_pendiente) as total_saldo
+            FROM supplier_invoices
+            WHERE company_id = :cid AND estado IN ('pendiente', 'aprobada', 'parcial') AND fecha_vencimiento IS NOT NULL
+            GROUP BY fecha_vencimiento
+        """),
+        {"cid": cid},
     )
-    ap_invoices = list(ap_result.scalars().all())
-    ap_due = {}
-    for inv in ap_invoices:
-        fv = inv.fecha_vencimiento
-        if fv not in ap_due:
-            ap_due[fv] = Decimal("0")
-        ap_due[fv] += inv.saldo_pendiente or Decimal("0")
+    ap_due = {row.fecha_vencimiento: Decimal(str(row.total_saldo or 0)) for row in ap_result.fetchall()}
 
-    ar_invoices_raw = await db.execute(
-        select(SupplierInvoice).where(
-            SupplierInvoice.company_id == cid,
-            SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
-        )
+    ar_result = await db.execute(
+        text("""
+            SELECT fecha_vencimiento, SUM(saldo_pendiente) as total_saldo
+            FROM accounts_receivable
+            WHERE company_id = :cid AND estado = 'pendiente' AND fecha_vencimiento IS NOT NULL
+            GROUP BY fecha_vencimiento
+        """),
+        {"cid": cid},
     )
+    ar_due = {row.fecha_vencimiento: Decimal(str(row.total_saldo or 0)) for row in ar_result.fetchall()}
 
     projections = []
     running_balance = saldo_bancario
     for i in range(dias):
         day = today + timedelta(days=i)
-        ingresos = Decimal("0")
+        ingresos = ar_due.get(day, Decimal("0"))
         egresos = ap_due.get(day, Decimal("0"))
 
         projected = running_balance + ingresos - egresos
