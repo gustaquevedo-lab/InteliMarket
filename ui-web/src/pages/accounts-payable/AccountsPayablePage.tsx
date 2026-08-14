@@ -487,63 +487,199 @@ export default function AccountsPayablePage() {
         </div>
       )}
 
-      {/* Invoice Detail Modal */}
+      {/* Invoice Detail Modal - Full Debt & Items Breakdown */}
       {selectedInvoice && (
         <div className="modal-overlay" onClick={() => setSelectedInvoice(null)}>
-          <div className="modal-content max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-primary">Comprobante de Proveedor</span>
-                <h3 className="text-xl font-bold font-mono text-gray-900 dark:text-white mt-1">
-                  Factura N° {selectedInvoice.numero_factura}
-                </h3>
-              </div>
-              <button onClick={() => setSelectedInvoice(null)} className="btn-ghost"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-6 space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Proveedor</span>
-                  <p className="font-bold text-gray-900 dark:text-white">{selectedInvoice.supplier_name}</p>
-                  <p className="font-mono text-gray-500">RUC: {selectedInvoice.supplier_ruc || "Sin RUC"}</p>
+          <div className="modal-content max-w-4xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-gray-900 via-slate-900 to-indigo-950 text-white rounded-t-xl">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className="p-3 bg-amber-500/20 rounded-xl border border-amber-400/30">
+                    <FileText className="w-7 h-7 text-amber-400" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-400/20">
+                        Detalle de Obligación & Factura Proveedor
+                      </span>
+                      {selectedInvoice.dias_mora > 0 && (
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
+                          {selectedInvoice.dias_mora} días de mora
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-2xl font-black font-mono text-white mt-1">
+                      Factura N° {selectedInvoice.numero_factura || "Legacy"}
+                    </h3>
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-gray-300 mt-1.5">
+                      <span className="flex items-center gap-1.5 font-bold text-white">
+                        <Building2 className="w-3.5 h-3.5 text-amber-400" />
+                        {selectedInvoice.supplier_name || "Proveedor sin nombre"}
+                      </span>
+                      <span>·</span>
+                      <span className="font-mono text-gray-400">RUC: {selectedInvoice.supplier_ruc || "Sin RUC"}</span>
+                      {selectedInvoice.supplier_direccion && (
+                        <>
+                          <span>·</span>
+                          <span className="text-gray-400">{selectedInvoice.supplier_direccion}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-gray-400 block text-[10px] uppercase font-bold">Emisión / Vencimiento</span>
-                  <p className="font-mono text-gray-900 dark:text-white">{formatDate(selectedInvoice.fecha_emision)} ➔ {formatDate(selectedInvoice.fecha_vencimiento)}</p>
-                  <p className="font-bold text-amber-500 mt-1">Saldo: {formatPYG(selectedInvoice.saldo_pendiente)}</p>
+
+                <button onClick={() => setSelectedInvoice(null)} className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition-all">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6 text-xs">
+              {/* Financial Debt Breakdown Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="card p-3.5 border-l-4 border-l-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
+                  <span className="text-gray-400 text-[10px] uppercase font-black tracking-widest block mb-1">Monto Original</span>
+                  <p className="text-base font-black font-mono text-blue-900 dark:text-blue-200">{formatPYG(selectedInvoice.monto_original)}</p>
+                  <span className="text-[10px] text-gray-400 mt-1 block">Total facturado</span>
+                </div>
+
+                <div className="card p-3.5 border-l-4 border-l-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20">
+                  <span className="text-gray-400 text-[10px] uppercase font-black tracking-widest block mb-1">Total Amortizado</span>
+                  <p className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(selectedInvoice.monto_amortizado || 0)}</p>
+                  <span className="text-[10px] text-emerald-600 mt-1 block font-semibold">Pagos registrados</span>
+                </div>
+
+                <div className="card p-3.5 border-l-4 border-l-amber-500 bg-amber-50/50 dark:bg-amber-950/20">
+                  <span className="text-gray-400 text-[10px] uppercase font-black tracking-widest block mb-1">Saldo Pendiente Exigible</span>
+                  <p className="text-base font-black font-mono text-amber-600 dark:text-amber-400">{formatPYG(selectedInvoice.saldo_pendiente)}</p>
+                  <span className="text-[10px] text-amber-600/80 mt-1 block font-bold">Deuda viva actual</span>
+                </div>
+
+                <div className="card p-3.5 border-l-4 border-l-purple-500 bg-purple-50/50 dark:bg-purple-950/20">
+                  <span className="text-gray-400 text-[10px] uppercase font-black tracking-widest block mb-1">Vencimiento</span>
+                  <p className="text-base font-bold font-mono text-purple-900 dark:text-purple-200">
+                    {selectedInvoice.fecha_vencimiento ? formatDate(selectedInvoice.fecha_vencimiento) : "—"}
+                  </p>
+                  <span className="text-[10px] text-gray-400 mt-1 block">Emisión: {formatDate(selectedInvoice.fecha_emision)}</span>
                 </div>
               </div>
 
-              {selectedInvoice.items && selectedInvoice.items.length > 0 && (
-                <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden mt-4">
+              {/* Items Table */}
+              <div className="card p-5 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-gray-700">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-gray-900 dark:text-white flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-primary" />
+                    Detalle de Mercaderías & Insumos ({selectedInvoice.items?.length || 0} ítems)
+                  </h4>
+                  <span className="text-[10px] text-gray-400 font-mono">Moneda: {selectedInvoice.moneda || "PYG (₲)"}</span>
+                </div>
+
+                <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="table-header">
-                        <th className="table-cell">Ítem</th>
-                        <th className="table-cell text-right">Cant.</th>
-                        <th className="table-cell text-right">Precio Unit.</th>
+                        <th className="table-cell">Código / SKU</th>
+                        <th className="table-cell">Descripción del Producto</th>
+                        <th className="table-cell text-right">Cantidad</th>
+                        <th className="table-cell text-right">Precio Unitario</th>
+                        <th className="table-cell text-center">IVA</th>
                         <th className="table-cell text-right">Subtotal</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {selectedInvoice.items.map((it: any, idx: number) => (
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {selectedInvoice.items?.map((it: any, idx: number) => (
                         <tr key={idx} className="table-row">
-                          <td className="table-td">{it.descripcion || "Mercadería"}</td>
-                          <td className="table-td text-right font-mono">{it.cantidad}</td>
+                          <td className="table-td font-mono font-bold text-primary">{it.sku || "-"}</td>
+                          <td className="table-td font-medium text-gray-900 dark:text-white">{it.descripcion}</td>
+                          <td className="table-td text-right font-mono font-bold">{Math.round(it.cantidad || 1)}</td>
                           <td className="table-td text-right font-mono">{formatPYG(it.precio_unitario)}</td>
-                          <td className="table-td text-right font-mono font-bold">{formatPYG(it.subtotal)}</td>
+                          <td className="table-td text-center font-mono text-[11px] text-gray-500">{it.iva_tasa || 10}%</td>
+                          <td className="table-td text-right font-mono font-bold text-gray-900 dark:text-white">{formatPYG(it.subtotal)}</td>
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-50 dark:bg-slate-800/80 font-bold border-t border-gray-200 dark:border-gray-700">
+                        <td colSpan={5} className="p-3 text-right text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300">Total Comprobante Proveedor:</td>
+                        <td className="p-3 text-right font-mono font-black text-sm text-primary">{formatPYG(selectedInvoice.monto_original)}</td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
-              )}
+              </div>
+
+              {/* Payments History & Other Supplier Invoices Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Payments History */}
+                <div className="card p-4 space-y-3">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    Historial de Pagos & Recibos Emitidos
+                  </h4>
+                  {selectedInvoice.pagos && selectedInvoice.pagos.length > 0 ? (
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {selectedInvoice.pagos.map((p: any) => (
+                        <div key={p.id} className="p-2.5 bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 rounded-lg flex justify-between items-center">
+                          <div>
+                            <span className="font-bold text-emerald-800 dark:text-emerald-300 block">{p.payment_method.toUpperCase()} · Ref: {p.referencia}</span>
+                            <span className="text-[10px] text-gray-400 font-mono">{formatDate(p.fecha_pago)}</span>
+                          </div>
+                          <span className="font-mono font-bold text-emerald-600">{formatPYG(p.monto)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-center py-5 text-gray-400">Sin pagos parciales ni recibos aplicados a esta factura</p>
+                  )}
+                </div>
+
+                {/* Other Pending Invoices from Same Supplier */}
+                <div className="card p-4 space-y-3">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-amber-500" />
+                    Otras Facturas Pendientes de {selectedInvoice.supplier_name?.split(" ")[0]}
+                  </h4>
+                  {selectedInvoice.otras_facturas_proveedor && selectedInvoice.otras_facturas_proveedor.length > 0 ? (
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {selectedInvoice.otras_facturas_proveedor.map((o: any) => (
+                        <div key={o.id} className="p-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg flex justify-between items-center text-[11px]">
+                          <div>
+                            <span className="font-mono font-bold text-gray-800 dark:text-gray-200 block">Factura N° {o.numero_factura}</span>
+                            <span className="text-[10px] text-gray-400">Vence: {formatDate(o.fecha_vencimiento)}</span>
+                          </div>
+                          <span className="font-mono font-bold text-amber-600">{formatPYG(o.saldo_pendiente)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-center py-5 text-gray-400">No hay otras facturas pendientes con este proveedor</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
+                <button onClick={() => setSelectedInvoice(null)} className="btn-ghost">Cerrar</button>
+                <button
+                  onClick={() => {
+                    const suppId = selectedInvoice.supplier_id
+                    setSelectedInvoice(null)
+                    setShowPaymentModal(true)
+                    if (suppId) handleSelectPaymentSupplier(suppId)
+                  }}
+                  className="btn-primary flex items-center gap-2 text-xs"
+                >
+                  <FileCheck className="w-4 h-4" />
+                  <span>Emitir Pago a este Proveedor</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Payment Order Modal */}
+{/* Payment Order Modal */}
       {showPaymentModal && (
         <div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
           <div className="modal-content max-w-3xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>

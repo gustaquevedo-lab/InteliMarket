@@ -173,9 +173,11 @@ async def get_ap_summary(db: AsyncSession, company_id: str) -> Dict[str, Any]:
 async def get_ap_document_detail(db: AsyncSession, company_id: str, document_id: str) -> Dict[str, Any]:
     query = text("""
         SELECT 
-            inv.id, inv.company_id, inv.supplier_id, s.razon_social as supplier_name, s.ruc as supplier_ruc, s.direccion as supplier_direccion,
+            inv.id, inv.company_id, inv.supplier_id, s.razon_social as supplier_name, s.ruc as supplier_ruc, 
+            s.direccion as supplier_direccion, s.telefono as supplier_telefono, s.email as supplier_email,
             inv.numero_factura, inv.timbrado, inv.cdc, inv.fecha_emision, inv.fecha_vencimiento, inv.moneda,
             inv.total as monto_original, inv.saldo_pendiente, inv.condicion, inv.estado, inv.concepto, inv.notas,
+            inv.purchase_order_id, inv.receipt_id,
             CASE WHEN inv.fecha_vencimiento IS NULL THEN 0 ELSE (:today - inv.fecha_vencimiento)::int END as dias_mora
         FROM supplier_invoices inv
         LEFT JOIN suppliers s ON s.id = inv.supplier_id
@@ -188,19 +190,97 @@ async def get_ap_document_detail(db: AsyncSession, company_id: str, document_id:
         return {}
 
     doc_dict = dict(doc._mapping)
-    items = [{
-        "id": str(doc.id),
-        "descripcion": f"Factura Proveedor {doc.numero_factura or 'Legacy'} - {doc.concepto or 'Mercaderías Insumos'}",
-        "cantidad": 1,
-        "precio_unitario": float(doc.monto_original),
-        "iva_tasa": 10,
-        "iva_monto": round(float(doc.monto_original) * 0.1),
-        "total": float(doc.monto_original)
-    }]
+    monto_orig = float(doc.monto_original or 0)
+    saldo_pend = float(doc.saldo_pendiente or 0)
+    monto_amortizado = max(0.0, monto_orig - saldo_pend)
+    doc_dict["monto_amortizado"] = monto_amortizado
+
+    # Fetch detailed purchase items
+    items = []
+    if doc.purchase_order_id:
+        q_items = text("""
+            SELECT poi.id, COALESCE(p.sku, 'SKU-' || SUBSTRING(poi.id::text, 1, 4)) as sku,
+                   COALESCE(p.nombre, poi.descripcion, 'Mercadería Insumo') as descripcion,
+                   poi.cantidad,
+                   CASE WHEN poi.precio_unitario > 0 THEN poi.precio_unitario ELSE round(:total / GREATEST(poi.cantidad, 1), 0) END as precio_unitario,
+                   COALESCE(poi.iva_tasa, 10) as iva_tasa,
+                   CASE WHEN poi.total > 0 THEN poi.total ELSE round(poi.cantidad * (:total / GREATEST(poi.cantidad, 1)), 0) END as subtotal
+            FROM purchase_order_items poi
+            LEFT JOIN products p ON p.id = poi.product_id
+            WHERE poi.purchase_order_id = :poid
+        """)
+        rows = (await db.execute(q_items, {"poid": str(doc.purchase_order_id), "total": monto_orig})).fetchall()
+        items = [
+            {
+                "id": str(r.id),
+                "sku": r.sku,
+                "descripcion": r.descripcion,
+                "cantidad": float(r.cantidad or 1),
+                "precio_unitario": float(r.precio_unitario or 0),
+                "iva_tasa": float(r.iva_tasa or 10),
+                "subtotal": float(r.subtotal or 0),
+            }
+            for r in rows
+        ]
+
+    if not items:
+        items = [{
+            "id": str(doc.id),
+            "sku": "FAC-" + str(doc.numero_factura or "101")[:6],
+            "descripcion": f"Factura Proveedor N° {doc.numero_factura or 'Legacy'} — {doc.concepto or 'Mercaderías Insumos y Reposición'}",
+            "cantidad": 1.0,
+            "precio_unitario": monto_orig,
+            "iva_tasa": 10.0,
+            "subtotal": monto_orig,
+        }]
 
     doc_dict["items"] = items
-    return doc_dict
 
+    # Fetch registered payments
+    q_payments = text("""
+        SELECT id, fecha_pago, monto, payment_method, referencia, estado
+        FROM supplier_invoice_payments
+        WHERE invoice_id = :doc_id
+        ORDER BY fecha_pago DESC
+    """)
+    p_rows = (await db.execute(q_payments, {"doc_id": document_id})).fetchall()
+    doc_dict["pagos"] = [
+        {
+            "id": str(p.id),
+            "fecha_pago": str(p.fecha_pago),
+            "monto": float(p.monto or 0),
+            "payment_method": p.payment_method or "transferencia",
+            "referencia": p.referencia or "S/Ref",
+            "estado": p.estado or "confirmado",
+        }
+        for p in p_rows
+    ]
+
+    # Fetch other pending invoices from same supplier
+    if doc.supplier_id:
+        q_other = text("""
+            SELECT id, numero_factura, fecha_emision, fecha_vencimiento, total, saldo_pendiente
+            FROM supplier_invoices
+            WHERE supplier_id = :supp_id AND company_id = :cid AND saldo_pendiente > 0 AND id != :doc_id
+            ORDER BY saldo_pendiente DESC
+            LIMIT 5
+        """)
+        other_rows = (await db.execute(q_other, {"supp_id": str(doc.supplier_id), "cid": company_id, "doc_id": document_id})).fetchall()
+        doc_dict["otras_facturas_proveedor"] = [
+            {
+                "id": str(o.id),
+                "numero_factura": o.numero_factura,
+                "fecha_emision": str(o.fecha_emision),
+                "fecha_vencimiento": str(o.fecha_vencimiento),
+                "total": float(o.total or 0),
+                "saldo_pendiente": float(o.saldo_pendiente or 0),
+            }
+            for o in other_rows
+        ]
+    else:
+        doc_dict["otras_facturas_proveedor"] = []
+
+    return doc_dict
 
 async def create_ap_payment_order(db: AsyncSession, company_id: str, data: dict) -> dict:
     invoice_ids = data.get("invoice_ids", [])
