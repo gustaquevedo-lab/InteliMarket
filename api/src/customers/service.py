@@ -181,61 +181,63 @@ async def list_consolidated_debts(
         search_filter = "AND (c.razon_social ILIKE :search OR c.ruc ILIKE :search OR c.ci ILIKE :search)"
         params["search"] = f"%{search}%"
 
-    having_clauses = []
+    where_clauses = []
     if solo_con_deuda:
-        having_clauses.append("(COALESCE(ar.facturas_pendiente, 0) + COALESCE(ch.cheques_cartera, 0) + COALESCE(ch.cheques_rechazados, 0) + COALESCE(ch.pagares, 0)) > 0")
+        where_clauses.append("deuda_total > 0")
     if solo_con_rechazados:
-        having_clauses.append("COALESCE(ch.cheques_rechazados, 0) > 0")
+        where_clauses.append("cheques_rechazados > 0")
 
-    having_str = "HAVING " + " AND ".join(having_clauses) if having_clauses else ""
+    where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
     query = text(f"""
-        SELECT 
-            c.id as customer_id,
-            c.razon_social,
-            c.ruc,
-            c.telefono,
-            COALESCE(ar.facturas_pendiente, 0) as facturas_pendiente,
-            COALESCE(ar.monto_vencido, 0) as monto_vencido,
-            COALESCE(ar.dias_mora_max, 0) as dias_mora_max,
-            COALESCE(ch.cheques_cartera, 0) as cheques_cartera,
-            COALESCE(ch.cheques_rechazados, 0) as cheques_rechazados,
-            COALESCE(ch.pagares, 0) as pagares,
-            (COALESCE(ar.facturas_pendiente, 0) + COALESCE(ch.cheques_cartera, 0) + COALESCE(ch.cheques_rechazados, 0) + COALESCE(ch.pagares, 0)) as deuda_total,
-            COALESCE(ca.limite_credito, c.credito_limite, 0) as limite_credito,
-            COALESCE(ca.saldo_disponible, 0) as saldo_disponible,
-            s.last_numero, s.last_fecha, s.last_total
-        FROM customers c
-        LEFT JOIN (
-            SELECT customer_id,
-                   SUM(saldo_pendiente) as facturas_pendiente,
-                   SUM(CASE WHEN fecha_vencimiento < CURRENT_DATE THEN saldo_pendiente ELSE 0 END) as monto_vencido,
-                   MAX(CASE WHEN fecha_vencimiento < CURRENT_DATE THEN (CURRENT_DATE - fecha_vencimiento) ELSE 0 END) as dias_mora_max
-            FROM accounts_receivable
-            WHERE estado = 'pendiente'
-            GROUP BY customer_id
-        ) ar ON ar.customer_id = c.id
-        LEFT JOIN (
-            SELECT customer_id,
-                   SUM(CASE WHEN tipo = 'cheque' AND estado IN ('cartera', 'depositado') THEN monto ELSE 0 END) as cheques_cartera,
-                   SUM(CASE WHEN tipo = 'cheque' AND estado = 'rechazado' THEN monto ELSE 0 END) as cheques_rechazados,
-                   SUM(CASE WHEN tipo = 'pagare' AND estado IN ('cartera', 'depositado', 'rechazado') THEN monto ELSE 0 END) as pagares
-            FROM checks
-            GROUP BY customer_id
-        ) ch ON ch.customer_id = c.id
-        LEFT JOIN credit_accounts ca ON ca.customer_id = c.id
-        LEFT JOIN LATERAL (
-            SELECT numero as last_numero, fecha as last_fecha, total as last_total
-            FROM sales
-            WHERE customer_id = c.id AND company_id = :company_id
-            ORDER BY fecha DESC LIMIT 1
-        ) s ON true
-        WHERE c.company_id = :company_id {search_filter}
-        {having_str}
+        WITH debt_calc AS (
+            SELECT 
+                c.id as customer_id,
+                c.razon_social,
+                c.ruc,
+                c.telefono,
+                COALESCE(ar.facturas_pendiente, 0) as facturas_pendiente,
+                COALESCE(ar.monto_vencido, 0) as monto_vencido,
+                COALESCE(ar.dias_mora_max, 0) as dias_mora_max,
+                COALESCE(ch.cheques_cartera, 0) as cheques_cartera,
+                COALESCE(ch.cheques_rechazados, 0) as cheques_rechazados,
+                COALESCE(ch.pagares, 0) as pagares,
+                (COALESCE(ar.facturas_pendiente, 0) + COALESCE(ch.cheques_cartera, 0) + COALESCE(ch.cheques_rechazados, 0) + COALESCE(ch.pagares, 0)) as deuda_total,
+                COALESCE(ca.limite_credito, c.credito_limite, 0) as limite_credito,
+                COALESCE(ca.saldo_disponible, 0) as saldo_disponible,
+                s.last_numero, s.last_fecha, s.last_total
+            FROM customers c
+            LEFT JOIN (
+                SELECT customer_id,
+                       SUM(saldo_pendiente) as facturas_pendiente,
+                       SUM(CASE WHEN fecha_vencimiento < CURRENT_DATE THEN saldo_pendiente ELSE 0 END) as monto_vencido,
+                       MAX(CASE WHEN fecha_vencimiento < CURRENT_DATE THEN (CURRENT_DATE - fecha_vencimiento) ELSE 0 END) as dias_mora_max
+                FROM accounts_receivable
+                WHERE estado = 'pendiente'
+                GROUP BY customer_id
+            ) ar ON ar.customer_id = c.id
+            LEFT JOIN (
+                SELECT customer_id,
+                       SUM(CASE WHEN tipo = 'cheque' AND estado IN ('cartera', 'depositado') THEN monto ELSE 0 END) as cheques_cartera,
+                       SUM(CASE WHEN tipo = 'cheque' AND estado = 'rechazado' THEN monto ELSE 0 END) as cheques_rechazados,
+                       SUM(CASE WHEN tipo = 'pagare' AND estado IN ('cartera', 'depositado', 'rechazado') THEN monto ELSE 0 END) as pagares
+                FROM checks
+                GROUP BY customer_id
+            ) ch ON ch.customer_id = c.id
+            LEFT JOIN credit_accounts ca ON ca.customer_id = c.id
+            LEFT JOIN LATERAL (
+                SELECT numero as last_numero, fecha as last_fecha, total as last_total
+                FROM sales
+                WHERE customer_id = c.id AND company_id = :company_id
+                ORDER BY fecha DESC LIMIT 1
+            ) s ON true
+            WHERE c.company_id = :company_id {search_filter}
+        )
+        SELECT * FROM debt_calc
+        {where_str}
         ORDER BY deuda_total DESC
         LIMIT :limit OFFSET :offset
     """)
-
     res = await db.execute(query, params)
     rows = res.fetchall()
 

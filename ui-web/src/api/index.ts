@@ -350,6 +350,8 @@ export const api = {
     update: (id: string, data: Partial<Customer>) => client.patch<Customer>(`/v1/customers/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/customers/${id}`),
     field360: (id: string) => client.get<CustomerField360>(`/v1/companies/${COMPANY_ID}/customers/${id}/360`),
+    consolidatedDebts: (companyId?: string, params?: { search?: string; solo_con_deuda?: boolean; solo_con_rechazados?: boolean; limit?: number; offset?: number }) => client.get<any>(`/v1/companies/${companyId || COMPANY_ID}/customers/consolidated-debts`, params as any),
+    customerConsolidatedDebt: (companyId: string, customerId: string) => client.get<any>(`/v1/companies/${companyId || COMPANY_ID}/customers/${customerId}/consolidated-debt`),
   },
   sales: {
     list: (params?: { fecha_desde?: string; fecha_hasta?: string; estado?: string; numero?: string; limit?: number; offset?: number }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
