@@ -31,6 +31,34 @@ async def list_customers(
     return await service.list_customers(db, company_id, search, activo, limit, offset)
 
 
+@router.get("/companies/{company_id}/customers/consolidated-debts")
+async def list_consolidated_debts(
+    company_id: str,
+    search: str | None = Query(None),
+    solo_con_deuda: bool = Query(False),
+    solo_con_rechazados: bool = Query(False),
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.list_consolidated_debts(
+        db, company_id, search=search, solo_con_deuda=solo_con_deuda,
+        solo_con_rechazados=solo_con_rechazados, limit=limit, offset=offset,
+    )
+
+
+@router.get("/companies/{company_id}/customers/{customer_id}/consolidated-debt")
+async def get_customer_consolidated_debt(
+    company_id: str,
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    data = await service.get_customer_consolidated_debt(db, company_id, customer_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return data
+
+
 @router.get("/customers/{customer_id}", response_model=CustomerResponse)
 async def get_customer(customer_id: str, db: AsyncSession = Depends(get_db)):
     customer = await service.get_customer(db, customer_id)
@@ -56,9 +84,6 @@ async def delete_customer(customer_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/companies/{company_id}/customers/{customer_id}/360")
 async def get_customer_field_360(company_id: str, customer_id: str, db: AsyncSession = Depends(get_db)):
-    """Vista 360 de campo: la misma que ve el vendedor en Inteliforce (top
-    productos, sugerencias de venta accionables, deuda/cheques) pero desde
-    el ERP web, para que un supervisor la use sin depender del celular."""
     from api.src.inteliforce.service import get_customer_360
     data = await get_customer_360(db, company_id, customer_id)
     if not data:

@@ -274,10 +274,20 @@ async def get_customer_360(db: AsyncSession, company_id: str, customer_id: str) 
     ar = ar_result.fetchone()
 
     checks_result = await db.execute(
-        text("SELECT COALESCE(SUM(monto), 0) as total FROM checks WHERE customer_id = :id AND estado IN ('cartera', 'depositado')"),
+        text("""
+            SELECT 
+                COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado IN ('cartera', 'depositado') THEN monto ELSE 0 END), 0) as cartera,
+                COALESCE(SUM(CASE WHEN tipo = 'cheque' AND estado = 'rechazado' THEN monto ELSE 0 END), 0) as rechazados,
+                COALESCE(SUM(CASE WHEN tipo = 'pagare' THEN monto ELSE 0 END), 0) as pagares
+            FROM checks WHERE customer_id = :id
+        """),
         {"id": customer_id},
     )
-    checks_total = checks_result.scalar() or 0
+    ch_row = checks_result.fetchone()
+    checks_cartera = float(ch_row.cartera) if ch_row else 0.0
+    checks_rechazados = float(ch_row.rechazados) if ch_row else 0.0
+    pagares = float(ch_row.pagares) if ch_row else 0.0
+    deuda_total_consolidada = float(ar.pendiente) + checks_cartera + checks_rechazados + pagares
 
     sales_result = await db.execute(
         text("""

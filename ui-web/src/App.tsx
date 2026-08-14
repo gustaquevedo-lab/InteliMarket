@@ -47,6 +47,7 @@ const ReturnsPage = lazy(() => import("./pages/returns/ReturnsPage"))
 const DiscountsPage = lazy(() => import("./pages/discounts/DiscountsPage"))
 const CommissionsPage = lazy(() => import("./pages/commissions/CommissionsPage"))
 const AccountsReceivablePage = lazy(() => import("./pages/accounts-receivable/AccountsReceivablePage"))
+const ConsolidatedDebtsPage = lazy(() => import("./pages/customers/ConsolidatedDebtsPage"))
 const FinanceAgentPage = lazy(() => import("./pages/finance-agent/FinanceAgentPage"))
 const RbacPage = lazy(() => import("./pages/rbac/RbacPage"))
 const CrmPage = lazy(() => import("./pages/crm/CrmPage"))
@@ -216,6 +217,7 @@ function AppRoutes() {
           ["discounts", <DiscountsPage />],
           ["commissions", <CommissionsPage />],
           ["accounts-receivable", <AccountsReceivablePage />],
+          ["deudas-consolidadas", <ConsolidatedDebtsPage />],
           ["finance-agent", <FinanceAgentPage />],
           ["notifications", <NotificationsPage />],
           ["intelicont", <InteliContPage />],
