@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { Search, ShoppingCartPlus, Filter } from "lucide-react"
+import { Search, ShoppingCart, Filter } from "lucide-react"
 import { ecommerceApi } from "../../api/ecommerce"
 import EcommerceLayout from "./EcommerceLayout"
 
@@ -86,7 +86,7 @@ export default function EcommerceCatalog() {
                     {p.stock > 0 ? (
                       <button onClick={() => handleAddToCart(p.id)} disabled={addingId === p.id}
                         className="p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 rounded-lg hover:bg-blue-100 transition disabled:opacity-50">
-                        <ShoppingCartPlus className="w-4 h-4" />
+                        <ShoppingCart className="w-4 h-4" />
                       </button>
                     ) : (
                       <span className="text-xs text-red-500 font-medium">Sin stock</span>

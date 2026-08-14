@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useParams, Link } from "react-router-dom"
-import { ArrowLeft, ShoppingCartPlus } from "lucide-react"
+import { ArrowLeft, ShoppingCart } from "lucide-react"
 import { ecommerceApi } from "../../api/ecommerce"
 import EcommerceLayout from "./EcommerceLayout"
 

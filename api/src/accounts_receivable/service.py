@@ -308,3 +308,176 @@ async def get_receivable_summary(db: AsyncSession, company_id: str) -> dict:
         "vencidos": 0,
         "monto_vencido": 0,
     }
+
+async def get_receivable_document_detail(db: AsyncSession, company_id: str, document_id: str) -> dict:
+    query = text("""
+        SELECT 
+            ar.id, ar.company_id, ar.customer_id, c.razon_social as customer_name, c.ruc as customer_ruc, c.direccion as customer_direccion,
+            ar.sale_id, ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento, ar.moneda,
+            ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
+            CASE WHEN ar.fecha_vencimiento IS NULL THEN 0 ELSE (DATE(:today) - ar.fecha_vencimiento)::int END as dias_mora
+        FROM accounts_receivable ar
+        LEFT JOIN customers c ON c.id = ar.customer_id
+        WHERE ar.id = :doc_id AND ar.company_id = :company_id
+    """)
+    res = await db.execute(query, {"doc_id": document_id, "company_id": company_id, "today": date.today()})
+    doc = res.fetchone()
+    if not doc:
+        return {}
+    
+    doc_dict = dict(doc._mapping)
+    items = []
+    if doc.sale_id:
+        items_query = text("""
+            SELECT si.id, si.descripcion, si.cantidad, si.precio_unitario, si.iva_tasa, si.iva_monto, si.total, p.nombre as producto_nombre
+            FROM sale_items si
+            LEFT JOIN products p ON p.id = si.product_id
+            WHERE si.sale_id = :sale_id
+        """)
+        items_res = await db.execute(items_query, {"sale_id": doc.sale_id})
+        items = [dict(i._mapping) for i in items_res.fetchall()]
+    
+    if not items:
+        # Fallback line item for standalone legacy invoice
+        items = [{
+            "id": str(doc.id),
+            "descripcion": f"Factura {doc.numero_documento or 'Legacy'} - Mercaderías Varias",
+            "cantidad": 1,
+            "precio_unitario": doc.monto_original,
+            "iva_tasa": 10,
+            "iva_monto": round(doc.monto_original * 0.1),
+            "total": doc.monto_original
+        }]
+    
+    doc_dict["items"] = items
+    return doc_dict
+
+async def create_collection_receipt(db: AsyncSession, company_id: str, data: dict) -> dict:
+    receivable_ids = data.get("receivable_ids", [])
+    monto_pagado = float(data.get("monto_pagado", 0))
+    medio_pago = data.get("medio_pago", "efectivo")
+    referencia = data.get("referencia", "")
+    observaciones = data.get("observaciones", "")
+    
+    receipt_no = f"REC-2026-{uuid.uuid4().hex[:6].upper()}"
+    monto_restante = monto_pagado
+    facturas_aplicadas = []
+    
+    for rec_id in receivable_ids:
+        if monto_restante <= 0:
+            break
+        q = text("SELECT id, saldo_pendiente, monto_original FROM accounts_receivable WHERE id = :id AND company_id = :cid")
+        res = await db.execute(q, {"id": rec_id, "cid": company_id})
+        rec = res.fetchone()
+        if not rec:
+            continue
+        
+        saldo_actual = float(rec.saldo_pendiente)
+        pago_aplicado = min(monto_restante, saldo_actual)
+        nuevo_saldo = saldo_actual - pago_aplicado
+        nuevo_estado = "pagado" if nuevo_saldo <= 0 else "pendiente"
+        
+        await db.execute(text("""
+            UPDATE accounts_receivable 
+            SET saldo_pendiente = :nuevo_saldo, estado = :nuevo_estado, ultimo_pago = NOW(), updated_at = NOW()
+            WHERE id = :id
+        """), {"id": rec_id, "nuevo_saldo": nuevo_saldo, "nuevo_estado": nuevo_estado})
+        
+        monto_restante -= pago_aplicado
+        facturas_aplicadas.append({"id": rec_id, "monto_aplicado": pago_aplicado, "nuevo_saldo": nuevo_saldo})
+    
+    await db.commit()
+    return {
+        "success": True,
+        "receipt_number": receipt_no,
+        "monto_total_pagado": monto_pagado,
+        "medio_pago": medio_pago,
+        "referencia": referencia,
+        "facturas_aplicadas": facturas_aplicadas
+    }
+
+async def get_receivable_document_detail(db: AsyncSession, company_id: str, document_id: str) -> dict:
+    query = text("""
+        SELECT 
+            ar.id, ar.company_id, ar.customer_id, c.razon_social as customer_name, c.ruc as customer_ruc, c.direccion as customer_direccion,
+            ar.sale_id, ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento, ar.moneda,
+            ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
+            CASE WHEN ar.fecha_vencimiento IS NULL THEN 0 ELSE (DATE(:today) - ar.fecha_vencimiento)::int END as dias_mora
+        FROM accounts_receivable ar
+        LEFT JOIN customers c ON c.id = ar.customer_id
+        WHERE ar.id = :doc_id AND ar.company_id = :company_id
+    """)
+    res = await db.execute(query, {"doc_id": document_id, "company_id": company_id, "today": date.today()})
+    doc = res.fetchone()
+    if not doc:
+        return {}
+    
+    doc_dict = dict(doc._mapping)
+    items = []
+    if doc.sale_id:
+        items_query = text("""
+            SELECT si.id, si.descripcion, si.cantidad, si.precio_unitario, si.iva_tasa, si.iva_monto, si.total, p.nombre as producto_nombre
+            FROM sale_items si
+            LEFT JOIN products p ON p.id = si.product_id
+            WHERE si.sale_id = :sale_id
+        """)
+        items_res = await db.execute(items_query, {"sale_id": doc.sale_id})
+        items = [dict(i._mapping) for i in items_res.fetchall()]
+    
+    if not items:
+        items = [{
+            "id": str(doc.id),
+            "descripcion": f"Factura {doc.numero_documento or "Legacy"} - Mercaderías Varias",
+            "cantidad": 1,
+            "precio_unitario": float(doc.monto_original),
+            "iva_tasa": 10,
+            "iva_monto": round(float(doc.monto_original) * 0.1),
+            "total": float(doc.monto_original)
+        }]
+    
+    doc_dict["items"] = items
+    return doc_dict
+
+async def create_collection_receipt(db: AsyncSession, company_id: str, data: dict) -> dict:
+    receivable_ids = data.get("receivable_ids", [])
+    monto_pagado = float(data.get("monto_pagado", 0))
+    medio_pago = data.get("medio_pago", "efectivo")
+    referencia = data.get("referencia", "")
+    observaciones = data.get("observaciones", "")
+    
+    receipt_no = f"REC-2026-{uuid.uuid4().hex[:6].upper()}"
+    monto_restante = monto_pagado
+    facturas_aplicadas = []
+    
+    for rec_id in receivable_ids:
+        if monto_restante <= 0:
+            break
+        q = text("SELECT id, saldo_pendiente, monto_original FROM accounts_receivable WHERE id = :id AND company_id = :cid")
+        res = await db.execute(q, {"id": rec_id, "cid": company_id})
+        rec = res.fetchone()
+        if not rec:
+            continue
+        
+        saldo_actual = float(rec.saldo_pendiente)
+        pago_aplicado = min(monto_restante, saldo_actual)
+        nuevo_saldo = saldo_actual - pago_aplicado
+        nuevo_estado = "pagado" if nuevo_saldo <= 0 else "pendiente"
+        
+        await db.execute(text("""
+            UPDATE accounts_receivable 
+            SET saldo_pendiente = :nuevo_saldo, estado = :nuevo_estado, ultimo_pago = NOW(), updated_at = NOW()
+            WHERE id = :id
+        """), {"id": rec_id, "nuevo_saldo": nuevo_saldo, "nuevo_estado": nuevo_estado})
+        
+        monto_restante -= pago_aplicado
+        facturas_aplicadas.append({"id": rec_id, "monto_aplicado": pago_aplicado, "nuevo_saldo": nuevo_saldo})
+    
+    await db.commit()
+    return {
+        "success": True,
+        "receipt_number": receipt_no,
+        "monto_total_pagado": monto_pagado,
+        "medio_pago": medio_pago,
+        "referencia": referencia,
+        "facturas_aplicadas": facturas_aplicadas
+    }

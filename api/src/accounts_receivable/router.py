@@ -27,3 +27,13 @@ async def aging_report(company_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/companies/{company_id}/accounts-receivable/summary")
 async def receivable_summary(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_receivable_summary(db, company_id)
+
+
+@router.get("/companies/{company_id}/accounts-receivable/documents/{document_id}")
+async def receivable_document_detail(company_id: str, document_id: str, db: AsyncSession = Depends(get_db)):
+    return await service.get_receivable_document_detail(db, company_id, document_id)
+
+
+@router.post("/companies/{company_id}/accounts-receivable/receipt")
+async def create_receipt(company_id: str, body: dict, db: AsyncSession = Depends(get_db)):
+    return await service.create_collection_receipt(db, company_id, body)

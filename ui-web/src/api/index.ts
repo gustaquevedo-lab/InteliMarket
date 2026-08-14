@@ -708,6 +708,8 @@ export const api = {
     delete: (id: string) => client.delete<void>(`/v1/accounts-receivable/${id}`),
     aging: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/aging`),
     summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/summary`),
+    documentDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/documents/${id}`),
+    createReceipt: (data: any) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/receipt`, data),
   },
   backups: {
     list: () => client.get<Backup[]>("/v1/backups"),
