@@ -47,6 +47,55 @@ export default function FinanceAgentPage() {
     concepto: "Depósito de Recaudación del Día",
   })
   const [savingDeposit, setSavingDeposit] = useState(false)
+  
+  // Reconciliation State
+  const [selectedBankForRecon, setSelectedBankForRecon] = useState<string>("")
+  const [rawStatementText, setRawStatementText] = useState<string>("")
+  const [processingRecon, setProcessingRecon] = useState<boolean>(false)
+  const [reconcileResult, setReconcileResult] = useState<any | null>(null)
+
+  const handleProcessStatement = async () => {
+    if (!rawStatementText.trim()) return
+    setProcessingRecon(true)
+    try {
+      const lines = rawStatementText.split("\n").filter(l => l.trim().length > 0)
+      const parsedLines = lines.map(line => {
+        const parts = line.split(",").map(p => p.trim())
+        if (parts.length >= 3) {
+          const fecha = parts[0]
+          const concepto = parts[1]
+          const montoNum = parseFloat(parts[2].replace(/[^0-9.-]/g, "")) || 0
+          const referencia = parts[3] || "S/Ref"
+          return {
+            fecha,
+            concepto,
+            monto: Math.abs(montoNum),
+            tipo: montoNum >= 0 ? "credito" : "debito",
+            referencia
+          }
+        }
+        return null
+      }).filter(Boolean)
+
+      if (parsedLines.length === 0) {
+        toast.error("Error de formato", "Verificá que las líneas tengan formato: Fecha, Concepto, Monto, Referencia")
+        return
+      }
+
+      const res = await api.integratedFinance.importStatement({
+        company_id: COMPANY_ID,
+        bank_account_id: selectedBankForRecon || (banksData[0]?.id || undefined),
+        lineas: parsedLines
+      })
+      setReconcileResult(res)
+      toast.success("Conciliación Completada", `Se evaluaron ${res.transacciones_evaluadas} transacciones, ${res.conciliadas_exitosas} conciliadas exitosamente.`)
+      loadAllData()
+    } catch {
+      toast.error("Error", "No se pudo procesar la conciliación bancaria")
+    } finally {
+      setProcessingRecon(false)
+    }
+  }
 
   const toast = useToast()
   const { user } = useAuth()
@@ -509,20 +558,140 @@ export default function FinanceAgentPage() {
 
       {/* TAB 5: RECONCILIATION */}
       {activeTab === "reconciliation" && (
-        <div className="card p-6 space-y-4">
-          <h3 className="font-bold text-lg flex items-center gap-2">
-            <ArrowRightLeft className="w-5 h-5 text-primary" /> Conciliación Bancaria Automática
-          </h3>
-          <p className="text-xs text-gray-500">
-            Importación de extractos digitales (Continental, Interfisa, Familiar, GNB, BNF) para matcheo automático contra cobros y depósitos del sistema.
-          </p>
-          <div className="p-8 border-2 border-dashed rounded-xl text-center space-y-3 bg-gray-50 dark:bg-slate-800/40">
-            <FileSpreadsheet className="w-10 h-10 text-gray-400 mx-auto" />
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <p className="text-sm font-semibold">Arrastrá aquí el archivo de Extracto Bancario</p>
-              <p className="text-xs text-gray-400 mt-1">Formatos compatibles: .CSV, .XLSX, .TXT</p>
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <ArrowRightLeft className="w-5 h-5 text-primary" /> Conciliación Bancaria & Matcheo Inteligente
+              </h3>
+              <p className="text-xs text-gray-500">
+                Cruza extractos de bancos de plaza (Itaú, Continental, BNF, Atlas, GNB) con cheques en clearing, remesas blindadas y cobros AR.
+              </p>
             </div>
-            <button className="btn-outline text-xs">Seleccionar Archivo de Extracto</button>
+
+            <div className="flex items-center gap-2">
+              <select
+                className="input-field text-xs font-bold"
+                value={selectedBankForRecon}
+                onChange={(e) => setSelectedBankForRecon(e.target.value)}
+              >
+                {banksData.map(b => (
+                  <option key={b.id} value={b.id}>{b.banco} ({b.numero_cuenta})</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Upload / Paste Extract Area */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="card p-5 space-y-4 lg:col-span-1 border-l-4 border-l-primary">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-900 dark:text-white flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-primary" /> Cargar Extracto Bancario
+              </h4>
+              <p className="text-xs text-gray-500">
+                Pegá líneas de extracto bancario en formato texto o CSV: <code className="text-[10px] bg-gray-100 dark:bg-slate-700 p-0.5 rounded">Fecha, Concepto, Monto, Referencia</code>
+              </p>
+
+              <textarea
+                className="input-field font-mono text-[11px] w-full h-32"
+                placeholder="2026-08-14, Deposito Remesa Prosegur, 25000000, BAG-8849&#10;2026-08-14, Camara Compensadora Cheque, 50000000, CH-0098471&#10;2026-08-14, Comision Mantenimiento Cta, -150000, COM-0826"
+                value={rawStatementText}
+                onChange={(e) => setRawStatementText(e.target.value)}
+              />
+
+              <button
+                onClick={handleProcessStatement}
+                disabled={processingRecon || !rawStatementText.trim()}
+                className="btn-primary w-full text-xs flex items-center justify-center gap-2"
+              >
+                {processingRecon ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                <span>Ejecutar Matcheo Automático</span>
+              </button>
+            </div>
+
+            {/* Reconciliation KPI Results */}
+            <div className="lg:col-span-2 space-y-4">
+              {reconcileResult ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="card p-4 bg-emerald-50/50 dark:bg-emerald-950/20 border-l-4 border-l-emerald-500">
+                      <span className="text-[10px] uppercase font-bold text-gray-400">Conciliadas con Éxito</span>
+                      <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                        {reconcileResult.conciliadas_exitosas || 0}
+                      </p>
+                      <span className="text-[10px] text-emerald-600 font-bold block mt-0.5">
+                        ₲ {formatPYG(reconcileResult.monto_conciliado_total || 0)}
+                      </span>
+                    </div>
+
+                    <div className="card p-4 bg-amber-50/50 dark:bg-amber-950/20 border-l-4 border-l-amber-500">
+                      <span className="text-[10px] uppercase font-bold text-gray-400">Pendientes de Revisión</span>
+                      <p className="text-xl font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
+                        {reconcileResult.pendientes_revision || 0}
+                      </p>
+                      <span className="text-[10px] text-gray-400 block mt-0.5">Requiere imputación manual</span>
+                    </div>
+
+                    <div className="card p-4 bg-blue-50/50 dark:bg-blue-950/20 border-l-4 border-l-blue-500">
+                      <span className="text-[10px] uppercase font-bold text-gray-400">Total Evaluadas</span>
+                      <p className="text-xl font-black font-mono text-blue-600 dark:text-blue-400 mt-1">
+                        {reconcileResult.transacciones_evaluadas || 0}
+                      </p>
+                      <span className="text-[10px] text-gray-400 block mt-0.5">Movimientos bancarios</span>
+                    </div>
+                  </div>
+
+                  {/* Matched Details Table */}
+                  <div className="card p-4 space-y-3">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-900 dark:text-white flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Movimientos Conciliados en Este Lote
+                    </h4>
+                    {reconcileResult.detalle && reconcileResult.detalle.length > 0 ? (
+                      <div className="overflow-x-auto max-h-60 overflow-y-auto border rounded-lg">
+                        <table className="w-full text-xs">
+                          <thead className="bg-gray-50 dark:bg-slate-800">
+                            <tr className="table-header">
+                              <th className="table-cell">Referencia</th>
+                              <th className="table-cell">Cruzado Con (Documento / Remesa)</th>
+                              <th className="table-cell">Tipo</th>
+                              <th className="table-cell text-right">Monto (₲)</th>
+                              <th className="table-cell text-center">Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                            {reconcileResult.detalle.map((d: any, idx: number) => (
+                              <tr key={idx} className="table-row">
+                                <td className="table-td font-mono font-bold text-primary">{d.referencia}</td>
+                                <td className="table-td font-medium text-gray-900 dark:text-white">{d.matched_with}</td>
+                                <td className="table-td uppercase text-[10px] text-gray-500 font-bold">{d.tipo}</td>
+                                <td className="table-td text-right font-mono font-bold text-emerald-600">
+                                  {formatPYG(d.monto)}
+                                </td>
+                                <td className="table-td text-center">
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                    Conciliado ✓
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-gray-400 text-xs italic text-center py-4">Sin coincidencias automáticas en el lote.</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="card p-12 text-center space-y-3 bg-gray-50 dark:bg-slate-800/40">
+                  <ArrowRightLeft className="w-12 h-12 text-primary mx-auto opacity-70" />
+                  <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200">Motor de Conciliación Preparado</h4>
+                  <p className="text-xs text-gray-400 max-w-md mx-auto">
+                    Seleccioná una cuenta corriente bancaria, pegá o cargá el extracto del día y ejecutá el matcheo para cruzar cheques y remesas en 1 clic.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

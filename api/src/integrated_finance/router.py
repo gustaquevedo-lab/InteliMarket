@@ -355,3 +355,47 @@ async def auto_reconcile(
 @router.get("/dashboard", response_model=ConsolidatedDashboard)
 async def get_consolidated_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
     return await service.get_consolidated_dashboard(db, company_id)
+
+
+@router.post("/reconciliation/import-statement")
+async def import_bank_statement(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from decimal import Decimal
+    from api.src.financial.models import BankTransaction
+    company_id = body.get("company_id", "00000000-0000-0000-0000-000000000010")
+    bank_account_id = body.get("bank_account_id")
+    banco_nombre = body.get("banco_nombre", "Banco Itaú Paraguay")
+    lineas = body.get("lineas", [])
+
+    cid = uuid.UUID(company_id)
+    baid = uuid.UUID(bank_account_id) if bank_account_id else uuid.UUID("00000000-0000-0000-0000-000000000010")
+
+    imported = 0
+    for l in lineas:
+        monto = float(l.get("monto", 0))
+        tipo = l.get("tipo", "credito") # credito / debito
+        concepto = l.get("concepto", "Movimiento de extracto")
+        referencia = l.get("referencia")
+        fecha = l.get("fecha") or str(date.today())
+
+        db.add(BankTransaction(
+            company_id=cid,
+            bank_account_id=baid,
+            tipo=tipo,
+            monto=Decimal(str(abs(monto))),
+            moneda="PYG",
+            descripcion=concepto,
+            referencia=referencia,
+            conciliado=False,
+            created_at=service._now()
+        ))
+        imported += 1
+
+    await db.commit()
+
+    # Automatically run auto-reconciliation
+    recon_result = await service.auto_reconcile(db, company_id, str(baid))
+    recon_result["lineas_importadas"] = imported
+    return recon_result

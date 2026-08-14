@@ -1270,8 +1270,9 @@ export const api = {
     recalculateScore: (companyId: string, customerId: string) => client.post<any>(`/v1/integrated-finance/scoring/${customerId}/recalculate`, { company_id: companyId, customer_id: customerId }),
     // EBITDA
     getEbitda: (companyId: string, periodo?: string) => client.get<any>("/v1/integrated-finance/ebitda", { company_id: companyId, periodo }),
-    // Auto Reconciliation
+    // Auto Reconciliation & Bank Statement Import
     autoReconcile: (companyId: string, bankAccountId: string) => client.post<any>("/v1/integrated-finance/reconciliation/auto", { company_id: companyId, bank_account_id: bankAccountId }),
+    importStatement: (data: { company_id: string; bank_account_id?: string; banco_nombre?: string; lineas: any[] }) => client.post<any>("/v1/integrated-finance/reconciliation/import-statement", data),
   },
 
   // ===== Smart Pricing =====

@@ -652,6 +652,7 @@ async def auto_reconcile(db: AsyncSession, company_id: str, bank_account_id: str
     baid = uuid.UUID(bank_account_id)
 
     from api.src.financial.models import BankTransaction, SupplierInvoicePayment
+    from api.src.checks.models import Check, CheckEvent
 
     conciliadas = 0
     monto_conciliado = 0
@@ -671,6 +672,69 @@ async def auto_reconcile(db: AsyncSession, company_id: str, bank_account_id: str
         monto_txn = float(txn.monto)
 
         if txn.tipo == "credito":
+            # 1. Check matching with deposited checks
+            ch_q = await db.execute(
+                select(Check).where(
+                    Check.company_id == cid,
+                    Check.estado == "depositado",
+                    Check.monto == Decimal(str(monto_txn))
+                ).limit(1)
+            )
+            ch = ch_q.scalar_one_or_none()
+            if ch:
+                ch.estado = "acreditado"
+                ch.updated_at = _now()
+                db.add(CheckEvent(
+                    check_id=ch.id,
+                    estado_anterior="depositado",
+                    estado_nuevo="acreditado",
+                    motivo=f"Acreditado automáticamente por conciliación bancaria (Txn {txn.referencia or txn.id})",
+                ))
+                txn.conciliado = True
+                txn.fecha_conciliacion = _now()
+                matched = True
+                conciliadas += 1
+                monto_conciliado += monto_txn
+                detalle.append({
+                    "transaction_id": str(txn.id),
+                    "referencia": txn.referencia or "S/Ref",
+                    "monto": monto_txn,
+                    "matched_with": f"Cheque #{ch.numero} ({ch.titular or 'Librador'})",
+                    "tipo": "cheque_acreditado",
+                })
+                continue
+
+            # 2. Check matching with armored remittances
+            rem_q = await db.execute(
+                text("""
+                    SELECT id, transportadora, precinto_bolsa FROM treasury_vault_movements
+                    WHERE company_id = :cid AND tipo = 'egreso_remesa_blindado' AND estado = 'en_transito'
+                    AND monto = :monto
+                    LIMIT 1
+                """),
+                {"cid": cid, "monto": monto_txn}
+            )
+            rem = rem_q.fetchone()
+            if rem:
+                await db.execute(
+                    text("UPDATE treasury_vault_movements SET estado = 'acreditado_banco', updated_at = NOW() WHERE id = :id"),
+                    {"id": rem.id}
+                )
+                txn.conciliado = True
+                txn.fecha_conciliacion = _now()
+                matched = True
+                conciliadas += 1
+                monto_conciliado += monto_txn
+                detalle.append({
+                    "transaction_id": str(txn.id),
+                    "referencia": txn.referencia or "S/Ref",
+                    "monto": monto_txn,
+                    "matched_with": f"Remesa Blindada {rem.transportadora} (Precinto {rem.precinto_bolsa})",
+                    "tipo": "remesa_blindada",
+                })
+                continue
+
+            # 3. Check matching with accounts receivable invoices
             ar_q = await db.execute(
                 text("""
                     SELECT id, monto_original FROM accounts_receivable
@@ -691,14 +755,15 @@ async def auto_reconcile(db: AsyncSession, company_id: str, bank_account_id: str
                     monto_conciliado += monto_txn
                     detalle.append({
                         "transaction_id": str(txn.id),
-                        "referencia": txn.referencia,
+                        "referencia": txn.referencia or "S/Ref",
                         "monto": monto_txn,
-                        "matched_with": str(ar[0]),
-                        "tipo": "cobro",
+                        "matched_with": f"Factura AR #{str(ar[0])[:8]}",
+                        "tipo": "cobro_factura",
                     })
                     break
 
         elif txn.tipo == "debito":
+            # Check matching with supplier payments
             pay_q = await db.execute(
                 select(SupplierInvoicePayment).where(
                     SupplierInvoicePayment.monto == Decimal(str(monto_txn)),
@@ -715,36 +780,22 @@ async def auto_reconcile(db: AsyncSession, company_id: str, bank_account_id: str
                     monto_conciliado += monto_txn
                     detalle.append({
                         "transaction_id": str(txn.id),
-                        "referencia": txn.referencia,
+                        "referencia": txn.referencia or "S/Ref",
                         "monto": monto_txn,
-                        "matched_with": str(p.invoice_id),
-                        "tipo": "pago",
+                        "matched_with": f"Pago a Proveedor #{str(p.id)[:8]}",
+                        "tipo": "pago_proveedor",
                     })
                     break
 
-        if not matched:
-            detalle.append({
-                "transaction_id": str(txn.id),
-                "referencia": txn.referencia,
-                "monto": monto_txn,
-                "tipo": "no_conciliado",
-            })
-
-    await db.flush()
-
-    no_conciliadas = len(transactions) - conciliadas
-    monto_no_conciliado = sum(float(t.monto) for t in transactions if not t.conciliado)
-
+    await db.commit()
     return {
-        "conciliadas": conciliadas,
-        "monto_conciliado": round(monto_conciliado, 2),
-        "no_conciliadas": no_conciliadas,
-        "monto_no_conciliado": round(monto_no_conciliado, 2),
+        "transacciones_evaluadas": len(transactions),
+        "conciliadas_exitosas": conciliadas,
+        "monto_conciliado_total": monto_conciliado,
+        "pendientes_revision": len(transactions) - conciliadas,
         "detalle": detalle,
     }
 
-
-# ── CONSOLIDATED DASHBOARD ───────────────────────────────────────────────────
 
 async def get_consolidated_dashboard(db: AsyncSession, company_id: str) -> dict:
     cid = uuid.UUID(company_id)
