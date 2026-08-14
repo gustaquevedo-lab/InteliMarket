@@ -454,9 +454,6 @@ async def get_vault_summary(db: AsyncSession, company_id: str) -> dict:
     alerts_rows = (await db.execute(q_alerts, {"cid": uuid.UUID(company_id)})).fetchall()
 
     saldo_efectivo = float(cash_row.saldo_efectivo or 0)
-    # If starting fresh, set a realistic operational baseline balance if <= 0
-    if saldo_efectivo < 10000000:
-        saldo_efectivo += 40200000.0
 
     cheques_monto = float(checks_row.cheques_custodia_monto or 0)
     total_custodia = saldo_efectivo + cheques_monto
