@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { api, type Product, type SupermerRecipe, type SupermerOrder, type SupermerWaste, type SupermerPerishableConfig, type SupermerMarkdown, type SupermerSuggestion, type SupermerDashboard, type SupermerBatch, type SupermerForecast, type ButcheryTemplate, type DesposteResponse, type DesposteCorteResult, type BakeryPlan, type ScaleRecipeResult, type ExecutePlanResult, type ProduceReceiveBatch, type ProduceFreshnessAudit, type ProduceSupplierScorecard, type ProduceDashboard, type AutoApplyMarkdownResult } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { Search, Plus, Loader2, AlertTriangle, TrendingUp, Utensils, Trash2, PackageOpen, ShoppingCart, CheckCircle, XCircle, Eye, EyeOff, BarChart3, Layers, ClipboardList, Sparkles, Beef, Croissant, Apple, X, ChevronRight, Settings, Thermometer, ShieldCheck, Tag, TrendingDown, Wifi, Battery, AlertCircle, Settings2, Gauge, Check, Database, ChefHat, Truck, RotateCcw } from "lucide-react"
+import { Search, Plus, Loader2, AlertTriangle, TrendingUp, Utensils, Trash2, PackageOpen, ShoppingCart, CheckCircle, XCircle, Eye, EyeOff, BarChart3, Layers, ClipboardList, Sparkles, Beef, Croissant, Apple, X, ChevronRight, Settings, Thermometer, ShieldCheck, Tag, TrendingDown, Wifi, Battery, AlertCircle, Settings2, Gauge, Check, Database, ChefHat, Truck, RotateCcw, Info, ExternalLink } from "lucide-react"
 import DesposteWizard from "./DesposteWizard"
 import RotiseriaTab from "./RotiseriaTab"
 import HaccpTab from "./HaccpTab"
@@ -380,7 +380,7 @@ export default function SupermerPage() {
         <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
       ) : (
         <>
-          {tab === "dashboard" && <DashboardTab data={dashboard} />}
+          {tab === "dashboard" && <DashboardTab data={dashboard} onGoToPerishables={() => setTab("perishables")} />}
           {tab === "recipes" && <RecipesTab data={recipes} search={search} setSearch={setSearch} loading={loading} fetchAll={fetchAll} />}
           {tab === "orders" && <OrdersTab orders={orders} batches={batches} search={search} setSearch={setSearch} onComplete={handleCompleteOrder} fetchAll={fetchAll} />}
           {tab === "waste" && <WasteTab data={wasteLogs} search={search} setSearch={setSearch} fetchAll={fetchAll} />}
@@ -405,73 +405,8 @@ export default function SupermerPage() {
   )
 }
 
-function DashboardTab({ data }: { data: SupermerDashboard }) {
+function DashboardTab({ data, onGoToPerishables }: { data: SupermerDashboard; onGoToPerishables: () => void }) {
   const toast = useToast()
-  const [rescues, setRescues] = useState([
-    {
-      id: "r1",
-      producto: "Tomate Perita",
-      area: "Verdulería",
-      cantidad: "45 kg",
-      motivo: "Firmeza Baja (Madurez Avanzada)",
-      tipo: "transformar",
-      propuesta: "Derivar a Rotisería para Salsa Bolognesa Casera (30 Litros)",
-      ahorro: "Gs 240.000",
-      icon: Apple,
-      color: "from-red-500/10 to-red-600/5 border-red-500/20 text-red-600 dark:text-red-400"
-    },
-    {
-      id: "r2",
-      producto: "Peceto Vacuno Bovina",
-      area: "Carnicería",
-      cantidad: "12 kg",
-      motivo: "Próximo a Vencer (24 hs restantes)",
-      tipo: "transformar",
-      propuesta: "Elaborar Milanesas de Peceto Preparadas (Empanado Pre-pack)",
-      ahorro: "Gs 450.000",
-      icon: Beef,
-      color: "from-amber-500/10 to-amber-600/5 border-amber-500/20 text-amber-600 dark:text-amber-400"
-    },
-    {
-      id: "r3",
-      producto: "Pan Felipe Tradicional",
-      area: "Panadería",
-      cantidad: "18 kg",
-      motivo: "Excedente de Producción (Remanente de ayer)",
-      tipo: "transformar",
-      propuesta: "Moler para empaquetar Pan Rallado de la Casa (36 Bolsas)",
-      ahorro: "Gs 110.000",
-      icon: Croissant,
-      color: "from-yellow-500/10 to-yellow-600/5 border-yellow-500/20 text-yellow-600 dark:text-yellow-400"
-    },
-    {
-      id: "r4",
-      producto: "Pechuga de Pollo Fresca",
-      area: "Carnicería",
-      cantidad: "8 kg",
-      motivo: "Pérdida de Frío (Góndola C a 9.5°C por >2 horas)",
-      tipo: "descarte",
-      propuesta: "Descarte Sanitario Obligatorio (Inocuidad Alimentaria)",
-      ahorro: "Bloqueo POS Activo",
-      icon: AlertCircle,
-      color: "from-slate-500/10 to-slate-600/5 border-slate-500/20 text-slate-600 dark:text-slate-400"
-    }
-  ])
-
-  const handleAction = (id: string, actionType: "transform" | "discard", productName: string, propuesta: string) => {
-    setRescues(prev => prev.filter(r => r.id !== id))
-    if (actionType === "transform") {
-      toast.success(
-        "¡Rescate Autorizado!", 
-        `Se han transferido los insumos y se creó la Orden de Producción para: "${propuesta}".`
-      )
-    } else {
-      toast.error(
-        "Descarte Sanitario Registrado", 
-        `Lote bloqueado en el inventario general y en el POS por protocolo de seguridad alimentaria.`
-      )
-    }
-  }
 
   const cards = [
     { label: "Órdenes activas", value: data.ordenes_activas ?? 0, icon: Layers, color: "text-blue-600" },
@@ -523,88 +458,12 @@ function DashboardTab({ data }: { data: SupermerDashboard }) {
         )}
       </div>
 
-      {/* Dynamic Waste-to-Margin AI Rescue Widget */}
-      <div className="bg-white dark:bg-slate-800 rounded-3xl border border-gray-100 dark:border-gray-700 p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-          <div>
-            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/10 dark:bg-blue-400/15 text-blue-600 dark:text-blue-400 text-xs font-bold uppercase tracking-wider mb-2">
-              <Sparkles className="w-3 h-3" /> Asistente IA Activo
-            </div>
-            <h2 className="text-2xl font-extrabold text-gray-900 dark:text-white flex items-center gap-2">
-              <Utensils className="w-6 h-6 text-primary" />
-              Asistente de Rescate de Inventario (Anti-Merma)
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Detección de productos de baja rotación o frescura decreciente sugeridos para transformación de alto margen o descarte seguro.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {rescues.length === 0 ? (
-            <div className="col-span-full py-12 text-center bg-gray-50 dark:bg-slate-900/30 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
-              <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-              <h4 className="text-lg font-bold text-gray-900 dark:text-white">¡Todo el inventario está seguro!</h4>
-              <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mx-auto mt-1">
-                No hay alertas de frescura crítica ni lotes próximos a vencer pendientes de acción de rescate.
-              </p>
-            </div>
-          ) : (
-            rescues.map(r => (
-              <div key={r.id} className={`flex flex-col md:flex-row gap-5 p-5 rounded-2xl border bg-gradient-to-br transition-all duration-300 hover:shadow-md ${r.color}`}>
-                <div className="flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-xl bg-white dark:bg-slate-800 shadow-sm self-start">
-                  <r.icon className="w-7 h-7" />
-                </div>
-                <div className="flex-1 space-y-3">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-extrabold uppercase tracking-widest bg-white/50 dark:bg-slate-800/80 px-2 py-0.5 rounded-md">{r.area}</span>
-                      <span className="text-xs text-gray-400 font-semibold">•</span>
-                      <span className="text-xs font-bold text-red-500 dark:text-red-400 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" /> {r.motivo}
-                      </span>
-                    </div>
-                    <h3 className="text-lg font-extrabold text-gray-900 dark:text-white mt-1">
-                      {r.producto} <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">({r.cantidad})</span>
-                    </h3>
-                  </div>
-
-                  <div className="p-3.5 bg-white/70 dark:bg-slate-800/50 rounded-xl border border-black/5 dark:border-white/5">
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Acción Propuesta por IA</p>
-                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{r.propuesta}</p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
-                    <div className="flex items-center gap-1 text-xs">
-                      <span className="text-gray-400 font-medium">Recuperación estimada:</span>
-                      <span className="font-extrabold text-green-600 dark:text-green-400 font-mono text-sm">{r.ahorro}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {r.tipo === "transformar" ? (
-                        <>
-                          <button 
-                            onClick={() => handleAction(r.id, "transform", r.producto, r.propuesta)}
-                            className="btn-primary text-xs px-3.5 py-1.5 flex items-center gap-1 rounded-xl"
-                          >
-                            <Check className="w-3.5 h-3.5" /> Autorizar Rescate
-                          </button>
-                        </>
-                      ) : (
-                        <button 
-                          onClick={() => handleAction(r.id, "discard", r.producto, r.propuesta)}
-                          className="text-xs font-bold bg-red-600 hover:bg-red-700 text-white px-3.5 py-1.5 flex items-center gap-1 rounded-xl shadow-md transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" /> Confirmar Descarte Sanitario
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+      {/* Rescate de vencimientos -- redirige al modulo real de markdowns/perecederos */}
+      <div className="bg-white dark:bg-slate-800 rounded-3xl border border-gray-100 dark:border-gray-700 p-10 text-center space-y-3">
+        <Info className="w-8 h-8 text-primary mx-auto" />
+        <p className="text-sm font-bold text-gray-900 dark:text-white">Este panel mostraba sugerencias inventadas, no productos reales</p>
+        <p className="text-sm text-gray-500 max-w-md mx-auto">El manejo real de productos proximos a vencer (descuentos automaticos por lote) vive en Perecederos.</p>
+        <button className="btn-primary mx-auto" onClick={onGoToPerishables}><ExternalLink className="w-4 h-4" /> Ir a Perecederos</button>
       </div>
     </div>
   )
@@ -3454,207 +3313,30 @@ function LicensingTab({ config, setConfig }: {
 
 // ── ELECTRONIC SHELF LABEL MONITOR (ESL) TAB ─────────────────────────
 function ESLTab() {
-  const toast = useToast()
-  const [selectedTag, setSelectedTag] = useState<any | null>(null)
-  const [priceForm, setPriceForm] = useState("")
-  const [syncing, setSyncing] = useState(false)
-  const [search, setSearch] = useState("")
-
-  const [tags, setTags] = useState([
-    { id: "ESL-A1-TOMA", producto: "Tomate Perita (kg)", precio_gondola: 8500, precio_pos: 8500, bateria: 96, rf: -45, sync: true, area: "Verdulería", gondola: "Góndola A1" },
-    { id: "ESL-A4-FRUT", producto: "Frutilla Fresca 500g", precio_gondola: 10500, precio_pos: 10500, bateria: 92, rf: -50, sync: true, area: "Verdulería", gondola: "Góndola A4" },
-    { id: "ESL-B3-COST", producto: "Costilla de Primera (kg)", precio_gondola: 48000, precio_pos: 48000, bateria: 99, rf: -41, sync: true, area: "Carnicería", gondola: "Góndola B3" },
-    { id: "ESL-P1-PANF", producto: "Pan Felipe Bolsa 500g", precio_gondola: 3500, precio_pos: 3500, bateria: 48, rf: -68, sync: true, area: "Panadería", gondola: "Góndola P1" },
-    { id: "ESL-L1-YOGD", producto: "Yogur Dietético 200g", precio_gondola: 8500, precio_pos: 8500, bateria: 87, rf: -53, sync: true, area: "Lácteos", gondola: "Góndola L1" }
-  ])
-
-  const handleSyncPrice = () => {
-    if (!selectedTag || !priceForm) return
-    setSyncing(true)
-    
-    setTimeout(() => {
-      setTags(tags.map(t => {
-        if (t.id === selectedTag.id) {
-          return {
-            ...t,
-            precio_gondola: Number(priceForm),
-            precio_pos: Number(priceForm),
-            sync: true
-          }
-        }
-        return t
-      }))
-      
-      setSyncing(false)
-      setSelectedTag(null)
-      toast.success("Etiqueta Sincronizada", "El precio en la góndola de tinta electrónica coincide al 100% con el POS.")
-    }, 1500)
-  }
-
-  const handleDesyncTest = (tagId: string) => {
-    setTags(tags.map(t => {
-      if (t.id === tagId) {
-        return {
-          ...t,
-          precio_gondola: t.precio_gondola * 1.15, // Simulate a Gondola Price discrepancy
-          sync: false
-        }
-      }
-      return t
-    }))
-    toast.error("Alerta de Desincronización", "Se ha detectado una discrepancia de precio entre Góndola y POS.")
-  }
-
-  const filtered = tags.filter(t => 
-    t.producto.toLowerCase().includes(search.toLowerCase()) || 
-    t.id.toLowerCase().includes(search.toLowerCase()) ||
-    t.area.toLowerCase().includes(search.toLowerCase())
-  )
-
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      
-      {/* Wireless RF Gateway Telemetry Card */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800 rounded-3xl p-6 text-white border border-slate-700 shadow-xl">
-        <div className="absolute top-0 right-0 w-48 h-48 bg-purple-500/10 rounded-bl-full -mr-8 -mt-8 blur-xl" />
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-          <div>
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-400 text-xs font-bold tracking-wider uppercase mb-3">
-              <Wifi className="w-3.5 h-3.5" /> Gateway de Radiofrecuencia ESL
-            </div>
-            <h3 className="text-2xl font-extrabold tracking-tight">Antena Principal: Conectada</h3>
-            <p className="text-slate-400 text-sm mt-1">
-              Frecuencia: 2.4GHz Zigbee High-Penetration · Displays Vinculados: {tags.length} · Tasa de Sincronización: {((tags.filter(t => t.sync).length / tags.length) * 100).toFixed(0)}%
-            </p>
-          </div>
-          <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 text-center font-mono">
-            <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Última Auditoría de Góndola</span>
-            <p className="text-base font-extrabold text-purple-400 mt-1">Sincronización 100% Ok</p>
-          </div>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-extrabold text-gray-900 dark:text-white flex items-center gap-2">
+            <Tag className="w-5 h-5 text-primary" />
+            Etiquetas Electronicas de Gondola (ESL)
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Sincronizacion de precio entre POS y etiquetas de tinta electronica en gondola.</p>
+        </div>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-red-500/10 text-red-500">
+          <Wifi className="w-4 h-4" />
+          Gateway ESL no conectado
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input-field pl-10" placeholder="Buscar etiqueta ESL por producto, ID o góndola..." value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Displays Grid */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="card p-0 overflow-hidden border border-gray-200 dark:border-slate-800">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-50 dark:bg-slate-800 text-left text-xs font-bold text-gray-500 uppercase">
-                  <th className="p-3">Góndola / ID</th>
-                  <th className="p-3">Producto</th>
-                  <th className="p-3">Batería</th>
-                  <th className="p-3">Señal RF</th>
-                  <th className="p-3">Góndola vs POS</th>
-                  <th className="p-3 text-right">Acción</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80">
-                {filtered.map(t => (
-                  <tr key={t.id} className="table-row text-xs">
-                    <td className="p-3 font-mono">
-                      <span className="font-bold block text-gray-800 dark:text-white">{t.gondola}</span>
-                      <span className="text-[10px] text-gray-400 block">{t.id}</span>
-                    </td>
-                    <td className="p-3 font-semibold text-gray-900 dark:text-white">{t.producto}</td>
-                    <td className="p-3">
-                      <div className="flex items-center gap-1.5">
-                        <Battery className={`w-4 h-4 ${t.bateria < 50 ? "text-red-500 animate-pulse" : "text-green-500"}`} />
-                        <span className="font-bold">{t.bateria}%</span>
-                      </div>
-                    </td>
-                    <td className="p-3 font-mono font-medium">{t.rf} dBm</td>
-                    <td className="p-3">
-                      {t.sync ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-green-500/15 text-green-500 border border-green-500/20 font-bold">
-                          <Check className="w-3.5 h-3.5" /> {formatPYG(t.precio_gondola)}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/15 text-red-500 border border-red-500/20 font-bold animate-pulse">
-                          <AlertCircle className="w-3.5 h-3.5" /> Discrepancia: {formatPYG(t.precio_gondola)} vs {formatPYG(t.precio_pos)}
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-3 text-right flex justify-end gap-2">
-                      <button 
-                        onClick={() => { setSelectedTag(t); setPriceForm(t.precio_pos.toString()) }}
-                        className="text-xs bg-primary/10 hover:bg-primary text-primary hover:text-white px-3 py-1.5 rounded-lg transition-all font-bold"
-                      >
-                        Ajustar
-                      </button>
-                      <button 
-                        onClick={() => handleDesyncTest(t.id)}
-                        className="text-xs bg-slate-100 dark:bg-slate-800 text-gray-400 hover:text-red-500 px-2 py-1.5 rounded-lg transition-all"
-                        title="Simular error de precio en góndola"
-                      >
-                        Sim. Error
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Sync panel */}
-        <div className="lg:col-span-1">
-          {selectedTag ? (
-            <div className="card p-6 border border-primary/30 bg-primary/5 space-y-4 animate-in slide-in-from-right duration-300">
-              <div className="flex justify-between items-start">
-                <h3 className="font-extrabold text-base">Sincronizador ESL Inteligente</h3>
-                <button onClick={() => setSelectedTag(null)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
-              </div>
-
-              <div className="text-xs space-y-2">
-                <div className="flex justify-between"><span className="text-gray-500">Etiqueta:</span> <span className="font-mono font-bold">{selectedTag.id}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Producto:</span> <span className="font-bold">{selectedTag.producto}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Góndola:</span> <span className="font-bold">{selectedTag.gondola}</span></div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 mb-1.5">Nuevo Precio POS & Góndola</label>
-                <input 
-                  type="number" className="input-field text-lg font-mono font-bold" 
-                  value={priceForm} onChange={e => setPriceForm(e.target.value)} 
-                />
-              </div>
-
-              <button 
-                onClick={handleSyncPrice} 
-                disabled={syncing}
-                className="btn-primary w-full py-3 flex items-center justify-center gap-2 font-extrabold shadow-lg"
-              >
-                {syncing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Sincronizando RF...</span>
-                  </>
-                ) : (
-                  <>
-                    <Wifi className="w-4 h-4" />
-                    <span>Sincronizar ESL al 100%</span>
-                  </>
-                )}
-              </button>
-            </div>
-          ) : (
-            <div className="card p-6 border border-gray-100 dark:border-slate-800 text-center py-12 flex flex-col items-center justify-center space-y-3">
-              <div className="p-4 bg-purple-500/10 rounded-full text-purple-400"><Tag className="w-8 h-8" /></div>
-              <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Seleccione una Etiqueta</h3>
-              <p className="text-xs text-gray-500 max-w-[200px]">Seleccione un display de tinta electrónica de la grilla para ajustar su precio o auditar su conectividad en tiempo real.</p>
-            </div>
-          )}
-        </div>
-
+      <div className="card p-10 text-center space-y-3">
+        <Battery className="w-8 h-8 text-primary mx-auto" />
+        <p className="text-sm font-bold text-gray-900 dark:text-white">Esta pantalla mostraba 5 etiquetas y bateria inventadas</p>
+        <p className="text-sm text-gray-500 max-w-lg mx-auto">
+          No hay gateway ni etiquetas electronicas de gondola instaladas hoy en la tienda. Esta funcion se activa
+          cuando se instale el hardware ESL real (gateway RF + tags por gondola) -- por ahora, los precios de
+          gondola se actualizan de forma manual.
+        </p>
       </div>
     </div>
   )

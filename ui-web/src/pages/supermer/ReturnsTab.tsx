@@ -6,32 +6,12 @@ import { formatDate, formatPYG } from "../../utils/format"
 
 type SubTab = "dashboard" | "returns" | "authorizations" | "backhaul"
 
-const MOCK_RETURNS = [
-  { id: "rt1", proveedor_nombre: "Lácteos SA", codigo: "DEV-2026-001", tipo: "devolucion", fecha_creacion: "2026-05-27T10:00:00", total_items: 3, valor_total_estimado: 250000, estado: "pendiente", items: [
-    { producto_nombre: "Leche Entera 1L", cantidad: 20, valor_unitario: 6500, valor_total: 130000, motivo: "proximo_vencer", lote: "L-202604" },
-    { producto_nombre: "Yogurt Natural 200g", cantidad: 30, valor_unitario: 4000, valor_total: 120000, motivo: "vencido", lote: "L-202603" },
-  ]},
-  { id: "rt2", proveedor_nombre: "Cárnicos del Sur", codigo: "DEV-2026-002", tipo: "devolucion", fecha_creacion: "2026-05-26T14:00:00", total_items: 1, valor_total_estimado: 450000, estado: "autorizado", autorizado_por_nombre: "Admin" },
-  { id: "rt3", proveedor_nombre: "Distribuidora XYZ", codigo: "REC-2026-001", tipo: "recall", fecha_creacion: "2026-05-25T09:00:00", total_items: 2, valor_total_estimado: 1200000, estado: "completado", nota_credito_numero: "NC-2026-001", nota_credito_monto: 1200000 },
-]
-
-const MOCK_AUTHS: Record<string, any[]> = {
-  rt2: [
-    { id: "a1", proveedor_nombre: "Cárnicos del Sur", numero_autorizacion: "AUT-2026-001", fecha_autorizacion: "2026-05-26", valido_hasta: "2026-06-02", autorizado_por_proveedor: "Juan Pérez" },
-  ],
-}
-
-const MOCK_BACKHAULS = [
-  { id: "b1", proveedor_nombre: "Lácteos SA", fecha_programada: "2026-05-28T10:00:00", transportista: "Transportes ABC", patente: "ABC-1234", total_bultos: 50, estado: "pendiente" },
-  { id: "b2", proveedor_nombre: "Cárnicos del Sur", fecha_programada: "2026-05-27T14:00:00", estado: "en_ruta", conductor: "María López" },
-]
-
 export default function ReturnsTab() {
   const [subTab, setSubTab] = useState<SubTab>("dashboard")
   const [loading, setLoading] = useState(true)
-  const [returns, setReturns] = useState<any[]>(MOCK_RETURNS)
-  const [authorizations, setAuthorizations] = useState<any>(MOCK_AUTHS)
-  const [backhauls, setBackhauls] = useState<any[]>(MOCK_BACKHAULS)
+  const [returns, setReturns] = useState<any[]>([])
+  const [authorizations, setAuthorizations] = useState<any>({})
+  const [backhauls, setBackhauls] = useState<any[]>([])
   const [selectedReturn, setSelectedReturn] = useState<string | null>(null)
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [showBackhaulModal, setShowBackhaulModal] = useState(false)
@@ -47,24 +27,24 @@ export default function ReturnsTab() {
     setLoading(true)
     try {
       const p: Promise<any>[] = []
-      if (subTab === "returns") p.push(api.returns.list().then(setReturns))
+      if (subTab === "returns") p.push(api.supplierReturns.list().then(setReturns))
       if (subTab === "backhaul") p.push(api.backhaul.list().then(setBackhauls))
-      if (subTab === "dashboard") p.push(api.returns.dashboard().then(setDashData))
+      if (subTab === "dashboard") p.push(api.supplierReturns.dashboard().then(setDashData))
       await Promise.all(p.map(p => p.catch(() => {})))
     } finally { setLoading(false) }
   }
 
   const loadAuthorizations = async (returnId: string) => {
     try {
-      const data = await api.returns.authorizations.list(returnId)
-      setAuthorizations(prev => ({ ...prev, [returnId]: data }))
+      const data = await api.supplierReturns.authorizations.list(returnId)
+      setAuthorizations((prev: any) => ({ ...prev, [returnId]: data }))
     } catch {}
   }
 
   const handleAuthorize = async (id: string) => {
     setSaving(true)
     try {
-      const res = await api.returns.authorize(id)
+      const res = await api.supplierReturns.authorize(id)
       setReturns(prev => prev.map(r => r.id === id ? { ...r, ...res } : r))
       toast.success("Devolución autorizada")
     } catch (e: any) { toast.error(e.message) } finally { setSaving(false) }
@@ -73,7 +53,7 @@ export default function ReturnsTab() {
   const handleComplete = async (id: string) => {
     setSaving(true)
     try {
-      const res = await api.returns.complete(id)
+      const res = await api.supplierReturns.complete(id)
       setReturns(prev => prev.map(r => r.id === id ? { ...r, ...res } : r))
       toast.success("Devolución completada")
     } catch (e: any) { toast.error(e.message) } finally { setSaving(false) }

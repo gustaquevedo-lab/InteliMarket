@@ -8,58 +8,19 @@ type EqTab = "equipos" | "mtto" | "ordenes" | "alertas" | "dashboard"
 
 const CATEGORIAS = ["refrigeración", "hornos", "cámaras", "balanzas", "cajas", "transporte", "generadores", "otros"]
 
-const MOCK_EQUIPOS: any[] = [
-  { id: "eq1", nombre: "Cámara Fría 1 (Carnes)", categoria: "refrigeración", modelo: "CF-3000", numero_serie: "CF-2024-001", ubicacion: "Sector Carnicería", fecha_instalacion: "2023-03-15", activo: true, costo_adquisicion: 45000000, vida_util_anos: 15 },
-  { id: "eq2", nombre: "Horno Rotativo 8 Bandejas", categoria: "hornos", modelo: "HR-800", numero_serie: "HR-2023-042", ubicacion: "Panadería", fecha_instalacion: "2022-11-01", activo: true, costo_adquisicion: 28000000, vida_util_anos: 10 },
-  { id: "eq3", nombre: "Balanza Digital Toledo", categoria: "balanzas", modelo: "BD-5000", numero_serie: "BD-2024-015", ubicacion: "Verdulería", fecha_instalacion: "2024-01-10", activo: true, costo_adquisicion: 3500000, vida_util_anos: 5 },
-  { id: "eq4", nombre: "Cámara de Maduración", categoria: "cámaras", modelo: "CM-500", numero_serie: "CM-2023-008", ubicacion: "Carnicería", fecha_instalacion: "2023-06-20", activo: false, costo_adquisicion: 18000000, vida_util_anos: 12 },
-  { id: "eq5", nombre: "Generador Eléctrico 150kVA", categoria: "generadores", modelo: "GE-150", numero_serie: "GE-2022-033", ubicacion: "Patio Servicios", fecha_instalacion: "2022-02-28", activo: true, costo_adquisicion: 65000000, vida_util_anos: 20 },
-]
+function labelSeveridad(s: string) {
+  const m: Record<string, string> = { crítica: "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400", alta: "bg-orange-100 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400", media: "bg-amber-100 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400", baja: "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400" }
+  return m[s] || m.media
+}
 
-const MOCK_SCHEDULES: any[] = [
-  { id: "s1", equipo_id: "eq1", equipo_nombre: "Cámara Fría 1 (Carnes)", tarea: "Limpieza de condensadores", frecuencia: "mensual", proximo_vencimiento: new Date(Date.now() + 7 * 86400000).toISOString(), responsable: "Técnico Mantenimiento", notas: "Usar cepillo de cerdas suaves" },
-  { id: "s2", equipo_id: "eq1", equipo_nombre: "Cámara Fría 1 (Carnes)", tarea: "Revisión de puertas y burletes", frecuencia: "trimestral", proximo_vencimiento: new Date(Date.now() + 45 * 86400000).toISOString(), responsable: "Técnico Mantenimiento" },
-  { id: "s3", equipo_id: "eq2", equipo_nombre: "Horno Rotativo 8 Bandejas", tarea: "Calibración de temperatura", frecuencia: "semanal", proximo_vencimiento: new Date(Date.now() + 3 * 86400000).toISOString(), responsable: "Panadero Jefe", notas: "Verificar termocupla" },
-  { id: "s4", equipo_id: "eq5", equipo_nombre: "Generador Eléctrico 150kVA", tarea: "Cambio de aceite + filtros", frecuencia: "semestral", proximo_vencimiento: new Date(Date.now() + 120 * 86400000).toISOString(), responsable: "Técnico Externo" },
-  { id: "s5", equipo_id: "eq2", equipo_nombre: "Horno Rotativo 8 Bandejas", tarea: "Lubricación de rodamientos", frecuencia: "mensual", proximo_vencimiento: new Date(Date.now() + 21 * 86400000).toISOString(), responsable: "Panadero Jefe" },
-]
+function labelPrioridad(p: string) {
+  const m: Record<string, string> = { crítica: "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400", alta: "bg-orange-100 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400", media: "bg-amber-100 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400", baja: "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400" }
+  return m[p] || m.media
+}
 
-const MOCK_WORK_ORDERS: any[] = [
-  { id: "wo1", equipo_id: "eq1", equipo_nombre: "Cámara Fría 1 (Carnes)", tarea: "Fuga de refrigerante", prioridad: "alta", estado: "en_progreso", descripcion: "Pérdida de gas refrigerante en válvula de expansión. Temperatura sube a 8°C.", responsable_asignado: "Carlos Ferreira", fecha_inicio: new Date(Date.now() - 86400000).toISOString(), costo_estimado: 1500000 },
-  { id: "wo2", equipo_id: "eq3", equipo_nombre: "Balanza Digital Toledo", tarea: "Descalibración de sensor", prioridad: "media", estado: "pendiente", descripcion: "Balanza muestra variación de ±50g en pesajes repetidos.", responsable_asignado: "Técnico Externo", costo_estimado: 450000 },
-  { id: "wo3", equipo_id: "eq4", equipo_nombre: "Cámara de Maduración", tarea: "Reactivación de equipo", prioridad: "baja", estado: "completada", descripcion: "Revisión general y puesta en marcha tras reparación.", responsable_asignado: "Técnico Mantenimiento", fecha_inicio: new Date(Date.now() - 7 * 86400000).toISOString(), fecha_fin: new Date(Date.now() - 5 * 86400000).toISOString(), costo_real: 800000, notas_cierre: "Equipo operativo. Monitorear 48 horas." },
-  { id: "wo4", equipo_id: "eq5", equipo_nombre: "Generador Eléctrico 150kVA", tarea: "Prueba de carga mensual", prioridad: "baja", estado: "pendiente", descripcion: "Prueba de funcionamiento con carga del 70% durante 30 min.", responsable_asignado: "Técnico Mantenimiento", costo_estimado: 0 },
-  { id: "wo5", equipo_id: "eq2", equipo_nombre: "Horno Rotativo 8 Bandejas", tarea: "Resistencia quemada", prioridad: "crítica", estado: "pendiente", descripcion: "Resistencia superior no calienta. Producción de panadería limitada al 50%.", responsable_asignado: "Técnico Externo Urgente", costo_estimado: 2200000 },
-]
-
-const MOCK_ALERTS: any[] = [
-  { id: "a1", equipo_id: "eq1", equipo_nombre: "Cámara Fría 1 (Carnes)", tipo: "temperatura", mensaje: "Temperatura superó los 8°C por más de 30 minutos", severidad: "crítica", resuelta: false, created_at: new Date(Date.now() - 3600000).toISOString() },
-  { id: "a2", equipo_id: "eq5", equipo_nombre: "Generador Eléctrico 150kVA", tipo: "mantenimiento", mensaje: "Cambio de aceite programado para los próximos 7 días", severidad: "media", resuelta: false, created_at: new Date(Date.now() - 86400000).toISOString() },
-  { id: "a3", equipo_id: "eq3", equipo_nombre: "Balanza Digital Toledo", tipo: "falla", mensaje: "Sensor de peso reporta lecturas inconsistentes", severidad: "alta", resuelta: false, created_at: new Date(Date.now() - 2 * 86400000).toISOString() },
-  { id: "a4", equipo_id: "eq2", equipo_nombre: "Horno Rotativo 8 Bandejas", tipo: "falla", mensaje: "Resistencia superior quemada - producción limitada", severidad: "crítica", resuelta: false, created_at: new Date(Date.now() - 5 * 3600000).toISOString() },
-]
-
-const MOCK_DASHBOARD: any = {
-  total_equipos: 18,
-  equipos_activos: 15,
-  equipos_inactivos: 3,
-  mtto_pendientes_hoy: 4,
-  ordenes_pendientes: 6,
-  ordenes_en_progreso: 2,
-  ordenes_completadas_mes: 24,
-  alertas_activas: 7,
-  alertas_criticas: 2,
-  costo_mtto_mensual: 4200000,
-  uptime_promedio: 96.8,
-  equipos_por_categoria: [
-    { categoria: "refrigeración", cantidad: 5 },
-    { categoria: "hornos", cantidad: 2 },
-    { categoria: "cámaras", cantidad: 3 },
-    { categoria: "balanzas", cantidad: 4 },
-    { categoria: "cajas", cantidad: 2 },
-    { categoria: "transporte", cantidad: 1 },
-    { categoria: "generadores", cantidad: 1 },
-  ],
+function labelEstado(e: string) {
+  const m: Record<string, string> = { completada: "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400", en_progreso: "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400", pendiente: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300" }
+  return m[e] || m.pendiente
 }
 
 export default function EquipmentTab() {
@@ -67,11 +28,11 @@ export default function EquipmentTab() {
   const [loading, setLoading] = useState(true)
   const toast = useToast()
 
-  const [equipos, setEquipos] = useState<any[]>(MOCK_EQUIPOS)
-  const [schedules, setSchedules] = useState<any[]>(MOCK_SCHEDULES)
-  const [workOrders, setWorkOrders] = useState<any[]>(MOCK_WORK_ORDERS)
-  const [alerts, setAlerts] = useState<any[]>(MOCK_ALERTS)
-  const [dashboard, setDashboard] = useState<any>(MOCK_DASHBOARD)
+  const [equipos, setEquipos] = useState<any[]>([])
+  const [schedules, setSchedules] = useState<any[]>([])
+  const [workOrders, setWorkOrders] = useState<any[]>([])
+  const [alerts, setAlerts] = useState<any[]>([])
+  const [dashboard, setDashboard] = useState<any>(null)
 
   const [search, setSearch] = useState("")
   const [catFilter, setCatFilter] = useState("")
@@ -104,21 +65,6 @@ export default function EquipmentTab() {
     { k: "alertas", l: "Alertas", i: AlertCircle },
     { k: "dashboard", l: "Dashboard", i: BarChart3 },
   ]
-
-  const labelSeveridad = (s: string) => {
-    const m: Record<string, string> = { crítica: "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400", alta: "bg-orange-100 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400", media: "bg-amber-100 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400", baja: "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400" }
-    return m[s] || m.media
-  }
-
-  const labelPrioridad = (p: string) => {
-    const m: Record<string, string> = { crítica: "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400", alta: "bg-orange-100 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400", media: "bg-amber-100 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400", baja: "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400" }
-    return m[p] || m.media
-  }
-
-  const labelEstado = (e: string) => {
-    const m: Record<string, string> = { completada: "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400", en_progreso: "bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400", pendiente: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300" }
-    return m[e] || m.pendiente
-  }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">

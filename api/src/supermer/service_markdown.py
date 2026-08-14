@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 from uuid import UUID
-from sqlalchemy import func
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
@@ -36,21 +36,28 @@ for h in range(22, 24): HOUR_URGENCY[h] = 2.5
 # ---------------------------------------------------------------------------
 
 async def list_markdown_rules(company_id: UUID, db: AsyncSession, activa: Optional[bool] = None):
-    q = db.query(DynamicMarkdownRule).filter(DynamicMarkdownRule.company_id == company_id)
-    if activa is not None: q = q.filter(DynamicMarkdownRule.activa == activa)
-    return q.order_by(DynamicMarkdownRule.categoria).all()
+    q = select(DynamicMarkdownRule).where(DynamicMarkdownRule.company_id == company_id)
+    if activa is not None:
+        q = q.where(DynamicMarkdownRule.activa == activa)
+    q = q.order_by(DynamicMarkdownRule.categoria)
+    result = await db.execute(q)
+    return result.scalars().all()
 
 async def create_markdown_rule(company_id: UUID, data, db: AsyncSession):
     r = DynamicMarkdownRule(company_id=company_id, **data.model_dump(exclude_none=True))
-    db.add(r); db.commit(); db.refresh(r)
+    db.add(r)
+    await db.commit()
+    await db.refresh(r)
     return r
 
 async def update_markdown_rule(rule_id: UUID, data, db: AsyncSession):
-    r = db.query(DynamicMarkdownRule).get(rule_id)
+    result = await db.execute(select(DynamicMarkdownRule).where(DynamicMarkdownRule.id == rule_id))
+    r = result.scalar_one_or_none()
     if not r: raise HTTPException(404, "Markdown rule not found")
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(r, k, v)
-    db.commit(); db.refresh(r)
+    await db.commit()
+    await db.refresh(r)
     return r
 
 
@@ -97,12 +104,14 @@ async def generate_recommendations(company_id: UUID, db: AsyncSession,
                                     solo_urgentes: bool = False, max_recommendations: Optional[int] = None):
     """Generate markdown recommendations based on dynamic rules.
     Scans products with active rules, calculates optimal discount and urgency."""
-    from app.models import Product, Inventory
+    from api.src.products.models import Product, ProductCategory
+    from api.src.inventory.models import StockLot
 
-    rules = db.query(DynamicMarkdownRule).filter(
+    result = await db.execute(select(DynamicMarkdownRule).where(
         DynamicMarkdownRule.company_id == company_id,
         DynamicMarkdownRule.activa == True,
-    ).all()
+    ))
+    rules = result.scalars().all()
 
     if not rules:
         return []  # No rules configured — operator should create rules first
@@ -116,25 +125,39 @@ async def generate_recommendations(company_id: UUID, db: AsyncSession,
         # Get product info
         prod = None
         if rule.producto_id:
-            prod = db.query(Product).get(rule.producto_id)
+            prod_result = await db.execute(select(Product).where(Product.id == rule.producto_id))
+            prod = prod_result.scalar_one_or_none()
         elif rule.categoria:
-            prod = db.query(Product).filter(Product.category == rule.categoria).first()
-        if not prod or not prod.sale_price:
+            prod_result = await db.execute(
+                select(Product)
+                .join(ProductCategory, ProductCategory.id == Product.categoria_id)
+                .where(
+                    Product.company_id == company_id,
+                    func.lower(ProductCategory.nombre) == rule.categoria.lower(),
+                )
+            )
+            prod = prod_result.scalars().first()
+        if not prod or not prod.precio_venta:
             continue
 
-        precio = Decimal(str(prod.sale_price))
+        precio = Decimal(str(prod.precio_venta))
         categoria = (rule.categoria or "almacen").lower()
         elasticidad = CATEGORY_ELASTICITY.get(categoria, 1.2)
 
-        # Get inventory to check days remaining
-        inv = db.query(Inventory).filter(
-            Inventory.product_id == prod.id,
-            Inventory.company_id == company_id,
-        ).first()
+        # Get inventory to check days remaining (uso el lote con vencimiento más próximo)
+        inv_result = await db.execute(
+            select(StockLot)
+            .where(
+                StockLot.product_id == prod.id,
+                StockLot.company_id == company_id,
+            )
+            .order_by(StockLot.fecha_vencimiento.asc())
+        )
+        inv = inv_result.scalars().first()
 
         dias_restantes = 30  # default
-        if inv and inv.expiry_date:
-            dias_restantes = (inv.expiry_date - hoy).days
+        if inv and inv.fecha_vencimiento:
+            dias_restantes = (inv.fecha_vencimiento.date() - hoy).days
 
         urgencia = _calculate_urgency_days(dias_restantes)
         if solo_urgentes and urgencia < 2.0:
@@ -168,32 +191,39 @@ async def generate_recommendations(company_id: UUID, db: AsyncSession,
         db.add(rec)
         recommendations.append(rec)
 
-    db.commit()
+    await db.commit()
     if max_recommendations:
         return recommendations[:max_recommendations]
     return recommendations
 
 
 async def list_recommendations(company_id: UUID, db: AsyncSession, aplicada: Optional[bool] = None, solo_urgentes: bool = False):
-    q = db.query(MarkdownRecommendation).filter(MarkdownRecommendation.company_id == company_id)
-    if aplicada is not None: q = q.filter(MarkdownRecommendation.aplicada == aplicada)
-    if solo_urgentes: q = q.filter(MarkdownRecommendation.score_urgencia >= 70)
-    return q.order_by(MarkdownRecommendation.score_urgencia.desc()).limit(100).all()
+    q = select(MarkdownRecommendation).where(MarkdownRecommendation.company_id == company_id)
+    if aplicada is not None:
+        q = q.where(MarkdownRecommendation.aplicada == aplicada)
+    if solo_urgentes:
+        q = q.where(MarkdownRecommendation.score_urgencia >= 70)
+    q = q.order_by(MarkdownRecommendation.score_urgencia.desc()).limit(100)
+    result = await db.execute(q)
+    return result.scalars().all()
 
 
 async def apply_recommendations(company_id: UUID, recommendation_ids: list[UUID], db: AsyncSession):
     """Apply selected markdown recommendations (update product price + mark as applied)."""
-    from app.models import Product, PriceAuditLog
+    from api.src.products.models import Product
+    from .models import PriceAuditLog
     applied = []
     for rec_id in recommendation_ids:
-        rec = db.query(MarkdownRecommendation).get(rec_id)
+        rec_result = await db.execute(select(MarkdownRecommendation).where(MarkdownRecommendation.id == rec_id))
+        rec = rec_result.scalar_one_or_none()
         if not rec or rec.aplicada: continue
         # Update product price
-        prod = db.query(Product).get(rec.producto_id)
+        prod_result = await db.execute(select(Product).where(Product.id == rec.producto_id))
+        prod = prod_result.scalar_one_or_none()
         if prod:
-            old_price = Decimal(str(prod.sale_price))
+            old_price = Decimal(str(prod.precio_venta))
             new_price = rec.precio_recomendado
-            prod.sale_price = float(new_price)
+            prod.precio_venta = float(new_price)
             # Log the change
             audit = PriceAuditLog(
                 company_id=company_id,
@@ -208,7 +238,7 @@ async def apply_recommendations(company_id: UUID, recommendation_ids: list[UUID]
         rec.aplicada = True
         rec.aplicada_at = datetime.utcnow()
         applied.append(rec)
-    db.commit()
+    await db.commit()
     return applied
 
 
@@ -219,23 +249,40 @@ async def apply_recommendations(company_id: UUID, recommendation_ids: list[UUID]
 async def get_markdown_dashboard(company_id: UUID, db: AsyncSession):
     hoy = date.today()
     hoy_inicio = datetime(hoy.year, hoy.month, hoy.day)
-    return {
-        "reglas_activas": db.query(DynamicMarkdownRule).filter(
+
+    reglas_activas = (await db.execute(
+        select(func.count()).select_from(DynamicMarkdownRule).where(
             DynamicMarkdownRule.company_id == company_id,
             DynamicMarkdownRule.activa == True,
-        ).count(),
-        "recomendaciones_hoy": db.query(MarkdownRecommendation).filter(
+        )
+    )).scalar()
+
+    recomendaciones_hoy = (await db.execute(
+        select(func.count()).select_from(MarkdownRecommendation).where(
             MarkdownRecommendation.company_id == company_id,
             MarkdownRecommendation.created_at >= hoy_inicio,
-        ).count(),
-        "aplicadas_hoy": db.query(MarkdownRecommendation).filter(
+        )
+    )).scalar()
+
+    aplicadas_hoy = (await db.execute(
+        select(func.count()).select_from(MarkdownRecommendation).where(
             MarkdownRecommendation.company_id == company_id,
             MarkdownRecommendation.aplicada == True,
             MarkdownRecommendation.aplicada_at >= hoy_inicio,
-        ).count(),
-        "urgencia_alta": db.query(MarkdownRecommendation).filter(
+        )
+    )).scalar()
+
+    urgencia_alta = (await db.execute(
+        select(func.count()).select_from(MarkdownRecommendation).where(
             MarkdownRecommendation.company_id == company_id,
             MarkdownRecommendation.score_urgencia >= 70,
             MarkdownRecommendation.aplicada == False,
-        ).count(),
+        )
+    )).scalar()
+
+    return {
+        "reglas_activas": reglas_activas,
+        "recomendaciones_hoy": recomendaciones_hoy,
+        "aplicadas_hoy": aplicadas_hoy,
+        "urgencia_alta": urgencia_alta,
     }

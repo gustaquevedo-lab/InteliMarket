@@ -61,7 +61,7 @@ export default function DesposteWizard({ onClose }: { onClose: () => void }) {
   }
 
   const handleFinishDesposte = () => {
-    toast.success("Desposte Registrado", `Se desintegraron ${carcassWeight} kg de carne e ingresaron ${calculatedCuts.length} subproductos al stock.`)
+    toast.info("Calculo guardado", "Esto calcula rendimiento y margen por corte, pero todavia no actualiza el stock real -- cargá los cortes resultantes como una recepcion o ajuste de inventario manual.")
     onClose()
   }
 
@@ -221,7 +221,7 @@ export default function DesposteWizard({ onClose }: { onClose: () => void }) {
               onClick={handleFinishDesposte}
               className="bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-all shadow-md flex-1 flex items-center justify-center gap-2"
             >
-              <CheckCircle2 className="w-4 h-4" /> Confirmar Desposte e Ingresar Stock
+              <CheckCircle2 className="w-4 h-4" /> Finalizar Calculo de Rendimiento
             </button>
           </div>
 

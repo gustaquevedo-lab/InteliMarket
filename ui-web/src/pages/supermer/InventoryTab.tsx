@@ -6,31 +6,12 @@ import { formatDate, formatPYG } from "../../utils/format"
 
 type SubTab = "dashboard" | "sessions" | "items" | "adjustments"
 
-const MOCK_SESSIONS = [
-  { id: "s1", codigo: "INV-2026-001", area: "Góndolas Lácteos", ubicacion: "Pasillo 3", tipo: "ciclico", abc_category: "a", contador_principal_nombre: "Carlos Gómez", contador_verificador_nombre: "Ana Martínez", fecha_inicio: "2026-05-27T08:00:00", estado: "en_curso", total_items_sistema: 120, total_items_contados: 85, total_discrepancias: 3, valor_discrepancia_total: 450000 },
-  { id: "s2", codigo: "INV-2026-002", area: "Carnicería", tipo: "completo", fecha_inicio: "2026-05-26T07:00:00", estado: "completada", total_items_sistema: 200, total_items_contados: 200, total_discrepancias: 5, valor_discrepancia_total: 1280000 },
-  { id: "s3", codigo: "INV-2026-003", area: "Perfumería", tipo: "abc", abc_category: "b", fecha_inicio: "2026-05-25T09:00:00", estado: "ajustada", total_items_sistema: 350, total_items_contados: 350, total_discrepancias: 8, valor_discrepancia_total: 2300000 },
-]
-
-const MOCK_COUNT_ITEMS: Record<string, any[]> = {
-  s1: [
-    { id: "ci1", producto_nombre: "Leche Entera 1L", codigo_barra: "7622210100126", cantidad_sistema: 45, cantidad_contada: 43, diferencia: -2, costo_promedio: 6500, valor_diferencia: -13000, conforme: false, requiere_ajuste: true },
-    { id: "ci2", producto_nombre: "Yogurt Natural 200g", codigo_barra: "7622210100133", cantidad_sistema: 60, cantidad_contada: 60, diferencia: 0, conforme: true },
-    { id: "ci3", producto_nombre: "Queso Paraguay 500g", codigo_barra: "7622210100140", cantidad_sistema: 15, cantidad_contada: 17, diferencia: 2, costo_promedio: 25000, valor_diferencia: 50000, conforme: false, requiere_ajuste: true },
-  ],
-}
-
-const MOCK_ADJUSTMENTS = [
-  { id: "a1", producto_nombre: "Leche Entera 1L", tipo: "faltante", cantidad_ajuste: -2, costo_unitario: 6500, valor_ajuste: -13000, motivo: "Diferencia en conteo físico", estado: "pendiente" },
-  { id: "a2", producto_nombre: "Queso Paraguay 500g", tipo: "sobrante", cantidad_ajuste: 2, costo_unitario: 25000, valor_ajuste: 50000, motivo: "Diferencia en conteo físico", estado: "aprobado", aprobado_por_nombre: "Admin" },
-]
-
 export default function InventoryTab() {
   const [subTab, setSubTab] = useState<SubTab>("dashboard")
   const [loading, setLoading] = useState(true)
-  const [sessions, setSessions] = useState<any[]>(MOCK_SESSIONS)
-  const [countItems, setCountItems] = useState<any>(MOCK_COUNT_ITEMS)
-  const [adjustments, setAdjustments] = useState<any[]>(MOCK_ADJUSTMENTS)
+  const [sessions, setSessions] = useState<any[]>([])
+  const [countItems, setCountItems] = useState<any>({})
+  const [adjustments, setAdjustments] = useState<any[]>([])
   const [selectedSession, setSelectedSession] = useState<string | null>(null)
   const [showSessionModal, setShowSessionModal] = useState(false)
   const [showItemModal, setShowItemModal] = useState(false)
@@ -47,7 +28,7 @@ export default function InventoryTab() {
     try {
       const p: Promise<any>[] = []
       if (subTab === "sessions") p.push(api.inventory.sessions.list().then(setSessions))
-      if (subTab === "items" && selectedSession) p.push(api.inventory.sessions.items.list(selectedSession).then(d => setCountItems(prev => ({ ...prev, [selectedSession]: d }))))
+      if (subTab === "items" && selectedSession) p.push(api.inventory.sessions.items.list(selectedSession).then(d => setCountItems((prev: any) => ({ ...prev, [selectedSession]: d }))))
       if (subTab === "adjustments" && selectedSession) p.push(api.inventory.sessions.adjustments.list(selectedSession).then(setAdjustments))
       if (subTab === "dashboard") p.push(api.inventory.dashboard().then(setDashData))
       await Promise.all(p.map(p => p.catch(() => {})))
@@ -68,6 +49,14 @@ export default function InventoryTab() {
       const res = await api.inventory.adjustments.approve(id)
       setAdjustments(prev => prev.map(a => a.id === id ? { ...a, ...res } : a))
       toast.success("Ajuste aprobado")
+    } catch (e: any) { toast.error(e.message) }
+  }
+
+  const handleRejectAdjustment = async (id: string) => {
+    try {
+      const res = await api.inventory.adjustments.reject(id)
+      setAdjustments(prev => prev.map(a => a.id === id ? { ...a, ...res } : a))
+      toast.success("Ajuste rechazado")
     } catch (e: any) { toast.error(e.message) }
   }
 
@@ -224,7 +213,7 @@ export default function InventoryTab() {
                       {a.estado === "pendiente" && (
                         <div className="flex gap-1 justify-center">
                           <button onClick={() => handleApproveAdjustment(a.id)} className="p-1 bg-green-100 text-green-700 rounded-lg hover:bg-green-200"><Check className="w-3.5 h-3.5" /></button>
-                          <button className="p-1 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"><X className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => handleRejectAdjustment(a.id)} className="p-1 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"><X className="w-3.5 h-3.5" /></button>
                         </div>
                       )}
                     </td>

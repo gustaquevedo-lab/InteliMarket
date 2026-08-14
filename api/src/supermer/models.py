@@ -451,8 +451,8 @@ class RotiseriaBatch(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(200), nullable=False)
     descripcion = Column(Text)
-    area = Column(SAEnum(RotiseriaCookingMethod), nullable=False)
-    holding_method = Column(SAEnum(RotiseriaHoldingMethod), nullable=False)
+    area = Column(String(30), nullable=False)
+    holding_method = Column(String(20), nullable=False)
 
     # Cooking yield: 1kg raw pollo entero → 0.75kg cooked
     factor_coccion = Column(Numeric(5, 4), nullable=False, default=1.0)
@@ -509,13 +509,15 @@ class RotiseriaProductionPlan(Base):
     receta_id = Column(UUID(as_uuid=True), ForeignKey("supermer_rotiseria_recipes.id"), nullable=False)
     cantidad_objetivo = Column(Numeric(12, 3), nullable=False)
     cantidad_producida = Column(Numeric(12, 3))
-    estado = Column(SAEnum(RotiseriaProductionStatus), default="planificada")
+    estado = Column(String(20), default="planificada")
     hora_inicio = Column(DateTime(timezone=True))
     hora_fin = Column(DateTime(timezone=True))
     responsable_id = Column(UUID(as_uuid=True))
     notas = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    temperature_logs = relationship("RotiseriaTemperatureLog", backref="plan", cascade="all, delete-orphan")
+    labels = relationship("RotiseriaLabelBatch", backref="plan", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_rotiseria_plan_fecha_company", "company_id", "fecha"),
@@ -530,7 +532,7 @@ class RotiseriaTemperatureLog(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     plan_id = Column(UUID(as_uuid=True), ForeignKey("supermer_rotiseria_plans.id"), nullable=False)
     punto_control = Column(String(100), nullable=False)  # ej: "Baño María Pollos", "Vitrina Ensaladas"
-    tipo = Column(SAEnum(RotiseriaHoldingMethod), nullable=False)
+    tipo = Column(String(20), nullable=False)
     temperatura = Column(Numeric(5, 1), nullable=False)
     temp_min_requerida = Column(Numeric(5, 1))
     temp_max_requerida = Column(Numeric(5, 1))
@@ -630,8 +632,8 @@ class HaccpCriticalPoint(Base):
     plan_id = Column(UUID(as_uuid=True), ForeignKey("supermer_haccp_plans.id"), nullable=False)
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(200), nullable=False)
-    tipo = Column(SAEnum(HaccpPointType), nullable=False)
-    riesgo = Column(SAEnum(HaccpRiskLevel), nullable=False)
+    tipo = Column(String(30), nullable=False)
+    riesgo = Column(String(20), nullable=False)
 
     # Critical limits
     limite_inferior = Column(Numeric(8, 2))     # ej: 0°C para refrigeración
@@ -744,14 +746,14 @@ class DsdReceivingSchedule(Base):
     ventana_inicio = Column(DateTime(timezone=True), nullable=False)
     ventana_fin = Column(DateTime(timezone=True), nullable=False)
     muelle = Column(String(20))
-    tipo_carga = Column(SAEnum(DsdDockType), nullable=False)
+    tipo_carga = Column(String(20), nullable=False)
     transportista = Column(String(100))
     patente = Column(String(20))
     conductor = Column(String(100))
     conductor_telefono = Column(String(20))
     total_bultos_estimado = Column(Integer)
     total_peso_estimado_kg = Column(Numeric(8, 2))
-    estado = Column(SAEnum(DsdReceivingStatus), default="programada")
+    estado = Column(String(20), default="programada")
     notas = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -777,10 +779,10 @@ class DsdReceivingLog(Base):
     total_bultos_recibidos = Column(Integer)
     total_bultos_rechazados = Column(Integer, default=0)
     temp_ambiente_descarga = Column(Numeric(4, 1))
-    temp_check_method = Column(SAEnum(DsdTemperatureCheck), default="manual")
+    temp_check_method = Column(String(20), default="manual")
     hora_inicio = Column(DateTime(timezone=True))
     hora_fin = Column(DateTime(timezone=True))
-    estado = Column(SAEnum(DsdReceivingStatus), default="en_curso")
+    estado = Column(String(20), default="en_curso")
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -861,12 +863,12 @@ class PhysicalCountSession(Base):
     area = Column(String(50), nullable=False)
     ubicacion = Column(String(100))
     tipo = Column(String(20), default="ciclico")  # completo, ciclico, abc, por_area
-    abc_category = Column(SAEnum(AbcCategory))
+    abc_category = Column(String(1))
     contador_principal = Column(UUID(as_uuid=True))
     contador_verificador = Column(UUID(as_uuid=True))
     fecha_inicio = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     fecha_fin = Column(DateTime(timezone=True))
-    estado = Column(SAEnum(CountSessionStatus), default="abierta")
+    estado = Column(String(20), default="abierta")
     total_items_sistema = Column(Integer, default=0)
     total_items_contados = Column(Integer, default=0)
     total_discrepancias = Column(Integer, default=0)
@@ -1055,7 +1057,7 @@ class SupplierReturn(Base):
     valor_total_estimado = Column(Numeric(14, 2))
     nota_credito_numero = Column(String(50))
     nota_credito_monto = Column(Numeric(14, 2))
-    estado = Column(SAEnum(ReturnStatus), default="pendiente")
+    estado = Column(String(20), default="pendiente")
     autorizado_por = Column(UUID(as_uuid=True))
     autorizado_at = Column(DateTime(timezone=True))
     completado_por = Column(UUID(as_uuid=True))
@@ -1083,7 +1085,7 @@ class SupplierReturnItem(Base):
     costo_promedio = Column(Numeric(12, 2))
     valor_unitario = Column(Numeric(12, 2))
     valor_total = Column(Numeric(14, 2))
-    motivo = Column(SAEnum(ReturnReason), nullable=False)
+    motivo = Column(String(30), nullable=False)
     lote = Column(String(50))
     fecha_vencimiento = Column(Date)
     detalle = Column(Text)
@@ -1150,7 +1152,7 @@ class StorePriceZone(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(100), nullable=False)
     descripcion = Column(Text)
-    tipo = Column(SAEnum(PriceZoneType), nullable=False)
+    tipo = Column(String(20), nullable=False)
     activa = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -1412,8 +1414,8 @@ class StoreAuditTemplate(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(200), nullable=False)
     descripcion = Column(Text)
-    area = Column(SAEnum(AuditArea), nullable=False, index=True)
-    schedule = Column(SAEnum(AuditSchedule), nullable=False)
+    area = Column(String(20), nullable=False, index=True)
+    schedule = Column(String(20), nullable=False)
 
     # Scoring
     peso_porcentual = Column(Numeric(5, 2), default=100.0)
@@ -1424,6 +1426,8 @@ class StoreAuditTemplate(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    items = relationship("StoreAuditTemplateItem", backref="template", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_audit_template_area_company", "company_id", "area"),
@@ -1438,7 +1442,7 @@ class StoreAuditTemplateItem(Base):
     template_id = Column(UUID(as_uuid=True), ForeignKey("supermer_audit_templates.id"), nullable=False)
     orden = Column(Integer, nullable=False)
     pregunta = Column(Text, nullable=False)
-    tipo_respuesta = Column(SAEnum(AuditResponseType), nullable=False)
+    tipo_respuesta = Column(String(20), nullable=False)
     peso = Column(Numeric(5, 2), default=1.0)  # weight for scoring
     opciones = Column(JSON)                      # for escala type: [1,2,3,4,5]
     instrucciones = Column(Text)
@@ -1473,6 +1477,7 @@ class StoreAuditExecution(Base):
     notas_generales = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    answers = relationship("StoreAuditAnswer", backref="execution", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_audit_execution_fecha", "company_id", "fecha"),
@@ -1548,7 +1553,7 @@ class StoreEquipment(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(200), nullable=False)
-    categoria = Column(SAEnum(EquipmentCategory), nullable=False, index=True)
+    categoria = Column(String(30), nullable=False, index=True)
     marca = Column(String(100))
     modelo = Column(String(100))
     numero_serie = Column(String(100))
@@ -1592,7 +1597,7 @@ class EquipmentMaintenanceSchedule(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     equipo_id = Column(UUID(as_uuid=True), ForeignKey("supermer_equipment.id"), nullable=False)
-    tipo = Column(SAEnum(MaintenanceType), nullable=False)
+    tipo = Column(String(20), nullable=False)
 
     # Frequency
     frecuencia_dias = Column(Integer, nullable=False)
@@ -1601,12 +1606,10 @@ class EquipmentMaintenanceSchedule(Base):
     # Task definition
     tareas = Column(JSON, nullable=False)  # List of subtasks with instructions
     duracion_estimada_min = Column(Integer)
-    prioridad = Column(SAEnum(EquipmentPriority), default="media")
+    prioridad = Column(String(20), default="media")
 
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         Index("ix_equip_schedule_equipo", "equipo_id"),
@@ -1623,12 +1626,11 @@ class EquipmentWorkOrder(Base):
     schedule_id = Column(UUID(as_uuid=True), ForeignKey("supermer_equipment_schedules.id"))
 
     numero_ot = Column(String(50), nullable=False)
-    tipo = Column(SAEnum(MaintenanceType), nullable=False)
-    prioridad = Column(SAEnum(EquipmentPriority), default="media")
-    estado = Column(SAEnum(MaintenanceStatus), default="programado")
+    tipo = Column(String(20), nullable=False)
+    prioridad = Column(String(20), default="media")
+    estado = Column(String(20), default="programado")
 
     # Issue description (for corrective)
-    reportado_por = Column(UUID(as_uuid=True))
     descripcion_falla = Column(Text)
     sintomas = Column(JSON)  # ["ruido_anormal", "fuga_agua", "no_enfria"]
 
@@ -1650,7 +1652,7 @@ class EquipmentWorkOrder(Base):
 
     # Result
     resultado = Column(String(50))  # "resuelto", "parcial", "derivado_proveedor", "baja_equipo"
-    fecha_proximo_mantenimiento = Column(Date)
+    notas = Column(Text)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

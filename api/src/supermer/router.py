@@ -839,7 +839,7 @@ async def rotiseria_add_temp_log(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_rotiseria.add_temp_log(plan_id, user["user_id"], data, db)
+    return await service_rotiseria.add_temp_log(plan_id, user["id"], data, db)
 
 
 @router.get("/rotiseria/plans/{plan_id}/temp-logs", response_model=list[RotiseriaTemperatureLogResponse])
@@ -982,7 +982,7 @@ async def haccp_create_monitoring_log(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_haccp.create_monitoring_log(cp_id, user["user_id"], data, db)
+    return await service_haccp.create_monitoring_log(cp_id, user["id"], data, db)
 
 
 @router.get("/haccp/corrective-actions", response_model=list[HaccpCorrectiveActionResponse])
@@ -1135,7 +1135,7 @@ async def audit_start_execution(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_audits.start_execution(user["company_id"], user["user_id"], data, db)
+    return await service_audits.start_execution(user["company_id"], user["id"], data, db)
 
 
 @router.post("/audit/executions/{execution_id}/answers", response_model=AuditExecutionResponse)
@@ -1145,7 +1145,7 @@ async def audit_submit_answers(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_audits.submit_answers(execution_id, user["user_id"], data, db)
+    return await service_audits.submit_answers(execution_id, user["id"], data, db)
 
 
 @router.post("/audit/executions/{execution_id}/complete", response_model=AuditExecutionResponse)
@@ -1177,15 +1177,6 @@ async def equipment_list(
     user=Depends(require_auth),
 ):
     return await service_equipment.list_equipment(user["company_id"], db, categoria, activo)
-
-
-@router.get("/equipment/{equipment_id}", response_model=EquipmentResponse)
-async def equipment_get(
-    equipment_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
-):
-    return await service_equipment.get_equipment(equipment_id, db)
 
 
 @router.post("/equipment", response_model=EquipmentResponse, status_code=status.HTTP_201_CREATED)
@@ -1342,6 +1333,15 @@ async def equipment_dashboard(
     user=Depends(require_auth),
 ):
     return await service_equipment.equipment_dashboard(user["company_id"], db)
+
+
+@router.get("/equipment/{equipment_id}", response_model=EquipmentResponse)
+async def equipment_get(
+    equipment_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service_equipment.get_equipment(equipment_id, db)
 
 
 # ============================================================
@@ -1684,7 +1684,7 @@ async def replenishment_review_suggestion(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_replenishment.review_suggestion(suggestion_id, data, db, user["user_id"])
+    return await service_replenishment.review_suggestion(suggestion_id, data, db, user["id"])
 
 
 @router.post("/crossdock/orders", response_model=CrossDockOrderResponse, status_code=201)
@@ -1746,15 +1746,6 @@ async def returns_create(
     return await service_returns.create_return(user["company_id"], data, db)
 
 
-@router.get("/returns/{return_id}", response_model=SupplierReturnResponse)
-async def returns_get(
-    return_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
-):
-    return await service_returns.get_return(return_id, db)
-
-
 @router.put("/returns/{return_id}", response_model=SupplierReturnResponse)
 async def returns_update(
     return_id: UUID,
@@ -1771,7 +1762,7 @@ async def returns_authorize(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_returns.authorize_return(return_id, user["user_id"], db)
+    return await service_returns.authorize_return(return_id, user["id"], db)
 
 
 @router.post("/returns/{return_id}/complete", response_model=SupplierReturnResponse)
@@ -1780,7 +1771,7 @@ async def returns_complete(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_returns.complete_return(return_id, user["user_id"], db)
+    return await service_returns.complete_return(return_id, user["id"], db)
 
 
 @router.post("/returns/{return_id}/items", response_model=ReturnItemResponse, status_code=201)
@@ -1857,6 +1848,15 @@ async def returns_dashboard(
     return await service_returns.get_returns_dashboard(user["company_id"], db)
 
 
+@router.get("/returns/{return_id}", response_model=SupplierReturnResponse)
+async def returns_get(
+    return_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service_returns.get_return(return_id, db)
+
+
 # ============================================================
 # FASE 3 — PRECIOS MULTICANAL
 # ============================================================
@@ -1926,7 +1926,7 @@ async def pricing_create_audit_log(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_pricing.create_price_audit_log(user["company_id"], data, db, user["user_id"])
+    return await service_pricing.create_price_audit_log(user["company_id"], data, db, user["id"])
 
 @router.post("/price-audit-logs/{log_id}/approve", response_model=PriceAuditLogResponse)
 async def pricing_approve_change(
@@ -1934,7 +1934,7 @@ async def pricing_approve_change(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service_pricing.approve_price_change(log_id, user["user_id"], db)
+    return await service_pricing.approve_price_change(log_id, user["id"], db)
 
 @router.get("/psychological-rules", response_model=list[PsychologicalRuleResponse])
 async def pricing_list_psych_rules(

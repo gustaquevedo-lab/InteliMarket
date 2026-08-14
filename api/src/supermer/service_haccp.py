@@ -4,9 +4,8 @@ from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
-from sqlalchemy import func
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
 from .models import HaccpPlan, HaccpCriticalPoint, HaccpMonitoringLog, HaccpCorrectiveAction
@@ -18,26 +17,44 @@ from .models import HaccpPlan, HaccpCriticalPoint, HaccpMonitoringLog, HaccpCorr
 # ---------------------------------------------------------------------------
 
 async def list_haccp_plans(company_id: UUID, db: AsyncSession, activo: Optional[bool] = None):
-    q = db.query(HaccpPlan).filter(HaccpPlan.company_id == company_id)
+    q = select(HaccpPlan).where(HaccpPlan.company_id == company_id)
     if activo is not None:
-        q = q.filter(HaccpPlan.activo == activo)
-    return q.order_by(HaccpPlan.nombre).all()
+        q = q.where(HaccpPlan.activo == activo)
+    q = q.order_by(HaccpPlan.nombre)
+    result = await db.execute(q)
+    return result.scalars().all()
 
 
 async def get_haccp_plan(plan_id: UUID, db: AsyncSession):
-    p = db.query(HaccpPlan).options(
-        selectinload(HaccpPlan.critical_points).selectinload(HaccpCriticalPoint.monitoring_logs),
-    ).get(plan_id)
+    result = await db.execute(select(HaccpPlan).where(HaccpPlan.id == plan_id))
+    p = result.scalar_one_or_none()
     if not p:
         raise HTTPException(404, "HACCP plan not found")
+
+    # No relationship() is declared between HaccpPlan/HaccpCriticalPoint/HaccpMonitoringLog
+    # in models.py, so selectinload() cannot be used here — fetch explicitly instead.
+    cps_result = await db.execute(
+        select(HaccpCriticalPoint)
+        .where(HaccpCriticalPoint.plan_id == plan_id)
+        .order_by(HaccpCriticalPoint.orden)
+    )
+    cps = cps_result.scalars().all()
+    for cp in cps:
+        logs_result = await db.execute(
+            select(HaccpMonitoringLog)
+            .where(HaccpMonitoringLog.critical_point_id == cp.id)
+            .order_by(HaccpMonitoringLog.registrado_at.desc())
+        )
+        cp.monitoring_logs = logs_result.scalars().all()
+    p.critical_points = cps
     return p
 
 
 async def create_haccp_plan(company_id: UUID, data, db: AsyncSession):
     p = HaccpPlan(company_id=company_id, **data.model_dump(exclude_none=True))
     db.add(p)
-    db.commit()
-    db.refresh(p)
+    await db.commit()
+    await db.refresh(p)
     return await get_haccp_plan(p.id, db)
 
 
@@ -45,8 +62,8 @@ async def update_haccp_plan(plan_id: UUID, data, db: AsyncSession):
     p = await get_haccp_plan(plan_id, db)
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(p, k, v)
-    db.commit()
-    db.refresh(p)
+    await db.commit()
+    await db.refresh(p)
     return await get_haccp_plan(plan_id, db)
 
 
@@ -55,39 +72,45 @@ async def update_haccp_plan(plan_id: UUID, data, db: AsyncSession):
 # ---------------------------------------------------------------------------
 
 async def list_critical_points(plan_id: UUID, db: AsyncSession):
-    return db.query(HaccpCriticalPoint).filter(
-        HaccpCriticalPoint.plan_id == plan_id,
-    ).order_by(HaccpCriticalPoint.orden).all()
+    result = await db.execute(
+        select(HaccpCriticalPoint)
+        .where(HaccpCriticalPoint.plan_id == plan_id)
+        .order_by(HaccpCriticalPoint.orden)
+    )
+    return result.scalars().all()
 
 
 async def create_critical_point(plan_id: UUID, data, db: AsyncSession):
-    plan = db.query(HaccpPlan).get(plan_id)
+    result = await db.execute(select(HaccpPlan).where(HaccpPlan.id == plan_id))
+    plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(404, "HACCP plan not found")
     cp = HaccpCriticalPoint(plan_id=plan_id, **data.model_dump(exclude_none=True))
     db.add(cp)
-    db.commit()
-    db.refresh(cp)
+    await db.commit()
+    await db.refresh(cp)
     return cp
 
 
 async def update_critical_point(cp_id: UUID, data, db: AsyncSession):
-    cp = db.query(HaccpCriticalPoint).get(cp_id)
+    result = await db.execute(select(HaccpCriticalPoint).where(HaccpCriticalPoint.id == cp_id))
+    cp = result.scalar_one_or_none()
     if not cp:
         raise HTTPException(404, "Critical point not found")
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(cp, k, v)
-    db.commit()
-    db.refresh(cp)
+    await db.commit()
+    await db.refresh(cp)
     return cp
 
 
 async def delete_critical_point(cp_id: UUID, db: AsyncSession):
-    cp = db.query(HaccpCriticalPoint).get(cp_id)
+    result = await db.execute(select(HaccpCriticalPoint).where(HaccpCriticalPoint.id == cp_id))
+    cp = result.scalar_one_or_none()
     if not cp:
         raise HTTPException(404, "Critical point not found")
-    db.delete(cp)
-    db.commit()
+    await db.delete(cp)
+    await db.commit()
     return {"ok": True}
 
 
@@ -96,7 +119,8 @@ async def delete_critical_point(cp_id: UUID, db: AsyncSession):
 # ---------------------------------------------------------------------------
 
 async def create_monitoring_log(cp_id: UUID, user_id: UUID, data, db: AsyncSession):
-    cp = db.query(HaccpCriticalPoint).get(cp_id)
+    result = await db.execute(select(HaccpCriticalPoint).where(HaccpCriticalPoint.id == cp_id))
+    cp = result.scalar_one_or_none()
     if not cp:
         raise HTTPException(404, "Critical point not found")
     lim_inf = data.limite_inferior or cp.limite_inferior
@@ -123,15 +147,18 @@ async def create_monitoring_log(cp_id: UUID, user_id: UUID, data, db: AsyncSessi
         )
         db.add(ca)
 
-    db.commit()
-    db.refresh(log)
+    await db.commit()
+    await db.refresh(log)
     return log
 
 
 async def list_monitoring_logs(cp_id: UUID, db: AsyncSession):
-    return db.query(HaccpMonitoringLog).filter(
-        HaccpMonitoringLog.critical_point_id == cp_id,
-    ).order_by(HaccpMonitoringLog.registrado_at.desc()).all()
+    result = await db.execute(
+        select(HaccpMonitoringLog)
+        .where(HaccpMonitoringLog.critical_point_id == cp_id)
+        .order_by(HaccpMonitoringLog.registrado_at.desc())
+    )
+    return result.scalars().all()
 
 
 # ---------------------------------------------------------------------------
@@ -139,30 +166,36 @@ async def list_monitoring_logs(cp_id: UUID, db: AsyncSession):
 # ---------------------------------------------------------------------------
 
 async def list_corrective_actions(company_id: UUID, db: AsyncSession, resuelto: Optional[bool] = None):
-    q = db.query(HaccpCorrectiveAction).join(HaccpCriticalPoint).join(HaccpPlan).filter(
-        HaccpPlan.company_id == company_id,
+    q = (
+        select(HaccpCorrectiveAction)
+        .join(HaccpCriticalPoint, HaccpCorrectiveAction.critical_point_id == HaccpCriticalPoint.id)
+        .join(HaccpPlan, HaccpCriticalPoint.plan_id == HaccpPlan.id)
+        .where(HaccpPlan.company_id == company_id)
     )
     if resuelto is not None:
-        q = q.filter(HaccpCorrectiveAction.resuelto == resuelto)
-    return q.order_by(HaccpCorrectiveAction.created_at.desc()).all()
+        q = q.where(HaccpCorrectiveAction.resuelto == resuelto)
+    q = q.order_by(HaccpCorrectiveAction.created_at.desc())
+    result = await db.execute(q)
+    return result.scalars().all()
 
 
 async def create_corrective_action(data, db: AsyncSession):
     ca = HaccpCorrectiveAction(**data.model_dump(exclude_none=True))
     db.add(ca)
-    db.commit()
-    db.refresh(ca)
+    await db.commit()
+    await db.refresh(ca)
     return ca
 
 
 async def resolve_corrective_action(ca_id: UUID, db: AsyncSession):
-    ca = db.query(HaccpCorrectiveAction).get(ca_id)
+    result = await db.execute(select(HaccpCorrectiveAction).where(HaccpCorrectiveAction.id == ca_id))
+    ca = result.scalar_one_or_none()
     if not ca:
         raise HTTPException(404, "Corrective action not found")
     ca.resuelto = True
     ca.resuelto_at = datetime.utcnow()
-    db.commit()
-    db.refresh(ca)
+    await db.commit()
+    await db.refresh(ca)
     return ca
 
 
@@ -171,18 +204,29 @@ async def resolve_corrective_action(ca_id: UUID, db: AsyncSession):
 # ---------------------------------------------------------------------------
 
 async def compliance_report(company_id: UUID, db: AsyncSession, periodo: str = "mes"):
-    plans = db.query(HaccpPlan).filter(
-        HaccpPlan.company_id == company_id, HaccpPlan.activo == True,
-    ).all()
+    result = await db.execute(
+        select(HaccpPlan).where(HaccpPlan.company_id == company_id, HaccpPlan.activo == True)
+    )
+    plans = result.scalars().all()
     total_cp = 0
     total_logs = 0
     total_conforme = 0
     total_ca = 0
     total_cost = 0
+    # No relationship() is declared between HaccpPlan/HaccpCriticalPoint/HaccpMonitoringLog
+    # in models.py, so fetch critical points and logs explicitly instead of via ORM relationship.
     for p in plans:
-        for cp in p.critical_points or []:
+        cps_result = await db.execute(
+            select(HaccpCriticalPoint).where(HaccpCriticalPoint.plan_id == p.id)
+        )
+        cps = cps_result.scalars().all()
+        for cp in cps:
             total_cp += 1
-            for log in cp.monitoring_logs or []:
+            logs_result = await db.execute(
+                select(HaccpMonitoringLog).where(HaccpMonitoringLog.critical_point_id == cp.id)
+            )
+            logs = logs_result.scalars().all()
+            for log in logs:
                 total_logs += 1
                 if log.conforme:
                     total_conforme += 1
@@ -206,31 +250,60 @@ async def compliance_report(company_id: UUID, db: AsyncSession, periodo: str = "
 # ---------------------------------------------------------------------------
 
 async def haccp_dashboard(company_id: UUID, db: AsyncSession):
-    active_plans = db.query(HaccpPlan).filter(
-        HaccpPlan.company_id == company_id, HaccpPlan.activo == True,
-    ).count()
-    cp_count = db.query(HaccpCriticalPoint).join(HaccpPlan).filter(
-        HaccpPlan.company_id == company_id, HaccpCriticalPoint.activo == True,
-    ).count()
+    active_plans = (await db.execute(
+        select(func.count()).select_from(HaccpPlan).where(
+            HaccpPlan.company_id == company_id, HaccpPlan.activo == True,
+        )
+    )).scalar()
+
+    cp_count = (await db.execute(
+        select(func.count()).select_from(HaccpCriticalPoint)
+        .join(HaccpPlan, HaccpCriticalPoint.plan_id == HaccpPlan.id)
+        .where(HaccpPlan.company_id == company_id, HaccpCriticalPoint.activo == True)
+    )).scalar()
+
     today = date.today()
-    logs_today = db.query(HaccpMonitoringLog).join(HaccpCriticalPoint).join(HaccpPlan).filter(
-        HaccpPlan.company_id == company_id,
-        func.date(HaccpMonitoringLog.registrado_at) == today,
-    ).count()
-    total_logs = db.query(HaccpMonitoringLog).join(HaccpCriticalPoint).join(HaccpPlan).filter(
-        HaccpPlan.company_id == company_id,
-    ).count()
-    conforming = db.query(HaccpMonitoringLog).join(HaccpCriticalPoint).join(HaccpPlan).filter(
-        HaccpPlan.company_id == company_id,
-        HaccpMonitoringLog.conforme == True,
-    ).count()
+    logs_today = (await db.execute(
+        select(func.count()).select_from(HaccpMonitoringLog)
+        .join(HaccpCriticalPoint, HaccpMonitoringLog.critical_point_id == HaccpCriticalPoint.id)
+        .join(HaccpPlan, HaccpCriticalPoint.plan_id == HaccpPlan.id)
+        .where(
+            HaccpPlan.company_id == company_id,
+            func.date(HaccpMonitoringLog.registrado_at) == today,
+        )
+    )).scalar()
+
+    total_logs = (await db.execute(
+        select(func.count()).select_from(HaccpMonitoringLog)
+        .join(HaccpCriticalPoint, HaccpMonitoringLog.critical_point_id == HaccpCriticalPoint.id)
+        .join(HaccpPlan, HaccpCriticalPoint.plan_id == HaccpPlan.id)
+        .where(HaccpPlan.company_id == company_id)
+    )).scalar()
+
+    conforming = (await db.execute(
+        select(func.count()).select_from(HaccpMonitoringLog)
+        .join(HaccpCriticalPoint, HaccpMonitoringLog.critical_point_id == HaccpCriticalPoint.id)
+        .join(HaccpPlan, HaccpCriticalPoint.plan_id == HaccpPlan.id)
+        .where(
+            HaccpPlan.company_id == company_id,
+            HaccpMonitoringLog.conforme == True,
+        )
+    )).scalar()
+
     pct = Decimal("0")
     if total_logs > 0:
         pct = Decimal(conforming) / Decimal(total_logs) * 100
-    pending_actions = db.query(HaccpCorrectiveAction).join(HaccpCriticalPoint).join(HaccpPlan).filter(
-        HaccpPlan.company_id == company_id,
-        HaccpCorrectiveAction.resuelto == False,
-    ).count()
+
+    pending_actions = (await db.execute(
+        select(func.count()).select_from(HaccpCorrectiveAction)
+        .join(HaccpCriticalPoint, HaccpCorrectiveAction.critical_point_id == HaccpCriticalPoint.id)
+        .join(HaccpPlan, HaccpCriticalPoint.plan_id == HaccpPlan.id)
+        .where(
+            HaccpPlan.company_id == company_id,
+            HaccpCorrectiveAction.resuelto == False,
+        )
+    )).scalar()
+
     return {
         "planes_activos": active_plans,
         "puntos_criticos": cp_count,

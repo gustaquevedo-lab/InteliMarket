@@ -6,26 +6,11 @@ import { formatDate, formatDateTime, formatTime } from "../../utils/format"
 
 type SubTab = "schedules" | "receivings" | "items" | "rejections" | "dashboard"
 
-const MOCK_SCHEDULES = [
-  { id: "s1", proveedor_nombre: "Distribuidora XYZ", numero_oc: "OC-2026-001", fecha_programada: "2026-05-27", ventana_inicio: "2026-05-27T08:00:00", ventana_fin: "2026-05-27T10:00:00", muelle: "M-01", tipo_carga: "seco", transportista: "Transportes ABC", patente: "ABC-1234", conductor: "Juan Pérez", estado: "programada" },
-  { id: "s2", proveedor_nombre: "Lácteos SA", numero_oc: "OC-2026-002", fecha_programada: "2026-05-27", ventana_inicio: "2026-05-27T10:00:00", ventana_fin: "2026-05-27T12:00:00", muelle: "M-02", tipo_carga: "frio", estado: "programada" },
-  { id: "s3", proveedor_nombre: "Cárnicos del Sur", numero_oc: "OC-2026-003", fecha_programada: "2026-05-27", ventana_inicio: "2026-05-27T06:00:00", ventana_fin: "2026-05-27T08:00:00", muelle: "M-03", tipo_carga: "congelado", transportista: "Carga Fría SRL", conductor: "María López", conductor_telefono: "0981-123-456", estado: "en_curso" },
-  { id: "s4", proveedor_nombre: "Bebidas del Paraguay", numero_oc: "OC-2026-004", fecha_programada: "2026-05-27", ventana_inicio: "2026-05-27T14:00:00", ventana_fin: "2026-05-27T16:00:00", muelle: "M-01", tipo_carga: "seco", estado: "programada" },
-]
-
-const MOCK_RECEIVINGS = [
-  { id: "r1", proveedor_nombre: "Cárnicos del Sur", numero_oc: "OC-2026-003", fecha_recepcion: new Date().toISOString(), recibido_por_nombre: "Carlos Gómez", total_bultos_recibidos: 45, total_bultos_rechazados: 2, temp_ambiente_descarga: 18.5, estado: "en_curso", items: [
-    { id: "i1", producto_nombre: "Carne Vacuna Premium kg", cantidad_solicitada: 500, cantidad_recibida: 480, cantidad_aceptada: 475, temperatura_producto: 2.1, temp_conforme: true, lote: "L-20260527", condicion_visual: "buena", inspeccion_conforme: true },
-    { id: "i2", producto_nombre: "Carne de Cerdo kg", cantidad_solicitada: 300, cantidad_recibida: 300, cantidad_aceptada: 290, temperatura_producto: 3.5, temp_conforme: true, lote: "L-20260527-B", condicion_visual: "regular", inspeccion_conforme: true },
-  ]},
-  { id: "r2", proveedor_nombre: "Distribuidora XYZ", numero_oc: "OC-2026-001", fecha_recepcion: new Date(Date.now() - 86400000).toISOString(), recibido_por_nombre: "Ana Martínez", total_bultos_recibidos: 120, total_bultos_rechazados: 0, estado: "completada" },
-]
-
 export default function DsdTab() {
   const [subTab, setSubTab] = useState<SubTab>("dashboard")
   const [loading, setLoading] = useState(true)
-  const [schedules, setSchedules] = useState<any[]>(MOCK_SCHEDULES)
-  const [receivings, setReceivings] = useState<any[]>(MOCK_RECEIVINGS)
+  const [schedules, setSchedules] = useState<any[]>([])
+  const [receivings, setReceivings] = useState<any[]>([])
   const [selectedReceiving, setSelectedReceiving] = useState<any>(null)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [showReceivingModal, setShowReceivingModal] = useState(false)
@@ -232,7 +217,6 @@ export default function DsdTab() {
                         <th className="text-left py-2 px-2 font-medium text-gray-500">Producto</th>
                         <th className="text-right py-2 px-2 font-medium text-gray-500">Cant.</th>
                         <th className="text-left py-2 px-2 font-medium text-gray-500">Motivo</th>
-                        <th className="text-center py-2 px-2 font-medium text-gray-500">NC</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -241,10 +225,9 @@ export default function DsdTab() {
                           <td className="py-2 px-2">{item.producto_nombre}</td>
                           <td className="py-2 px-2 text-right text-red-600">{item.cantidad_aceptada !== undefined ? item.cantidad_recibida - item.cantidad_aceptada : "-"}</td>
                           <td className="py-2 px-2 text-gray-500">{item.condicion_visual === "mala" ? "Condición visual deficiente" : "Temp fuera de rango"}</td>
-                          <td className="py-2 px-2 text-center"><Check className="w-4 h-4 text-green-600 mx-auto" /></td>
                         </tr>
                       ))}
-                      {(!selectedReceiving.items.some((i: any) => !i.inspeccion_conforme)) && <tr><td colSpan={4} className="py-4 text-center text-gray-400">Sin rechazos en esta recepción</td></tr>}
+                      {(!selectedReceiving.items.some((i: any) => !i.inspeccion_conforme)) && <tr><td colSpan={3} className="py-4 text-center text-gray-400">Sin rechazos en esta recepción</td></tr>}
                     </tbody>
                   </table>
                 </div>

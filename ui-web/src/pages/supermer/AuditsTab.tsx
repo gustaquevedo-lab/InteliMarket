@@ -52,85 +52,12 @@ const AREAS = ["panadería", "carnicería", "rotisería", "verdulería", "lácte
 
 const CATEGORIAS = ["higiene", "temperatura", "calidad", "seguridad", "documentación", "equipamiento"]
 
-const MOCK_TEMPLATES: AuditTemplate[] = [
-  {
-    id: "at1", nombre: "Higiene y Limpieza General", area: "panadería",
-    descripcion: "Auditoría diaria de higiene en área de panadería",
-    activa: true, created_at: new Date().toISOString(),
-    items: [
-      { id: "ai1", pregunta: "Mesada de trabajo limpia y desinfectada", categoria: "higiene", peso: 20, es_critico: true },
-      { id: "ai2", pregunta: "Utensilios lavados y almacenados correctamente", categoria: "higiene", peso: 15, es_critico: false },
-      { id: "ai3", pregunta: "Piso libre de residuos de harina/masa", categoria: "higiene", peso: 10, es_critico: false },
-      { id: "ai4", pregunta: "Horno con temperatura correcta (180-220°C)", categoria: "temperatura", peso: 25, es_critico: true },
-      { id: "ai5", pregunta: "Registro de temperatura visible y actualizado", categoria: "documentación", peso: 10, es_critico: false },
-    ]
-  },
-  {
-    id: "at2", nombre: "Control de Cámaras Frigoríficas", area: "carnicería",
-    descripcion: "Verificación de temperatura y estado de cámaras de frío",
-    activa: true, created_at: new Date().toISOString(),
-    items: [
-      { id: "ai6", pregunta: "Temperatura cámara entre 0°C y 4°C", categoria: "temperatura", peso: 30, es_critico: true },
-      { id: "ai7", pregunta: "Puerta de cámara cierra herméticamente", categoria: "seguridad", peso: 15, es_critico: true },
-      { id: "ai8", pregunta: "Alarma de temperatura operativa", categoria: "equipamiento", peso: 20, es_critico: false },
-      { id: "ai9", pregunta: "Productos separados por tipo (ave, cerdo, vacuno)", categoria: "calidad", peso: 15, es_critico: false },
-      { id: "ai10", pregunta: "Registro de temperaturas cada 4 horas", categoria: "documentación", peso: 10, es_critico: false },
-    ]
-  },
-  {
-    id: "at3", nombre: "Calidad de Verdulería", area: "verdulería",
-    descripcion: "Auditoría de frescura y calidad de productos frescos",
-    activa: false, created_at: new Date(Date.now() - 86400000).toISOString(),
-    items: [
-      { id: "ai11", pregunta: "Productos sin signos de deshidratación", categoria: "calidad", peso: 25, es_critico: false },
-      { id: "ai12", pregunta: "Góndola refrigerada a temperatura óptima", categoria: "temperatura", peso: 20, es_critico: true },
-      { id: "ai13", pregunta: "Rotación FIFO aplicada correctamente", categoria: "calidad", peso: 20, es_critico: false },
-    ]
-  }
-]
-
-const MOCK_EXECUTIONS: AuditExecution[] = [
-  {
-    id: "ae1", template_id: "at1", template_nombre: "Higiene y Limpieza General", area: "panadería",
-    estado: "completada", score: 92, pass: true, ejecutado_por: "Carlos Benítez",
-    created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
-    notas: "Todo en orden, pequeño derrame de harina corregido in-situ"
-  },
-  {
-    id: "ae2", template_id: "at2", template_nombre: "Control de Cámaras Frigoríficas", area: "carnicería",
-    estado: "completada", score: 75, pass: true, ejecutado_por: "María González",
-    created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
-    notas: "Alarma de temperatura no respondió en prueba, se generó orden de mantenimiento"
-  },
-  {
-    id: "ae3", template_id: "at3", template_nombre: "Calidad de Verdulería", area: "verdulería",
-    estado: "en_progreso", ejecutado_por: "Luis Acosta",
-    created_at: new Date(Date.now() - 3600000).toISOString()
-  }
-]
-
-const MOCK_DASHBOARD: AuditDashboard = {
-  ejecuciones_hoy: 3,
-  ejecuciones_semana: 14,
-  tasa_aprobacion: 85.7,
-  total_ejecuciones: 48,
-  por_area: [
-    { area: "panadería", total: 12, aprobadas: 11 },
-    { area: "carnicería", total: 10, aprobadas: 8 },
-    { area: "verdulería", total: 8, aprobadas: 6 },
-    { area: "rotisería", total: 6, aprobadas: 5 },
-    { area: "lácteos", total: 7, aprobadas: 7 },
-    { area: "almacén", total: 5, aprobadas: 4 },
-  ],
-  alertas_pendientes: 2
-}
-
 export default function AuditsTab() {
   const [tab, setTab] = useState<STab>("dashboard")
   const [loading, setLoading] = useState(true)
-  const [templates, setTemplates] = useState<AuditTemplate[]>(MOCK_TEMPLATES)
-  const [executions, setExecutions] = useState<AuditExecution[]>(MOCK_EXECUTIONS)
-  const [dashboard, setDashboard] = useState<AuditDashboard>(MOCK_DASHBOARD)
+  const [templates, setTemplates] = useState<AuditTemplate[]>([])
+  const [executions, setExecutions] = useState<AuditExecution[]>([])
+  const [dashboard, setDashboard] = useState<AuditDashboard | null>(null)
   const [search, setSearch] = useState("")
   const toast = useToast()
 
@@ -145,7 +72,8 @@ export default function AuditsTab() {
       if (tab === "plantillas") promises.push(api.audits.templates.list().then(setTemplates))
       if (tab === "ejecuciones") promises.push(api.audits.executions.list().then(setExecutions))
       if (tab === "dashboard") promises.push(api.audits.dashboard().then(setDashboard))
-      await Promise.all(promises.map(p => p.catch(e => console.warn("Demo fetch warning:", e))))
+      const results = await Promise.allSettled(promises)
+      if (results.some(r => r.status === "rejected")) toast.error("Error", "No se pudieron cargar algunos datos de auditorias")
     } catch (e: any) {
       console.error("Audits fetch error:", e)
     } finally {
@@ -696,7 +624,8 @@ function EjecucionesTab({ data, templates, search, setSearch, fetchAll, toast }:
   )
 }
 
-function DashboardTab({ data }: { data: AuditDashboard }) {
+function DashboardTab({ data }: { data: AuditDashboard | null }) {
+  if (!data) return <div className="text-center py-12 text-gray-400 text-sm">Sin datos de auditorias todavia</div>
   const totalAprobadas = data.por_area.reduce((s, a) => s + a.aprobadas, 0)
   const totalGlobal = data.por_area.reduce((s, a) => s + Number(a.total), 0)
 
