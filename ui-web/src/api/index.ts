@@ -416,10 +416,18 @@ export const api = {
     summary: (id: string) => client.get<CashSessionSummary>(`/v1/cash-sessions/${id}/summary`),
   },
   routeCashSettlements: {
-    list: (params?: { fecha_desde?: string; fecha_hasta?: string; cobrador_codigo?: string; limit?: number; offset?: number }) =>
+    list: (params?: { fecha_desde?: string; fecha_hasta?: string; cobrador_codigo?: string; cerrado?: boolean; search?: string; limit?: number; offset?: number }) =>
       client.get<any[]>(`/v1/companies/${COMPANY_ID}/route-cash-settlements`, params as any),
     summary: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>
       client.get<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/summary`, params as any),
+    getDetail: (id: string) =>
+      client.get<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/${id}`),
+    open: (data: { cobrador_codigo?: string; funcionario_codigo?: string; a_rendir: number; observaciones?: string }) =>
+      client.post<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/open`, data),
+    close: (id: string, data: { efectivo: number; pagares?: number; descuentos?: number; otro_egreso?: number; anticipo?: number; observaciones?: string; usuario?: string }) =>
+      client.post<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/${id}/close`, data),
+    authorize: (id: string, data?: { usuario_tesorero?: string; observaciones?: string }) =>
+      client.post<any>(`/v1/companies/${COMPANY_ID}/route-cash-settlements/${id}/authorize`, data || {}),
   },
   branches: {
     list: () => client.get<Branch[]>("/v1/branches"),

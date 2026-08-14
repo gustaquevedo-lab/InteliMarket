@@ -98,11 +98,15 @@ async def list_route_settlements(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     cobrador_codigo: str | None = Query(None),
+    cerrado: bool | None = Query(None),
+    search: str | None = Query(None),
     limit: int = Query(50, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_route_settlements(db, company_id, fecha_desde, fecha_hasta, cobrador_codigo, limit, offset)
+    return await service.list_route_settlements(
+        db, company_id, fecha_desde, fecha_hasta, cobrador_codigo, cerrado, search, limit, offset
+    )
 
 
 @router.get("/companies/{company_id}/route-cash-settlements/summary")
@@ -113,3 +117,63 @@ async def route_settlements_summary(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.get_route_settlements_summary(db, company_id, fecha_desde, fecha_hasta)
+
+
+@router.get("/companies/{company_id}/route-cash-settlements/{settlement_id}")
+async def get_route_settlement_detail(
+    company_id: str,
+    settlement_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await service.get_route_settlement_detail(db, company_id, settlement_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Liquidación / Sesión de caja no encontrada")
+    return result
+
+
+@router.post("/companies/{company_id}/route-cash-settlements/open")
+async def open_route_settlement(
+    company_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.open_route_settlement(db, company_id, body)
+
+
+@router.post("/companies/{company_id}/route-cash-settlements/{settlement_id}/close")
+async def close_route_settlement(
+    company_id: str,
+    settlement_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from decimal import Decimal
+    efectivo = Decimal(str(body.get("efectivo", 0)))
+    pagares = Decimal(str(body.get("pagares", 0)))
+    descuentos = Decimal(str(body.get("descuentos", 0)))
+    otro_egreso = Decimal(str(body.get("otro_egreso", 0)))
+    anticipo = Decimal(str(body.get("anticipo", 0)))
+    observaciones = body.get("observaciones")
+    usuario = body.get("usuario", "Cajero")
+
+    result = await service.close_route_settlement_with_count(
+        db, company_id, settlement_id, efectivo, pagares, descuentos, otro_egreso, anticipo, observaciones, usuario
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Liquidación no encontrada")
+    return result
+
+
+@router.post("/companies/{company_id}/route-cash-settlements/{settlement_id}/authorize")
+async def authorize_route_settlement(
+    company_id: str,
+    settlement_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    usuario_tesorero = body.get("usuario_tesorero", "Tesoreria Central")
+    observaciones = body.get("observaciones")
+    result = await service.authorize_route_settlement(db, company_id, settlement_id, usuario_tesorero, observaciones)
+    if not result:
+        raise HTTPException(status_code=404, detail="Liquidación no encontrada")
+    return result
