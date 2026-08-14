@@ -84,7 +84,7 @@ async def list_checks(
         LEFT JOIN customers c ON c.id = ch.customer_id
         WHERE {where_stmt}
         ORDER BY 
-            CASE WHEN ch.fecha_vencimiento IS NULL OR ch.fecha_vencimiento < '1950-01-01' THEN 0 ELSE 1 END ASC,
+            CASE WHEN ch.fecha_vencimiento IS NOT NULL AND ch.fecha_vencimiento >= '1950-01-01' THEN 0 ELSE 1 END ASC,
             ch.fecha_vencimiento DESC,
             ch.created_at DESC
         LIMIT :limit OFFSET :offset
