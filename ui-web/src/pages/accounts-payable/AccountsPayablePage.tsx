@@ -85,21 +85,21 @@ export default function AccountsPayablePage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [docsData, agingData, summaryData, suppsData] = await Promise.all([
+      const [docsRes, agingRes, summaryRes, suppsRes] = await Promise.allSettled([
         api.accountsPayable.list({ estado: filterStatus }),
         api.accountsPayable.aging(),
         api.accountsPayable.summary(),
         api.suppliers.list({ activo: true }),
       ])
-      setDocs(docsData)
-      setAging(agingData)
-      setSummary(summaryData)
-      setSuppliers(suppsData)
-    } catch {
-      setDocs([])
-      setAging(null)
-      setSummary(null)
-    } finally { setLoading(false) }
+      if (docsRes.status === "fulfilled") setDocs(docsRes.value || [])
+      if (agingRes.status === "fulfilled") setAging(agingRes.value || null)
+      if (summaryRes.status === "fulfilled") setSummary(summaryRes.value || null)
+      if (suppsRes.status === "fulfilled") setSuppliers(suppsRes.value || [])
+    } catch (e: any) {
+      toast.error("Error", "Error al procesar los datos de cuentas por pagar")
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { fetchData() }, [filterStatus])

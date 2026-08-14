@@ -28,6 +28,10 @@ async def create_supplier(body: SupplierCreate, db: AsyncSession = Depends(get_d
     return await service.create_supplier(db, body)
 
 
+@router.get("/suppliers", response_model=list[SupplierResponse])
+async def list_all_suppliers(company_id: str = Query("00000000-0000-0000-0000-000000000010"), search: str | None = Query(None), activo: bool | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_suppliers(db, company_id, search)
+
 @router.get("/companies/{company_id}/suppliers", response_model=list[SupplierResponse])
 async def list_suppliers(company_id: str, search: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     return await service.list_suppliers(db, company_id, search)
