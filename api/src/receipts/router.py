@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from sqlalchemy import select, text
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
-from api.src.receipts.pdf_service import generate_receipt_pdf
-from api.src.sifen.qr_service import generate_qr_image
+from api.src.sifen.client import sifen_client
 
 router = APIRouter(prefix="/api/v1/receipts", tags=["receipts"])
 
@@ -17,8 +16,8 @@ async def get_sale_receipt_pdf(
 ):
     try:
         result = await db.execute(text("""
-            SELECT s.id, s.customer_id, s.total, s.iva_10, s.iva_5,
-                   s.tipo_comprobante, s.condicion, s.numero, s.cdc,
+            SELECT s.id, s.customer_id, s.total, s.subtotal, s.iva_10, s.iva_5,
+                   s.tipo_comprobante, s.condicion, s.numero, s.cdc, s.sifen_estado,
                    s.created_at, c.razon_social, c.ruc, c.direccion, c.telefono,
                    cu.razon_social as customer_name, cu.ruc as customer_ruc
             FROM sales s
@@ -36,43 +35,52 @@ async def get_sale_receipt_pdf(
             LEFT JOIN products p ON si.product_id = p.id
             WHERE si.sale_id = :sale_id
         """), {"sale_id": sale_id})
-        items = [dict(row._mapping) for row in items_result.fetchall()]
+        items = [dict(r._mapping) for r in items_result.fetchall()]
 
-        company = {
-            "razon_social": row.razon_social or "Empresa",
+        company_dict = {
+            "razon_social": row.razon_social or "Casa Gonzalito",
             "ruc": row.ruc or "N/A",
-            "direccion": row.direccion or "",
+            "direccion": row.direccion or "Asuncion",
             "telefono": row.telefono or "",
         }
 
-        sale = {
+        customer_dict = {
+            "razon_social": row.customer_name or "CONSUMIDOR FINAL",
+            "ruc": row.customer_ruc or "00000000",
+        }
+
+        sale_dict = {
+            "id": str(row.id),
             "numero": row.numero or "N/A",
             "tipo_comprobante": row.tipo_comprobante or "factura",
             "condicion": row.condicion or "contado",
-            "total": row.total or 0,
-            "iva_10": row.iva_10 or 0,
-            "iva_5": row.iva_5 or 0,
-            "customer_name": row.customer_name or "Consumidor Final",
-            "customer_ruc": row.customer_ruc or "N/A",
-            "created_at": row.created_at.isoformat() if row.created_at else "",
+            "subtotal": float(row.subtotal or row.total or 0),
+            "descuento": 0,
+            "total": float(row.total or 0),
+            "total_iva10": float(row.iva_10 or 0),
+            "total_iva5": float(row.iva_5 or 0),
+            "cdc": row.cdc or "",
+            "fecha": row.created_at.isoformat() if row.created_at else "",
+            "items": [
+                {
+                    "descripcion": i.get("product_name") or "Producto",
+                    "cantidad": float(i.get("cantidad") or 1),
+                    "precio_unitario": float(i.get("precio_unitario") or 0),
+                }
+                for i in items
+            ],
         }
 
-        cdc = row.cdc
-        qr_bytes = None
-        if cdc:
-            qr_bytes = generate_qr_image(cdc, size=256)
+        pdf_bytes = await sifen_client.generate_pdf(sale_dict, company_dict, customer_dict)
 
-        pdf_bytes = generate_receipt_pdf(company, sale, items, cdc, qr_bytes)
-
-        return StreamingResponse(
-            iter([pdf_bytes]),
+        return Response(
+            content=pdf_bytes,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f"attachment; filename=factura_{sale_id[:8]}.pdf",
-                "Content-Length": str(len(pdf_bytes)),
+                "Content-Disposition": f"inline; filename=factura_{row.numero or sale_id[:8]}.pdf",
             },
         )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generando PDF con InteliFact: {str(e)}")

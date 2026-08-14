@@ -1,17 +1,24 @@
-﻿import { useState, useEffect } from "react"
-import { FileText, RefreshCw, Search, X, Loader2, CheckCircle, XCircle, AlertTriangle, Clock, QrCode, ExternalLink, Plus, Shield, Copy } from "lucide-react"
+import { useState, useEffect } from "react"
+import {
+  FileText, RefreshCw, Search, X, Loader2, CheckCircle, XCircle, AlertTriangle, Clock,
+  QrCode, ExternalLink, Plus, Shield, Copy, Key, Upload, FileCheck, Check
+} from "lucide-react"
 import { api, type SifenResponse, type SifenTimbrado } from "../api"
 import { useToast } from "../context/ToastContext"
 import { formatPYG } from "../utils/format"
 
-type Tab = "responses" | "timbrados" | "cdc"
+type Tab = "responses" | "timbrados" | "config" | "cdc"
+
+const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 const estadoColors: Record<string, string> = {
-  pendiente: "bg-amber-100 text-amber-700",
-  aceptado: "bg-green-100 text-green-700",
-  rechazado: "bg-red-100 text-red-700",
-  error: "bg-red-100 text-red-700",
-  enviado: "bg-blue-100 text-blue-700",
+  pendiente: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  aprobado: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  authorized_sandbox: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
+  aceptado: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  rechazado: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  error: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  enviado: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
 }
 
 export default function SifenPage() {
@@ -40,163 +47,181 @@ export default function SifenPage() {
     try {
       const result = await api.sifen.retry(response.sale_id)
       if (result.success) {
-        toast.success("SIFEN", "Reenviado correctamente")
+        toast.success("SIFEN InteliFact", "Comprobante procesado correctamente")
       } else {
-        toast.error("SIFEN", result.error || "Error al reenviar")
+        toast.error("SIFEN", result.error || "Error al procesar comprobante")
       }
       loadResponses()
-    } catch { toast.error("Error", "No se pudo reenviar") }
+    } catch { toast.error("Error", "No se pudo procesar el comprobante") }
     finally { setRetrying(null) }
-  }
-
-  const stats = {
-    total: responses.length,
-    pendientes: responses.filter((r) => r.estado === "pendiente" || r.estado === "enviado").length,
-    aceptados: responses.filter((r) => r.estado === "aceptado").length,
-    rechazados: responses.filter((r) => r.estado === "rechazado" || r.estado === "error").length,
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gradient-to-r from-blue-900/90 to-indigo-900 text-white p-6 rounded-2xl shadow-lg">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <Shield className="w-6 h-6 text-accent" />
-            Facturación Electrónica
-          </h1>
-          <p className="text-sm text-gray-500">Gestión SIFEN / e-Kuatia</p>
+          <div className="flex items-center gap-3 mb-1">
+            <h1 className="text-2xl font-black">Facturación Electrónica (SIFEN / e-Kuatia)</h1>
+            <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1">
+              <Shield className="w-3.5 h-3.5" /> InteliFact Engine
+            </span>
+          </div>
+          <p className="text-blue-200 text-sm">
+            Gestión de timbrados, certificados .p12, firmas digitales y envíos oficiales a la SET
+          </p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setTab("responses")}
-            className={`px-3 py-1.5 rounded text-sm ${tab === "responses" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-700"}`}>
-            Respuestas
-          </button>
-          <button onClick={() => setTab("timbrados")}
-            className={`px-3 py-1.5 rounded text-sm ${tab === "timbrados" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-700"}`}>
-            Timbrados
-          </button>
-          <button onClick={() => setTab("cdc")}
-            className={`px-3 py-1.5 rounded text-sm ${tab === "cdc" ? "bg-primary text-white" : "bg-gray-100 dark:bg-gray-700"}`}>
-            Consultar CDC
-          </button>
-        </div>
+        <button onClick={loadResponses} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-medium transition flex items-center gap-2">
+          <RefreshCw className="w-4 h-4" /> Actualizar
+        </button>
+      </div>
+
+      <div className="flex border-b border-gray-200 dark:border-gray-700 gap-2">
+        <button
+          onClick={() => setTab("responses")}
+          className={`px-4 py-2.5 font-medium text-sm border-b-2 transition flex items-center gap-2 ${
+            tab === "responses" ? "border-primary text-primary font-bold" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <FileText className="w-4 h-4" /> Comprobantes y Envíos
+        </button>
+        <button
+          onClick={() => setTab("timbrados")}
+          className={`px-4 py-2.5 font-medium text-sm border-b-2 transition flex items-center gap-2 ${
+            tab === "timbrados" ? "border-primary text-primary font-bold" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <Shield className="w-4 h-4" /> Timbrados SET
+        </button>
+        <button
+          onClick={() => setTab("config")}
+          className={`px-4 py-2.5 font-medium text-sm border-b-2 transition flex items-center gap-2 ${
+            tab === "config" ? "border-primary text-primary font-bold" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <Key className="w-4 h-4" /> Certificado P12 & Config
+        </button>
+        <button
+          onClick={() => setTab("cdc")}
+          className={`px-4 py-2.5 font-medium text-sm border-b-2 transition flex items-center gap-2 ${
+            tab === "cdc" ? "border-primary text-primary font-bold" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <QrCode className="w-4 h-4" /> Consultar CDC / QR
+        </button>
       </div>
 
       {tab === "responses" && (
-        <>
-          <div className="grid grid-cols-4 gap-4">
-            <div className="card p-4 text-center">
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.total}</p>
-              <p className="text-xs text-gray-500">Total</p>
-            </div>
-            <div className="card p-4 text-center">
-              <p className="text-2xl font-bold text-amber-600">{stats.pendientes}</p>
-              <p className="text-xs text-gray-500">Pendientes</p>
-            </div>
-            <div className="card p-4 text-center">
-              <p className="text-2xl font-bold text-green-600">{stats.aceptados}</p>
-              <p className="text-xs text-gray-500">Aceptados</p>
-            </div>
-            <div className="card p-4 text-center">
-              <p className="text-2xl font-bold text-red-600">{stats.rechazados}</p>
-              <p className="text-xs text-gray-500">Rechazados</p>
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <select className="input-field w-44" value={estadoFilter} onChange={(e) => setEstadoFilter(e.target.value)}>
+        <div className="space-y-4">
+          <div className="flex justify-between items-center gap-4">
+            <select
+              value={estadoFilter}
+              onChange={(e) => setEstadoFilter(e.target.value)}
+              className="input-field max-w-xs text-sm"
+            >
               <option value="">Todos los estados</option>
+              <option value="aprobado">Aprobado / Sandbox</option>
               <option value="pendiente">Pendiente</option>
-              <option value="aceptado">Aceptado</option>
               <option value="rechazado">Rechazado</option>
               <option value="error">Error</option>
             </select>
-            <button onClick={loadResponses} className="px-4 py-2 bg-primary text-white rounded-lg text-sm">
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            </button>
+            <span className="text-xs text-gray-500">{responses.length} comprobantes procesados</span>
           </div>
 
-          <div className="space-y-2">
-            {loading ? (
-              <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-            ) : responses.length === 0 ? (
-              <div className="text-center py-12 text-gray-400">
-                <FileText className="w-12 h-12 mx-auto mb-3" />
-                <p className="text-sm">Sin respuestas SIFEN</p>
-              </div>
-            ) : responses.map((r) => (
-              <div key={r.id} className="card p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${estadoColors[r.estado || ""] || "bg-gray-100"}`}>
-                      {r.estado || "desconocido"}
-                    </span>
-                    <div>
-                      <p className="text-sm font-mono text-gray-900 dark:text-white">
-                        {r.cdc ? `${r.cdc.slice(0, 20)}...${r.cdc.slice(-8)}` : "Sin CDC"}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {r.fecha_envio ? new Date(r.fecha_envio).toLocaleString("es-PY") : ""}
-                        {r.sale_id && <span className="ml-2">Sale: {r.sale_id.slice(0, 8)}...</span>}
-                      </p>
-                      {r.mensaje_error && <p className="text-xs text-red-500 mt-1">{r.mensaje_error}</p>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setSelected(r)} className="btn-ghost p-2" title="Ver detalle">
-                      <Search className="w-4 h-4" />
-                    </button>
-                    {(r.estado === "rechazado" || r.estado === "error") ? (
-                      <button onClick={() => handleRetry(r)} disabled={retrying === r.sale_id}
-                        className="btn-ghost p-2 text-amber-600 hover:text-amber-800" title="Reintentar">
-                        {retrying === r.sale_id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                      </button>
-                    ) : null}
-                    {r.cdc && (
-                      <button onClick={() => window.open(`/api/v1/sifen/qr/${r.cdc}`, "_blank")}
-                        className="btn-ghost p-2" title="Ver QR">
-                        <QrCode className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div className="card overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 dark:bg-slate-800 border-b text-xs font-semibold text-gray-500">
+                  <th className="p-3">CDC</th>
+                  <th className="p-3">Estado SIFEN</th>
+                  <th className="p-3">Fecha Envío</th>
+                  <th className="p-3 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y text-sm">
+                {loading ? (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-gray-400">
+                      <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" /> Cargando comprobantes...
+                    </td>
+                  </tr>
+                ) : responses.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-gray-400">
+                      No hay registros de comprobantes electrónicos en SIFEN.
+                    </td>
+                  </tr>
+                ) : (
+                  responses.map((r) => (
+                    <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50">
+                      <td className="p-3 font-mono text-xs text-gray-700 dark:text-gray-300">
+                        {r.cdc || "N/A"}
+                      </td>
+                      <td className="p-3">
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${estadoColors[r.estado || "pendiente"] || "bg-gray-100 text-gray-600"}`}>
+                          {r.estado === "authorized_sandbox" ? "Aprobado (Sandbox InteliFact)" : r.estado}
+                        </span>
+                      </td>
+                      <td className="p-3 text-xs text-gray-500">
+                        {r.fecha_envio ? new Date(r.fecha_envio).toLocaleString("es-PY") : "-"}
+                      </td>
+                      <td className="p-3 text-right space-x-2">
+                        <button
+                          onClick={() => setSelected(r)}
+                          className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded text-xs font-medium"
+                        >
+                          Ver XML / Detalle
+                        </button>
+                        {r.sale_id && (
+                          <button
+                            onClick={() => handleRetry(r)}
+                            disabled={retrying === r.sale_id}
+                            className="px-2.5 py-1 bg-primary text-white rounded text-xs font-medium hover:bg-primary-dark disabled:opacity-50"
+                          >
+                            {retrying === r.sale_id ? "Enviando..." : "Firmar / Reenviar"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-
-          {selected && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setSelected(null)}>
-              <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-lg mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold">Detalle SIFEN</h3>
-                  <button onClick={() => setSelected(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
-                </div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between"><span className="text-gray-500">ID</span><span className="font-mono text-xs">{selected.id}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Sale ID</span><span className="font-mono text-xs">{selected.sale_id}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">CDC</span><span className="font-mono text-xs">{selected.cdc || "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Estado</span><span>{selected.estado}</span></div>
-                  {selected.fecha_envio && <div className="flex justify-between"><span className="text-gray-500">Envío</span><span>{new Date(selected.fecha_envio).toLocaleString("es-PY")}</span></div>}
-                  {selected.fecha_respuesta && <div className="flex justify-between"><span className="text-gray-500">Respuesta</span><span>{new Date(selected.fecha_respuesta).toLocaleString("es-PY")}</span></div>}
-                  {selected.codigo_error && <div className="flex justify-between"><span className="text-gray-500">Código error</span><span className="text-red-500">{selected.codigo_error}</span></div>}
-                  {selected.mensaje_error && <div><span className="text-gray-500">Mensaje</span><p className="text-red-500 mt-1">{selected.mensaje_error}</p></div>}
-                </div>
-                <div className="flex gap-3 mt-6">
-                  <button onClick={() => setSelected(null)} className="btn-outline flex-1">Cerrar</button>
-                  {(selected.estado === "rechazado" || selected.estado === "error") && selected.sale_id && (
-                    <button onClick={() => { handleRetry(selected); setSelected(null) }} className="btn-primary flex-1">
-                      Reintentar envío
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </>
+        </div>
       )}
 
       {tab === "timbrados" && <TimbradosTab />}
+      {tab === "config" && <ConfigTab />}
       {tab === "cdc" && <CdcTab />}
+
+      {selected && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-3xl shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-bold text-lg">Detalle Comprobante SIFEN</h3>
+              <button onClick={() => setSelected(null)} className="p-1 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-400">CDC</label>
+              <p className="font-mono text-sm break-all bg-gray-100 dark:bg-slate-900 p-2 rounded-lg">{selected.cdc}</p>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-400">XML Enviado por InteliFact</label>
+              <pre className="font-mono text-xs bg-slate-950 text-green-400 p-4 rounded-xl max-h-60 overflow-y-auto whitespace-pre-wrap">
+                {selected.xml_sent || selected.xml_enviado || "No disponible"}
+              </pre>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-400">Respuesta de la SET / e-Kuatia</label>
+              <pre className="font-mono text-xs bg-slate-900 text-blue-300 p-4 rounded-xl max-h-40 overflow-y-auto whitespace-pre-wrap">
+                {selected.xml_respuesta || "No disponible"}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -205,56 +230,218 @@ function TimbradosTab() {
   const [timbrados, setTimbrados] = useState<SifenTimbrado[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
-  const toast = useToast()
 
-  useEffect(() => {
-    api.sifen.timbrados.list().then(setTimbrados).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+  async function loadTimbrados() {
+    setLoading(true)
+    try {
+      const data = await api.fiscal.timbrados.list(COMPANY_ID)
+      setTimbrados(data || [])
+    } catch { setTimbrados([]) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { loadTimbrados() }, [])
 
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <p className="text-sm text-gray-500">{timbrados.length} timbrados registrados</p>
-        <button onClick={() => setShowCreate(true)} className="btn-primary text-sm flex items-center gap-1">
-          <Plus className="w-4 h-4" />Nuevo Timbrado
+        <h3 className="font-bold text-lg">Timbrados Activos de la SET</h3>
+        <button onClick={() => setShowCreate(true)} className="btn-primary text-sm flex items-center gap-2">
+          <Plus className="w-4 h-4" /> Nuevo Timbrado
         </button>
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+        <div className="p-8 text-center text-gray-400">
+          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" /> Cargando timbrados...
+        </div>
       ) : timbrados.length === 0 ? (
-        <div className="text-center py-8 text-gray-400"><FileText className="w-10 h-10 mx-auto mb-2" /><p className="text-sm">Sin timbrados</p></div>
+        <div className="card p-8 text-center text-gray-400">No hay timbrados registrados.</div>
       ) : (
-        <div className="space-y-2">
-          {timbrados.map((t) => (
-            <div key={t.id} className="card p-4">
-              <div className="flex justify-between items-center">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {timbrados.map((t: any) => (
+            <div key={t.id} className="card p-5 border-l-4 border-l-primary space-y-3">
+              <div className="flex justify-between items-start">
                 <div>
-                  <p className="font-semibold">Timbrado N° {t.numero}</p>
-                  <p className="text-xs text-gray-500">
-                    {t.fecha_inicio && new Date(t.fecha_inicio).toLocaleDateString()} → {t.fecha_fin && new Date(t.fecha_fin).toLocaleDateString()}
-                    {t.rango_desde && t.rango_hasta && ` | N° ${t.rango_desde} - ${t.rango_hasta}`}
-                  </p>
+                  <span className="text-xs font-bold uppercase text-primary tracking-wider">{t.tipo_comprobante || "factura"}</span>
+                  <h4 className="text-xl font-black font-mono">N° {t.numero}</h4>
                 </div>
-                <span className={`text-xs px-2 py-1 rounded-full ${t.activo ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${t.activo ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
                   {t.activo ? "Activo" : "Inactivo"}
                 </span>
               </div>
+              <div className="text-xs text-gray-500 space-y-1">
+                <p>Vigencia: {t.fecha_inicio} al {t.fecha_fin}</p>
+                <p>Rango autorizado: {t.rango_desde} - {t.rango_hasta}</p>
+              </div>
+              {t.disponibles !== undefined && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs font-medium">
+                    <span>Disponibles: {t.disponibles}</span>
+                    <span>Usados: {t.usados}</span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-primary h-full transition-all"
+                      style={{ width: `${Math.min(100, (t.usados / (t.rango_hasta - t.rango_desde + 1)) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
 
       {showCreate && (
-        <CreateTimbradoModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); api.sifen.timbrados.list().then(setTimbrados) }} />
+        <CreateTimbradoModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); loadTimbrados() }} />
       )}
+    </div>
+  )
+}
+
+function ConfigTab() {
+  const [certBase64, setCertBase64] = useState("")
+  const [certPassword, setCertPassword] = useState("")
+  const [sifenEnv, setSifenEnv] = useState("test")
+  const [modoEmision, setModoEmision] = useState("sifen")
+  const [puntoEmision, setPuntoEmision] = useState("001")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [certFileName, setCertFileName] = useState("")
+  const toast = useToast()
+
+  useEffect(() => {
+    async function loadConfig() {
+      setLoading(true)
+      try {
+        const config = await api.fiscal.config.get(COMPANY_ID)
+        if (config) {
+          setModoEmision(config.modo_emision || "sifen")
+          setPuntoEmision(config.punto_emision || "001")
+          setSifenEnv((config as any).sifen_env || "test")
+          if ((config as any).cert_p12_base64) {
+            setCertBase64((config as any).cert_p12_base64)
+            setCertFileName("certificado_cargado.p12")
+          }
+          if ((config as any).cert_password) {
+            setCertPassword((config as any).cert_password)
+          }
+        }
+      } catch {
+        // use defaults
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadConfig()
+  }, [])
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setCertFileName(file.name)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      const base64 = result.split(",")[1] || result
+      setCertBase64(base64)
+      toast.success("Certificado Seleccionado", file.name)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await api.fiscal.config.upsert(COMPANY_ID, {
+        company_id: COMPANY_ID,
+        modo_emision: modoEmision,
+        punto_emision: puntoEmision,
+        cert_p12_base64: certBase64 || null,
+        cert_password: certPassword || null,
+        sifen_env: sifenEnv,
+      })
+      toast.success("Configuración Guardada", "Firma digital y ambiente SIFEN actualizados")
+    } catch {
+      toast.error("Error", "No se pudo guardar la configuración fiscal")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return <div className="p-8 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" /> Carga de configuración...</div>
+  }
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div className="card p-6 space-y-6">
+        <div>
+          <h3 className="font-bold text-lg flex items-center gap-2"><Key className="w-5 h-5 text-primary" /> Certificado Digital .P12 (Firma Electrónica)</h3>
+          <p className="text-xs text-gray-500 mt-1">Cargá tu firma digital PKCS12 (.p12) emitida por una entidad certificadora autorizada de Paraguay (CODE10, E-Sign, etc.)</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1">Archivo Certificado .p12</label>
+            <div className="flex items-center gap-3">
+              <label className="btn-outline cursor-pointer flex items-center gap-2">
+                <Upload className="w-4 h-4" /> Seleccionar Archivo .p12
+                <input type="file" accept=".p12,.pfx" onChange={handleFileChange} className="hidden" />
+              </label>
+              {certFileName && (
+                <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                  <FileCheck className="w-4 h-4" /> {certFileName}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1">Contraseña del Certificado .p12</label>
+            <input
+              type="password"
+              className="input-field w-full max-w-md font-mono text-sm"
+              placeholder="••••••••••••"
+              value={certPassword}
+              onChange={(e) => setCertPassword(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <hr />
+
+        <div>
+          <h3 className="font-bold text-lg mb-4">Ambiente y Punto de Emisión SIFEN</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 mb-1">Ambiente SET e-Kuatia</label>
+              <select className="input-field w-full" value={sifenEnv} onChange={(e) => setSifenEnv(e.target.value)}>
+                <option value="test">Test / Sandbox (Homologación SET)</option>
+                <option value="production">Producción Oficial SET</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 mb-1">Punto de Emisión</label>
+              <input className="input-field w-full font-mono" value={puntoEmision} onChange={(e) => setPuntoEmision(e.target.value)} />
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-4 flex justify-end">
+          <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Guardar Configuración Fiscal
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
 
 function CreateTimbradoModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState({
-    numero: "", fecha_inicio: "", fecha_fin: "", rango_desde: 1, rango_hasta: 1000, tipo_comprobante: "ticket",
+    numero: "", fecha_inicio: "", fecha_fin: "", rango_desde: 1, rango_hasta: 1000, tipo_comprobante: "factura",
   })
   const [saving, setSaving] = useState(false)
   const toast = useToast()
@@ -263,7 +450,8 @@ function CreateTimbradoModal({ onClose, onCreated }: { onClose: () => void; onCr
     if (!form.numero || !form.fecha_inicio || !form.fecha_fin) { toast.error("Error", "Completá todos los campos"); return }
     setSaving(true)
     try {
-      await api.sifen.timbrados.create({
+      await api.fiscal.timbrados.create({
+        company_id: COMPANY_ID,
         numero: form.numero,
         fecha_inicio: form.fecha_inicio,
         fecha_fin: form.fecha_fin,
@@ -281,11 +469,11 @@ function CreateTimbradoModal({ onClose, onCreated }: { onClose: () => void; onCr
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold">Nuevo Timbrado</h3>
-          <button onClick={onClose} className="btn-ghost"><X className="w-4 h-4" /></button>
+          <h3 className="text-lg font-bold">Nuevo Timbrado SET</h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4" /></button>
         </div>
         <div className="space-y-4">
-          <input className="input-field w-full" placeholder="Número de timbrado" value={form.numero}
+          <input className="input-field w-full font-mono" placeholder="Número de timbrado" value={form.numero}
             onChange={(e) => setForm({ ...form, numero: e.target.value })} />
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -313,10 +501,10 @@ function CreateTimbradoModal({ onClose, onCreated }: { onClose: () => void; onCr
           </div>
           <select className="input-field w-full" value={form.tipo_comprobante}
             onChange={(e) => setForm({ ...form, tipo_comprobante: e.target.value })}>
-            <option value="ticket">Ticket</option>
             <option value="factura">Factura</option>
             <option value="nota_credito">Nota de crédito</option>
             <option value="nota_debito">Nota de débito</option>
+            <option value="ticket">Ticket</option>
           </select>
         </div>
         <div className="flex gap-3 mt-6">
@@ -355,7 +543,7 @@ function CdcTab() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <div className="lg:col-span-2 card p-6">
-        <h3 className="text-sm font-bold mb-4 flex items-center gap-2"><Search className="w-4 h-4 text-primary" />Consultar CDC</h3>
+        <h3 className="text-sm font-bold mb-4 flex items-center gap-2"><Search className="w-4 h-4 text-primary" />Consultar CDC SIFEN</h3>
         <div className="flex gap-3">
           <input className="input-field flex-1 font-mono text-sm" placeholder="CDC de 44 caracteres"
             value={cdc} maxLength={44}

@@ -41,8 +41,14 @@ async def upsert_fiscal_config(
     _=Depends(require_auth),
 ):
     return await fiscal_service.upsert_fiscal_config(
-        db, company_id, body.modo_emision, body.punto_emision,
+        db,
+        company_id,
+        body.modo_emision,
+        body.punto_emision,
         str(body.timbrado_id) if body.timbrado_id else None,
+        cert_p12_base64=body.cert_p12_base64,
+        cert_password=body.cert_password,
+        sifen_env=body.sifen_env or "test",
     )
 
 
@@ -121,10 +127,11 @@ async def create_nota(
     nota = await fiscal_service.create_nota(
         db,
         str(sale.company_id),
-        body.sale_id,
+        str(body.sale_id),
         body.tipo,
         body.motivo,
         total=body.total or Decimal("0"),
+        items=body.items,
     )
     return nota
 

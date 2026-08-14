@@ -17,6 +17,9 @@ class FiscalConfig(Base):
     modo_emision = Column(String(20), nullable=False, default="sifen")  # sifen, preimpreso, autoimpresor
     timbrado_id = Column(UUID(as_uuid=True), ForeignKey("sifen_timbrados.id"))
     punto_emision = Column(String(10), default="001")
+    cert_p12_base64 = Column(Text, nullable=True)
+    cert_password = Column(String(255), nullable=True)
+    sifen_env = Column(String(20), default="test")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

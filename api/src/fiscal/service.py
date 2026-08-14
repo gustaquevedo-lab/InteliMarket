@@ -1,17 +1,17 @@
-"""Fiscal service — preimpresos, timbrados, NC/ND."""
+"""Fiscal service — SIFEN timbrados, fiscal config, NC/ND con InteliFact."""
 
-import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
+import uuid
 
-from sqlalchemy import func, select, and_
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from api.src.fiscal.models import FiscalConfig, TimbradoUsage, NotaCreditoDebito
 from api.src.sifen.models import SifenTimbrado
 from api.src.sales.models import Sale
+from api.src.sifen.client import sifen_client
 
 
 # ─── Fiscal Config ───────────────────────────────────────────────────────────
@@ -23,7 +23,16 @@ async def get_fiscal_config(db: AsyncSession, company_id: str) -> Optional[Fisca
     return result.scalar_one_or_none()
 
 
-async def upsert_fiscal_config(db: AsyncSession, company_id: str, modo: str, punto_emision: str = "001", timbrado_id: Optional[str] = None) -> FiscalConfig:
+async def upsert_fiscal_config(
+    db: AsyncSession,
+    company_id: str,
+    modo: str,
+    punto_emision: str = "001",
+    timbrado_id: Optional[str] = None,
+    cert_p12_base64: Optional[str] = None,
+    cert_password: Optional[str] = None,
+    sifen_env: str = "test",
+) -> FiscalConfig:
     cid = uuid.UUID(company_id)
     existing = await get_fiscal_config(db, company_id)
     if existing:
@@ -31,12 +40,20 @@ async def upsert_fiscal_config(db: AsyncSession, company_id: str, modo: str, pun
         existing.punto_emision = punto_emision
         if timbrado_id:
             existing.timbrado_id = uuid.UUID(timbrado_id)
+        if cert_p12_base64 is not None:
+            existing.cert_p12_base64 = cert_p12_base64
+        if cert_password is not None:
+            existing.cert_password = cert_password
+        existing.sifen_env = sifen_env
     else:
         existing = FiscalConfig(
             company_id=cid,
             modo_emision=modo,
             punto_emision=punto_emision,
             timbrado_id=uuid.UUID(timbrado_id) if timbrado_id else None,
+            cert_p12_base64=cert_p12_base64,
+            cert_password=cert_password,
+            sifen_env=sifen_env,
         )
         db.add(existing)
     await db.commit()
@@ -59,7 +76,6 @@ async def get_active_timbrados(db: AsyncSession, company_id: str, tipo_comproban
     result = await db.execute(query)
     timbrados = result.scalars().all()
 
-    # Attach usage info
     enriched = []
     for t in timbrados:
         usados = await _count_used(db, t.id, company_id, tipo_comprobante or "factura")
@@ -92,15 +108,12 @@ async def _count_used(db: AsyncSession, timbrado_id: uuid.UUID, company_id: str,
 
 
 async def reserve_next_number(db: AsyncSession, timbrado_id: uuid.UUID, company_id: str, tipo_documento: str, sale_id: Optional[str] = None) -> int:
-    """Reserve and return the next available pre-printed number from a timbrado."""
     cid = uuid.UUID(company_id)
-    # Get the timbrado to know the range
     result = await db.execute(select(SifenTimbrado).where(SifenTimbrado.id == timbrado_id))
     timbrado = result.scalar_one_or_none()
     if not timbrado:
         raise ValueError("Timbrado no encontrado")
 
-    # Find the last used number
     last = await db.execute(
         select(func.max(TimbradoUsage.numero_utilizado)).where(
             TimbradoUsage.timbrado_id == timbrado_id,
@@ -139,13 +152,11 @@ async def create_nota(
     cid = uuid.UUID(company_id)
     sid = uuid.UUID(sale_id)
 
-    # Get original sale
     result = await db.execute(select(Sale).where(Sale.id == sid, Sale.company_id == cid))
     sale = result.scalar_one_or_none()
     if not sale:
         raise ValueError("Venta no encontrada")
 
-    # Build nota number
     count = await db.execute(
         select(func.count()).select_from(NotaCreditoDebito).where(
             NotaCreditoDebito.company_id == cid,
@@ -156,24 +167,23 @@ async def create_nota(
     prefix = "NC" if tipo == "credito" else "ND"
     numero = f"{prefix}-{sale.numero}-{seq:04d}"
 
-    # Calculate amounts (from items or based on sale)
     if items:
-        base_10 = sum(i.get("base_gravada_10", 0) for i in items)
-        base_5 = sum(i.get("base_gravada_5", 0) for i in items)
-        exenta = sum(i.get("base_exenta", 0) for i in items)
-        iva10 = sum(i.get("iva_10", 0) for i in items)
-        iva5 = sum(i.get("iva_5", 0) for i in items)
+        base_10 = sum(Decimal(str(i.get("base_gravada_10", 0))) for i in items)
+        base_5 = sum(Decimal(str(i.get("base_gravada_5", 0))) for i in items)
+        exenta = sum(Decimal(str(i.get("base_exenta", 0))) for i in items)
+        iva10 = sum(Decimal(str(i.get("iva_10", 0))) for i in items)
+        iva5 = sum(Decimal(str(i.get("iva_5", 0))) for i in items)
         sub = base_10 + base_5 + exenta
-        desc = sum(i.get("descuento", 0) for i in items)
+        desc = sum(Decimal(str(i.get("descuento", 0))) for i in items)
         tot = sub - desc
     else:
-        base_10 = sale.base_gravada_10 or 0
-        base_5 = sale.base_gravada_5 or 0
-        exenta = sale.base_exenta or 0
-        iva10 = sale.iva_10 or 0
-        iva5 = sale.iva_5 or 0
-        sub = sale.subtotal
-        desc = 0
+        base_10 = sale.base_gravada_10 or Decimal("0")
+        base_5 = sale.base_gravada_5 or Decimal("0")
+        exenta = sale.base_exenta or Decimal("0")
+        iva10 = sale.iva_10 or Decimal("0")
+        iva5 = sale.iva_5 or Decimal("0")
+        sub = sale.subtotal or sale.total
+        desc = Decimal("0")
         tot = total or sale.total
 
     nota = NotaCreditoDebito(
@@ -200,15 +210,64 @@ async def create_nota(
 
 
 async def emitir_nota_sifen(db: AsyncSession, nota_id: uuid.UUID) -> NotaCreditoDebito:
-    """Submit NC/ND to SIFEN (placeholder — real implementation calls SIFEN API)."""
     result = await db.execute(
         select(NotaCreditoDebito).where(NotaCreditoDebito.id == nota_id)
     )
     nota = result.scalar_one_or_none()
     if not nota:
         raise ValueError("Nota no encontrada")
-    nota.estado = "emitido"
-    nota.sifen_estado = "pendiente"
+
+    # Fetch company fiscal config
+    fiscal_cfg_res = await db.execute(
+        select(FiscalConfig).where(FiscalConfig.company_id == nota.company_id)
+    )
+    fiscal_config = fiscal_cfg_res.scalar_one_or_none()
+
+    cdc_data = {
+        "documentNumber": nota.numero,
+        "documentDate": datetime.now(timezone.utc).isoformat(),
+        "documentType": "nota_credito" if nota.tipo == "credito" else "nota_debito",
+        "operationType": "devolucion",
+        "recipientName": "CLIENTE NC/ND",
+        "recipientDocument": "00000000",
+        "items": [
+            {
+                "description": f"Nota de {nota.tipo}: {nota.motivo}",
+                "quantity": 1,
+                "unitPrice": float(nota.total),
+                "lineTotal": float(nota.total),
+            }
+        ],
+        "subtotal": float(nota.subtotal),
+        "totalAmount": float(nota.total),
+        "paymentMethod": "01",
+    }
+
+    try:
+        gen = await sifen_client.generate_and_sign(
+            cdc_data,
+            cert_base64=fiscal_config.cert_p12_base64 if fiscal_config else None,
+            cert_password=fiscal_config.cert_password if fiscal_config else None,
+        )
+        nota.cdc = gen.get("cdc")
+        nota.sifen_xml_sent = gen.get("signedXml")
+
+        sub = await sifen_client.submit_sifen(
+            xml=gen.get("signedXml", ""),
+            ruc_emitter="12345678",
+            document_number=nota.numero,
+            cert_base64=fiscal_config.cert_p12_base64 if fiscal_config else None,
+            cert_password=fiscal_config.cert_password if fiscal_config else None,
+            environment=fiscal_config.sifen_env if fiscal_config else "test",
+        )
+        nota.sifen_estado = sub.get("status", "aprobado")
+        nota.sifen_xml_response = str(sub)
+        nota.estado = "emitido"
+    except Exception as e:
+        nota.sifen_estado = "error"
+        nota.sifen_xml_response = str(e)
+        nota.estado = "rechazado"
+
     await db.commit()
     await db.refresh(nota)
     return nota
