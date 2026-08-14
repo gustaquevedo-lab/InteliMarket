@@ -288,7 +288,7 @@ async def get_receivable_summary(db: AsyncSession, company_id: str) -> dict:
             COALESCE(SUM(saldo_pendiente), 0) as total_pendiente,
             COALESCE(SUM(CASE WHEN estado = 'pagado' THEN 1 ELSE 0 END), 0) as pagados,
             COALESCE(SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END), 0) as pendientes,
-            COALESCE(SUM(CASE WHEN estado = 'vencido' THEN 1 ELSE 0 END), 0) as vencidos,
+            COALESCE(SUM(CASE WHEN estado = 'pendiente' AND fecha_vencimiento < :today THEN 1 ELSE 0 END), 0) as vencidos,
             COALESCE(SUM(CASE WHEN estado = 'pendiente' AND fecha_vencimiento < :today THEN saldo_pendiente ELSE 0 END), 0) as monto_vencido
         FROM accounts_receivable
         WHERE company_id = :company_id
