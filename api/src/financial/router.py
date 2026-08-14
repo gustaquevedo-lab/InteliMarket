@@ -29,7 +29,7 @@ async def create_invoice(body: SupplierInvoiceCreate, user_id: str | None = Quer
 
 @router.get("/invoices", response_model=list[SupplierInvoiceResponse])
 async def list_invoices(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     estado: str | None = Query(None),
     supplier_id: str | None = Query(None),
     vencidas: bool | None = Query(None),
@@ -68,12 +68,12 @@ async def pay_invoice(invoice_id: str, body: SupplierInvoicePaymentCreate, db: A
 
 
 @router.get("/aging", response_model=dict)
-async def get_aging(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_aging(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_ap_aging(db, company_id)
 
 
 @router.get("/dashboard", response_model=dict)
-async def get_ap_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_ap_dashboard(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_ap_dashboard(db, company_id)
 
 
@@ -85,12 +85,12 @@ async def create_bank_account(body: BankAccountCreate, db: AsyncSession = Depend
 
 
 @router.get("/banks", response_model=list[BankAccountResponse])
-async def list_bank_accounts(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def list_bank_accounts(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.list_bank_accounts(db, company_id)
 
 
 @router.get("/banks/dashboard", response_model=dict)
-async def get_bank_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_bank_dashboard(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_bank_dashboard(db, company_id)
 
 
@@ -121,7 +121,7 @@ async def delete_bank_account(account_id: str, db: AsyncSession = Depends(get_db
 @router.get("/banks/{account_id}/transactions", response_model=list[BankTransactionResponse])
 async def list_bank_transactions(
     account_id: str,
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     conciliado: bool | None = Query(None),
     desde: date | None = Query(None),
     hasta: date | None = Query(None),
@@ -135,7 +135,7 @@ async def list_bank_transactions(
 @router.post("/banks/{account_id}/import", response_model=list[BankTransactionResponse])
 async def import_bank_statement(
     account_id: str,
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     body: BankTransactionImport = ...,
     db: AsyncSession = Depends(get_db),
 ):
@@ -154,7 +154,7 @@ async def reconcile_transaction(transaction_id: str, body: ReconcileRequest, db:
 
 @router.get("/cash-flow", response_model=list[CashFlowProjectionResponse])
 async def list_projections(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     desde: date | None = Query(None),
     hasta: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -164,7 +164,7 @@ async def list_projections(
 
 @router.post("/cash-flow/generate", response_model=list[CashFlowProjectionResponse])
 async def generate_cash_flow(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     dias: int = Query(90, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
 ):
@@ -180,7 +180,7 @@ async def update_projection(projection_id: str, body: CashFlowProjectionUpdate, 
 
 
 @router.get("/cash-flow/dashboard", response_model=dict)
-async def get_cash_flow_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_cash_flow_dashboard(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_cash_flow_dashboard(db, company_id)
 
 
@@ -193,7 +193,7 @@ async def create_budget(body: BudgetCreate, db: AsyncSession = Depends(get_db)):
 
 @router.get("/budgets", response_model=list[BudgetResponse])
 async def list_budgets(
-    company_id: str = Query(),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     periodo: str | None = Query(None),
     area: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -218,7 +218,7 @@ async def delete_budget(budget_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/budgets/vs-actual", response_model=list[BudgetVsActual])
-async def get_budget_vs_actual(company_id: str = Query(), periodo: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_budget_vs_actual(company_id: str = Query("00000000-0000-0000-0000-000000000010"), periodo: str = Query(), db: AsyncSession = Depends(get_db)):
     return await service.get_budget_vs_actual(db, company_id, periodo)
 
 
@@ -230,7 +230,7 @@ async def create_payment_run(body: PaymentRunCreate, db: AsyncSession = Depends(
 
 
 @router.get("/payment-runs", response_model=list[PaymentRunResponse])
-async def list_payment_runs(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def list_payment_runs(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.list_payment_runs(db, company_id)
 
 
@@ -257,10 +257,10 @@ async def execute_payment_run(
 # ── Consolidated ───────────────────────────────────────────────────────────────
 
 @router.get("/financial-dashboard", response_model=dict)
-async def get_financial_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_financial_dashboard(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_financial_dashboard(db, company_id)
 
 
 @router.get("/ratios", response_model=dict)
-async def get_financial_ratios(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+async def get_financial_ratios(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_financial_ratios(db, company_id)

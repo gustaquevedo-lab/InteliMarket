@@ -993,7 +993,7 @@ export const api = {
     aging: () => client.get<any[]>("/v1/financial/aging", { company_id: COMPANY_ID }),
     apDashboard: () => client.get<APDashboard>("/v1/financial/dashboard", { company_id: COMPANY_ID }),
     banks: {
-      list: () => client.get<BankAccount[]>("/v1/financial/banks"),
+      list: (companyId?: string) => client.get<BankAccount[]>("/v1/financial/banks", { company_id: companyId || COMPANY_ID }),
       create: (data: any) => client.post<BankAccount>("/v1/financial/banks", data),
       update: (id: string, data: any) => client.put<BankAccount>(`/v1/financial/banks/${id}`, data),
       delete: (id: string) => client.delete(`/v1/financial/banks/${id}`),
@@ -1001,12 +1001,12 @@ export const api = {
       import: (id: string, data: any) => client.post<{ detail: string }>(`/v1/financial/banks/${id}/import`, data),
     },
     reconcile: (id: string, data: any) => client.post<{ detail: string }>(`/v1/financial/transactions/${id}/reconcile`, data),
-    banksDashboard: () => client.get<any>("/v1/financial/banks/dashboard"),
+    banksDashboard: (companyId?: string) => client.get<any>("/v1/financial/banks/dashboard", { company_id: companyId || COMPANY_ID }),
     cashFlow: {
       list: (params?: { desde?: string; hasta?: string }) => client.get<CashFlowProjection[]>("/v1/financial/cash-flow", params as any),
       generate: () => client.post<{ detail: string }>("/v1/financial/cash-flow/generate"),
       update: (id: string, data: any) => client.post<CashFlowProjection>(`/v1/financial/cash-flow/${id}`, data),
-      dashboard: () => client.get<CashFlowDashboard>("/v1/financial/cash-flow/dashboard"),
+      dashboard: (companyId?: string) => client.get<CashFlowDashboard>("/v1/financial/cash-flow/dashboard", { company_id: companyId || COMPANY_ID }),
     },
     budgets: {
       list: (params?: { periodo?: string; area?: string }) => client.get<Budget[]>("/v1/financial/budgets", params as any),
