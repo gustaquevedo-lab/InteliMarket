@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
+import { useNavigate } from "react-router-dom"
 import {
   BarChart3, TrendingUp, Clock, Package, Users, Calendar, MessageCircle, Globe,
   Sparkles, Tag, ChevronRight, Search, Plus, Edit3, Trash2, X, Check,
@@ -7,13 +8,16 @@ import {
   TrendingDown, ArrowUp, ArrowDown, Wifi, WifiOff, Volume2, VolumeX, Keyboard,
   Lightbulb, Target, Award, Gift, Bell, ExternalLink, Camera, Receipt,
   CalendarDays, Cake, Heart, Sun, Moon, Star, Hash, AtSign, ScanLine,
-  ArrowLeft, ShoppingBag, Box, Truck, Eye as EyeIcon, Briefcase, Percent
+  ArrowLeft, ShoppingBag, Box, Truck, Eye as EyeIcon, Briefcase, Percent, AlertTriangle
 } from "lucide-react"
 import { useToast } from "../../hooks/useToast"
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from "recharts"
 import { formatPYG } from "../../utils/format"
-import { api } from "../../api"
+import { api, type GerencialDeptoPyl, type GerencialProductoRanking } from "../../api"
 
-type Tab = "dashboard" | "pos" | "cliente" | "cupones" | "whatsapp" | "eventos" | "tienda"
+type Tab = "dashboard" | "pos" | "cliente" | "cupones" | "whatsapp" | "eventos" | "tienda" | "deptos" | "ranking"
 
 const TABS: { id: Tab; label: string; icon: any; color: string; description: string }[] = [
   { id: "dashboard", label: "Dashboard KPIs", icon: BarChart3, color: "from-teal-500 to-cyan-600", description: "Métricas en tiempo real" },
@@ -23,6 +27,8 @@ const TABS: { id: Tab; label: string; icon: any; color: string; description: str
   { id: "whatsapp", label: "WhatsApp Local", icon: MessageCircle, color: "from-green-500 to-emerald-600", description: "Campañas PY" },
   { id: "eventos", label: "Eventos PY", icon: Calendar, color: "from-purple-500 to-violet-600", description: "Calendario nacional" },
   { id: "tienda", label: "Tienda Online", icon: Globe, color: "from-amber-500 to-orange-600", description: "Pickup & delivery" },
+  { id: "deptos", label: "PyG por Departamento", icon: Package, color: "from-slate-500 to-slate-700", description: "Rentabilidad por área" },
+  { id: "ranking", label: "Ranking Productos", icon: TrendingUp, color: "from-indigo-500 to-blue-700", description: "Ventas, margen, rotación" },
 ]
 
 // ════════════════════════════════════════════════════════════
@@ -31,27 +37,32 @@ const TABS: { id: Tab; label: string; icon: any; color: string; description: str
 
 function DashboardTab() {
   const [data, setData] = useState<any>(null)
+  const [alertasNegocio, setAlertasNegocio] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const { toast } = useToast()
+  const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
+  const navigate = useNavigate()
 
   const load = async () => {
     setRefreshing(true)
     try {
       const r = await api.retail.getDashboard()
       setData(r)
+      setError(null)
     } catch (e: any) {
-      // Demo mode
-      setData(generateDemoDashboard())
+      setError(e?.message || "No se pudo cargar el dashboard")
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
+    api.gerencial.alertasNegocio().then(setAlertasNegocio).catch(() => {})
   }
 
   useEffect(() => { load() }, [])
 
   if (loading) return <LoadingState message="Cargando dashboard..." />
+  if (error || !data) return <ErrorState message={error || "Sin datos"} onRetry={load} />
 
   const { hoy, semana, mes, heatmap_7dias, top_productos, productos_sin_venta, alertas_stock, proximos_eventos, cupones_activos, ventas_por_dia_semana, comparativa } = data
 
@@ -161,7 +172,7 @@ function DashboardTab() {
                     <div className="font-medium text-sm text-red-900 dark:text-red-300">{a.nombre}</div>
                     <div className="text-xs text-red-700 dark:text-red-400">Stock: {a.stock_actual} / Mín: {a.stock_minimo}</div>
                   </div>
-                  <button className="text-xs text-red-700 dark:text-red-400 font-medium hover:underline">Reabastecer</button>
+                  <button onClick={() => navigate("/auto-replenish")} className="text-xs text-red-700 dark:text-red-400 font-medium hover:underline">Reabastecer</button>
                 </div>
               ))}
             </div>
@@ -212,6 +223,107 @@ function DashboardTab() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Alertas de Negocio: margen real + días de cobro vs. pago */}
+      <div>
+        <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
+          <Bell className="w-5 h-5 text-indigo-500" />
+          Alertas de Negocio
+        </h3>
+        {!alertasNegocio ? (
+          <div className="text-sm text-slate-400 py-4">Cargando alertas de margen y cobros...</div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
+              <h4 className="font-semibold text-slate-900 dark:text-slate-100 mb-1 flex items-center gap-2 text-sm">
+                <Percent className="w-4 h-4 text-red-500" />
+                Margen Real Bajo (&lt;{alertasNegocio.margen_umbral}%)
+              </h4>
+              <p className="text-xs text-slate-500 mb-3">Últimos 30 días, productos con volumen relevante de venta</p>
+              {alertasNegocio.margen_bajo.length === 0 ? (
+                <div className="text-center py-6 text-slate-400">
+                  <CheckCircle className="w-8 h-8 mx-auto mb-2 text-emerald-500" />
+                  <p className="text-xs">Ningún producto con margen bajo el umbral</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                  {alertasNegocio.margen_bajo.map((p: any) => (
+                    <div key={p.producto_id} className="flex items-center justify-between p-2 bg-red-50 dark:bg-red-900/20 rounded-lg text-xs">
+                      <div className="flex-1 truncate">
+                        <div className="font-medium text-red-900 dark:text-red-300 truncate">{p.producto_nombre}</div>
+                        <div className="text-red-600 dark:text-red-400">{p.cantidad_vendida_30d} und · {formatPYG(p.total_ventas_30d)}</div>
+                      </div>
+                      <span className="font-bold text-red-700 dark:text-red-400 ml-2">{p.margen_porcentaje}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
+              <h4 className="font-semibold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2 text-sm">
+                <TrendingDown className="w-4 h-4 text-orange-500" />
+                Cobros y Pagos Vencidos
+              </h4>
+              <div className="space-y-3">
+                <div className="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                  <div className="text-xs text-orange-700 dark:text-orange-400 mb-1">Cuentas por Cobrar vencidas</div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-lg font-bold text-orange-900 dark:text-orange-300">{formatPYG(alertasNegocio.cxc_vencidas.monto)}</span>
+                    <span className="text-xs text-orange-600">{alertasNegocio.cxc_vencidas.cantidad} facturas</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                  <div className="text-xs text-purple-700 dark:text-purple-400 mb-1">Cuentas por Pagar vencidas</div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-lg font-bold text-purple-900 dark:text-purple-300">{formatPYG(alertasNegocio.cxp_vencidas.monto)}</span>
+                    <span className="text-xs text-purple-600">{alertasNegocio.cxp_vencidas.cantidad} facturas</span>
+                  </div>
+                </div>
+                <button onClick={() => navigate("/financiero")} className="text-xs text-indigo-600 font-medium hover:underline">Ver detalle en Finanzas →</button>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
+              <h4 className="font-semibold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2 text-sm">
+                <Clock className="w-4 h-4 text-indigo-500" />
+                Días de Cobro vs. Pago
+              </h4>
+              {alertasNegocio.dias_cobro_promedio === null && alertasNegocio.dias_pago_promedio === null ? (
+                <p className="text-xs text-slate-400 py-6 text-center">Sin ventas o compras suficientes en los últimos 30 días para calcularlo</p>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-slate-500">Cobramos en (días)</span>
+                      <span className="font-bold text-slate-900 dark:text-slate-100">{alertasNegocio.dias_cobro_promedio ?? "—"}</span>
+                    </div>
+                    <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min((alertasNegocio.dias_cobro_promedio || 0) / 60 * 100, 100)}%` }} />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-slate-500">Pagamos en (días)</span>
+                      <span className="font-bold text-slate-900 dark:text-slate-100">{alertasNegocio.dias_pago_promedio ?? "—"}</span>
+                    </div>
+                    <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.min((alertasNegocio.dias_pago_promedio || 0) / 60 * 100, 100)}%` }} />
+                    </div>
+                  </div>
+                  {alertasNegocio.dias_cobro_promedio !== null && alertasNegocio.dias_pago_promedio !== null && (
+                    <p className={`text-xs pt-2 border-t border-slate-200 dark:border-slate-700 ${alertasNegocio.dias_cobro_promedio > alertasNegocio.dias_pago_promedio ? "text-red-600" : "text-emerald-600"}`}>
+                      {alertasNegocio.dias_cobro_promedio > alertasNegocio.dias_pago_promedio
+                        ? `Cobrás ${Math.round(alertasNegocio.dias_cobro_promedio - alertasNegocio.dias_pago_promedio)} días más tarde de lo que pagás — presión de caja`
+                        : `Pagás más lento de lo que cobrás — margen de caja favorable`}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -324,288 +436,12 @@ function HeatmapGrid({ heatmap }: any) {
   )
 }
 
-// ════════════════════════════════════════════════════════════
-//  POS
-// ════════════════════════════════════════════════════════════
-
-function POSTab() {
-  const [items, setItems] = useState<any[]>([])
-  const [search, setSearch] = useState("")
-  const [customer, setCustomer] = useState<any>(null)
-  const [showCustomerModal, setShowCustomerModal] = useState(false)
-  const [kioskMode, setKioskMode] = useState(false)
-  const [soundEnabled, setSoundEnabled] = useState(true)
-  const [couponCode, setCouponCode] = useState("")
-  const [appliedDiscount, setAppliedDiscount] = useState(0)
-  const { toast } = useToast()
-
-  const PRODUCTS = useMemo(() => [
-    { id: "1", name: "Coca-Cola 1.5L", price: 12000, category: "Bebidas", code: "7501", emoji: "🥤" },
-    { id: "2", name: "Pan Baguette", price: 8500, category: "Panadería", code: "7502", emoji: "🥖" },
-    { id: "3", name: "Leche Entera 1L", price: 7500, category: "Lácteos", code: "7503", emoji: "🥛" },
-    { id: "4", name: "Arroz 1kg", price: 6200, category: "Almacén", code: "7504", emoji: "🍚" },
-    { id: "5", name: "Huevos 6un", price: 8500, category: "Lácteos", code: "7505", emoji: "🥚" },
-    { id: "6", name: "Azúcar 1kg", price: 5200, category: "Almacén", code: "7506", emoji: "🍬" },
-    { id: "7", name: "Aceite Girasol 1L", price: 13500, category: "Almacén", code: "7507", emoji: "🫒" },
-    { id: "8", name: "Yerba Mate 500g", price: 8500, category: "Almacén", code: "7508", emoji: "🧉" },
-    { id: "9", name: "Fideos 500g", price: 4800, category: "Almacén", code: "7509", emoji: "🍝" },
-    { id: "10", name: "Detergente 750ml", price: 9500, category: "Limpieza", code: "7510", emoji: "🧴" },
-    { id: "11", name: "Papel Higiénico 4un", price: 11200, category: "Limpieza", code: "7511", emoji: "🧻" },
-    { id: "12", name: "Jabón Tocador", price: 5200, category: "Limpieza", code: "7512", emoji: "🧼" },
-  ], [])
-
-  const filtered = useMemo(() => {
-    if (!search) return PRODUCTS
-    const s = search.toLowerCase()
-    return PRODUCTS.filter(p => p.name.toLowerCase().includes(s) || p.code.includes(s))
-  }, [search, PRODUCTS])
-
-  const total = items.reduce((sum, item) => sum + item.price * item.qty, 0)
-  const finalTotal = Math.max(0, total - appliedDiscount)
-
-  const playBeep = (freq: number, duration: number) => {
-    if (!soundEnabled) return
-    try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
-      const o = ctx.createOscillator()
-      const g = ctx.createGain()
-      o.connect(g); g.connect(ctx.destination)
-      o.frequency.value = freq
-      o.type = "sine"
-      g.gain.setValueAtTime(0.1, ctx.currentTime)
-      g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration)
-      o.start()
-      o.stop(ctx.currentTime + duration)
-    } catch (e) {}
-  }
-
-  const addToCart = (product: any) => {
-    playBeep(800, 0.05)
-    setItems(prev => {
-      const found = prev.find(i => i.id === product.id)
-      if (found) return prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i)
-      return [...prev, { ...product, qty: 1 }]
-    })
-  }
-
-  const removeFromCart = (id: string) => {
-    setItems(prev => prev.filter(i => i.id !== id))
-  }
-
-  const updateQty = (id: string, qty: number) => {
-    if (qty <= 0) { removeFromCart(id); return }
-    setItems(prev => prev.map(i => i.id === id ? { ...i, qty } : i))
-  }
-
-  const handleCheckout = () => {
-    if (items.length === 0) { playBeep(300, 0.2); return }
-    playBeep(1200, 0.1); setTimeout(() => playBeep(1500, 0.1), 100)
-    toast({ title: "✅ Venta completada", description: `${items.length} items · ${formatPYG(finalTotal)}`, variant: "success" })
-    setItems([]); setCustomer(null); setCouponCode(""); setAppliedDiscount(0)
-  }
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F2") { e.preventDefault(); (document.getElementById("pos-search") as HTMLInputElement)?.focus() }
-      if (e.key === "F4") { e.preventDefault(); /* apply discount */ }
-      if (e.key === "F8") { e.preventDefault(); handleCheckout() }
-      if (e.key === "F9") { e.preventDefault(); /* digital ticket */ toast({ title: "📱 Ticket digital enviado" }) }
-      if (e.key === "F12") { e.preventDefault(); setKioskMode(k => !k) }
-      if (e.key === "Escape") { setItems([]) }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [items, finalTotal])
-
-  const applyCoupon = async () => {
-    if (!couponCode) return
-    playBeep(1000, 0.08)
-    // Mock discount
-    if (couponCode.toUpperCase() === "VERANO15") {
-      setAppliedDiscount(total * 0.15)
-      toast({ title: "✅ Cupón aplicado", description: "15% de descuento", variant: "success" })
-    } else if (couponCode.toUpperCase() === "BIENVENIDO10") {
-      setAppliedDiscount(total * 0.10)
-      toast({ title: "✅ Cupón aplicado", description: "10% descuento bienvenida", variant: "success" })
-    } else {
-      playBeep(300, 0.3)
-      toast({ title: "❌ Cupón inválido", variant: "destructive" })
-    }
-  }
-
-  return (
-    <div className={`grid grid-cols-1 lg:grid-cols-3 gap-4 ${kioskMode ? "bg-slate-900 -m-4 p-4 rounded-2xl" : ""}`}>
-      {/* Products grid */}
-      <div className="lg:col-span-2 space-y-4">
-        <div className={`rounded-2xl p-4 shadow-sm border ${kioskMode ? "bg-slate-800 border-slate-700" : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"}`}>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex-1 relative">
-              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${kioskMode ? "text-slate-400" : "text-slate-400"}`} />
-              <input
-                id="pos-search"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Buscar producto o escanear código (F2)..."
-                className={`w-full pl-10 pr-4 py-3 rounded-xl text-lg font-medium ${
-                  kioskMode
-                    ? "bg-slate-700 text-white border-slate-600 placeholder:text-slate-400"
-                    : "bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 border-slate-200 dark:border-slate-600"
-                } border focus:ring-2 focus:ring-teal-500 outline-none`}
-                autoFocus
-              />
-            </div>
-            <button onClick={() => setKioskMode(k => !k)} className={`p-3 rounded-xl ${kioskMode ? "bg-teal-600 text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`} title="Modo Kiosko (F12)">
-              <Store className="w-5 h-5" />
-            </button>
-            <button onClick={() => setSoundEnabled(s => !s)} className={`p-3 rounded-xl ${soundEnabled ? "bg-teal-600 text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`} title="Sonidos">
-              {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {filtered.map(p => (
-              <button
-                key={p.id}
-                onClick={() => addToCart(p)}
-                className={`p-4 rounded-xl text-left transition transform hover:scale-105 active:scale-95 ${
-                  kioskMode
-                    ? "bg-slate-700 hover:bg-slate-600 text-white border-slate-600"
-                    : "bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-800 hover:from-teal-50 hover:to-cyan-50 dark:hover:from-teal-900/30 dark:hover:to-cyan-900/30 border-slate-200 dark:border-slate-600"
-                } border`}
-              >
-                <div className="text-3xl mb-2">{p.emoji}</div>
-                <div className="font-semibold text-sm truncate">{p.name}</div>
-                <div className="text-xs opacity-70 mt-0.5">{p.category}</div>
-                <div className="font-bold text-teal-600 dark:text-teal-400 mt-1">{formatPYG(p.price)}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className={`rounded-xl p-3 text-xs flex items-center gap-3 ${kioskMode ? "bg-slate-800 text-slate-300" : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"}`}>
-          <Keyboard className="w-4 h-4" />
-          <span className="font-medium">Atajos:</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded">F2</kbd> Buscar</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded">F8</kbd> Cobrar</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded">F9</kbd> Ticket Digital</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded">F12</kbd> Kiosko</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded">Esc</kbd> Cancelar</span>
-        </div>
-      </div>
-
-      {/* Cart */}
-      <div className={`rounded-2xl shadow-lg border-2 flex flex-col ${
-        kioskMode ? "bg-slate-800 border-teal-600" : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
-      }`}>
-        <div className="p-4 border-b border-slate-200 dark:border-slate-700">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className={`font-bold flex items-center gap-2 ${kioskMode ? "text-white" : "text-slate-900 dark:text-slate-100"}`}>
-              <ShoppingCart className="w-5 h-5 text-teal-600" />
-              Carrito ({items.length})
-            </h3>
-            {customer && (
-              <div className="flex items-center gap-2 px-2 py-1 bg-teal-100 dark:bg-teal-900/30 rounded-lg">
-                <Users className="w-3 h-3 text-teal-700 dark:text-teal-300" />
-                <span className="text-xs font-medium text-teal-700 dark:text-teal-300">{customer.nombre?.split(" ")[0]}</span>
-              </div>
-            )}
-          </div>
-          <button
-            onClick={() => setShowCustomerModal(true)}
-            className="w-full text-sm py-2 px-3 rounded-lg bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900/40 font-medium flex items-center justify-center gap-2"
-          >
-            <ScanLine className="w-4 h-4" />
-            {customer ? "Cambiar cliente" : "Identificar cliente (rápido)"}
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-3 space-y-2" style={{ maxHeight: "400px" }}>
-          {items.length === 0 ? (
-            <div className={`text-center py-12 ${kioskMode ? "text-slate-400" : "text-slate-400"}`}>
-              <ShoppingCart className="w-12 h-12 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">Carrito vacío</p>
-              <p className="text-xs mt-1">Click productos o F2 para buscar</p>
-            </div>
-          ) : items.map(item => (
-            <div key={item.id} className={`flex items-center gap-2 p-2 rounded-lg ${kioskMode ? "bg-slate-700" : "bg-slate-50 dark:bg-slate-700/50"}`}>
-              <div className="text-2xl">{item.emoji}</div>
-              <div className="flex-1 min-w-0">
-                <div className={`text-sm font-medium truncate ${kioskMode ? "text-white" : "text-slate-900 dark:text-slate-100"}`}>{item.name}</div>
-                <div className={`text-xs ${kioskMode ? "text-slate-400" : "text-slate-500"}`}>{formatPYG(item.price)} c/u</div>
-              </div>
-              <div className="flex items-center gap-1">
-                <button onClick={() => updateQty(item.id, item.qty - 1)} className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200">-</button>
-                <span className={`w-7 text-center text-sm font-bold ${kioskMode ? "text-white" : ""}`}>{item.qty}</span>
-                <button onClick={() => updateQty(item.id, item.qty + 1)} className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200">+</button>
-              </div>
-              <div className={`font-bold text-sm w-20 text-right ${kioskMode ? "text-white" : "text-slate-900 dark:text-slate-100"}`}>{formatPYG(item.price * item.qty)}</div>
-              <button onClick={() => removeFromCart(item.id)} className="text-red-500 hover:text-red-700">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
-        </div>
-
-        <div className={`p-4 border-t border-slate-200 dark:border-slate-700 space-y-2`}>
-          <div className="flex items-center gap-2">
-            <input
-              value={couponCode}
-              onChange={e => setCouponCode(e.target.value)}
-              placeholder="Código cupón (ej: VERANO15)"
-              className={`flex-1 px-3 py-2 rounded-lg text-sm ${
-                kioskMode ? "bg-slate-700 text-white border-slate-600 placeholder:text-slate-400" : "bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 border-slate-200 dark:border-slate-600"
-              } border`}
-            />
-            <button onClick={applyCoupon} className="px-3 py-2 bg-pink-600 text-white text-sm rounded-lg hover:bg-pink-700 font-medium">
-              <Tag className="w-4 h-4" />
-            </button>
-          </div>
-          <Row label="Subtotal" value={formatPYG(total)} dark={kioskMode} />
-          {appliedDiscount > 0 && (
-            <div className="flex items-center justify-between text-pink-600">
-              <span className="text-sm">Descuento</span>
-              <span className="font-semibold">-{formatPYG(appliedDiscount)}</span>
-            </div>
-          )}
-          <div className={`flex items-center justify-between pt-2 border-t ${kioskMode ? "border-slate-600" : "border-slate-200 dark:border-slate-600"}`}>
-            <span className={`font-bold ${kioskMode ? "text-white" : "text-slate-900 dark:text-slate-100"}`}>TOTAL</span>
-            <span className="text-2xl font-bold text-teal-600">{formatPYG(finalTotal)}</span>
-          </div>
-          <button
-            onClick={handleCheckout}
-            disabled={items.length === 0}
-            className="w-full py-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-xl font-bold text-lg hover:from-teal-700 hover:to-cyan-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
-          >
-            <Zap className="w-5 h-5" />
-            COBRAR (F8)
-          </button>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => toast({ title: "📱 Ticket digital enviado" })} className="py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium flex items-center justify-center gap-1">
-              <MessageCircle className="w-4 h-4" /> WhatsApp
-            </button>
-            <button onClick={() => toast({ title: "📧 Ticket enviado por email" })} className="py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium flex items-center justify-center gap-1">
-              <Receipt className="w-4 h-4" /> Email
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {showCustomerModal && (
-        <CustomerModal
-          onClose={() => setShowCustomerModal(false)}
-          onSelect={(c) => { setCustomer(c); setShowCustomerModal(false); toast({ title: "✅ Cliente identificado", description: c.nombre, variant: "success" }) }}
-        />
-      )}
-    </div>
-  )
-}
 
 function CustomerModal({ onClose, onSelect }: any) {
   const [ident, setIdent] = useState("")
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
-  const { toast } = useToast()
+  const toast = useToast()
 
   const lookup = async () => {
     if (!ident) return
@@ -614,16 +450,8 @@ function CustomerModal({ onClose, onSelect }: any) {
       const r = await api.retail.quickCustomer.lookup({ identificador: ident, tipo: "auto" })
       setResult(r)
     } catch (e: any) {
-      // Demo
-      const seed = ident.length
-      const nombres = ["Juan Pérez", "María González", "Carlos Rodríguez", "Ana Martínez"]
-      setResult({
-        encontrado: true, customer_id: "demo",
-        nombre: nombres[seed % nombres.length], telefono: `+5959${(seed * 123) % 1000000}`,
-        puntos: 1500, segmento: "Frecuente", proxima_recompensa: "💎 15% descuento",
-        descuento_aplicable: 50000, sugerencias: ["Aplicar cupón automático", "Ofrecer producto top"],
-        mensaje: "Cliente identificado"
-      })
+      setResult({ encontrado: false, mensaje: e?.message || "No se encontró ningún cliente real con ese dato" })
+      toast.error("Error", "No se pudo buscar el cliente")
     } finally {
       setLoading(false)
     }
@@ -652,7 +480,12 @@ function CustomerModal({ onClose, onSelect }: any) {
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
           </button>
         </div>
-        {result && (
+        {result && !result.encontrado && (
+          <div className="p-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl text-center text-sm text-slate-500">
+            {result.mensaje}
+          </div>
+        )}
+        {result && result.encontrado && (
           <div className="space-y-3">
             <div className="p-4 bg-teal-50 dark:bg-teal-900/20 rounded-xl">
               <div className="font-bold text-lg text-slate-900 dark:text-slate-100">{result.nombre}</div>
@@ -695,7 +528,7 @@ function ClienteTab() {
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [ident, setIdent] = useState("")
-  const { toast } = useToast()
+  const toast = useToast()
 
   const lookup = async () => {
     if (!ident) return
@@ -704,7 +537,7 @@ function ClienteTab() {
       const r = await api.retail.quickCustomer.lookup({ identificador: ident, tipo: "auto" })
       setResult(r)
     } catch (e: any) {
-      toast({ title: "Error", description: "No se pudo identificar", variant: "destructive" })
+      toast.error("Error", "No se pudo identificar")
     } finally {
       setLoading(false)
     }
@@ -848,7 +681,7 @@ function CuponesTab() {
   const [stats, setStats] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
-  const { toast } = useToast()
+  const toast = useToast()
 
   const load = async () => {
     setLoading(true)
@@ -856,9 +689,7 @@ function CuponesTab() {
       const [c, s] = await Promise.all([api.retail.coupons.list(), api.retail.coupons.stats()])
       setCoupons(c); setStats(s)
     } catch (e) {
-      // Demo
-      setCoupons(DEMO_COUPONS)
-      setStats({ total_coupons: 12, activos: 8, expirados: 3, agotados: 1, canjes: 47, descuento_total: 1234000, tasa_canje_pct: 38.5, roi_estimado: 4.2 })
+      toast.error("Error", "No se pudieron cargar los cupones")
     } finally {
       setLoading(false)
     }
@@ -889,7 +720,7 @@ function CuponesTab() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {coupons.map((c: any) => (
-          <CouponCard key={c.id} coupon={c} onCopy={() => { navigator.clipboard.writeText(c.codigo); toast({ title: "📋 Copiado", description: c.codigo }) }} />
+          <CouponCard key={c.id} coupon={c} onCopy={() => { navigator.clipboard.writeText(c.codigo); toast.info("📋 Copiado", c.codigo) }} />
         ))}
       </div>
 
@@ -947,7 +778,7 @@ function CreateCouponModal({ onClose, onCreate }: any) {
     fecha_hasta: new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
     usos_maximos: 100, usos_por_cliente: 1, segmento_nombre: "Todos", canal: "todos",
   })
-  const { toast } = useToast()
+  const toast = useToast()
 
   const submit = async () => {
     try {
@@ -956,11 +787,10 @@ function CreateCouponModal({ onClose, onCreate }: any) {
         fecha_desde: new Date(data.fecha_desde).toISOString(),
         fecha_hasta: new Date(data.fecha_hasta).toISOString(),
       })
-      toast({ title: "✅ Cupón creado", variant: "success" })
+      toast.success("✅ Cupón creado")
       onCreate()
     } catch (e: any) {
-      toast({ title: "✅ Cupón creado (demo)", variant: "success" })
-      onCreate()
+      toast.error("Error", "No se pudo crear el cupón")
     }
   }
 
@@ -1117,7 +947,7 @@ function WhatsAppTab() {
 function EventosTab() {
   const [events, setEvents] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const { toast } = useToast()
+  const toast = useToast()
 
   const load = async () => {
     setLoading(true)
@@ -1125,8 +955,7 @@ function EventosTab() {
       const e = await api.retail.calendar.events.list()
       setEvents(e)
     } catch (err) {
-      // Demo
-      setEvents(DEMO_EVENTS)
+      toast.error("Error", "No se pudieron cargar los eventos del calendario")
     } finally {
       setLoading(false)
     }
@@ -1135,11 +964,10 @@ function EventosTab() {
   const seedCalendar = async () => {
     try {
       await api.retail.calendar.seedPy()
-      toast({ title: "✅ Calendario inicializado", description: "15 eventos PY cargados", variant: "success" })
+      toast.success("✅ Calendario inicializado", "15 eventos PY cargados")
       load()
     } catch (e) {
-      toast({ title: "✅ Calendario cargado (demo)", variant: "success" })
-      setEvents(DEMO_EVENTS)
+      toast.error("Error", "No se pudo inicializar el calendario")
     }
   }
 
@@ -1219,7 +1047,7 @@ function TiendaTab() {
   const [config, setConfig] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [edit, setEdit] = useState(false)
-  const { toast } = useToast()
+  const toast = useToast()
 
   const load = async () => {
     setLoading(true)
@@ -1325,7 +1153,7 @@ function TiendaTab() {
             <Field label="Costo delivery/km (PYG)" value={config.delivery_costo_km.toString()} onChange={v => setConfig({ ...config, delivery_costo_km: parseInt(v) || 0 })} type="number" />
             <Field label="Pickup horas" value={config.pickup_horas.toString()} onChange={v => setConfig({ ...config, pickup_horas: parseInt(v) || 0 })} type="number" />
             <Field label="Seña %" value={config.senia_pct.toString()} onChange={v => setConfig({ ...config, senia_pct: parseFloat(v) || 0 })} type="number" />
-            <button onClick={() => { toast({ title: "✅ Tienda actualizada" }); setEdit(false) }} className="w-full py-2 bg-teal-600 text-white rounded-xl font-medium">Guardar</button>
+            <button onClick={() => { toast.success("✅ Tienda actualizada"); setEdit(false) }} className="w-full py-2 bg-teal-600 text-white rounded-xl font-medium">Guardar</button>
           </div>
         ) : (
           <div className="space-y-2 text-sm">
@@ -1399,58 +1227,231 @@ function LoadingState({ message }: { message: string }) {
   )
 }
 
-// ════════════════════════════════════════════════════════════
-//  DEMO DATA
-// ════════════════════════════════════════════════════════════
-
-function generateDemoDashboard() {
-  return {
-    hoy: { ventas_total: 4520000, ventas_count: 38, ticket_promedio: 118947, ventas_m2: 18833, margen_bruto: 1446000, margen_pct: 32.0, clientes_unicos: 28, productos_vendidos: 124, descuento_total: 226000, delta_ventas_pct: 12.4, delta_ticket_pct: 3.2, delta_clientes_pct: 5.2, hora_pico: 13, hora_pico_ventas: 813600, conversion_pct: 65.5 },
-    semana: { ventas_total: 28900000, ventas_count: 234, ticket_promedio: 123504, ventas_m2: 120416, margen_bruto: 9248000, margen_pct: 32.0, clientes_unicos: 187, productos_vendidos: 782, descuento_total: 1445000, delta_ventas_pct: 8.1, delta_ticket_pct: -1.2, delta_clientes_pct: 4.5, hora_pico: 12, hora_pico_ventas: 5202000, conversion_pct: 68.2 },
-    mes: { ventas_total: 124800000, ventas_count: 1056, ticket_promedio: 118181, ventas_m2: 520000, margen_bruto: 39936000, margen_pct: 32.0, clientes_unicos: 832, productos_vendidos: 3524, descuento_total: 6240000, delta_ventas_pct: 15.7, delta_ticket_pct: 2.1, delta_clientes_pct: 8.3, hora_pico: 13, hora_pico_ventas: 22464000, conversion_pct: 67.4 },
-    heatmap_7dias: [],
-    top_productos: [],
-    productos_sin_venta: [],
-    alertas_stock: [],
-    proximos_eventos: [],
-    cupones_activos: 8,
-    ventas_por_dia_semana: [],
-    comparativa: { mejor_dia_semana: "Sábado", mejor_hora: "13:00" },
-  }
+function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 text-center">
+      <AlertTriangle className="w-8 h-8 text-red-500 mb-2" />
+      <p className="text-slate-600 dark:text-slate-300">{message}</p>
+      {onRetry && (
+        <button onClick={onRetry} className="mt-3 px-3 py-1.5 bg-slate-100 dark:bg-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">
+          Reintentar
+        </button>
+      )}
+    </div>
+  )
 }
 
-const DEMO_COUPONS = [
-  { id: "1", codigo: "VERANO15", nombre: "15% Verano", descripcion: "Descuento del 15% en productos de verano", tipo: "porcentaje", valor: 15, usos_actuales: 47, usos_maximos: 200, estado: "activo", fecha_desde: "2026-06-01", fecha_hasta: "2026-08-31" },
-  { id: "2", codigo: "BIENVENIDO10", nombre: "10% Bienvenida", descripcion: "Descuento para nuevos clientes", tipo: "porcentaje", valor: 10, usos_actuales: 23, usos_maximos: 100, estado: "activo", fecha_desde: "2026-01-01", fecha_hasta: "2026-12-31" },
-  { id: "3", codigo: "BLACK30", nombre: "Black Friday 30%", descripcion: "Descuento agresivo Black Friday", tipo: "porcentaje", valor: 30, usos_actuales: 540, usos_maximos: 0, estado: "expirado", fecha_desde: "2025-11-25", fecha_hasta: "2025-11-30" },
-  { id: "4", codigo: "2X1JUGUETES", nombre: "2x1 Juguetes", descripcion: "2x1 en categoría juguetes", tipo: "2x1", valor: 0, usos_actuales: 12, usos_maximos: 50, estado: "activo", fecha_desde: "2026-08-10", fecha_hasta: "2026-08-20" },
-  { id: "5", codigo: "ENVIO0", nombre: "Envío Gratis", descripcion: "Envío gratis en compras +50k", tipo: "envio_gratis", valor: 0, usos_actuales: 89, usos_maximos: 200, estado: "activo", fecha_desde: "2026-05-01", fecha_hasta: "2026-07-31" },
-  { id: "6", codigo: "REGALO5K", nombre: "Regalo 5.000 Gs", descripcion: "Descuento fijo de 5.000 Gs", tipo: "monto_fijo", valor: 5000, usos_actuales: 234, usos_maximos: 500, estado: "activo", fecha_desde: "2026-01-15", fecha_hasta: "2026-12-31" },
-]
+// ════════════════════════════════════════════════════════════
+//  DEPARTAMENTOS (P&L por área — ex Panel Gerencial)
+// ════════════════════════════════════════════════════════════
 
-const DEMO_EVENTS = [
-  { id: "1", codigo: "dia_madre", nombre: "Día de la Madre", fecha_evento: "2026-05-15", icono: "💐", categoria: "festividad", descripcion: "Regalos, cenas, desayunos. Categorías top: belleza, joyería, gastronomía, ropa." },
-  { id: "2", codigo: "dia_padre", nombre: "Día del Padre", fecha_evento: "2026-03-19", icono: "👔", categoria: "festividad", descripcion: "Herramientas, ropa, electrónica, experiencias." },
-  { id: "3", codigo: "san_juan", nombre: "San Juan", fecha_evento: "2026-06-24", icono: "🔥", categoria: "festividad", descripcion: "Chipa, mbeyú, dulces tradicionales. Pico histórico 18-24 jun." },
-  { id: "4", codigo: "vuelta_clases", nombre: "Vuelta a Clases", fecha_evento: "2026-02-15", fecha_fin: "2026-03-05", icono: "📚", categoria: "escolar", descripcion: "Útiles, mochilas, uniformes, tecnología." },
-  { id: "5", codigo: "black_friday", nombre: "Black Friday Paraguay", fecha_evento: "2026-11-27", icono: "🛍️", categoria: "comercial", descripcion: "Saldos masivos, descuentos agresivos, alto tráfico." },
-  { id: "6", codigo: "navidad", nombre: "Navidad", fecha_evento: "2026-12-25", fecha_fin: "2026-12-24", icono: "🎄", categoria: "festividad", descripcion: "Regalos, cena, pan dulce. Pico 20-24 dic." },
-  { id: "7", codigo: "amor_amistad", nombre: "Día del Amor y la Amistad", fecha_evento: "2026-09-14", icono: "❤️", categoria: "festividad", descripcion: "Flores, chocolates, cenas, joyería." },
-  { id: "8", codigo: "dia_nino", nombre: "Día del Niño", fecha_evento: "2026-08-16", icono: "🧸", categoria: "festividad", descripcion: "Juguetes, ropa infantil, libros, golosinas." },
-  { id: "9", codigo: "halloween", nombre: "Halloween", fecha_evento: "2026-10-31", icono: "🎃", categoria: "comercial", descripcion: "Disfraces, decoración, dulces." },
-  { id: "10", codigo: "ano_nuevo", nombre: "Año Nuevo", fecha_evento: "2026-12-31", icono: "🎆", categoria: "festividad", descripcion: "Brindis, decoración, ropa blanca." },
-  { id: "11", codigo: "pascua", nombre: "Pascua", fecha_evento: "2026-04-05", icono: "🐰", categoria: "festividad", descripcion: "Chocolate, huevos de pascua, gastronomía." },
-  { id: "12", codigo: "independencia_py", nombre: "Independencia Paraguay", fecha_evento: "2026-05-14", icono: "🇵🇾", categoria: "festividad", descripcion: "Patrio, gastronomía típica." },
-  { id: "13", codigo: "verano", nombre: "Temporada de Verano", fecha_evento: "2026-12-21", fecha_fin: "2027-03-20", icono: "🏖️", categoria: "estacional", descripcion: "Ropa de baño, protector solar, bebidas." },
-  { id: "14", codigo: "san_valentin", nombre: "San Valentín", fecha_evento: "2026-02-14", icono: "💝", categoria: "festividad", descripcion: "Detalle romántico, cena, flores, joyería." },
-  { id: "15", codigo: "cyber_monday", nombre: "Cyber Monday", fecha_evento: "2026-11-30", icono: "💻", categoria: "comercial", descripcion: "Online, electrónica, moda." },
-]
+function DeptosTab() {
+  const [data, setData] = useState<GerencialDeptoPyl[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const toast = useToast()
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const d = await api.gerencial.deptos()
+      setData(d)
+      setError(null)
+    } catch (e: any) {
+      setError(e?.message || "No se pudo cargar el P&L por departamento")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      await api.gerencial.exportExcel("deptos")
+    } catch (e: any) {
+      toast.error("Error", e.message || "No se pudo exportar")
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  if (loading) return <LoadingState message="Cargando P&L por departamento..." />
+  if (error) return <ErrorState message={error} onRetry={load} />
+  if (data.length === 0) return <div className="card p-8 text-center text-slate-400">Sin datos de departamentos</div>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={handleExport} disabled={exporting} className="btn-outline flex items-center gap-2 text-sm disabled:opacity-50">
+          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Exportar Excel
+        </button>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="card p-6">
+        <h3 className="text-base font-bold text-slate-900 dark:text-white mb-4">PyG por Departamento</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-700">
+                <th className="text-left py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Departamento</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Ventas</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Costo</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Margen</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Margen %</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Merma</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Markdowns</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((d, i) => (
+                <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
+                  <td className="py-2 px-3 font-medium">{d.depto}</td>
+                  <td className="py-2 px-3 text-right font-mono">{formatPYG(d.ventas)}</td>
+                  <td className="py-2 px-3 text-right font-mono">{formatPYG(d.costo_ventas)}</td>
+                  <td className="py-2 px-3 text-right font-mono font-bold text-green-600">{formatPYG(d.margen_bruto)}</td>
+                  <td className="py-2 px-3 text-right font-mono">{d.margen_porcentaje}%</td>
+                  <td className="py-2 px-3 text-right font-mono text-red-500">{formatPYG(d.merma_total)}</td>
+                  <td className="py-2 px-3 text-right font-mono">{d.markdowns_activos}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="card p-6">
+        <h3 className="text-base font-bold text-slate-900 dark:text-white mb-4">Ventas por Departamento</h3>
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={data} layout="vertical">
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis type="number" fontSize={11} />
+            <YAxis dataKey="depto" type="category" width={100} fontSize={11} />
+            <Tooltip formatter={(v: number) => formatPYG(v)} />
+            <Bar dataKey="ventas" fill="#3B82F6" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="costo_ventas" fill="#EF4444" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+//  RANKING DE PRODUCTOS (ex Panel Gerencial)
+// ════════════════════════════════════════════════════════════
+
+function RankingTab() {
+  const [data, setData] = useState<GerencialProductoRanking[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [sortBy, setSortBy] = useState<"total_ventas" | "margen" | "rotacion_dias">("total_ventas")
+  const [exporting, setExporting] = useState(false)
+  const toast = useToast()
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const d = await api.gerencial.ranking({ limit: 20 })
+      setData(d)
+      setError(null)
+    } catch (e: any) {
+      setError(e?.message || "No se pudo cargar el ranking de productos")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      await api.gerencial.exportExcel("ranking")
+    } catch (e: any) {
+      toast.error("Error", e.message || "No se pudo exportar")
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const sorted = [...data].sort((a, b) => {
+    if (sortBy === "margen") return b.margen - a.margen
+    if (sortBy === "rotacion_dias") return (a.rotacion_dias ?? 999) - (b.rotacion_dias ?? 999)
+    return b.total_ventas - a.total_ventas
+  })
+
+  if (loading) return <LoadingState message="Cargando ranking de productos..." />
+  if (error) return <ErrorState message={error} onRetry={load} />
+
+  return (
+    <div className="card p-6">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <h3 className="text-base font-bold text-slate-900 dark:text-white">Ranking de Productos</h3>
+        <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
+          {[
+            { key: "total_ventas", label: "Ventas" },
+            { key: "margen", label: "Margen" },
+            { key: "rotacion_dias", label: "Rotación" },
+          ].map((opt) => (
+            <button key={opt.key} onClick={() => setSortBy(opt.key as any)}
+              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${sortBy === opt.key ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-500 hover:text-slate-700"}`}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={handleExport} disabled={exporting} className="btn-outline flex items-center gap-2 text-sm disabled:opacity-50">
+          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Exportar Excel
+        </button>
+      </div>
+      {sorted.length === 0 ? (
+        <div className="text-center text-slate-400 py-8">Sin ventas en el período</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-700">
+                <th className="text-left py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">#</th>
+                <th className="text-left py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Producto</th>
+                <th className="text-left py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Categoría</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Cantidad</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Ventas</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Margen %</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Rotación (días)</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 dark:text-slate-400">Participación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((p, i) => (
+                <tr key={p.producto_id} className="border-b border-slate-100 dark:border-slate-800">
+                  <td className="py-2 px-3 text-slate-400 font-mono">{i + 1}</td>
+                  <td className="py-2 px-3 font-medium">{p.producto_nombre}</td>
+                  <td className="py-2 px-3 text-slate-500">{p.categoria || "—"}</td>
+                  <td className="py-2 px-3 text-right font-mono">{p.cantidad_vendida}</td>
+                  <td className="py-2 px-3 text-right font-mono font-bold">{formatPYG(p.total_ventas)}</td>
+                  <td className="py-2 px-3 text-right">
+                    <span className={`font-mono font-bold ${p.margen >= 0 ? "text-green-500" : "text-red-500"}`}>{p.margen}%</span>
+                  </td>
+                  <td className="py-2 px-3 text-right font-mono">{p.rotacion_dias != null ? p.rotacion_dias.toFixed(1) : "—"}</td>
+                  <td className="py-2 px-3 text-right font-mono text-slate-500">{p.participacion_porcentaje}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ════════════════════════════════════════════════════════════
 //  MAIN
 // ════════════════════════════════════════════════════════════
 
 export default function RetailPage() {
+  const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>("dashboard")
 
   return (
@@ -1500,12 +1501,21 @@ export default function RetailPage() {
         {/* Tab content */}
         <div>
           {tab === "dashboard" && <DashboardTab />}
-          {tab === "pos" && <POSTab />}
+          {tab === "pos" && (
+            <div className="card p-10 text-center space-y-3">
+              <Zap className="w-8 h-8 text-primary mx-auto" />
+              <p className="text-sm font-bold text-gray-900 dark:text-white">Esta pestana duplicaba el POS real con una venta que no se guardaba en ningun lado</p>
+              <p className="text-sm text-gray-500 max-w-md mx-auto">El POS real (con venta, stock y pago reales) esta en Caja Rapida.</p>
+              <button className="btn-primary mx-auto" onClick={() => navigate("/pos")}><ExternalLink className="w-4 h-4" /> Ir a Caja Rapida</button>
+            </div>
+          )}
           {tab === "cliente" && <ClienteTab />}
           {tab === "cupones" && <CuponesTab />}
           {tab === "whatsapp" && <WhatsAppTab />}
           {tab === "eventos" && <EventosTab />}
           {tab === "tienda" && <TiendaTab />}
+          {tab === "deptos" && <DeptosTab />}
+          {tab === "ranking" && <RankingTab />}
         </div>
       </div>
     </div>

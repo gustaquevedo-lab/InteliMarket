@@ -1,18 +1,11 @@
 import { useState, useEffect } from "react"
-import { Building2, Plus, Edit, Trash2, Search, Loader2, X, Check, MapPin, Phone, Mail, Hash, DollarSign, ArrowLeftRight, LayoutDashboard, Package, TrendingUp, Truck, Eye } from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { Building2, Plus, Edit, Trash2, Search, Loader2, X, Check, MapPin, Phone, Mail, Hash, DollarSign, ArrowLeftRight, LayoutDashboard, Package, TrendingUp, Truck, Eye, ExternalLink } from "lucide-react"
 import { api, type Branch, type BranchPrice, type BranchTransfer, type ConsolidatedDashboard } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { StatusBadge } from "../../components/DataTable"
 
 type Tab = "sucursales" | "precios" | "transferencias" | "dashboard"
-
-const ESTADOS_TRANSFER = [
-  { value: "", label: "Todos" },
-  { value: "pendiente", label: "Pendiente" },
-  { value: "en_transito", label: "En tránsito" },
-  { value: "recibido", label: "Recibido" },
-  { value: "cancelado", label: "Cancelado" },
-]
 
 export default function BranchesPage() {
   const [tab, setTab] = useState<Tab>("sucursales")
@@ -47,7 +40,7 @@ export default function BranchesPage() {
 
       {tab === "sucursales" && <BranchesTab />}
       {tab === "precios" && <PricesTab />}
-      {tab === "transferencias" && <TransfersTab />}
+      {tab === "transferencias" && <TransfersRedirect />}
       {tab === "dashboard" && <DashboardTab />}
     </div>
   )
@@ -69,7 +62,7 @@ function BranchesTab() {
       const data = await api.branches.list()
       setBranches(data)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver sucursales")
+      toast.error("Error de conexión", "Conectá el backend para ver sucursales")
     } finally {
       setLoading(false)
     }
@@ -314,7 +307,7 @@ function PricesTab() {
       setPrices(p)
       setProducts(pr)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver precios")
+      toast.error("Error de conexión", "Conectá el backend para ver precios")
     } finally {
       setLoading(false)
     }
@@ -456,345 +449,18 @@ function PricesTab() {
   )
 }
 
-function TransfersTab() {
-  const [branches, setBranches] = useState<Branch[]>([])
-  const [transfers, setTransfers] = useState<BranchTransfer[]>([])
-  const [products, setProducts] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [estadoFilter, setEstadoFilter] = useState("")
-  const [showCreate, setShowCreate] = useState(false)
-  const [showDetail, setShowDetail] = useState<string | null>(null)
-  const [showReceive, setShowReceive] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-  const toast = useToast()
-  const [form, setForm] = useState({
-    origen_branch_id: "",
-    destino_branch_id: "",
-    notas: "",
-    transportista: "",
-    items: [] as { product_id: string; cantidad: string; costo_unitario: string }[],
-  })
-
-  const fetchData = async () => {
-    setLoading(true)
-    try {
-      const [b, t, p] = await Promise.all([
-        api.branches.list(),
-        api.branches.transfers.list(estadoFilter ? { estado: estadoFilter } : undefined),
-        api.products.list({ activo: true }),
-      ])
-      setBranches(b)
-      setTransfers(t)
-      setProducts(p)
-    } catch {
-      toast.info("Datos demo", "Conectá el backend para ver transferencias")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchData() }, [estadoFilter])
-
-  const addItem = () => {
-    setForm({ ...form, items: [...form.items, { product_id: "", cantidad: "1", costo_unitario: "" }] })
-  }
-
-  const removeItem = (idx: number) => {
-    setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })
-  }
-
-  const updateItem = (idx: number, field: string, value: string) => {
-    const items = [...form.items]
-    items[idx] = { ...items[idx], [field]: value }
-    setForm({ ...form, items })
-  }
-
-  const handleCreate = async () => {
-    if (!form.origen_branch_id || !form.destino_branch_id) {
-      toast.error("Error", "Origen y destino son obligatorios")
-      return
-    }
-    if (form.origen_branch_id === form.destino_branch_id) {
-      toast.error("Error", "Origen y destino deben ser diferentes")
-      return
-    }
-    if (form.items.length === 0 || !form.items[0].product_id) {
-      toast.error("Error", "Agregá al menos un producto")
-      return
-    }
-    setSubmitting(true)
-    try {
-      await api.branches.transfers.create({
-        origen_branch_id: form.origen_branch_id,
-        destino_branch_id: form.destino_branch_id,
-        notas: form.notas || undefined,
-        transportista: form.transportista || undefined,
-        items: form.items.map(i => ({
-          product_id: i.product_id,
-          cantidad: parseInt(i.cantidad) || 1,
-          costo_unitario: i.costo_unitario ? parseFloat(i.costo_unitario) : undefined,
-        })),
-      })
-      toast.success("Creada", "Transferencia creada correctamente")
-      setShowCreate(false)
-      setForm({ origen_branch_id: "", destino_branch_id: "", notas: "", transportista: "", items: [] })
-      fetchData()
-    } catch {
-      toast.error("Error", "No se pudo crear la transferencia")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const handleReceive = async () => {
-    if (!showReceive) return
-    const transfer = transfers.find(t => t.id === showReceive)
-    if (!transfer) return
-    const items = transfer.items?.map(it => ({
-      item_id: it.id,
-      cantidad_recibida: it.cantidad_recibida ?? it.cantidad,
-    })) || []
-    setSubmitting(true)
-    try {
-      await api.branches.transfers.receive(showReceive, { items })
-      toast.success("Recibida", "Transferencia recibida correctamente")
-      setShowReceive(null)
-      fetchData()
-    } catch {
-      toast.error("Error", "No se pudo recibir la transferencia")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const estadoBadge = (estado: string) => {
-    const map: Record<string, string> = {
-      pendiente: "badge-warning",
-      en_transito: "badge-info",
-      recibido: "badge-success",
-      cancelado: "badge-danger",
-    }
-    return <StatusBadge status={estado} map={map} />
-  }
-
+function TransfersRedirect() {
+  const navigate = useNavigate()
   return (
-    <div className="space-y-6">
-      <div className="flex gap-3 items-center">
-        <select className="input-field w-48" value={estadoFilter} onChange={(e) => setEstadoFilter(e.target.value)}>
-          {ESTADOS_TRANSFER.map((e) => <option key={e.value} value={e.value}>{e.label}</option>)}
-        </select>
-        <button onClick={fetchData} className="btn-outline">Actualizar</button>
-        <button onClick={() => setShowCreate(true)} className="btn-primary ml-auto">
-          <Plus className="w-4 h-4" />
-          Nueva transferencia
-        </button>
-      </div>
-
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="table-header">
-              <th className="table-cell">Número</th>
-              <th className="table-cell">Origen</th>
-              <th className="table-cell">Destino</th>
-              <th className="table-cell">Estado</th>
-              <th className="table-cell">Items</th>
-              <th className="table-cell">Fecha</th>
-              <th className="table-cell">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-            ) : transfers.length === 0 ? (
-              <tr><td colSpan={7} className="text-center py-12 text-gray-400">No hay transferencias</td></tr>
-            ) : (
-              transfers.map((t) => (
-                <tr key={t.id} className="table-row">
-                  <td className="table-td font-mono text-xs font-bold text-primary">{t.numero}</td>
-                  <td className="table-td">{t.origen_nombre || t.origen_branch_id}</td>
-                  <td className="table-td">{t.destino_nombre || t.destino_branch_id}</td>
-                  <td className="table-td">{estadoBadge(t.estado)}</td>
-                  <td className="table-td">{t.items?.length || 0}</td>
-                  <td className="table-td text-sm text-gray-500">
-                    {t.created_at ? new Date(t.created_at).toLocaleDateString() : "—"}
-                  </td>
-                  <td className="table-td">
-                    <div className="flex items-center gap-1">
-                      {t.estado === "pendiente" && (
-                        <button className="btn-ghost" title="Enviar" onClick={async () => {
-                          try {
-                            await api.branches.transfers.send(t.id)
-                            toast.success("Enviada", "Transferencia marcada como en tránsito")
-                            fetchData()
-                          } catch { toast.error("Error", "No se pudo actualizar") }
-                        }}><Truck className="w-4 h-4" /></button>
-                      )}
-                      {t.estado === "en_transito" && (
-                        <button className="btn-ghost text-green-500" title="Recibir" onClick={() => setShowReceive(t.id)}><Check className="w-4 h-4" /></button>
-                      )}
-                      <button className="btn-ghost" title="Ver detalle" onClick={() => setShowDetail(showDetail === t.id ? null : t.id)}><Eye className="w-4 h-4" /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {showDetail && (() => {
-        const t = transfers.find(x => x.id === showDetail)
-        if (!t) return null
-        return (
-          <div className="card p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                Transferencia {t.numero}
-              </h3>
-              <button onClick={() => setShowDetail(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-              <div><span className="text-gray-400">Origen:</span> <span className="font-medium">{t.origen_nombre || t.origen_branch_id}</span></div>
-              <div><span className="text-gray-400">Destino:</span> <span className="font-medium">{t.destino_nombre || t.destino_branch_id}</span></div>
-              <div><span className="text-gray-400">Estado:</span> {estadoBadge(t.estado)}</div>
-              <div><span className="text-gray-400">Transportista:</span> <span className="font-medium">{t.transportista || "—"}</span></div>
-              {t.notas && <div className="col-span-2"><span className="text-gray-400">Notas:</span> <span>{t.notas}</span></div>}
-            </div>
-            <table className="w-full">
-              <thead>
-                <tr className="table-header">
-                  <th className="table-cell">Producto</th>
-                  <th className="table-cell">Cantidad</th>
-                  <th className="table-cell">Costo Unit.</th>
-                  <th className="table-cell">Recibido</th>
-                </tr>
-              </thead>
-              <tbody>
-                {t.items?.map((it) => (
-                  <tr key={it.id} className="table-row">
-                    <td className="table-td">{it.product_nombre || it.product_id}</td>
-                    <td className="table-td">{it.cantidad}</td>
-                    <td className="table-td">{it.costo_unitario ? `Gs. ${it.costo_unitario.toLocaleString()}` : "—"}</td>
-                    <td className="table-td">{it.cantidad_recibida ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      })()}
-
-      {showReceive && (() => {
-        const t = transfers.find(x => x.id === showReceive)
-        if (!t) return null
-        return (
-          <div className="modal-overlay" onClick={() => setShowReceive(null)}>
-            <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Recibir transferencia {t.numero}</h3>
-                <button onClick={() => setShowReceive(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
-              </div>
-              <div className="p-6 space-y-4">
-                <p className="text-sm text-gray-500">Confirmar recepción de todos los items de esta transferencia.</p>
-                <table className="w-full text-sm">
-                  <thead><tr className="table-header"><th className="table-cell">Producto</th><th className="table-cell">Enviado</th><th className="table-cell">A recibir</th></tr></thead>
-                  <tbody>
-                    {t.items?.map((it) => (
-                      <tr key={it.id} className="table-row">
-                        <td className="table-td">{it.product_nombre || it.product_id}</td>
-                        <td className="table-td">{it.cantidad}</td>
-                        <td className="table-td font-bold">{it.cantidad}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="flex gap-3 pt-4">
-                  <button className="btn-outline flex-1" onClick={() => setShowReceive(null)}>Cancelar</button>
-                  <button className="btn-primary flex-1" onClick={handleReceive} disabled={submitting}>
-                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar recepción"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
-
-      {showCreate && (
-        <div className="modal-overlay" onClick={() => setShowCreate(false)}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Nueva transferencia</h3>
-              <button onClick={() => setShowCreate(false)} className="btn-ghost"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label label-required">Origen</label>
-                  <select className="input-field" value={form.origen_branch_id} onChange={(e) => setForm({ ...form, origen_branch_id: e.target.value })}>
-                    <option value="">Seleccionar...</option>
-                    {branches.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="input-label label-required">Destino</label>
-                  <select className="input-field" value={form.destino_branch_id} onChange={(e) => setForm({ ...form, destino_branch_id: e.target.value })}>
-                    <option value="">Seleccionar...</option>
-                    {branches.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label">Transportista</label>
-                  <input className="input-field" placeholder="Nombre del transportista" value={form.transportista} onChange={(e) => setForm({ ...form, transportista: e.target.value })} />
-                </div>
-                <div>
-                  <label className="input-label">Notas</label>
-                  <input className="input-field" placeholder="Notas opcionales" value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} />
-                </div>
-              </div>
-
-              <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
-                <div className="flex items-center justify-between mb-3">
-                  <label className="input-label label-required mb-0">Productos</label>
-                  <button onClick={addItem} className="btn-outline text-xs py-1 px-2">
-                    <Plus className="w-3 h-3" /> Agregar producto
-                  </button>
-                </div>
-                {form.items.map((item, idx) => (
-                  <div key={idx} className="grid grid-cols-4 gap-2 mb-2 items-end">
-                    <div className="col-span-2">
-                      <select className="input-field text-sm" value={item.product_id} onChange={(e) => updateItem(idx, "product_id", e.target.value)}>
-                        <option value="">Seleccionar...</option>
-                        {products.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <input className="input-field text-sm" type="number" min="1" placeholder="Cant." value={item.cantidad} onChange={(e) => updateItem(idx, "cantidad", e.target.value)} />
-                    </div>
-                    <div className="flex gap-1">
-                      <input className="input-field text-sm flex-1" type="number" step="0.01" placeholder="Costo" value={item.costo_unitario} onChange={(e) => updateItem(idx, "costo_unitario", e.target.value)} />
-                      <button onClick={() => removeItem(idx)} className="btn-ghost text-red-400 p-1"><X className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button className="btn-outline flex-1" onClick={() => setShowCreate(false)}>Cancelar</button>
-                <button className="btn-primary flex-1" onClick={handleCreate} disabled={submitting}>
-                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Crear transferencia"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+    <div className="card p-10 text-center space-y-3">
+      <ArrowLeftRight className="w-8 h-8 text-primary mx-auto" />
+      <p className="text-sm font-bold text-gray-900 dark:text-white">Esta pestana duplicaba el modulo real de Transferencias</p>
+      <p className="text-sm text-gray-500 max-w-md mx-auto">Mismos datos reales, una sola pantalla -- las transferencias entre sucursales viven en su propio modulo.</p>
+      <button className="btn-primary mx-auto" onClick={() => navigate("/transferencias")}><ExternalLink className="w-4 h-4" /> Ir a Transferencias</button>
     </div>
   )
 }
+
 
 function DashboardTab() {
   const [dashboard, setDashboard] = useState<ConsolidatedDashboard | null>(null)
@@ -807,7 +473,7 @@ function DashboardTab() {
       const data = await api.branches.dashboard()
       setDashboard(data)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver el dashboard")
+      toast.error("Error de conexión", "Conectá el backend para ver el dashboard")
     } finally {
       setLoading(false)
     }

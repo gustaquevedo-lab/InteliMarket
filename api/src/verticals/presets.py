@@ -199,10 +199,10 @@ VERTICALS: dict[str, VerticalPreset] = {
             "ecommerce_sm",
             # Delivery App Integrations
             "delivery_integrations",
-            # Suscripciones Recurrentes
-            "suscripciones",
             # Delivery
             "intelientregas",
+            # Retail Hub — centro de mando de rentabilidad
+            "retail", "pyg_diario", "shrinkage", "demand_forecast",
         ],
         config_defaults={
             "iva_default": 10,

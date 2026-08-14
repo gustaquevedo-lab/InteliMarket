@@ -13,14 +13,6 @@ async def create_return(body: ReturnCreate, db: AsyncSession = Depends(get_db)):
     return await service.create_return(db, body)
 
 
-@router.get("/returns/{return_id}", response_model=ReturnWithItems)
-async def get_return(return_id: str, db: AsyncSession = Depends(get_db)):
-    result = await service.get_return_with_items(db, return_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="Devolución no encontrada")
-    return result
-
-
 @router.get("/companies/{company_id}/returns", response_model=list[ReturnResponse])
 async def list_returns(
     company_id: str,
@@ -30,6 +22,19 @@ async def list_returns(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.list_returns(db, company_id, estado, limit=limit, offset=offset)
+
+
+@router.get("/returns/motivos")
+async def list_motivos():
+    return service.RETURN_MOTIVOS
+
+
+@router.get("/returns/{return_id}", response_model=ReturnWithItems)
+async def get_return(return_id: str, db: AsyncSession = Depends(get_db)):
+    result = await service.get_return_with_items(db, return_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+    return result
 
 
 @router.post("/returns/{return_id}/approve", response_model=ReturnResponse)
@@ -50,8 +55,3 @@ async def reject_return(
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo rechazar la devolución")
     return result
-
-
-@router.get("/returns/motivos")
-async def list_motivos():
-    return service.RETURN_MOTIVOS

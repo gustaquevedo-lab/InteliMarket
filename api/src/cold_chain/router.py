@@ -85,16 +85,6 @@ async def get_readings(
     return await service.get_readings(db, user["company_id"], sensor_id, hours_back, limit)
 
 
-# === MQTT SIMULATION ===
-
-@router.post("/simulate")
-async def simulate_mqtt(
-    db: AsyncSession = Depends(get_db),
-    user=Depends(require_auth),
-):
-    return await service.simulate_mqtt_reading(db, user["company_id"])
-
-
 # === ALERTS ===
 
 @router.get("/alerts")

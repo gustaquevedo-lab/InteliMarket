@@ -30,7 +30,7 @@ export default function LogisticsPage() {
       if (routesData.status === "fulfilled") setRoutes(routesData.value)
       if (customersData.status === "fulfilled") setCustomers(customersData.value)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver logística")
+      toast.error("Error de conexión", "Conectá el backend para ver logística")
     } finally {
       setLoading(false)
     }

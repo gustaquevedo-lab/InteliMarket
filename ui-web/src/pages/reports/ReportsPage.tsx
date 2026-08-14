@@ -1,11 +1,14 @@
 ﻿import { useState, useEffect, useRef } from "react"
 import { useSearchParams } from "react-router-dom"
-import { BarChart3, TrendingUp, Package, FileText, Download, Loader2, ChevronDown, FileSpreadsheet, Layers, ArrowUpDown } from "lucide-react"
+import { BarChart3, TrendingUp, Package, FileText, Download, Loader2, ChevronDown, FileSpreadsheet, Layers, ArrowUpDown, Printer } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api"
+// Mismo patron que el resto de la app (BancosPage, IntegratedFinancePage) --
+// single-tenant hoy, se deriva de auth cuando haya multi-empresa real.
+const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 interface SalesSummary {
   total_ventas: number
@@ -38,6 +41,7 @@ interface ExportOption {
   label: string
   endpoint: string
   filename: string
+  format?: "excel" | "pdf"
 }
 
 const reportTypes = [
@@ -70,9 +74,16 @@ const reportTypes = [
   {
     id: "financial",
     titulo: "Financiero",
-    descripcion: "Flujo de caja, cobros y pagos",
+    descripcion: "Estado de resultados, flujo de caja, cobros y pagos",
     icono: "financial" as const,
     exports: [
+      { label: "Estado de Resultados (PDF)", endpoint: "/reports/export/pnl.pdf", filename: "estado_de_resultados.pdf", format: "pdf" as const },
+      { label: "Flujo de Caja 30 días (PDF)", endpoint: "/reports/export/cash-flow.pdf?dias=30", filename: "flujo_de_caja_30d.pdf", format: "pdf" as const },
+      { label: "Flujo de Caja 90 días (PDF)", endpoint: "/reports/export/cash-flow.pdf?dias=90", filename: "flujo_de_caja_90d.pdf", format: "pdf" as const },
+      { label: "Posición de Caja (PDF)", endpoint: "/v1/financial/banks/export/cash-position.pdf", filename: "posicion_de_caja.pdf", format: "pdf" as const },
+      { label: "Antigüedad Cuentas por Cobrar (PDF)", endpoint: `/v1/companies/${COMPANY_ID}/accounts-receivable/export/aging.pdf`, filename: "antiguedad_cxc.pdf", format: "pdf" as const },
+      { label: "Antigüedad Cuentas por Pagar (PDF)", endpoint: "/v1/financial/ap/export/aging.pdf", filename: "antiguedad_cxp.pdf", format: "pdf" as const },
+      { label: "Top Proveedores / DPO (PDF)", endpoint: "/v1/financial/ap/export/top-suppliers.pdf", filename: "top_proveedores_dpo.pdf", format: "pdf" as const },
       { label: "Resumen financiero", endpoint: "/reports/export/financial", filename: "resumen_financiero.xlsx" },
     ],
   },
@@ -88,7 +99,7 @@ const reportTypes = [
   },
 ]
 
-function ExportDropdown({ options, periodo }: { options: ExportOption[]; periodo: string }) {
+function ExportDropdown({ options, fechaDesde, fechaHasta }: { options: ExportOption[]; fechaDesde: string; fechaHasta: string }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -100,22 +111,36 @@ function ExportDropdown({ options, periodo }: { options: ExportOption[]; periodo
     return () => document.removeEventListener("mousedown", handler)
   }, [])
 
+  const [loadingKey, setLoadingKey] = useState<string | null>(null)
+
+  const fetchBlob = async (opt: ExportOption) => {
+    // Los reportes de /api/reports/* derivan company_id de la sesion y usan
+    // fecha_desde/fecha_hasta. Los reportes reusados de otros modulos
+    // (Bancos, AP, AR) todavia esperan company_id como query param y, en el
+    // caso de "Top Proveedores/DPO", los mismos rangos bajo el nombre
+    // desde/hasta -- se mandan los dos juegos de nombres, cada endpoint
+    // ignora los que no declara.
+    const params = new URLSearchParams({
+      fecha_desde: fechaDesde,
+      fecha_hasta: fechaHasta,
+      desde: fechaDesde,
+      hasta: fechaHasta,
+      company_id: COMPANY_ID,
+    })
+    const separator = opt.endpoint.includes("?") ? "&" : "?"
+    const url = `${API_BASE}${opt.endpoint}${separator}${params}`
+    const token = localStorage.getItem("access_token")
+    const resp = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!resp.ok) throw new Error("Error al generar el archivo")
+    return resp.blob()
+  }
+
   const handleExport = async (opt: ExportOption) => {
+    setLoadingKey(`dl-${opt.label}`)
     try {
-      const days = periodo === "7d" ? 7 : periodo === "30d" ? 30 : 90
-      const desde = new Date()
-      desde.setDate(desde.getDate() - days)
-      const params = new URLSearchParams({
-        fecha_desde: desde.toISOString().split("T")[0],
-        fecha_hasta: new Date().toISOString().split("T")[0],
-      })
-      const url = `${API_BASE}${opt.endpoint}?${params}`
-      const token = localStorage.getItem("access_token")
-      const resp = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (!resp.ok) throw new Error("Error al generar el archivo")
-      const blob = await resp.blob()
+      const blob = await fetchBlob(opt)
       const a = document.createElement("a")
       a.href = URL.createObjectURL(blob)
       a.download = opt.filename
@@ -123,7 +148,26 @@ function ExportDropdown({ options, periodo }: { options: ExportOption[]; periodo
       URL.revokeObjectURL(a.href)
       setOpen(false)
     } catch {
+      // silencioso: el estado de carga se limpia igual en el finally
+    } finally {
+      setLoadingKey(null)
+    }
+  }
+
+  // Imprimir = abrir el PDF en una pestaña nueva con el visor nativo del
+  // navegador, que ya trae boton de imprimir/descargar -- mas confiable
+  // entre navegadores que forzar window.print() sobre un blob.
+  const handlePrint = async (opt: ExportOption) => {
+    setLoadingKey(`pr-${opt.label}`)
+    try {
+      const blob = await fetchBlob(opt)
+      const blobUrl = URL.createObjectURL(blob)
+      window.open(blobUrl, "_blank")
       setOpen(false)
+    } catch {
+      // silencioso: el estado de carga se limpia igual en el finally
+    } finally {
+      setLoadingKey(null)
     }
   }
 
@@ -137,14 +181,30 @@ function ExportDropdown({ options, periodo }: { options: ExportOption[]; periodo
       {open && (
         <div className="absolute right-0 top-full mt-1 w-56 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50">
           {options.map((opt, i) => (
-            <button
-              key={i}
-              onClick={() => handleExport(opt)}
-              className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
-              {opt.label}
-            </button>
+            <div key={i} className="flex items-center gap-1 px-2 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+              <button
+                onClick={() => handleExport(opt)}
+                disabled={loadingKey !== null}
+                className="flex-1 text-left px-2 py-1.5 text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2 disabled:opacity-50"
+              >
+                {loadingKey === `dl-${opt.label}`
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                  : opt.format === "pdf"
+                    ? <FileText className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                    : <FileSpreadsheet className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />}
+                {opt.label}
+              </button>
+              {opt.format === "pdf" && (
+                <button
+                  onClick={() => handlePrint(opt)}
+                  disabled={loadingKey !== null}
+                  title="Ver / Imprimir"
+                  className="p-1.5 text-gray-400 hover:text-primary disabled:opacity-50 flex-shrink-0"
+                >
+                  {loadingKey === `pr-${opt.label}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -167,7 +227,12 @@ export default function ReportsPage() {
   const meta = sector ? SECTOR_META[sector] : null
 
   const [loading, setLoading] = useState(true)
-  const [periodo, setPeriodo] = useState("7d")
+  const [fechaDesde, setFechaDesde] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 30)
+    return d.toISOString().split("T")[0]
+  })
+  const [fechaHasta, setFechaHasta] = useState(() => new Date().toISOString().split("T")[0])
   const [costingTab, setCostingTab] = useState<"fifo" | "lifo" | "comparison">("fifo")
   const [salesSummary, setSalesSummary] = useState<SalesSummary | null>(null)
   const [inventorySummary, setInventorySummary] = useState<InventorySummary | null>(null)
@@ -186,15 +251,16 @@ export default function ReportsPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
+      const range = { fecha_desde: fechaDesde, fecha_hasta: fechaHasta }
       const [sales, inventory, financial, category, period, paymentMethod, expenseCategory, payroll] = await Promise.allSettled([
-        api.reports.salesSummary(),
+        api.reports.salesSummary(range),
         api.reports.inventorySummary(),
-        api.reports.financialSummary(),
-        api.reports.salesByCategory(),
-        api.reports.salesByPeriod({ agrupar_por: "dia" }),
-        api.reports.salesByPaymentMethod(),
-        api.reports.expensesByCategory(),
-        api.financial.payrollByConcepto(),
+        api.reports.financialSummary(range),
+        api.reports.salesByCategory(range),
+        api.reports.salesByPeriod({ ...range, agrupar_por: "dia" }),
+        api.reports.salesByPaymentMethod(range),
+        api.reports.expensesByCategory(range),
+        api.financial.payrollByConcepto({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta }),
       ])
       if (sales.status === "fulfilled") setSalesSummary(sales.value)
       if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
@@ -204,7 +270,7 @@ export default function ReportsPage() {
       if (paymentMethod.status === "fulfilled") setSalesByPaymentMethod(paymentMethod.value)
       if (expenseCategory.status === "fulfilled") setExpensesByCategory(expenseCategory.value)
       if (payroll.status === "fulfilled") setPayrollByConcepto(payroll.value)
-      if (sales.status === "rejected") toast.info("Datos demo", "Conectá el backend para ver datos reales")
+      if (sales.status === "rejected") toast.error("Error de conexión", "Conectá el backend para ver datos reales")
     } catch {
       toast.error("Error", "No se pudieron cargar los reportes")
     } finally {
@@ -212,7 +278,7 @@ export default function ReportsPage() {
     }
   }
 
-  useEffect(() => { fetchData() }, [periodo])
+  useEffect(() => { fetchData() }, [fechaDesde, fechaHasta])
   useEffect(() => { fetchCosting() }, [costingTab])
 
   const fetchCosting = async () => {
@@ -247,12 +313,26 @@ export default function ReportsPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{meta?.titulo || "Reportes"}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{meta?.descripcion || "Análisis y reportes del negocio"}</p>
         </div>
-        <div className="flex gap-2">
-          <select className="input-field w-fit" value={periodo} onChange={(e) => setPeriodo(e.target.value)}>
-            <option value="7d">Últimos 7 días</option>
-            <option value="30d">Últimos 30 días</option>
-            <option value="90d">Últimos 90 días</option>
-          </select>
+        <div className="flex gap-2 items-center flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-gray-500 font-medium">Desde</label>
+            <input type="date" className="input-field w-fit" value={fechaDesde} max={fechaHasta} onChange={(e) => setFechaDesde(e.target.value)} />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-gray-500 font-medium">Hasta</label>
+            <input type="date" className="input-field w-fit" value={fechaHasta} min={fechaDesde} max={new Date().toISOString().split("T")[0]} onChange={(e) => setFechaHasta(e.target.value)} />
+          </div>
+          <div className="flex gap-1">
+            {[
+              { l: "7d", d: 7 }, { l: "30d", d: 30 }, { l: "90d", d: 90 },
+            ].map((p) => (
+              <button key={p.l} onClick={() => {
+                const d = new Date(); d.setDate(d.getDate() - p.d)
+                setFechaDesde(d.toISOString().split("T")[0])
+                setFechaHasta(new Date().toISOString().split("T")[0])
+              }} className="btn-ghost text-xs px-2 py-1">{p.l}</button>
+            ))}
+          </div>
           <button onClick={fetchData} className="btn-outline"><Download className="w-4 h-4" />Actualizar</button>
         </div>
       </div>
@@ -566,7 +646,7 @@ export default function ReportsPage() {
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
                       <h3 className="text-base font-bold text-gray-900 dark:text-white">{r.titulo}</h3>
-                      <ExportDropdown options={r.exports} periodo={periodo} />
+                      <ExportDropdown options={r.exports} fechaDesde={fechaDesde} fechaHasta={fechaHasta} />
                     </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{r.descripcion}</p>
                   </div>

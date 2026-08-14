@@ -194,7 +194,7 @@ export default function POSPage() {
       const medInfo = pharmaEnabled ? getMedicationInfo(product.id) : null
       return [...prev, {
         id: product.id, nombre: product.nombre, precio: 0,
-        categoria: product.category?.nombre || "", sku: product.sku,
+        categoria: product.categoria?.nombre || "", sku: product.sku,
         quantity: 1, iva_tasa: product.iva_tasa || 10,
         ...(medInfo ? {
           medication_id: medInfo.medication_id, es_controlado: medInfo.es_controlado,
@@ -308,10 +308,10 @@ export default function POSPage() {
 
   const topProducts = products.filter(p => (p.stock || 0) > 0).slice(0, 8)
 
-  const categorias = ["Todas", ...Array.from(new Set(products.map(p => p.category?.nombre || p.sku.split("-")[0])))]
+  const categorias = ["Todas", ...Array.from(new Set(products.map(p => p.categoria?.nombre || p.sku.split("-")[0])))]
 
   const filtered = products.filter(p => {
-    const catNombre = p.category?.nombre || p.sku.split("-")[0]
+    const catNombre = p.categoria?.nombre || p.sku.split("-")[0]
     return (!search || p.nombre.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()) || (p.codigo_barra?.toLowerCase().includes(search.toLowerCase()) ?? false)) && (categoria === "Todas" || catNombre === categoria)
   })
 
@@ -410,17 +410,27 @@ export default function POSPage() {
         toast.success(roundPY(roundedTotal) === roundedTotal ? `Cobrado: ${formatPYG(roundedTotal)}` : `Cobrado: ${formatPYG(roundedTotal)} (redondeado)`, "Se sincronizará al reconectar")
       } else {
         const result = await api.sales.create(saleData)
-        const saleId = (result as any).id || saleNumber
-        if (pharmaEnabled) await handlePharmaPostSale(saleId, cart, selectedCustomer?.id)
-        const receipt = generateReceipt(
-          (result as any).numero || saleNumber,
-          cart.map(i => ({ nombre: i.nombre, cantidad: i.quantity, precio: i.precio, total: i.precio * i.quantity })),
-          roundedTotal, iva10, iva5, paymentMethod,
-          selectedCustomer?.razon_social || null, "InteliMarket"
-        )
-        receipt.print()
-        playSuccess()
-        toast.success("Venta completada", `${formatPYG(roundedTotal)} - ${paymentMethod}`)
+        if ((result as any).estado === "pend_aprob_credito") {
+          // Excede el limite de credito del cliente: la venta queda
+          // retenida (sin stock descontado, sin recibo) hasta que
+          // Supervisor y Gerente la aprueben desde "Aprobaciones de crédito".
+          toast.error(
+            "Venta pendiente de aprobación",
+            `Excede el límite de crédito de ${selectedCustomer?.razon_social || "el cliente"}. Un Supervisor y un Gerente deben aprobarla antes de despachar.`
+          )
+        } else {
+          const saleId = (result as any).id || saleNumber
+          if (pharmaEnabled) await handlePharmaPostSale(saleId, cart, selectedCustomer?.id)
+          const receipt = generateReceipt(
+            (result as any).numero || saleNumber,
+            cart.map(i => ({ nombre: i.nombre, cantidad: i.quantity, precio: i.precio, total: i.precio * i.quantity })),
+            roundedTotal, iva10, iva5, paymentMethod,
+            selectedCustomer?.razon_social || null, "InteliMarket"
+          )
+          receipt.print()
+          playSuccess()
+          toast.success("Venta completada", `${formatPYG(roundedTotal)} - ${paymentMethod}`)
+        }
       }
       setLastCompletedSale({ items: [...cart], total: roundedTotal })
       setCart([])
@@ -1385,7 +1395,7 @@ export default function POSPage() {
                     return [...prev, {
                       id: scaleProduct.id, nombre: scaleProduct.nombre,
                       precio: scalePrecioUnitario,
-                      categoria: scaleProduct.category?.nombre || "", sku: scaleProduct.sku,
+                      categoria: scaleProduct.categoria?.nombre || "", sku: scaleProduct.sku,
                       quantity: scaleWeight, iva_tasa: scaleProduct.iva_tasa || 10,
                       ...(medInfo ? {
                         medication_id: medInfo.medication_id, es_controlado: medInfo.es_controlado,

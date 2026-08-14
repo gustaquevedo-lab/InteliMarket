@@ -12,6 +12,10 @@ from api.src.sales.models import Sale, SaleItem
 from api.src.products.models import Product, ProductCategory
 from api.src.inventory.models import Stock
 from api.src.supermer.models import ProductionOrder, ProductionRecipe, WasteLog, MarkdownLog
+from api.src.accounts_receivable.service import get_receivable_summary
+from api.src.financial.service import get_ap_dashboard
+from api.src.financial.models import SupplierInvoice
+from api.src.petty_cash.models import Expense, ExpenseCategory
 
 
 AREA_LABELS = {
@@ -43,26 +47,26 @@ async def get_dashboard(
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
 
-    base_filter = lambda q: q.where(Sale.company_id == company_id, Sale.estado != "anulado")
+    base_filter = lambda q: q.where(Sale.company_id == company_id, Sale.estado == "confirmado")
 
     r = await db.execute(
         _apply_date_range(select(sa_func.coalesce(sa_func.sum(Sale.total), 0)),
                           Sale.fecha, today_start, today_start)
-        .where(Sale.company_id == company_id, Sale.estado != "anulado")
+        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
     )
     ventas_hoy = float(r.scalar() or 0)
 
     r = await db.execute(
         _apply_date_range(select(sa_func.coalesce(sa_func.sum(Sale.total), 0)),
                           Sale.fecha, week_start, now)
-        .where(Sale.company_id == company_id, Sale.estado != "anulado")
+        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
     )
     ventas_semana = float(r.scalar() or 0)
 
     r = await db.execute(
         _apply_date_range(select(sa_func.coalesce(sa_func.sum(Sale.total), 0)),
                           Sale.fecha, month_start, now)
-        .where(Sale.company_id == company_id, Sale.estado != "anulado")
+        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
     )
     ventas_mes = float(r.scalar() or 0)
 
@@ -70,7 +74,7 @@ async def get_dashboard(
         sa_func.coalesce(sa_func.sum(Sale.total), 0),
         sa_func.count(Sale.id.distinct()),
         sa_func.count(Sale.customer_id.distinct()),
-    ).where(Sale.company_id == company_id, Sale.estado != "anulado")
+    ).where(Sale.company_id == company_id, Sale.estado == "confirmado")
     period_q = _apply_date_range(period_q, Sale.fecha, desde or month_start, hasta or now)
     r = await db.execute(period_q)
     row = r.one()
@@ -81,7 +85,7 @@ async def get_dashboard(
 
     items_q = select(sa_func.coalesce(sa_func.sum(SaleItem.cantidad), 0))\
         .join(Sale, SaleItem.sale_id == Sale.id)\
-        .where(Sale.company_id == company_id, Sale.estado != "anulado")
+        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
     items_q = _apply_date_range(items_q, Sale.fecha, desde or month_start, hasta or now)
     r = await db.execute(items_q)
     productos_vendidos = int(r.scalar() or 0)
@@ -92,7 +96,7 @@ async def get_dashboard(
         sa_func.sum(SaleItem.total).label("total"),
         sa_func.avg(SaleItem.costo_unitario).label("costo_prom"),
     ).join(Sale, SaleItem.sale_id == Sale.id)\
-     .where(Sale.company_id == company_id, Sale.estado != "anulado")
+     .where(Sale.company_id == company_id, Sale.estado == "confirmado")
     top_q = _apply_date_range(top_q, Sale.fecha, desde or month_start, hasta or now)
     top_q = top_q.group_by(SaleItem.product_id).order_by(sa_func.sum(SaleItem.total).desc()).limit(10)
     r = await db.execute(top_q)
@@ -103,8 +107,8 @@ async def get_dashboard(
         prod_r = await db.execute(select(Product).where(Product.id == tr.product_id))
         prod = prod_r.scalar_one_or_none()
         cat_nombre = None
-        if prod and prod.category_id:
-            cat_r = await db.execute(select(ProductCategory.nombre).where(ProductCategory.id == prod.category_id))
+        if prod and prod.categoria_id:
+            cat_r = await db.execute(select(ProductCategory.nombre).where(ProductCategory.id == prod.categoria_id))
             cat_nombre = cat_r.scalar_one_or_none()
         cant = float(tr.cantidad or 0)
         tot = float(tr.total or 0)
@@ -126,7 +130,7 @@ async def get_dashboard(
         sa_func.extract("hour", Sale.fecha).label("hora"),
         sa_func.coalesce(sa_func.sum(Sale.total), 0).label("total"),
         sa_func.count(Sale.id).label("count"),
-    ).where(Sale.company_id == company_id, Sale.estado != "anulado")
+    ).where(Sale.company_id == company_id, Sale.estado == "confirmado")
     hour_q = _apply_date_range(hour_q, Sale.fecha, desde or month_start, hasta or now)
     hour_q = hour_q.group_by(sa_func.extract("hour", Sale.fecha)).order_by(sa_func.extract("hour", Sale.fecha))
     r = await db.execute(hour_q)
@@ -185,7 +189,7 @@ async def get_depto_pyl(
             sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
         ).join(Sale, SaleItem.sale_id == Sale.id).where(
             Sale.company_id == company_id,
-            Sale.estado != "anulado",
+            Sale.estado == "confirmado",
             SaleItem.product_id.in_(pid_uuids),
         )
         sales_q = _apply_date_range(sales_q, Sale.fecha, desde, hasta)
@@ -231,7 +235,7 @@ async def get_depto_pyl(
             sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
         ).join(Sale, SaleItem.sale_id == Sale.id).where(
             Sale.company_id == company_id,
-            Sale.estado != "anulado",
+            Sale.estado == "confirmado",
             ~SaleItem.product_id.in_([UUID(pid) for pid in all_area_pids]),
         )
         gral_q = _apply_date_range(gral_q, Sale.fecha, desde, hasta)
@@ -258,7 +262,7 @@ async def get_depto_pyl(
                 sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
             )
             .join(Sale, SaleItem.sale_id == Sale.id)
-            .where(Sale.company_id == company_id, Sale.estado != "anulado")
+            .where(Sale.company_id == company_id, Sale.estado == "confirmado")
         )
         row = r.one()
         ventas = float(row[0] or 0)
@@ -284,7 +288,7 @@ async def get_ranking(
 ) -> list[dict]:
     total_q = select(sa_func.coalesce(sa_func.sum(SaleItem.total), 0))\
         .join(Sale, SaleItem.sale_id == Sale.id)\
-        .where(Sale.company_id == company_id, Sale.estado != "anulado")
+        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
     total_q = _apply_date_range(total_q, Sale.fecha, desde, hasta)
     r = await db.execute(total_q)
     total_ventas = float(r.scalar() or 1)
@@ -295,7 +299,7 @@ async def get_ranking(
         sa_func.sum(SaleItem.total).label("total"),
         sa_func.avg(SaleItem.costo_unitario).label("costo_prom"),
     ).join(Sale, SaleItem.sale_id == Sale.id)\
-     .where(Sale.company_id == company_id, Sale.estado != "anulado")
+     .where(Sale.company_id == company_id, Sale.estado == "confirmado")
     q = _apply_date_range(q, Sale.fecha, desde, hasta)
     q = q.group_by(SaleItem.product_id).order_by(sa_func.sum(SaleItem.total).desc()).limit(limit)
     r = await db.execute(q)
@@ -310,8 +314,8 @@ async def get_ranking(
         prod_r = await db.execute(select(Product).where(Product.id == row.product_id))
         prod = prod_r.scalar_one_or_none()
         cat_nombre = None
-        if prod and prod.category_id:
-            cat_r = await db.execute(select(ProductCategory.nombre).where(ProductCategory.id == prod.category_id))
+        if prod and prod.categoria_id:
+            cat_r = await db.execute(select(ProductCategory.nombre).where(ProductCategory.id == prod.categoria_id))
             cat_nombre = cat_r.scalar_one_or_none()
         cant = float(row.cantidad or 0)
         tot = float(row.total or 0)
@@ -339,6 +343,143 @@ async def get_ranking(
         })
 
     return result
+
+
+async def get_alertas_negocio(
+    db: AsyncSession, company_id: str,
+    margen_umbral: float = 15.0,
+) -> dict:
+    """Alertas de margen real y días de cobro vs. pago, sobre datos reales de los últimos 30 días."""
+    today = date.today()
+    since_30 = today - timedelta(days=30)
+
+    q = select(
+        SaleItem.product_id,
+        sa_func.sum(SaleItem.cantidad).label("cantidad"),
+        sa_func.sum(SaleItem.total).label("total"),
+        sa_func.avg(SaleItem.costo_unitario).label("costo_prom"),
+    ).join(Sale, SaleItem.sale_id == Sale.id).where(
+        Sale.company_id == company_id,
+        Sale.estado == "confirmado",
+        Sale.fecha >= since_30,
+    ).group_by(SaleItem.product_id).having(sa_func.sum(SaleItem.cantidad) >= 3)
+    r = await db.execute(q)
+    rows = r.all()
+
+    margen_bajo = []
+    for row in rows:
+        cant = float(row.cantidad or 0)
+        tot = float(row.total or 0)
+        costo = float(row.costo_prom or 0) * cant
+        margen_pct = round(((tot - costo) / max(tot, 1)) * 100, 1)
+        if tot > 0 and margen_pct < margen_umbral:
+            margen_bajo.append((margen_pct, row.product_id, cant, tot, margen_pct))
+    margen_bajo.sort(key=lambda x: x[0])
+    margen_bajo = margen_bajo[:10]
+
+    margen_bajo_out = []
+    for _, product_id, cant, tot, margen_pct in margen_bajo:
+        prod_r = await db.execute(select(Product.nombre).where(Product.id == product_id))
+        nombre = prod_r.scalar_one_or_none() or "N/A"
+        margen_bajo_out.append({
+            "producto_id": str(product_id),
+            "producto_nombre": nombre,
+            "cantidad_vendida_30d": cant,
+            "total_ventas_30d": tot,
+            "margen_porcentaje": margen_pct,
+        })
+
+    ar = await get_receivable_summary(db, company_id)
+    ap = await get_ap_dashboard(db, company_id)
+
+    ventas_r = await db.execute(
+        select(sa_func.coalesce(sa_func.sum(Sale.total), 0))
+        .where(Sale.company_id == company_id, Sale.estado == "confirmado", Sale.fecha >= since_30)
+    )
+    ventas_30d = float(ventas_r.scalar() or 0)
+
+    compras_r = await db.execute(
+        select(sa_func.coalesce(sa_func.sum(SupplierInvoice.total), 0))
+        .where(SupplierInvoice.company_id == UUID(company_id), SupplierInvoice.fecha_emision >= since_30)
+    )
+    compras_30d = float(compras_r.scalar() or 0)
+
+    monto_pendiente_ar = float(ar.get("total_pendiente") or 0)
+    monto_pendiente_ap = float(ap.get("total_pendiente") or 0)
+    dias_cobro = round(monto_pendiente_ar / (ventas_30d / 30), 1) if ventas_30d > 0 else None
+    dias_pago = round(monto_pendiente_ap / (compras_30d / 30), 1) if compras_30d > 0 else None
+
+    return {
+        "margen_bajo": margen_bajo_out,
+        "margen_umbral": margen_umbral,
+        "cxc_vencidas": {
+            "cantidad": int(ar.get("vencidos") or 0),
+            "monto": float(ar.get("monto_vencido") or 0),
+            "total_pendiente": monto_pendiente_ar,
+        },
+        "cxp_vencidas": {
+            "cantidad": int(ap.get("facturas_vencidas") or 0),
+            "monto": float(ap.get("total_vencido") or 0),
+            "total_pendiente": monto_pendiente_ap,
+        },
+        "dias_cobro_promedio": dias_cobro,
+        "dias_pago_promedio": dias_pago,
+    }
+
+
+async def get_pnl_data(
+    db: AsyncSession, company_id: str,
+    desde: Optional[date] = None, hasta: Optional[date] = None,
+) -> dict:
+    """Estado de Resultados real: ventas y costo de mercaderia de sales/sale_items,
+    gastos operativos reales de petty_cash.expenses (agrupados por categoria)."""
+    today = date.today()
+    desde = desde or today.replace(day=1)
+    hasta = hasta or today
+
+    r = await db.execute(
+        select(sa_func.coalesce(sa_func.sum(Sale.total), 0))
+        .where(Sale.company_id == company_id, Sale.estado == "confirmado",
+               Sale.fecha >= desde, Sale.fecha <= hasta + timedelta(days=1))
+    )
+    total_ventas = float(r.scalar() or 0)
+
+    r = await db.execute(
+        select(sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0))
+        .join(Sale, SaleItem.sale_id == Sale.id)
+        .where(Sale.company_id == company_id, Sale.estado == "confirmado",
+               Sale.fecha >= desde, Sale.fecha <= hasta + timedelta(days=1))
+    )
+    total_costo = float(r.scalar() or 0)
+
+    r = await db.execute(
+        select(
+            sa_func.coalesce(ExpenseCategory.nombre, "Sin categoría"),
+            sa_func.sum(Expense.monto),
+        )
+        .select_from(Expense)
+        .outerjoin(ExpenseCategory, ExpenseCategory.id == Expense.category_id)
+        .where(Expense.company_id == company_id, Expense.fecha_gasto >= desde, Expense.fecha_gasto <= hasta)
+        .group_by(ExpenseCategory.nombre)
+        .order_by(sa_func.sum(Expense.monto).desc())
+    )
+    gastos = [{"nombre": nombre, "monto": float(monto or 0)} for nombre, monto in r.all()]
+    total_gastos = sum(g["monto"] for g in gastos)
+
+    resultado_bruto = total_ventas - total_costo
+    resultado_neto = resultado_bruto - total_gastos
+
+    return {
+        "periodo": f"{desde.strftime('%d/%m/%Y')} — {hasta.strftime('%d/%m/%Y')}",
+        "ingresos": [{"nombre": "Ventas", "monto": total_ventas}],
+        "total_ingresos": total_ventas,
+        "costos": [{"nombre": "Costo de Mercadería Vendida", "monto": total_costo}],
+        "total_costos": total_costo,
+        "resultado_bruto": resultado_bruto,
+        "gastos": gastos,
+        "total_gastos": total_gastos,
+        "resultado_neto": resultado_neto,
+    }
 
 
 async def export_excel(

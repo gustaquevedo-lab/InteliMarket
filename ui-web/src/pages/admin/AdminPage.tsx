@@ -60,7 +60,7 @@ export default function AdminPage() {
       if (plansData.status === "fulfilled") setPlans(plansData.value)
       if (verticalsData.status === "fulfilled") setVerticals(verticalsData.value)
       if (featuresData.status === "fulfilled") setAllFeatures(featuresData.value)
-      if (tenantsData.status === "rejected") toast.info("Datos demo", "Conectá el backend para ver datos reales")
+      if (tenantsData.status === "rejected") toast.error("Error de conexión", "Conectá el backend para ver datos reales")
     } catch {
       toast.error("Error", "No se pudieron cargar los datos")
     } finally {
@@ -158,7 +158,7 @@ export default function AdminPage() {
       const data = await api.backups.list()
       setBackups(data)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver backups")
+      toast.error("Error de conexión", "Conectá el backend para ver backups")
     } finally {
       setBackupsLoading(false)
     }
@@ -173,7 +173,7 @@ export default function AdminPage() {
       const data = await api.backups.getSchedule()
       setSchedule({ ...data, frequency: data.frequency as BackupSchedule["frequency"] })
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver configuración de backups")
+      toast.error("Error de conexión", "Conectá el backend para ver configuración de backups")
     } finally {
       setScheduleLoading(false)
     }

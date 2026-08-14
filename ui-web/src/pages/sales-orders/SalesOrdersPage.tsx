@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react"
 import { Search, ClipboardList, Plus, Eye, X, Loader2, CheckCircle, XCircle, Send, Truck, Package, FileText, Check, AlertTriangle, Ban, ChevronRight } from "lucide-react"
 import { api, type SalesOrder, type Customer, type Product } from "../../api"
 import { useToast } from "../../context/ToastContext"
+import { useAuth } from "../../context/AuthContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { StatusBadge } from "../../components/DataTable"
 import { Modal } from "../../components/Modal"
@@ -46,6 +47,7 @@ export default function SalesOrdersPage() {
 
   const toast = useToast()
   const confirm = useConfirm()
+  const { user } = useAuth()
 
   const fetchOrders = useCallback(async () => {
     setLoading(true)
@@ -138,7 +140,7 @@ export default function SalesOrdersPage() {
 
     setSubmitting(true)
     try {
-      await api.salesOrders.approve(order.id, "current_user")
+      await api.salesOrders.approve(order.id, user?.id || user?.email || "desconocido")
       toast.success("Aprobado", `Pedido ${order.numero} aprobado`)
       fetchOrders()
     } catch {

@@ -39,7 +39,7 @@ export default function DinelcoPage() {
       const data = await api.dinelco.payments()
       setTransactions(data)
     } catch {
-      toast.info("Datos demo", "Configurá Dinelco en las credenciales de la empresa")
+      toast.error("Error de conexión", "Configurá Dinelco en las credenciales de la empresa")
     } finally {
       setLoading(false)
     }

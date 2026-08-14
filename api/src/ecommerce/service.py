@@ -104,7 +104,7 @@ async def get_catalog(
     if search:
         query = query.where(Product.nombre.ilike(f"%{search}%"))
     if category_id:
-        query = query.where(Product.category_id == UUID(category_id))
+        query = query.where(Product.categoria_id == UUID(category_id))
 
     total_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(total_q)).scalar() or 0
@@ -141,7 +141,7 @@ async def get_catalog(
             "descripcion": p.descripcion,
             "codigo_barra": p.codigo_barra,
             "unidad_medida": p.unidad_medida,
-            "categoria_id": str(p.category_id) if p.category_id else None,
+            "categoria_id": str(p.categoria_id) if p.categoria_id else None,
             "precio": default_prices.get(str(p.id), 0),
             "stock": stock_map.get(str(p.id), 0),
             "imagen_url": getattr(p, "imagen_url", None),
@@ -194,7 +194,7 @@ async def get_product_detail(db: AsyncSession, company_id: str, product_id: str)
         "codigo_barra": p.codigo_barra,
         "unidad_medida": p.unidad_medida,
         "iva_tasa": float(p.iva_tasa) if p.iva_tasa else None,
-        "categoria_id": str(p.category_id) if p.category_id else None,
+        "categoria_id": str(p.categoria_id) if p.categoria_id else None,
         "activo": p.activo,
         "prices": prices,
         "stock": int(total_stock),
@@ -577,7 +577,7 @@ async def _build_catalog_payload(db: AsyncSession, company_id: str) -> dict:
             "descripcion": p.descripcion, "codigo_barra": p.codigo_barra,
             "tipo": p.tipo, "unidad_medida": p.unidad_medida,
             "iva_tasa": float(p.iva_tasa) if p.iva_tasa else None,
-            "categoria_id": str(p.category_id) if p.category_id else None,
+            "categoria_id": str(p.categoria_id) if p.categoria_id else None,
             "activo": p.activo,
             "variants": variants_dict.get(str(p.id), []),
         })

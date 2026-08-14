@@ -124,11 +124,12 @@ export default function Dashboard() {
     if (isRefresh) setRefreshing(true)
     // KPIs
     try {
-      const [sales, inventory, fin, creditAccs] = await Promise.allSettled([
+      const [sales, inventory, fin, creditAccs, gerencial] = await Promise.allSettled([
         api.reports.salesSummary({ fecha_desde: TODAY, fecha_hasta: TODAY }),
         api.reports.inventorySummary(),
         api.reports.financialSummary(),
         api.creditAccounts.list({ activo: true }),
+        api.gerencial.dashboard(),
       ])
       if (sales.status === "fulfilled") setSalesSummary(sales.value)
       if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
@@ -136,6 +137,7 @@ export default function Dashboard() {
       if (creditAccs.status === "fulfilled") {
         setCreditUsed(creditAccs.value.reduce((s: number, a: CreditAccount) => s + Number(a.saldo_utilizado || 0), 0))
       }
+      if (gerencial.status === "fulfilled") setMarginAvg(gerencial.value.margen_promedio)
     } catch { /* errores por widget ya se manejan abajo */ }
 
     // Week chart
@@ -333,7 +335,7 @@ export default function Dashboard() {
         <KPICard
           icon={Percent}
           label="Margen Promedio"
-          value={marginAvg !== null ? formatPYG(marginAvg) : "—"}
+          value={marginAvg !== null ? `${marginAvg.toFixed(1)}%` : "—"}
           color="green"
           loading={loading}
         />

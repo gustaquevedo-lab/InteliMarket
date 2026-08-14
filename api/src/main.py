@@ -2,7 +2,9 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import logging
 
@@ -43,7 +45,7 @@ from api.src.pagopar.public_router import router as pagopar_public_router
 from api.src.kuapay.router import router as kuapay_router
 from api.src.kuapay.public_router import router as kuapay_public_router
 from api.src.branches.router import router as branches_router
-from api.src.credit_accounts.router import router as credit_accounts_router
+from api.src.credit_accounts.router import router as credit_accounts_router, approval_router as credit_approval_router, writeoff_router as credit_writeoff_router, advances_router as credit_advances_router
 from api.src.logistics.router import router as logistics_router
 from api.src.imports.router import router as imports_router
 from api.src.email.router import router as email_router
@@ -78,12 +80,13 @@ from api.src.intelientregas.driver_router import router as intelientregas_driver
 from api.src.boutique.router import router as boutique_router
 from api.src.supermer.router import router as supermer_router
 from api.src.promotions.router import router as promotions_router
-from api.src.petty_cash.router import router as expenses_router
+from api.src.petty_cash.router import router as expenses_router, funds_router as petty_cash_funds_router
 from api.src.gerencial.router import router as gerencial_router
 from api.src.mobile.router import router as mobile_router
 from api.src.ecommerce.router import router as ecommerce_router
 from api.src.data_migration.router import router as data_migration_router
 from api.src.financial.router import router as financial_router
+from api.src.cheques.router import router as cheques_router
 from api.src.finance_agent.router import router as finance_agent_router
 from api.src.sales_agent.router import router as sales_agent_router
 from api.src.general_agent.router import router as general_agent_router
@@ -102,11 +105,11 @@ from api.src.sifen_avanzado.router import router as sifen_avanzado_router
 from api.src.smart_pricing.router import router as smart_pricing_router
 from api.src.demand_forecast.router import router as demand_forecast_router
 from api.src.intelligent_routing.router import router as intelligent_routing_router
-from api.src.credit_scoring.router import router as credit_scoring_router
 from api.src.comerciales.router import router as comerciales_router
 from api.src.cold_chain.router import router as cold_chain_router
 from api.src.asistente_virtual.router import router as asistente_virtual_router
 from api.src.clientes.router import router as clientes_router
+from api.src.fixed_assets.router import router as fixed_assets_router
 from api.src.scanandgo.router import router as scanandgo_router
 from api.src.customer360.router import router as customer360_router
 from api.src.schedule.router import router as schedule_router
@@ -121,7 +124,14 @@ from api.src.delivery_integrations.router import router as delivery_integrations
 from api.src.suscripciones.router import router as suscripciones_router
 from api.src.servicios.router import router as servicios_router
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="InteliMarket API",
     description="""
 # InteliMarket API v1
@@ -154,6 +164,16 @@ como parámetro en los endpoints correspondientes.
     license_info={"name": "Proprietary"},
 )
 
+register_exception_handlers(app)
+app.add_middleware(RequestLoggingMiddleware)
+
+# CORSMiddleware se registra al final a propósito: en Starlette, el último
+# middleware agregado queda más "afuera" (envuelve a los demás). Si CORS
+# queda por dentro del manejador de errores, cualquier excepción no
+# atrapada nunca pasa por la lógica de CORS al volver — el navegador ve una
+# respuesta de error sin cabeceras Access-Control-Allow-Origin y lo reporta
+# como "bloqueado por CORS", escondiendo el error real (por ejemplo un 500
+# de base de datos) detrás de un mensaje de CORS engañoso.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins.split(","),
@@ -162,13 +182,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-register_exception_handlers(app)
-app.add_middleware(RequestLoggingMiddleware)
-
 
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "version": "0.3.0"}
+
+_UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
+_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")
 
 
 app.include_router(auth_router)
@@ -199,6 +220,9 @@ app.include_router(kuapay_router)
 app.include_router(kuapay_public_router)
 app.include_router(branches_router)
 app.include_router(credit_accounts_router)
+app.include_router(credit_approval_router)
+app.include_router(credit_writeoff_router)
+app.include_router(credit_advances_router)
 app.include_router(logistics_router)
 app.include_router(imports_router)
 app.include_router(email_router)
@@ -234,6 +258,7 @@ app.include_router(boutique_router)
 app.include_router(supermer_router)
 app.include_router(promotions_router)
 app.include_router(expenses_router)
+app.include_router(petty_cash_funds_router)
 app.include_router(gerencial_router)
 app.include_router(mobile_router)
 app.include_router(ecommerce_router)
@@ -244,11 +269,11 @@ app.include_router(sifen_avanzado_router)
 app.include_router(smart_pricing_router)
 app.include_router(demand_forecast_router)
 app.include_router(intelligent_routing_router)
-app.include_router(credit_scoring_router)
 app.include_router(comerciales_router)
 app.include_router(cold_chain_router)
 app.include_router(asistente_virtual_router)
 app.include_router(clientes_router)
+app.include_router(fixed_assets_router)
 app.include_router(scanandgo_router)
 app.include_router(customer360_router)
 app.include_router(schedule_router)
@@ -262,6 +287,7 @@ app.include_router(ecommerce_sm_router)
 app.include_router(delivery_integrations_router)
 app.include_router(suscripciones_router)
 app.include_router(financial_router)
+app.include_router(cheques_router)
 app.include_router(finance_agent_router)
 app.include_router(sales_agent_router)
 app.include_router(general_agent_router)

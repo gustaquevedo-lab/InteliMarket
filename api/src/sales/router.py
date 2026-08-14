@@ -40,13 +40,11 @@ async def _send_sale_wa(db: AsyncSession, sale, customer_phone: str | None, tipo
     await send_message_to_phone(db, sale.company_id, customer_phone, message)
 
 
-@router.post("/sales", response_model=SaleResponse, status_code=status.HTTP_201_CREATED)
-async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
-    try:
-        sale = await service.create_sale(db, body)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    
+async def fire_sale_side_effects(db: AsyncSession, sale, tipo_comprobante: str) -> None:
+    """Email de recibo, WhatsApp, asiento contable InteliCont, emision SIFEN
+    y webhook. Solo debe dispararse para una venta realmente confirmada — si
+    queda 'pend_aprob_credito' (excede limite de credito, retenida
+    para Supervisor+Gerente) todavia no hay nada que facturar ni emitir."""
     try:
         await emit_sale_completed(
             company_id=sale.company_id,
@@ -56,11 +54,11 @@ async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
         )
     except Exception:
         pass
-    
+
     customer_email, customer_phone = None, None
     if sale.customer_id:
         customer_email, customer_phone = await _get_customer_email_phone(db, str(sale.customer_id))
-    
+
     # Send receipt email
     if customer_email:
         try:
@@ -73,24 +71,24 @@ async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
             )
         except Exception:
             pass
-    
+
     # WhatsApp notification
     await _send_sale_wa(db, sale, customer_phone)
-    
+
     # Auto-generate InteliCont entry
     try:
         await generate_sale_entry(db, str(sale.id))
     except Exception:
         pass
-    
+
     # Auto-fire SIFEN for POS sales
-    if body.tipo_comprobante in ("ticket", "factura"):
+    if tipo_comprobante in ("ticket", "factura"):
         try:
             from api.src.sifen.service import send_sale_to_sifen
             await send_sale_to_sifen(db, str(sale.id))
         except Exception:
             pass
-    
+
     # Fire webhook event
     try:
         await send_webhook_async(db, "venta.creada", {
@@ -102,7 +100,19 @@ async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
         })
     except Exception:
         pass
-    
+
+
+@router.post("/sales", response_model=SaleResponse, status_code=status.HTTP_201_CREATED)
+async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
+    try:
+        sale = await service.create_sale(db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if sale.estado == "pend_aprob_credito":
+        return sale
+
+    await fire_sale_side_effects(db, sale, body.tipo_comprobante)
     return sale
 
 

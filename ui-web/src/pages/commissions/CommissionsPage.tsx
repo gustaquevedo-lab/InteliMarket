@@ -62,7 +62,7 @@ export default function CommissionsPage() {
       if (commissionsData.status === "fulfilled") setCommissions(commissionsData.value)
       if (summaryData.status === "fulfilled") setSummary(summaryData.value)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver comisiones")
+      toast.error("Error de conexión", "Conectá el backend para ver comisiones")
     } finally {
       setLoading(false)
     }

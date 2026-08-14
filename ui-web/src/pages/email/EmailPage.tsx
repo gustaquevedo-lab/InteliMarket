@@ -38,7 +38,7 @@ export default function EmailPage() {
         })
       }
     } catch {
-      toast.info("Datos demo", "Configurá el servidor SMTP")
+      toast.error("Error de conexión", "Configurá el servidor SMTP")
     } finally {
       setLoading(false)
     }

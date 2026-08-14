@@ -29,7 +29,7 @@ export default function PagoparPage() {
       const data = await api.pagopar.transactions()
       setTransactions(data)
     } catch {
-      toast.info("Datos demo", "Configurá Pagopar en las credenciales de la empresa")
+      toast.error("Error de conexión", "Configurá Pagopar en las credenciales de la empresa")
     } finally {
       setLoading(false)
     }

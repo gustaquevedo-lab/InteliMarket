@@ -345,7 +345,7 @@ async def generate_personalized_offers(db: AsyncSession, company_id: str) -> lis
             continue
         # Get categories of bought products
         cat_r = await db.execute(
-            select(Product.category_id).where(Product.company_id == UUID(company_id), Product.id.in_([UUID(p) for p in bought_pids[:50]]))
+            select(Product.categoria_id).where(Product.company_id == UUID(company_id), Product.id.in_([UUID(p) for p in bought_pids[:50]]))
         )
         cat_ids = list(set(str(r[0]) for r in cat_r.all() if r[0]))
 
@@ -356,7 +356,7 @@ async def generate_personalized_offers(db: AsyncSession, company_id: str) -> lis
         cross_r = await db.execute(
             select(Product).where(
                 Product.company_id == UUID(company_id),
-                Product.category_id.in_([UUID(c) for c in cat_ids]),
+                Product.categoria_id.in_([UUID(c) for c in cat_ids]),
                 Product.activo == True,
                 ~Product.id.in_([UUID(p) for p in bought_pids]),
             ).limit(3)

@@ -39,7 +39,7 @@ export default function BancardPage() {
       const data = await api.bancard.payments()
       setTransactions(data)
     } catch {
-      toast.info("Datos demo", "Configurá Bancard en las credenciales de la empresa")
+      toast.error("Error de conexión", "Configurá Bancard en las credenciales de la empresa")
     } finally {
       setLoading(false)
     }

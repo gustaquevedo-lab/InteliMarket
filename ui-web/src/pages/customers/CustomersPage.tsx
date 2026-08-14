@@ -9,6 +9,7 @@ export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState("")
   const [showForm, setShowForm] = useState(false)
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
@@ -29,7 +30,7 @@ export default function CustomersPage() {
       const data = await api.customers.list({ search: search || undefined })
       setCustomers(data)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver datos reales")
+      toast.error("Error de conexión", "Conectá el backend para ver datos reales")
       setCustomers([])
     } finally {
       setLoading(false)
@@ -68,21 +69,37 @@ export default function CustomersPage() {
     }
   }
 
+  const emptyForm = { razon_social: "", ruc: "", ci: "", tipo_persona: "juridica", telefono: "", email: "", credito_limite: 0, condicion_iva: "exento", direccion: "" }
+
+  const openEdit = (c: Customer) => {
+    setEditingCustomer(c)
+    setForm({
+      razon_social: c.razon_social || "", ruc: c.ruc || "", ci: c.ci || "",
+      tipo_persona: c.tipo_persona || "juridica", telefono: c.telefono || "", email: c.email || "",
+      credito_limite: c.credito_limite || 0, condicion_iva: (c as any).condicion_iva || "exento",
+      direccion: c.direccion || "",
+    })
+    setShowForm(true)
+  }
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
     try {
-      await api.customers.create({
-        ...form,
-        ruc: form.ruc || undefined,
-        ci: form.ci || undefined,
-      })
-      toast.success("Cliente creado", form.razon_social)
+      const payload = { ...form, ruc: form.ruc || undefined, ci: form.ci || undefined }
+      if (editingCustomer) {
+        await api.customers.update(editingCustomer.id, payload)
+        toast.success("Cliente actualizado", form.razon_social)
+      } else {
+        await api.customers.create(payload)
+        toast.success("Cliente creado", form.razon_social)
+      }
       setShowForm(false)
-      setForm({ razon_social: "", ruc: "", ci: "", tipo_persona: "juridica", telefono: "", email: "", credito_limite: 0, condicion_iva: "exento", direccion: "" })
+      setEditingCustomer(null)
+      setForm(emptyForm)
       fetchData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Error al crear cliente"
+      const msg = err instanceof Error ? err.message : "Error al guardar cliente"
       toast.error("Error", msg)
     } finally {
       setSaving(false)
@@ -124,7 +141,7 @@ export default function CustomersPage() {
             <Upload className="w-4 h-4" />
             Importar
           </button>
-          <button onClick={() => setShowForm(true)} className="btn-primary">
+          <button onClick={() => { setEditingCustomer(null); setForm(emptyForm); setShowForm(true) }} className="btn-primary">
             <Plus className="w-4 h-4" />
             Nuevo cliente
           </button>
@@ -198,7 +215,7 @@ export default function CustomersPage() {
                   <td className="table-td"><StatusBadge status={c.activo ? "activo" : "cancelado"} /></td>
                   <td className="table-td">
                     <div className="flex items-center gap-1">
-                      <button className="btn-ghost" title="Editar"><Edit className="w-4 h-4" /></button>
+                      <button className="btn-ghost" title="Editar" onClick={(e) => { e.stopPropagation(); openEdit(c) }}><Edit className="w-4 h-4" /></button>
                       <button className="btn-ghost text-red-400 hover:text-red-500" title="Eliminar" onClick={(e) => { e.stopPropagation(); handleDelete(c) }}><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
                     </div>
                   </td>
@@ -210,10 +227,10 @@ export default function CustomersPage() {
       </div>
 
       {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+        <div className="modal-overlay" onClick={() => { setShowForm(false); setEditingCustomer(null) }}>
           <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Nuevo cliente</h3>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">{editingCustomer ? "Editar cliente" : "Nuevo cliente"}</h3>
               <form onSubmit={handleCreate} className="space-y-4">
                 <div>
                   <label className="input-label label-required">Razón social</label>
@@ -247,9 +264,9 @@ export default function CustomersPage() {
                   </div>
                 </div>
                 <div className="flex gap-3 pt-2">
-                  <button type="button" className="btn-outline flex-1" onClick={() => setShowForm(false)}>Cancelar</button>
+                  <button type="button" className="btn-outline flex-1" onClick={() => { setShowForm(false); setEditingCustomer(null) }}>Cancelar</button>
                   <button type="submit" className="btn-primary flex-1" disabled={saving}>
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Crear cliente"}
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingCustomer ? "Guardar cambios" : "Crear cliente")}
                   </button>
                 </div>
               </form>

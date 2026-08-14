@@ -44,7 +44,7 @@ export default function DiscountsPage() {
       const data = await api.discounts.list()
       setDiscounts(data)
     } catch {
-      toast.info("Datos demo", "Conectá el backend para ver descuentos")
+      toast.error("Error de conexión", "Conectá el backend para ver descuentos")
     } finally {
       setLoading(false)
     }

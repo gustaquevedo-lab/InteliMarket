@@ -106,6 +106,15 @@ function DashboardTab() {
 
   return (
     <div className="space-y-6">
+      {data?.data_status && data.data_status !== "ok" && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Sin datos reales todavía</p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">{data.message}</p>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard icon={DollarSign} label="Venta Teórica" value={`Gs ${(data?.total_theoretical_sales || 0).toLocaleString()}`} color="blue" />
         <KpiCard icon={DollarSign} label="Venta Real" value={`Gs ${(data?.total_actual_sales || 0).toLocaleString()}`} color="green" />

@@ -17,7 +17,6 @@ const InventoryPage = lazy(() => import("./pages/inventory/InventoryPage"))
 const CustomersPage = lazy(() => import("./pages/customers/CustomersPage"))
 const SalesPage = lazy(() => import("./pages/sales/SalesPage"))
 const PurchasesPage = lazy(() => import("./pages/purchases/PurchasesPage"))
-const PaymentsPage = lazy(() => import("./pages/payments/PaymentsPage"))
 const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"))
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"))
 const POSPage = lazy(() => import("./pages/pos/POSPage"))
@@ -42,6 +41,7 @@ const AccountsReceivablePage = lazy(() => import("./pages/accounts-receivable/Ac
 const FinanceAgentPage = lazy(() => import("./pages/finance-agent/FinanceAgentPage"))
 const SalesAgentPage = lazy(() => import("./pages/sales-agent/SalesAgentPage"))
 const RbacPage = lazy(() => import("./pages/rbac/RbacPage"))
+const UsuariosPage = lazy(() => import("./pages/usuarios/UsuariosPage"))
 const CrmPage = lazy(() => import("./pages/crm/CrmPage"))
 const WhatsAppPage = lazy(() => import("./pages/whatsapp/WhatsAppPage"))
 const NotificationsPage = lazy(() => import("./pages/notifications/NotificationsPage"))
@@ -57,7 +57,7 @@ const PromotionsPage = lazy(() => import("./pages/promotions/PromotionsPage"))
 const IntelliZappPage = lazy(() => import("./pages/intellizapp/IntelliZappPage"))
 const ExpensesPage = lazy(() => import("./pages/expenses/ExpensesPage"))
 const FinancialPage = lazy(() => import("./pages/financial/FinancialPage"))
-const GerencialPage = lazy(() => import("./pages/gerencial/GerencialPage"))
+const BancosPage = lazy(() => import("./pages/bancos/BancosPage"))
 const SupplierContractsPage = lazy(() => import("./pages/supplier-contracts/SupplierContractsPage"))
 const SupplierLogin = lazy(() => import("./pages/supplier-portal/SupplierLogin"))
 const SupplierDashboard = lazy(() => import("./pages/supplier-portal/SupplierDashboard"))
@@ -69,7 +69,6 @@ const SelfCheckoutPage = lazy(() => import("./pages/pos/SelfCheckoutPage"))
 const TransferenciasPage = lazy(() => import("./pages/inventory/TransferenciasPage"))
 const BovedaPage = lazy(() => import("./pages/caja/BovedaPage"))
 const EdgeAgentPage = lazy(() => import("./pages/pos/EdgeAgentPage"))
-const AutoReplenishPage = lazy(() => import("./pages/inventory/AutoReplenishPage"))
 const SellersPage = lazy(() => import("./pages/sellers/SellersPage"))
 const MapaPage = lazy(() => import("./pages/mapa-tiempo-real/MapaPage"))
 const RutasPage = lazy(() => import("./pages/rutas/RutasPage"))
@@ -81,7 +80,6 @@ const IntegratedFinancePage = lazy(() => import("./pages/integrated-finance/Inte
 const SmartPricingPage = lazy(() => import("./pages/smart-pricing/SmartPricingPage"))
 const DemandForecastPage = lazy(() => import("./pages/demand-forecast/DemandForecastPage"))
 const IntelligentRoutingPage = lazy(() => import("./pages/intelligent-routing/IntelligentRoutingPage"))
-const CreditScoringPage = lazy(() => import("./pages/credit-scoring/CreditScoringPage"))
 const OportunidadesPage = lazy(() => import("./pages/comerciales/OportunidadesPage"))
 const ColdChainPage = lazy(() => import("./pages/cold-chain/ColdChainPage"))
 const AsistenteVirtualPage = lazy(() => import("./pages/asistente-virtual/AsistenteVirtualPage"))
@@ -191,13 +189,11 @@ function AppRoutes() {
           ["transferencias", <TransferenciasPage />],
           ["boveda", <BovedaPage />],
           ["edge-agent", <EdgeAgentPage />],
-          ["auto-replenish", <AutoReplenishPage />],
           ["sales", <SalesPage />],
           ["products", <ProductsPage />],
           ["inventory", <InventoryPage />],
           ["purchases", <PurchasesPage />],
           ["customers", <CustomersPage />],
-          ["payments", <PaymentsPage />],
           ["reports", <ReportsPage />],
           ["settings", <SettingsPage />],
           ["sifen", <SifenPage />],
@@ -217,10 +213,10 @@ function AppRoutes() {
           ["intelicont", <InteliContPage />],
           ["integrations", <IntegrationsPage />],
           ["sueldok", <SueldokPage />],
-          ["gerencial", <GerencialPage />],
           ["promociones", <PromotionsPage />],
           ["gastos", <ExpensesPage />],
           ["financiero", <FinancialPage />],
+          ["bancos", <BancosPage />],
           ["contratos-proveedores", <SupplierContractsPage />],
           ["acuerdos-clientes", <CustomerAgreementsPage />],
           ["distribuidora", <DistribuidoraPage />],
@@ -240,6 +236,7 @@ function AppRoutes() {
         <Route path="credit-accounts" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="credit_accounts"><CreditAccountsPage /></FeatureRoute></Suspense>} />
         <Route path="logistics" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="logistics"><LogisticsPage /></FeatureRoute></Suspense>} />
         <Route path="rbac" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="rbac"><RbacPage /></FeatureRoute></Suspense>} />
+        <Route path="usuarios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="rbac"><UsuariosPage /></FeatureRoute></Suspense>} />
         <Route path="crm" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="crm"><CrmPage /></FeatureRoute></Suspense>} />
         <Route path="whatsapp" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="whatsapp"><WhatsAppPage /></FeatureRoute></Suspense>} />
         <Route path="intellizapp" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intellizapp"><IntelliZappPage /></FeatureRoute></Suspense>} />
@@ -256,8 +253,8 @@ function AppRoutes() {
         <Route path="integrated-finance" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="integrated_finance"><IntegratedFinancePage /></FeatureRoute></Suspense>} />
         <Route path="smart-pricing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="smart_pricing"><SmartPricingPage /></FeatureRoute></Suspense>} />
         <Route path="demand-forecast" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="demand_forecast"><DemandForecastPage /></FeatureRoute></Suspense>} />
+        <Route path="auto-replenish" element={<Navigate to="/demand-forecast" replace />} />
         <Route path="intelligent-routing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intelligent_routing"><IntelligentRoutingPage /></FeatureRoute></Suspense>} />
-        <Route path="credit-scoring" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="credit_scoring"><CreditScoringPage /></FeatureRoute></Suspense>} />
         <Route path="oportunidades" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="comerciales"><OportunidadesPage /></FeatureRoute></Suspense>} />
         <Route path="cold-chain" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="cold_chain"><ColdChainPage /></FeatureRoute></Suspense>} />
         <Route path="asistente-virtual" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="asistente_virtual"><AsistenteVirtualPage /></FeatureRoute></Suspense>} />

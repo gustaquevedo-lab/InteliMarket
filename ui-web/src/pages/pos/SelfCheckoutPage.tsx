@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react"
+import { api } from "../../api"
 import { Scan, ShoppingBag, CreditCard, QrCode, AlertOctagon, HelpCircle, X, ChevronRight, CheckCircle, RefreshCw, Volume2, ShieldAlert } from "lucide-react"
 import { formatPYG } from "../../utils/format"
 import { roundPY } from "../../utils/posUtils"
@@ -26,7 +27,9 @@ export default function SelfCheckoutPage() {
   const [activeStep, setActiveStep] = useState<"welcome" | "scanning" | "bagging_wait" | "payment" | "success">("welcome")
   const [paymentMethod, setPaymentMethod] = useState<"card" | "qr" | null>(null)
   const [isLocked, setIsLocked] = useState(false)
-  const [supervisorPin, setSupervisorPin] = useState("")
+  const [supervisorEmail, setSupervisorEmail] = useState("")
+  const [supervisorPassword, setSupervisorPassword] = useState("")
+  const [verifyingSupervisor, setVerifyingSupervisor] = useState(false)
   const [scaleWeight, setScaleWeight] = useState(0) // actual scale weight in kg
   const [expectedWeight, setExpectedWeight] = useState(0)
   const [showQrCode, setShowQrCode] = useState(false)
@@ -121,15 +124,24 @@ export default function SelfCheckoutPage() {
     }, 4000)
   }
 
-  const handleSupervisorBypass = () => {
-    if (supervisorPin === "1234") {
-      setIsLocked(false)
-      setExpectedWeight(scaleWeight) // sync weight
-      setSupervisorPin("")
-      toast.success("Balanza calibrada", "El supervisor ha validado las bolsas.")
-    } else {
-      toast.error("PIN Incorrecto", "Código de supervisor inválido (Demostración PIN: 1234).")
-      setSupervisorPin("")
+  const handleSupervisorBypass = async () => {
+    if (!supervisorEmail || !supervisorPassword) return
+    setVerifyingSupervisor(true)
+    try {
+      const result = await api.auth.verifySupervisor({ email: supervisorEmail, password: supervisorPassword })
+      if (result.valid) {
+        setIsLocked(false)
+        setExpectedWeight(scaleWeight) // sync weight
+        setSupervisorEmail(""); setSupervisorPassword("")
+        toast.success("Autorizado", "Bolsas validadas por " + (result.nombre || "supervisor") + ".")
+      } else {
+        toast.error("Credenciales invalidas", "El usuario y contrasena no corresponden a una cuenta activa.")
+        setSupervisorPassword("")
+      }
+    } catch {
+      toast.error("Error", "No se pudo verificar al supervisor")
+    } finally {
+      setVerifyingSupervisor(false)
     }
   }
 
@@ -152,19 +164,25 @@ export default function SelfCheckoutPage() {
               <p style={{ color: "#94a3b8", fontSize: 14, marginTop: 8 }}>Diferencia de peso detectada en la bolsa.<br/>Por favor, aguarde al asistente de tienda.</p>
             </div>
             <div style={{ background: "rgba(15,23,42,0.6)", border: "1px solid #1e293b", borderRadius: 16, padding: 16, display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-              <p style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>Desbloqueo de Supervisor (Demo: 1234)</p>
+              <p style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>Desbloqueo de Supervisor</p>
+              <input
+                type="email"
+                value={supervisorEmail}
+                onChange={e => setSupervisorEmail(e.target.value)}
+                placeholder="Email del supervisor"
+                style={{ background: "#020617", border: "1px solid #334155", color: "white", borderRadius: 12, padding: 12, outline: "none", textAlign: "center", fontSize: 14 }}
+              />
               <div style={{ display: "flex", gap: 8 }}>
                 <input
                   type="password"
-                  value={supervisorPin}
-                  onChange={e => setSupervisorPin(e.target.value)}
-                  placeholder="PIN del Asistente"
-                  style={{ flex: 1, background: "#020617", border: "1px solid #334155", color: "white", borderRadius: 12, padding: 12, outline: "none", textAlign: "center", fontSize: 16, letterSpacing: 4 }}
+                  value={supervisorPassword}
+                  onChange={e => setSupervisorPassword(e.target.value)}
+                  placeholder="Contrasena"
+                  style={{ flex: 1, background: "#020617", border: "1px solid #334155", color: "white", borderRadius: 12, padding: 12, outline: "none", textAlign: "center", fontSize: 14 }}
                 />
-                <button onClick={handleSupervisorBypass} style={{ background: "#ef4444", border: "none", color: "white", borderRadius: 12, padding: "0 20px", fontWeight: 800, cursor: "pointer", fontSize: 14 }}>Validar</button>
+                <button onClick={handleSupervisorBypass} disabled={verifyingSupervisor} style={{ background: "#ef4444", border: "none", color: "white", borderRadius: 12, padding: "0 20px", fontWeight: 800, cursor: "pointer", fontSize: 14, opacity: verifyingSupervisor ? 0.6 : 1 }}>{verifyingSupervisor ? "..." : "Validar"}</button>
               </div>
             </div>
-            <button onClick={() => { setScaleWeight(expectedWeight); setIsLocked(false) }} style={{ color: "#475569", background: "none", border: "none", fontSize: 12, textDecoration: "underline", cursor: "pointer" }}>Simular Resolución Automática de Peso</button>
           </div>
         </div>
       )}

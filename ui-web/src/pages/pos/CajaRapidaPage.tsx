@@ -40,31 +40,9 @@ const MOCK_CUSTOMERS: Customer[] = [
   { id: "c2", nombre: "María Rodríguez", razon_social: "María Rodríguez", ruc: "5555555-2", ci: "5555555", activo: true } as any,
 ]
 
-// Mock Fidelity Database Linked to CRM
-const FIDELITY_DATA: Record<string, { tier: string; points: number; cashback: number; coupons: { id: string; code: string; label: string; applied: boolean; value: number; type: "percent" | "fixed"; targetCategory?: string; targetProduct?: string }[] }> = {
-  "c1": {
-    tier: "Platino",
-    points: 4200,
-    cashback: 15000,
-    coupons: [
-      { id: "cp1", code: "MIL-20", label: "20% en Lácteos", applied: false, value: 20, type: "percent", targetCategory: "almacen", targetProduct: "Leche" },
-      { id: "cp2", code: "PAN-5", label: "Gs 5.000 Regalo en Panadería", applied: false, value: 5000, type: "fixed", targetCategory: "panaderia" }
-    ]
-  },
-  "c2": {
-    tier: "Gold Elite",
-    points: 8500,
-    cashback: 35000,
-    coupons: [
-      { id: "cp3", code: "MEAT-15", label: "15% en Carnes (Costilla)", applied: false, value: 15, type: "percent", targetCategory: "carnes", targetProduct: "Costilla" },
-      { id: "cp4", code: "FRU-3", label: "Gs 10.000 Regalo en Verdulería", applied: false, value: 10000, type: "fixed", targetCategory: "fruver" }
-    ]
-  }
-}
-
 export default function CajaRapidaPage() {
-  const [products, setProducts] = useState<Product[]>(MOCK_PRODUCTS)
-  const [customers, setCustomers] = useState<Customer[]>(MOCK_CUSTOMERS)
+  const [products, setProducts] = useState<Product[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [cart, setCart] = useState<CartItem[]>([])
   const [barcode, setBarcode] = useState("")
   const [loading, setLoading] = useState(true)
@@ -76,15 +54,17 @@ export default function CajaRapidaPage() {
   const [showSuccess, setShowSuccess] = useState(false)
   const [lastTotal, setLastTotal] = useState(0)
   const [pausedSales, setPausedSales] = useState<{ id: string; items: CartItem[]; customer: Customer | null; discountPct: number; applyCashback: boolean; appliedCoupons: string[]; fidelityProfile: any; timestamp: Date }[]>([])
-  const [accumulatedCash, setAccumulatedCash] = useState(3450000)
+  const [accumulatedCash, setAccumulatedCash] = useState(0)
   const [searchText, setSearchText] = useState("")
   const [showPausedSalesPanel, setShowPausedSalesPanel] = useState(false)
 
   // Supervisor Override security states
   const [pendingAuthAction, setPendingAuthAction] = useState<{ type: string; payload: any } | null>(null)
   const [authModalOpen, setAuthModalOpen] = useState(false)
-  const [remoteRequestSent, setRemoteRequestSent] = useState(false)
   const [authorizedBy, setAuthorizedBy] = useState<string | null>(null)
+  const [supervisorEmail, setSupervisorEmail] = useState("")
+  const [supervisorPassword, setSupervisorPassword] = useState("")
+  const [verifyingSupervisor, setVerifyingSupervisor] = useState(false)
 
   // Fidelity / Club Supermercado states
   const [fidelityProfile, setFidelityProfile] = useState<any>(null)
@@ -95,11 +75,11 @@ export default function CajaRapidaPage() {
 
   const selectCustomerById = (customer: Customer) => {
     setSelectedCustomer(customer)
-    const data = FIDELITY_DATA[customer.id]
+    const data: any = undefined
     if (data) {
       const alerts: string[] = []
       if (data.coupons && data.coupons.length > 0) {
-        data.coupons.forEach(cp => {
+        data.coupons.forEach((cp: any) => {
           alerts.push(`Este cliente tiene un cupón de ${cp.label} por ser miembro del Club`)
         })
       }
@@ -126,12 +106,12 @@ export default function CajaRapidaPage() {
   // Sync fidelity profile when customer changes
   useEffect(() => {
     if (selectedCustomer) {
-      const data = FIDELITY_DATA[selectedCustomer.id]
+      const data: any = undefined
       if (data) {
         // Deep copy coupons so we don't mutate mock DB directly during runtime
         setFidelityProfile({
           ...data,
-          coupons: data.coupons.map(c => ({ ...c }))
+          coupons: data.coupons.map((c: any) => ({ ...c }))
         })
       } else {
         setFidelityProfile(null)
@@ -164,6 +144,7 @@ export default function CajaRapidaPage() {
         setProducts(cachedProducts.map(x => x.data as Product))
       }
       if (c.status === "fulfilled") setCustomers(c.value)
+      else toast.error("Error", "No se pudieron cargar los clientes")
     } catch {
       if (cachedProducts.length > 0) setProducts(cachedProducts.map(x => x.data as Product))
     } finally {
@@ -191,7 +172,7 @@ export default function CajaRapidaPage() {
       setSelectedCustomer(null)
       toast.info("Venta Cancelada", `El supervisor ${supervisorName} autorizó cancelar la venta.`)
     } else if (pendingAuthAction.type === "drop_cash") {
-      setAccumulatedCash(500000)
+      setAccumulatedCash(0)
       toast.success("Drop Cash Exitoso", `Fondo de caja depurado por supervisor: ${supervisorName}`)
     } else if (pendingAuthAction.type === "discard_paused") {
       const pId = pendingAuthAction.payload.pausedId
@@ -201,15 +182,26 @@ export default function CajaRapidaPage() {
 
     setPendingAuthAction(null)
     setAuthModalOpen(false)
-    setRemoteRequestSent(false)
+    setSupervisorEmail("")
+    setSupervisorPassword("")
   }
 
-  const triggerRemoteAuthRequest = () => {
-    setRemoteRequestSent(true)
-    toast.info("Solicitud Enviada", "Esperando aprobación remota de supervisor...")
-    setTimeout(() => {
-      handleResolveAuth("CARLOS (PWA Móvil)")
-    }, 5000)
+  const handleSupervisorLogin = async () => {
+    if (!supervisorEmail || !supervisorPassword) return
+    setVerifyingSupervisor(true)
+    try {
+      const result = await api.auth.verifySupervisor({ email: supervisorEmail, password: supervisorPassword })
+      if (result.valid) {
+        handleResolveAuth(result.nombre || "Supervisor")
+      } else {
+        toast.error("Credenciales invalidas", "El usuario y contrasena no corresponden a una cuenta activa.")
+        setSupervisorPassword("")
+      }
+    } catch {
+      toast.error("Error", "No se pudo verificar al supervisor")
+    } finally {
+      setVerifyingSupervisor(false)
+    }
   }
 
   const pauseCurrentSale = () => {
@@ -331,15 +323,6 @@ export default function CajaRapidaPage() {
     if (e.key !== "Enter") return
     const code = barcode.trim()
     if (!code) return
-
-    // Intercept Supervisor QR Badge Scans
-    if (code.startsWith("SUP-QR-")) {
-      const parts = code.split("-")
-      const supervisorName = parts[3] || parts[2] || "Supervisor"
-      handleResolveAuth(supervisorName)
-      setBarcode("")
-      return
-    }
 
     // CRM Fidelity Customer Identification by CI/RUC in Checkout/Barcode field
     const cleanInput = code.replace(/[-.\s]/g, "").toLowerCase()
@@ -968,7 +951,7 @@ export default function CajaRapidaPage() {
       {/* SUPERVISOR OVERRIDE MODAL */}
       {authModalOpen && pendingAuthAction && (
         <div 
-          onClick={() => { setAuthModalOpen(false); setPendingAuthAction(null); setRemoteRequestSent(false); }}
+          onClick={() => { setAuthModalOpen(false); setPendingAuthAction(null); setSupervisorEmail(""); setSupervisorPassword(""); }}
           style={{ position: "fixed", inset: 0, zIndex: 99999, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyItems: "center", justifyContent: "center", padding: "16px" }}
         >
           <div 
@@ -980,7 +963,7 @@ export default function CajaRapidaPage() {
                 <ShieldCheck style={{ width: 18, height: 18 }} /> SEGURIDAD: AUTORIZACIÓN
               </span>
               <button 
-                onClick={() => { setAuthModalOpen(false); setPendingAuthAction(null); setRemoteRequestSent(false); }} 
+                onClick={() => { setAuthModalOpen(false); setPendingAuthAction(null); setSupervisorEmail(""); setSupervisorPassword(""); }} 
                 style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer" }}
               >
                 <X style={{ width: 20, height: 20 }} />
@@ -1000,31 +983,31 @@ export default function CajaRapidaPage() {
               </p>
             </div>
 
-            {remoteRequestSent ? (
-              <div style={{ padding: "30px 10px", display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
-                <Loader2 style={{ width: 36, height: 36, color: "#3b82f6", animation: "spin 1s linear infinite" }} />
-                <p style={{ color: "white", fontSize: "14px", fontWeight: "bold" }}>Solicitud enviada al celular del Supervisor...</p>
-                <p style={{ color: "#64748b", fontSize: "11px" }}>Esperando confirmación remota PWA (Simulado 5s)...</p>
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <div style={{ background: "rgba(59,130,246,0.05)", border: "1px dashed rgba(59,130,246,0.3)", padding: "16px", borderRadius: "16px", display: "flex", flexDirection: "column", gap: "6px" }}>
-                  <ScanLine style={{ width: 24, height: 24, color: "#3b82f6", margin: "0 auto" }} />
-                  <p style={{ color: "white", fontSize: "13px", fontWeight: "bold", margin: 0 }}>ESCANEÉ CREDENCIAL QR</p>
-                  <p style={{ color: "#64748b", fontSize: "10px", margin: 0 }}>Acerque el código QR de su credencial al lector láser de caja</p>
-                </div>
-
-                <div style={{ color: "#475569", fontSize: "11px", fontWeight: "bold" }}>o también</div>
-
-                <button 
-                  type="button"
-                  onClick={triggerRemoteAuthRequest}
-                  style={{ width: "100%", background: "rgba(59,130,246,0.1)", border: "1px solid #3b82f6", color: "#60a5fa", padding: "12px", borderRadius: "12px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
-                >
-                  <Sparkles style={{ width: 14, height: 14 }} /> Solicitar Aprobación Remota (PWA)
-                </button>
-              </div>
-            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <input
+                type="email"
+                value={supervisorEmail}
+                onChange={e => setSupervisorEmail(e.target.value)}
+                placeholder="Email del supervisor"
+                style={{ background: "#020817", border: "1px solid #1e293b", color: "white", borderRadius: "12px", padding: "12px", outline: "none", fontSize: "13px" }}
+              />
+              <input
+                type="password"
+                value={supervisorPassword}
+                onChange={e => setSupervisorPassword(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") handleSupervisorLogin() }}
+                placeholder="Contrasena"
+                style={{ background: "#020817", border: "1px solid #1e293b", color: "white", borderRadius: "12px", padding: "12px", outline: "none", fontSize: "13px" }}
+              />
+              <button
+                type="button"
+                onClick={handleSupervisorLogin}
+                disabled={verifyingSupervisor}
+                style={{ width: "100%", background: "#3b82f6", border: "none", color: "white", padding: "12px", borderRadius: "12px", fontWeight: "bold", cursor: "pointer", opacity: verifyingSupervisor ? 0.6 : 1 }}
+              >
+                {verifyingSupervisor ? "Verificando..." : "Autorizar"}
+              </button>
+            </div>
 
             <div style={{ background: "#020817", padding: "10px", borderRadius: "10px", border: "1px solid #1e293b", display: "flex", alignItems: "center", justifyItems: "center", justifyContent: "center", gap: "6px" }}>
               <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981" }} />

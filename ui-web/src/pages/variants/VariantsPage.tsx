@@ -78,17 +78,12 @@ function KpiCard({ icon: Icon, label, value, sub, color = "blue" }: { icon: Luci
 // ==================== DASHBOARD ====================
 function DashboardTab() {
   const [productCount, setProductCount] = useState(0)
-  const [variantCount, setVariantCount] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([
-      api.products.list().catch(() => [] as Product[]),
-      api.variants.list("").catch(() => [] as ProductVariant[]),
-    ]).then(([products, variants]) => {
+    api.products.list().catch(() => [] as Product[]).then((products) => {
       setProductCount(products.length)
-      setVariantCount(variants.length)
     }).finally(() => setLoading(false))
   }, [])
 
@@ -98,8 +93,8 @@ function DashboardTab() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard icon={Boxes} label="Productos" value={productCount} color="blue" />
-        <KpiCard icon={Hash} label="Variantes" value={variantCount} color="purple" />
       </div>
+      <p className="text-xs text-gray-400">El total de variantes no se puede calcular en conjunto todavia -- elegi un producto en la pestana "Variantes por Producto" para ver las suyas.</p>
     </div>
   )
 }

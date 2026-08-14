@@ -135,7 +135,7 @@ export async function syncPOSData(): Promise<{
       sku: p.sku,
       codigo_barra: p.codigo_barra ?? null,
       nombre: p.nombre,
-      category_id: p.category_id ?? null,
+      category_id: p.categoria_id ?? null,
       iva_tasa: p.iva_tasa || 10,
       activo: p.activo !== false,
       precio: p.precio || 0,

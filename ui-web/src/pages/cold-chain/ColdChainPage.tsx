@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react"
 import {
   BarChart3, Thermometer, AlertTriangle, FileSpreadsheet, Map, Plus, Search, Loader2,
-  Zap, CheckCircle, XCircle, Clock, RefreshCcw, Smartphone, Wifi, WifiOff,
-  BatteryMedium, Droplets, MapPin, ShieldCheck, Activity,
+  CheckCircle, XCircle, Clock, RefreshCcw, Smartphone, Wifi, WifiOff,
+  BatteryMedium, Droplets, MapPin, ShieldCheck,
 } from "lucide-react"
 import { api } from "../../api/index"
 
@@ -16,7 +16,7 @@ export default function ColdChainPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">IoT Cadena de Frío</h1>
-          <p className="text-sm text-gray-500 mt-1">Sensores ESP32, monitoreo mapa, alertas DINALFA, simulación MQTT</p>
+          <p className="text-sm text-gray-500 mt-1">Sensores ESP32, monitoreo mapa, alertas DINALFA</p>
         </div>
       </div>
 
@@ -28,7 +28,6 @@ export default function ColdChainPage() {
             { key: "mapa",       label: "Mapa",         icon: Map },
             { key: "alertas",    label: "Alertas",      icon: AlertTriangle },
             { key: "compliance", label: "Compliance",   icon: ShieldCheck },
-            { key: "simular",    label: "Simular MQTT", icon: Activity },
           ].map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
@@ -45,7 +44,6 @@ export default function ColdChainPage() {
       {tab === "mapa"       && <MapaTab />}
       {tab === "alertas"    && <AlertasTab />}
       {tab === "compliance" && <ComplianceTab />}
-      {tab === "simular"    && <SimularTab />}
     </div>
   )
 }
@@ -471,58 +469,3 @@ function ComplianceTab() {
 
 // ===== SIMULAR MQTT =====
 
-function SimularTab() {
-  const [result, setResult] = useState<any>(null)
-  const [loading, setLoading] = useState(false)
-
-  const simulate = async () => {
-    setLoading(true)
-    try {
-      const r = await api.coldChain.simulate(COMPANY_ID)
-      setResult(r)
-    } catch (e: any) { alert(e.message) }
-    setLoading(false)
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2"><Activity className="w-4 h-4" /> Simular Lectura MQTT</h3>
-        <p className="text-xs text-gray-500 mb-3">Simula la llegada de datos desde un sensor ESP32 vía MQTT. Genera temperaturas aleatorias con un 10% de probabilidad de fuera de rango (para probar alertas).</p>
-        <button onClick={simulate} disabled={loading}
-          className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
-          {loading ? <Spinner /> : <Zap className="w-4 h-4" />} Simular Lectura
-        </button>
-      </div>
-
-      {result && (
-        <div className="space-y-2">
-          {result.readings?.map((r: any, i: number) => (
-            <div key={i} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Thermometer className={`w-5 h-5 ${r.alerts_generated?.length ? "text-red-500" : "text-green-500"}`} />
-                  <div>
-                    <p className="text-sm font-medium">Sensor {r.reading?.sensor_id?.slice(0, 8)}</p>
-                    <p className="text-lg font-bold">{r.reading?.temperature}°C</p>
-                  </div>
-                </div>
-                <div className="text-right text-xs text-gray-400">
-                  <p>💧 {r.reading?.humidity}%</p>
-                  <p>🔋 {r.reading?.battery}%</p>
-                </div>
-              </div>
-              {r.alerts_generated?.length > 0 && (
-                <div className="mt-2 p-2 bg-red-50 rounded-lg">
-                  {r.alerts_generated.map((a: any, j: number) => (
-                    <p key={j} className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {a.message}</p>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}

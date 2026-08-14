@@ -78,6 +78,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     iva_5 = Decimal("0")
 
     sale = Sale(
+        id=uuid.uuid4(),
         company_id=data.company_id,
         branch_id=data.branch_id,
         customer_id=data.customer_id,
@@ -92,7 +93,11 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         user_id=data.user_id,
     )
     db.add(sale)
-    await db.flush()
+    # Ojo: NO se hace flush aca todavia -- subtotal/total (NOT NULL, sin
+    # default) recien se calculan despues del loop de items. El id se
+    # pre-genera en Python (en vez de esperar el server_default+flush) para
+    # que los SaleItem de abajo puedan referenciar sale.id sin forzar un
+    # INSERT prematuro de sales con subtotal/total todavia en NULL.
 
     for item_data in data.items:
         taxes = calculate_taxes(item_data.model_dump())
@@ -136,7 +141,28 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     sale.saldo = sale.total
 
     if data.condicion == "credito" and data.customer_id:
-        from api.src.credit_accounts.service import process_purchase
+        from api.src.credit_accounts.service import get_credit_check, create_approval_request, process_purchase
+
+        check = await get_credit_check(db, str(data.company_id), str(data.customer_id), sale.total)
+        if check.get("no_account"):
+            raise ValueError("Credit account error: No credit account for customer")
+        if check.get("inactive"):
+            raise ValueError("Credit account error: Credit account inactive")
+
+        if not check["ok"]:
+            # Excede el limite disponible: la venta queda retenida, sin
+            # descontar stock ni sumar puntos, hasta que Supervisor y
+            # Gerente aprueben la excepcion (ver credit_accounts.service).
+            sale.estado = "pend_aprob_credito"
+            await db.flush()
+            await create_approval_request(
+                db, data.company_id, sale.id, data.customer_id, check["credit_account_id"],
+                sale.total, check["limite_credito"], check["saldo_disponible"],
+            )
+            await db.flush()
+            await db.refresh(sale)
+            return sale
+
         credit_result = await process_purchase(
             db,
             str(data.company_id),
@@ -150,6 +176,20 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         sale.total_pagado = sale.total
         sale.saldo = Decimal("0")
 
+        from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
+        await create_accounts_receivable_for_sale(
+            db, str(data.company_id), str(data.customer_id), str(sale.id), sale.total, sale.numero,
+        )
+
+    await _deduct_stock_for_sale(db, sale, data)
+    await _award_loyalty_points(db, sale, data)
+
+    await db.flush()
+    await db.refresh(sale)
+    return sale
+
+
+async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate) -> None:
     for item_data in data.items:
         qty_to_deduct = int(item_data.cantidad)
         warehouse_id = None
@@ -216,6 +256,81 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                 user_id=data.user_id,
             )
             db.add(movement)
+
+
+async def _award_loyalty_points(db: AsyncSession, sale: Sale, data: SaleCreate) -> None:
+    if not data.customer_id:
+        return
+    from api.src.loyalty import service as loyalty_service
+    from api.src.loyalty.schemas import PointsCreate
+    config = await loyalty_service.get_or_create_config(db, str(data.company_id))
+    if config.activo and config.crear_en_venta and config.puntos_por_guarani > 0:
+        # puntos_por_guarani se usa como divisor (guaranies necesarios por punto),
+        # no como multiplicador -- con guaranies reales, un multiplicador entero >=1
+        # da millones de puntos por venta. Nunca se habia conectado hasta ahora.
+        puntos = int(sale.total // config.puntos_por_guarani)
+        if puntos > 0:
+            await loyalty_service.earn_points(
+                db,
+                PointsCreate(
+                    company_id=data.company_id,
+                    customer_id=data.customer_id,
+                    tipo="ganado",
+                    puntos=puntos,
+                    referencia_tipo="sale",
+                    referencia_id=str(sale.id),
+                    descripcion=f"Compra {sale.numero}",
+                ),
+                config=config,
+            )
+
+
+async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:
+    """Llamado desde credit_accounts.service.approve_credit_request cuando
+    Supervisor Y Gerente ya aprobaron la excepcion de limite. Recien aca se
+    descuenta el credito, se confirma la venta, se descuenta stock (diferido
+    desde create_sale) y se genera la fila de AR."""
+    from api.src.credit_accounts.service import process_purchase
+    from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
+    from api.src.sales.schemas import SaleCreate
+
+    sale = await get_sale(db, str(request.sale_id))
+    if not sale:
+        raise ValueError("Venta no encontrada")
+
+    credit_result = await process_purchase(
+        db, str(request.company_id), str(request.customer_id), sale.total, sale.id,
+        bypass_limit=True,
+    )
+    if "error" in credit_result:
+        raise ValueError(f"Credit account error: {credit_result['error']}")
+
+    sale.estado = "confirmado"
+    sale.total_pagado = sale.total
+    sale.saldo = Decimal("0")
+    await db.flush()
+
+    await create_accounts_receivable_for_sale(
+        db, str(sale.company_id), str(sale.customer_id), str(sale.id), sale.total, sale.numero,
+    )
+
+    items = await get_sale_items(db, str(sale.id))
+    deduct_data = SaleCreate(
+        company_id=sale.company_id, branch_id=sale.branch_id, customer_id=sale.customer_id,
+        emission_point_id=sale.emission_point_id, tipo_comprobante=sale.tipo_comprobante,
+        condicion=sale.condicion, moneda=sale.moneda, tipo_cambio=sale.tipo_cambio,
+        user_id=sale.user_id, items=[
+            {
+                "product_id": i["product_id"], "variant_id": i.get("variant_id"),
+                "descripcion": i["descripcion"], "cantidad": i["cantidad"],
+                "precio_unitario": i["precio_unitario"], "descuento_pct": i["descuento_pct"],
+                "iva_tasa": i["iva_tasa"], "costo_unitario": i.get("costo_unitario") or 0,
+            }
+            for i in items
+        ],
+    )
+    await _deduct_stock_for_sale(db, sale, deduct_data)
+    await _award_loyalty_points(db, sale, deduct_data)
 
     await db.flush()
     await db.refresh(sale)

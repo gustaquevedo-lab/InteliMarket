@@ -1,5 +1,6 @@
 """InteliAudit integration service"""
 
+import json
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import select, text
@@ -51,11 +52,17 @@ async def update_sync_config(db: AsyncSession, tenant_id: str, data: dict) -> di
 
 
 async def record_audit_event(db: AsyncSession, data: dict) -> dict:
+    # asyncpg no serializa dicts de python a JSONB solo (a diferencia del
+    # ORM, que si sabe hacerlo via el tipo de columna) -- una consulta text()
+    # cruda necesita el valor ya como string JSON, o falla con
+    # "'dict' object has no attribute 'encode'".
     now = datetime.now(timezone.utc)
+    datos_ant = data.get("datos_anteriores")
+    datos_new = data.get("datos_nuevos")
     result = await db.execute(
         text("""
             INSERT INTO audit_logs (company_id, user_id, accion, entidad, entidad_id, datos_anteriores, datos_nuevos, ip_address, user_agent, created_at)
-            VALUES (:company_id, :user_id, :accion, :entidad, :entidad_id, :datos_ant, :datos_new, :ip, :ua, :now)
+            VALUES (:company_id, :user_id, :accion, :entidad, :entidad_id, CAST(:datos_ant AS JSONB), CAST(:datos_new AS JSONB), :ip, :ua, :now)
             RETURNING id
         """),
         {
@@ -64,8 +71,8 @@ async def record_audit_event(db: AsyncSession, data: dict) -> dict:
             "accion": data.get("accion", ""),
             "entidad": data.get("entidad", ""),
             "entidad_id": data.get("entidad_id"),
-            "datos_ant": data.get("datos_anteriores"),
-            "datos_new": data.get("datos_nuevos"),
+            "datos_ant": json.dumps(datos_ant) if datos_ant is not None else None,
+            "datos_new": json.dumps(datos_new) if datos_new is not None else None,
             "ip": data.get("ip_address"),
             "ua": data.get("user_agent"),
             "now": now,

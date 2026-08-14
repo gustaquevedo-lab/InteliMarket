@@ -18,13 +18,15 @@ from decimal import Decimal
 
 from api.src.config import settings
 from api.src.reports import service as reports_service
+from api.src.petty_cash import service as petty_cash_service
 
 ANTHROPIC_MODEL = "claude-opus-4-8"
 GEMINI_MODEL = "gemini-2.5-flash"
 
 SYSTEM_PROMPT = """Sos el Gerente General IA de InteliMarket, el asistente conversacional \
 de un supermercado en Paraguay. Tenés acceso al estado real y actualizado del negocio: \
-ventas, finanzas y stock.
+ventas, finanzas, stock y gastos (incluyendo el desglose de gastos por sector/centro de \
+costo del supermercado y por categoría, con presupuestos y variaciones).
 
 Contestá en español, de forma directa y concreta, usando SIEMPRE los datos reales que se \
 te pasan en el contexto — nunca inventes cifras. Si algo no está en el contexto que \
@@ -52,6 +54,7 @@ async def _gather_context(db, company_id: str) -> dict:
     financiero = await reports_service.get_financial_summary(db, hace_30, hoy)
     inventario = await reports_service.get_inventory_summary(db)
     top_productos = await reports_service.get_sales_by_product(db, hace_30, hoy, 10)
+    gastos = await petty_cash_service.get_expense_dashboard(db, company_id, hace_30, hoy)
 
     return {
         "fecha_actual": hoy.isoformat(),
@@ -60,6 +63,7 @@ async def _gather_context(db, company_id: str) -> dict:
         "financiero_ultimos_30_dias": financiero,
         "inventario": inventario,
         "top_10_productos_30_dias": top_productos,
+        "gastos_ultimos_30_dias": gastos,
     }
 
 

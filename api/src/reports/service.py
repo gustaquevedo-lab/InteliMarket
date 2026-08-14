@@ -11,6 +11,7 @@ Nota: consultas migradas a los nombres reales del esquema (modelos ORM):
   anulado=false → estado <> 'cancelado'.
 """
 
+import uuid
 from datetime import date
 from typing import Optional
 from sqlalchemy import text, select, func
@@ -23,9 +24,9 @@ async def _exec(db: AsyncSession, query: str, params: Optional[dict] = None):
     return result.mappings()
 
 
-async def get_sales_summary(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> dict:
-    params = {}
-    where = "v.estado <> 'cancelado'"
+async def get_sales_summary(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> dict:
+    params = {"company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -59,9 +60,9 @@ async def get_sales_summary(db: AsyncSession, fecha_desde: Optional[date] = None
     }
 
 
-async def get_sales_by_period(db: AsyncSession, agrupar_por: str = "dia", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> list:
-    params = {}
-    where = "v.estado <> 'cancelado'"
+async def get_sales_by_period(db: AsyncSession, company_id: str, agrupar_por: str = "dia", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> list:
+    params = {"company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -103,9 +104,9 @@ async def get_sales_by_period(db: AsyncSession, agrupar_por: str = "dia", fecha_
     ]
 
 
-async def get_sales_by_category(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
-    params = {}
-    where = "v.estado <> 'cancelado'"
+async def get_sales_by_category(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    params = {"company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -121,7 +122,7 @@ async def get_sales_by_category(db: AsyncSession, fecha_desde: Optional[date] = 
         FROM sales v
         JOIN sale_items vi ON vi.sale_id = v.id
         JOIN products p ON p.id = vi.product_id
-        JOIN product_categories c ON c.id = p.category_id
+        JOIN product_categories c ON c.id = p.categoria_id
         WHERE {where}
         GROUP BY c.nombre
         ORDER BY monto DESC
@@ -139,9 +140,9 @@ async def get_sales_by_category(db: AsyncSession, fecha_desde: Optional[date] = 
     ]
 
 
-async def get_sales_by_payment_method(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
-    params = {}
-    where = "1=1"
+async def get_sales_by_payment_method(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    params = {"company_id": company_id}
+    where = "sp.company_id = :company_id"
     if fecha_desde:
         where += " AND sp.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -172,9 +173,9 @@ async def get_sales_by_payment_method(db: AsyncSession, fecha_desde: Optional[da
     ]
 
 
-async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, limit: int = 50) -> list:
-    params = {"limit": limit}
-    where = "v.estado <> 'cancelado'"
+async def get_sales_by_product(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, limit: int = 50) -> list:
+    params = {"limit": limit, "company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -216,9 +217,9 @@ async def get_sales_by_product(db: AsyncSession, fecha_desde: Optional[date] = N
     ]
 
 
-async def get_sales_by_client(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
-    params = {}
-    where = "v.estado <> 'cancelado'"
+async def get_sales_by_client(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    params = {"company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -252,9 +253,9 @@ async def get_sales_by_client(db: AsyncSession, fecha_desde: Optional[date] = No
     ]
 
 
-async def get_inventory_summary(db: AsyncSession, warehouse_id: Optional[int] = None) -> dict:
-    params = {}
-    where = "s.cantidad > 0"
+async def get_inventory_summary(db: AsyncSession, company_id: str, warehouse_id: Optional[int] = None) -> dict:
+    params = {"company_id": company_id}
+    where = "s.cantidad > 0 AND w.company_id = :company_id"
     if warehouse_id:
         where += " AND s.warehouse_id = :warehouse_id"
         params["warehouse_id"] = warehouse_id
@@ -265,6 +266,7 @@ async def get_inventory_summary(db: AsyncSession, warehouse_id: Optional[int] = 
             COALESCE(SUM(s.cantidad), 0) as total_unidades,
             COALESCE(SUM(s.cantidad * COALESCE(s.costo_unitario, 0)), 0) as valor_total
         FROM stock s
+        JOIN warehouses w ON w.id = s.warehouse_id
         WHERE {where}
     """
     result = (await _exec(db, query, params)).first()
@@ -273,12 +275,18 @@ async def get_inventory_summary(db: AsyncSession, warehouse_id: Optional[int] = 
         SELECT COUNT(DISTINCT s.product_id) as bajo_stock
         FROM stock s
         JOIN products p ON p.id = s.product_id
-        WHERE s.cantidad - s.cantidad_reservada <= p.stock_minimo AND s.cantidad > 0
+        JOIN warehouses w ON w.id = s.warehouse_id
+        WHERE s.cantidad - s.cantidad_reservada <= p.stock_minimo AND s.cantidad > 0 AND w.company_id = :company_id
     """
-    bajo = (await _exec(db, query_bajo)).first()
+    bajo = (await _exec(db, query_bajo, {"company_id": company_id})).first()
 
-    query_sin = "SELECT COUNT(DISTINCT s.product_id) as sin_stock FROM stock s WHERE s.cantidad = 0"
-    sin = (await _exec(db, query_sin)).first()
+    query_sin = """
+        SELECT COUNT(DISTINCT s.product_id) as sin_stock
+        FROM stock s
+        JOIN warehouses w ON w.id = s.warehouse_id
+        WHERE s.cantidad = 0 AND w.company_id = :company_id
+    """
+    sin = (await _exec(db, query_sin, {"company_id": company_id})).first()
 
     return {
         "total_productos": result["total_productos"] or 0,
@@ -290,9 +298,9 @@ async def get_inventory_summary(db: AsyncSession, warehouse_id: Optional[int] = 
     }
 
 
-async def get_inventory_detail(db: AsyncSession, warehouse_id: Optional[int] = None) -> list:
-    params = {}
-    where = "1=1"
+async def get_inventory_detail(db: AsyncSession, company_id: str, warehouse_id: Optional[int] = None) -> list:
+    params = {"company_id": company_id}
+    where = "w.company_id = :company_id"
     if warehouse_id:
         where += " AND s.warehouse_id = :warehouse_id"
         params["warehouse_id"] = warehouse_id
@@ -311,7 +319,7 @@ async def get_inventory_detail(db: AsyncSession, warehouse_id: Optional[int] = N
             CASE WHEN s.cantidad - s.cantidad_reservada <= p.stock_minimo THEN true ELSE false END as bajo_stock
         FROM stock s
         JOIN products p ON p.id = s.product_id
-        LEFT JOIN product_categories c ON c.id = p.category_id
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
         JOIN warehouses w ON w.id = s.warehouse_id
         WHERE {where}
         ORDER BY p.nombre
@@ -334,7 +342,7 @@ async def get_inventory_detail(db: AsyncSession, warehouse_id: Optional[int] = N
     ]
 
 
-async def get_inventory_rotation(db: AsyncSession) -> list:
+async def get_inventory_rotation(db: AsyncSession, company_id: str) -> list:
     query = """
         SELECT
             p.nombre as producto,
@@ -343,10 +351,11 @@ async def get_inventory_rotation(db: AsyncSession) -> list:
             COALESCE((SELECT SUM(s.cantidad) FROM stock s WHERE s.product_id = p.id), 0) as stock_actual
         FROM products p
         LEFT JOIN sale_items vi ON vi.product_id = p.id
-        LEFT JOIN sales v ON v.id = vi.sale_id AND v.estado <> 'cancelado'
+        LEFT JOIN sales v ON v.id = vi.sale_id AND v.estado <> 'cancelado' AND v.company_id = :company_id
+        WHERE p.company_id = :company_id
         GROUP BY p.id, p.nombre, p.sku
     """
-    results = (await _exec(db, query)).all()
+    results = (await _exec(db, query, {"company_id": company_id})).all()
     items = []
     for r in results:
         ventas_30d = int(r["ventas_30d"] or 0)
@@ -370,9 +379,9 @@ async def get_inventory_rotation(db: AsyncSession) -> list:
     return sorted(items, key=lambda x: x["ventas_30d"], reverse=True)
 
 
-async def get_fiscal_book(db: AsyncSession, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
-    params = {}
-    where = "v.estado <> 'cancelado'"
+async def get_fiscal_book(db: AsyncSession, company_id: str, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    params = {"company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -442,9 +451,9 @@ async def get_fiscal_book(db: AsyncSession, tipo_libro: str = "ventas", fecha_de
     ]
 
 
-async def get_fiscal_summary(db: AsyncSession, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
-    params = {}
-    where = "v.estado <> 'cancelado'"
+async def get_fiscal_summary(db: AsyncSession, company_id: str, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
+    params = {"company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -476,9 +485,9 @@ async def get_fiscal_summary(db: AsyncSession, tipo_libro: str = "ventas", fecha
     }
 
 
-async def get_financial_summary(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
-    params = {}
-    where = "estado <> 'cancelado'"
+async def get_financial_summary(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
+    params = {"company_id": company_id}
+    where = "estado <> 'cancelado' AND company_id = :company_id"
     if fecha_desde:
         where += " AND fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -487,14 +496,17 @@ async def get_financial_summary(db: AsyncSession, fecha_desde: Optional[date] = 
         params["fecha_hasta"] = fecha_hasta
 
     ingresos = (await _exec(db, f"SELECT COALESCE(SUM(total), 0) as total FROM sales WHERE {where}", params)).first()
-    egresos = (await _exec(db, "SELECT COALESCE(SUM(total), 0) as total FROM purchase_orders")).first()
+    egresos = (await _exec(db, f"SELECT COALESCE(SUM(total), 0) as total FROM purchase_orders WHERE {where}", params)).first()
     # customer_accounts está vacía/huérfana (0 filas) — la fuente real y poblada
     # de cuentas por cobrar es accounts_receivable (saldo_pendiente/estado), la
     # misma que usa el resto del código (ver financial/service.py).
-    por_cobrar = (await _exec(db, "SELECT COALESCE(SUM(saldo_pendiente), 0) as total FROM accounts_receivable WHERE estado = 'pendiente'")).first()
+    por_cobrar = (await _exec(
+        db, "SELECT COALESCE(SUM(saldo_pendiente), 0) as total FROM accounts_receivable WHERE estado = 'pendiente' AND company_id = :company_id",
+        {"company_id": company_id},
+    )).first()
     r_ap = await db.execute(
         select(func.coalesce(func.sum(SupplierInvoice.saldo_pendiente), 0))
-        .where(SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]))
+        .where(SupplierInvoice.estado == "pendiente", SupplierInvoice.company_id == uuid.UUID(company_id))
     )
     por_pagar = {"total": r_ap.scalar()}
 
@@ -511,9 +523,9 @@ async def get_financial_summary(db: AsyncSession, fecha_desde: Optional[date] = 
     }
 
 
-async def get_financial_by_day(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
-    params = {}
-    where = "estado <> 'cancelado'"
+async def get_financial_by_day(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    params = {"company_id": company_id}
+    where = "estado <> 'cancelado' AND company_id = :company_id"
     if fecha_desde:
         where += " AND fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -544,9 +556,9 @@ async def get_financial_by_day(db: AsyncSession, fecha_desde: Optional[date] = N
     ]
 
 
-async def get_fifo_costing(db: AsyncSession, product_id=None, warehouse_id=None) -> list:
-    params = {}
-    where = "sl.cantidad_disponible > 0"
+async def get_fifo_costing(db: AsyncSession, company_id: str, product_id=None, warehouse_id=None) -> list:
+    params = {"company_id": company_id}
+    where = "sl.cantidad_disponible > 0 AND sl.company_id = :company_id"
     if product_id:
         where += " AND sl.product_id = :product_id"
         params["product_id"] = product_id
@@ -570,7 +582,7 @@ async def get_fifo_costing(db: AsyncSession, product_id=None, warehouse_id=None)
             sl.fecha_vencimiento
         FROM stock_lots sl
         JOIN products p ON p.id = sl.product_id
-        LEFT JOIN product_categories c ON c.id = p.category_id
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
         JOIN warehouses w ON w.id = sl.warehouse_id
         WHERE {where}
         ORDER BY sl.product_id, sl.fecha_ingreso ASC
@@ -615,9 +627,9 @@ async def get_fifo_costing(db: AsyncSession, product_id=None, warehouse_id=None)
     return sorted(products.values(), key=lambda x: x["total_stock"], reverse=True)
 
 
-async def get_lifo_costing(db: AsyncSession, product_id=None, warehouse_id=None) -> list:
-    params = {}
-    where = "sl.cantidad_disponible > 0"
+async def get_lifo_costing(db: AsyncSession, company_id: str, product_id=None, warehouse_id=None) -> list:
+    params = {"company_id": company_id}
+    where = "sl.cantidad_disponible > 0 AND sl.company_id = :company_id"
     if product_id:
         where += " AND sl.product_id = :product_id"
         params["product_id"] = product_id
@@ -641,7 +653,7 @@ async def get_lifo_costing(db: AsyncSession, product_id=None, warehouse_id=None)
             sl.fecha_vencimiento
         FROM stock_lots sl
         JOIN products p ON p.id = sl.product_id
-        LEFT JOIN product_categories c ON c.id = p.category_id
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
         JOIN warehouses w ON w.id = sl.warehouse_id
         WHERE {where}
         ORDER BY sl.product_id, sl.fecha_ingreso DESC
@@ -686,9 +698,9 @@ async def get_lifo_costing(db: AsyncSession, product_id=None, warehouse_id=None)
     return sorted(products.values(), key=lambda x: x["total_stock"], reverse=True)
 
 
-async def get_cost_comparison(db: AsyncSession, product_id=None, warehouse_id=None) -> list:
-    fifo_data = await get_fifo_costing(db, product_id, warehouse_id)
-    lifo_data = await get_lifo_costing(db, product_id, warehouse_id)
+async def get_cost_comparison(db: AsyncSession, company_id: str, product_id=None, warehouse_id=None) -> list:
+    fifo_data = await get_fifo_costing(db, company_id, product_id, warehouse_id)
+    lifo_data = await get_lifo_costing(db, company_id, product_id, warehouse_id)
 
     lifo_map = {item["producto"]: item for item in lifo_data}
 
@@ -720,9 +732,9 @@ async def get_cost_comparison(db: AsyncSession, product_id=None, warehouse_id=No
     return comparison
 
 
-async def get_inventory_valuation(db: AsyncSession, warehouse_id: Optional[str] = None) -> dict:
-    params = {}
-    where = "s.cantidad > 0"
+async def get_inventory_valuation(db: AsyncSession, company_id: str, warehouse_id: Optional[str] = None) -> dict:
+    params = {"company_id": company_id}
+    where = "s.cantidad > 0 AND w.company_id = :company_id"
     if warehouse_id:
         where += " AND s.warehouse_id = :warehouse_id"
         params["warehouse_id"] = warehouse_id
@@ -764,9 +776,11 @@ async def get_inventory_valuation(db: AsyncSession, warehouse_id: Optional[str] 
     }
 
 
-async def get_expenses_by_category(db: AsyncSession, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
-    params = {}
-    where = "e.estado <> 'rechazado'"
+async def get_expenses_by_category(db: AsyncSession, company_id: str, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    params = {"company_id": company_id}
+    # anulado=false: un gasto anulado (Caja Chica) no es un gasto real, no
+    # tiene que sumar acá — se estaba colando antes de este fix.
+    where = "e.estado <> 'rechazado' AND e.anulado = false AND e.company_id = :company_id"
     if fecha_desde:
         where += " AND e.fecha_gasto >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
