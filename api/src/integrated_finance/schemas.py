@@ -28,13 +28,13 @@ class WithholdingConfigUpdate(BaseModel):
 class WithholdingConfigResponse(BaseModel):
     id: UUID
     company_id: UUID
-    supplier_id: UUID
+    supplier_id: Optional[UUID] = None
     tipo: str
     activo: bool
     categoria: Optional[str] = None
     tasa: float
-    base_minima: float
-    exento_hasta: float
+    base_minima: Optional[float] = 0.0
+    exento_hasta: Optional[float] = None
     regimen: Optional[str] = None
     created_at: Optional[datetime] = None
 

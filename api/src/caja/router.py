@@ -177,3 +177,42 @@ async def authorize_route_settlement(
     if not result:
         raise HTTPException(status_code=404, detail="Liquidación no encontrada")
     return result
+
+
+# ── Bóveda Central & Remesas de Caudales Endpoints ─────────────────────────
+
+@router.get("/companies/{company_id}/vault/summary")
+async def get_vault_summary(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_vault_summary(db, company_id)
+
+
+@router.get("/companies/{company_id}/vault/movements")
+async def list_vault_movements(
+    company_id: str,
+    tipo: str | None = Query(None),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.list_vault_movements(db, company_id, tipo, limit, offset)
+
+
+@router.post("/companies/{company_id}/vault/drop-cash")
+async def create_vault_drop_cash(
+    company_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.create_vault_drop_cash(db, company_id, body)
+
+
+@router.post("/companies/{company_id}/vault/dispatch-armored")
+async def create_vault_armored_dispatch(
+    company_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.create_vault_armored_dispatch(db, company_id, body)

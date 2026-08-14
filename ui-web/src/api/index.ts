@@ -414,6 +414,12 @@ export const api = {
     openSession: (data: { caja_id: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions/open", data),
     closeSession: (id: string, data: { monto_cierre: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
     summary: (id: string) => client.get<CashSessionSummary>(`/v1/cash-sessions/${id}/summary`),
+    vault: {
+      summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/vault/summary`),
+      movements: (params?: { tipo?: string; limit?: number; offset?: number }) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/vault/movements`, params as any),
+      dropCash: (data: { caja_nombre: string; cajero?: string; supervisor?: string; monto: number; observaciones?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/vault/drop-cash`, data),
+      dispatchArmored: (data: { transportadora: string; precinto_bolsa: string; banco_destino?: string; cuenta_banco?: string; supervisor?: string; monto: number; observaciones?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/vault/dispatch-armored`, data),
+    },
   },
   routeCashSettlements: {
     list: (params?: { fecha_desde?: string; fecha_hasta?: string; cobrador_codigo?: string; cerrado?: boolean; search?: string; limit?: number; offset?: number }) =>
