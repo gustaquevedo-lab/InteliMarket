@@ -7,12 +7,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 
-from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement
+from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff, VaultEntry, VaultDepositApprovalRequest
 from api.src.sales.models import Sale, SalePayment
+from api.src.auth.models import User
 
 
-async def list_registers(db: AsyncSession, branch_id: str | None = None) -> list[CashRegister]:
-    query = select(CashRegister).where(CashRegister.activo == True)
+async def list_registers(db: AsyncSession, company_id: str, branch_id: str | None = None) -> list[CashRegister]:
+    query = select(CashRegister).where(CashRegister.activo == True, CashRegister.company_id == company_id)
     if branch_id:
         query = query.where(CashRegister.branch_id == branch_id)
     query = query.order_by(CashRegister.nombre)
@@ -20,9 +21,9 @@ async def list_registers(db: AsyncSession, branch_id: str | None = None) -> list
     return list(result.scalars().all())
 
 
-async def get_register(db: AsyncSession, register_id: str) -> CashRegister | None:
+async def get_register(db: AsyncSession, register_id: str, company_id: str) -> CashRegister | None:
     result = await db.execute(
-        select(CashRegister).where(CashRegister.id == uuid.UUID(register_id))
+        select(CashRegister).where(CashRegister.id == uuid.UUID(register_id), CashRegister.company_id == uuid.UUID(company_id))
     )
     return result.scalar_one_or_none()
 
@@ -35,8 +36,8 @@ async def create_register(db: AsyncSession, data: dict) -> CashRegister:
     return register
 
 
-async def update_register(db: AsyncSession, register_id: str, data: dict) -> CashRegister | None:
-    register = await get_register(db, register_id)
+async def update_register(db: AsyncSession, register_id: str, company_id: str, data: dict) -> CashRegister | None:
+    register = await get_register(db, register_id, company_id)
     if not register:
         return None
     for key, value in data.items():
@@ -47,8 +48,8 @@ async def update_register(db: AsyncSession, register_id: str, data: dict) -> Cas
     return register
 
 
-async def delete_register(db: AsyncSession, register_id: str) -> bool:
-    register = await get_register(db, register_id)
+async def delete_register(db: AsyncSession, register_id: str, company_id: str) -> bool:
+    register = await get_register(db, register_id, company_id)
     if not register:
         return False
     register.activo = False
@@ -106,7 +107,7 @@ async def get_session_with_summary(db: AsyncSession, session_id: str) -> dict | 
             func.count(Sale.id).label("total_ventas"),
             func.coalesce(func.sum(Sale.total), 0).label("total_cobrado"),
         ).where(
-            Sale.branch_id == session_obj.register_id,
+            Sale.session_id == session_obj.id,
             Sale.fecha >= session_obj.fecha_apertura,
             Sale.estado == "confirmado",
         )
@@ -160,6 +161,7 @@ async def close_session(
     monto_cierre_usd: Decimal = Decimal("0"),
     monto_cierre_brl: Decimal = Decimal("0"),
     observaciones: str | None = None,
+    tenant_id: str | None = None,
 ) -> dict | None:
     result = await db.execute(
         select(CashSession).where(CashSession.id == uuid.UUID(session_id))
@@ -170,7 +172,7 @@ async def close_session(
 
     sales_result = await db.execute(
         select(func.coalesce(func.sum(Sale.total), 0)).where(
-            Sale.branch_id == session_obj.register_id,
+            Sale.session_id == session_obj.id,
             Sale.fecha >= session_obj.fecha_apertura,
             Sale.estado == "confirmado",
         )
@@ -198,7 +200,7 @@ async def close_session(
     session_obj.estado = "cerrada"
     await db.flush()
 
-    db.add(CashCount(
+    count = CashCount(
         session_id=session_obj.id,
         monto_efectivo=monto_cierre_real,
         monto_total=monto_cierre_real,
@@ -207,9 +209,47 @@ async def close_session(
         monto_efectivo_brl=monto_cierre_brl,
         diferencia_usd=diferencia_usd,
         diferencia_brl=diferencia_brl,
-    ))
+        requiere_revision=requiere_revision,
+    )
+    db.add(count)
+    await db.flush()
+    await db.refresh(count)
+
+    # Punto de custodia: la sesión se cierra igual (no se bloquea por diferencia,
+    # segun lo definido con el cliente), pero el efectivo contado queda "pendiente"
+    # bajo responsabilidad de la cajera hasta que un supervisor confirme que lo
+    # recibio — antes esto no existia, el cierre era un callejon sin salida.
+    handoff = CashHandoff(
+        company_id=register.company_id if register else None,
+        session_id=session_obj.id,
+        cash_count_id=count.id,
+        entregado_por=session_obj.user_id,
+        entregado_por_nombre=session_obj.cajero_nombre,
+        monto_pyg=monto_cierre_real,
+        monto_usd=monto_cierre_usd,
+        monto_brl=monto_cierre_brl,
+        requiere_revision=requiere_revision,
+        estado="pendiente",
+    )
+    db.add(handoff)
     await db.flush()
     await db.refresh(session_obj)
+
+    if requiere_revision and tenant_id:
+        # Antes esta alerta se calculaba y se descartaba sin avisar a nadie —
+        # ahora dispara una notificacion real a quienes pueden actuar (rol
+        # Administrador, hasta que exista un rol dedicado de Supervisor).
+        try:
+            from api.src.notifications import service as notifications_service
+            await notifications_service.create_notification_for_role(
+                db, uuid.UUID(tenant_id), "Administrador",
+                title="Descuadre de caja requiere revisión",
+                body=f"{session_obj.cajero_nombre or 'Un cajero'} cerró con una diferencia de {diferencia:,.0f} Gs. que supera la tolerancia configurada.",
+                tipo="alerta_caja",
+                link="/caja",
+            )
+        except Exception:
+            pass
 
     return {
         "session": session_obj,
@@ -218,6 +258,7 @@ async def close_session(
         "diferencia_usd": diferencia_usd,
         "diferencia_brl": diferencia_brl,
         "requiere_revision": requiere_revision,
+        "handoff_id": handoff.id,
     }
 
 
@@ -393,7 +434,7 @@ async def get_session_payment_breakdown(db: AsyncSession, session_id: str) -> di
     }
 
 
-async def register_cash_drop(db: AsyncSession, session_id: str, monto: Decimal, observaciones: str | None = None) -> CashRegisterMovement | None:
+async def register_cash_drop(db: AsyncSession, session_id: str, monto: Decimal, observaciones: str | None = None, registrado_por: str | None = None) -> CashRegisterMovement | None:
     result = await db.execute(select(CashSession).where(CashSession.id == uuid.UUID(session_id)))
     session_obj = result.scalar_one_or_none()
     if not session_obj or session_obj.estado != "abierta":
@@ -415,4 +456,438 @@ async def register_cash_drop(db: AsyncSession, session_id: str, monto: Decimal, 
     session_obj.ultimo_cash_drop_at = datetime.now(timezone.utc)
     await db.flush()
     await db.refresh(movement)
+
+    # El cash drop es efectivo que fisicamente ya salio de la caja hacia la
+    # boveda a mitad de turno — antes no quedaba ningun rastro en boveda hasta
+    # el cierre de sesion, subestimando el saldo real ahi guardado.
+    db.add(VaultEntry(
+        company_id=register.company_id if register else None,
+        branch_id=register.branch_id if register else None,
+        origen="cash_drop",
+        monto_pyg=monto,
+        estado="en_boveda",
+        registrado_por=uuid.UUID(registrado_por) if registrado_por else None,
+        observaciones=f"Cash drop sesión {session_id}",
+    ))
+    await db.flush()
     return movement
+
+
+# ── Entregas de efectivo (custodia cajera -> supervisor) ────────────────
+
+async def list_pending_handoffs(db: AsyncSession, company_id: str, estado: str | None = None, limit: int = 100) -> list[dict]:
+    """Pese al nombre (mantenido por compatibilidad), lista TODAS las entregas
+    por defecto, no solo las pendientes — antes una entrega confirmada
+    desaparecia de la lista sin dejar ningun registro visible."""
+    query = select(CashHandoff).where(CashHandoff.company_id == uuid.UUID(company_id))
+    if estado:
+        query = query.where(CashHandoff.estado == estado)
+    query = query.order_by(CashHandoff.created_at.desc()).limit(limit)
+    result = await db.execute(query)
+    handoffs = list(result.scalars().all())
+    out = []
+    for h in handoffs:
+        session_result = await db.execute(select(CashSession).where(CashSession.id == h.session_id))
+        session_obj = session_result.scalar_one_or_none()
+        register_nombre = None
+        if session_obj:
+            reg_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
+            reg = reg_result.scalar_one_or_none()
+            register_nombre = reg.nombre if reg else None
+        out.append({
+            "id": str(h.id),
+            "session_id": str(h.session_id),
+            "register_nombre": register_nombre,
+            "entregado_por_nombre": h.entregado_por_nombre,
+            "recibido_por_nombre": h.recibido_por_nombre,
+            "monto_pyg": float(h.monto_pyg),
+            "monto_usd": float(h.monto_usd or 0),
+            "monto_brl": float(h.monto_brl or 0),
+            "monto_confirmado_pyg": float(h.monto_confirmado_pyg) if h.monto_confirmado_pyg is not None else None,
+            "monto_confirmado_usd": float(h.monto_confirmado_usd) if h.monto_confirmado_usd is not None else None,
+            "monto_confirmado_brl": float(h.monto_confirmado_brl) if h.monto_confirmado_brl is not None else None,
+            "discrepancia_confirmacion": h.discrepancia_confirmacion,
+            "requiere_revision": h.requiere_revision,
+            "estado": h.estado,
+            "created_at": h.created_at.isoformat(),
+            "fecha_confirmacion": h.fecha_confirmacion.isoformat() if h.fecha_confirmacion else None,
+        })
+    return out
+
+
+async def confirm_handoff(
+    db: AsyncSession, handoff_id: str, company_id: str, recibido_por: str, recibido_por_nombre: str,
+    monto_confirmado_pyg: Decimal | None = None, monto_confirmado_usd: Decimal | None = None,
+    monto_confirmado_brl: Decimal | None = None,
+) -> CashHandoff | str | None:
+    """El supervisor confirma que recibió el efectivo de la cajera — con su
+    propio recuento independiente (no solo aceptar el numero de la cajera),
+    que es el control real de doble conteo en el traspaso. A partir de aca la
+    responsabilidad del dinero es de tesoreria/boveda, no de la cajera — y se
+    genera la entrada real en boveda (antes no existia ningun vinculo).
+
+    Retorna None si no se encontro / ya estaba confirmada / no pertenece a la
+    empresa. Retorna "forbidden" (string) si quien confirma no tiene nivel de
+    supervisor — se verifica de nuevo aca ademas de en verify-supervisor, para
+    que este endpoint no dependa unicamente de que el frontend haya llamado
+    a ese paso antes."""
+    user_result = await db.execute(select(User).where(User.id == uuid.UUID(recibido_por)))
+    supervisor = user_result.scalar_one_or_none()
+    if not supervisor or not supervisor.activo or (supervisor.rol != "admin" and not supervisor.is_superadmin):
+        return "forbidden"
+
+    result = await db.execute(
+        select(CashHandoff).where(CashHandoff.id == uuid.UUID(handoff_id), CashHandoff.company_id == uuid.UUID(company_id))
+    )
+    handoff = result.scalar_one_or_none()
+    if not handoff or handoff.estado != "pendiente":
+        return None
+
+    session_result = await db.execute(select(CashSession).where(CashSession.id == handoff.session_id))
+    session_obj = session_result.scalar_one_or_none()
+    branch_id = None
+    if session_obj:
+        reg_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
+        reg = reg_result.scalar_one_or_none()
+        branch_id = reg.branch_id if reg else None
+
+    m_pyg = monto_confirmado_pyg if monto_confirmado_pyg is not None else handoff.monto_pyg
+    m_usd = monto_confirmado_usd if monto_confirmado_usd is not None else (handoff.monto_usd or Decimal("0"))
+    m_brl = monto_confirmado_brl if monto_confirmado_brl is not None else (handoff.monto_brl or Decimal("0"))
+    discrepancia = bool(m_pyg != handoff.monto_pyg or m_usd != (handoff.monto_usd or Decimal("0")) or m_brl != (handoff.monto_brl or Decimal("0")))
+
+    handoff.estado = "confirmado"
+    handoff.recibido_por = uuid.UUID(recibido_por)
+    handoff.recibido_por_nombre = recibido_por_nombre
+    handoff.monto_confirmado_pyg = m_pyg
+    handoff.monto_confirmado_usd = m_usd
+    handoff.monto_confirmado_brl = m_brl
+    handoff.discrepancia_confirmacion = discrepancia
+    handoff.fecha_confirmacion = datetime.now(timezone.utc)
+    await db.flush()
+
+    # La boveda registra lo que el supervisor efectivamente contó recibir, no
+    # lo que la cajera declaró — si hay discrepancia, ese es el monto real
+    # que entra a custodia de tesoreria.
+    db.add(VaultEntry(
+        company_id=handoff.company_id,
+        branch_id=branch_id,
+        origen="entrega_cajero",
+        handoff_id=handoff.id,
+        monto_pyg=m_pyg,
+        monto_usd=m_usd,
+        monto_brl=m_brl,
+        estado="en_boveda",
+        registrado_por=uuid.UUID(recibido_por),
+        observaciones="Discrepancia con lo declarado por la cajera en la entrega" if discrepancia else None,
+    ))
+    await db.flush()
+    await db.refresh(handoff)
+    return handoff
+
+
+# ── Bóveda central ────────────────────────────────────────────────────
+
+async def get_vault_dashboard(db: AsyncSession, company_id: str) -> dict:
+    cid = uuid.UUID(company_id)
+    en_boveda = await db.execute(
+        select(
+            func.coalesce(func.sum(VaultEntry.monto_pyg), 0),
+            func.coalesce(func.sum(VaultEntry.monto_usd), 0),
+            func.coalesce(func.sum(VaultEntry.monto_brl), 0),
+            func.count(),
+        ).where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+    )
+    pyg, usd, brl, cantidad = en_boveda.first()
+
+    pendientes = await list_pending_handoffs(db, company_id, estado="pendiente")
+
+    ultimos_result = await db.execute(
+        select(VaultEntry).where(VaultEntry.company_id == cid).order_by(VaultEntry.created_at.desc()).limit(20)
+    )
+    ultimos = [
+        {
+            "id": str(v.id), "origen": v.origen, "monto_pyg": float(v.monto_pyg),
+            "monto_usd": float(v.monto_usd or 0), "monto_brl": float(v.monto_brl or 0),
+            "estado": v.estado, "created_at": v.created_at.isoformat(),
+            "fecha_deposito": v.fecha_deposito.isoformat() if v.fecha_deposito else None,
+        }
+        for v in ultimos_result.scalars().all()
+    ]
+
+    return {
+        "saldo_en_boveda_pyg": float(pyg), "saldo_en_boveda_usd": float(usd), "saldo_en_boveda_brl": float(brl),
+        "entradas_en_boveda": int(cantidad),
+        "entregas_pendientes": len(pendientes),
+        "entregas_pendientes_detalle": pendientes,
+        "movimientos_recientes": ultimos,
+    }
+
+
+async def list_vault_entries(db: AsyncSession, company_id: str, estado: str | None = None) -> list[dict]:
+    query = select(VaultEntry).where(VaultEntry.company_id == uuid.UUID(company_id))
+    if estado:
+        query = query.where(VaultEntry.estado == estado)
+    query = query.order_by(VaultEntry.created_at.desc())
+    result = await db.execute(query)
+    return [
+        {
+            "id": str(v.id), "origen": v.origen, "monto_pyg": float(v.monto_pyg),
+            "monto_usd": float(v.monto_usd or 0), "monto_brl": float(v.monto_brl or 0),
+            "estado": v.estado, "bank_transaction_id": str(v.bank_transaction_id) if v.bank_transaction_id else None,
+            "created_at": v.created_at.isoformat(),
+        }
+        for v in result.scalars().all()
+    ]
+
+
+async def deposit_vault_entries(db: AsyncSession, company_id: str, entry_ids: list[str], bank_transaction_id: str | None, user_id: str | None) -> int:
+    """Marca un lote de entradas de boveda como depositadas — el cierre del
+    ciclo cajera -> boveda -> banco. Enlazarlas con un bank_transaction real
+    es opcional (se puede hacer despues via conciliacion en Bancos)."""
+    result = await db.execute(
+        select(VaultEntry).where(VaultEntry.id.in_([uuid.UUID(i) for i in entry_ids]), VaultEntry.company_id == uuid.UUID(company_id))
+    )
+    entries = list(result.scalars().all())
+    count = 0
+    for e in entries:
+        if e.estado != "en_boveda":
+            continue
+        e.estado = "depositado"
+        e.fecha_deposito = datetime.now(timezone.utc)
+        e.bank_transaction_id = uuid.UUID(bank_transaction_id) if bank_transaction_id else None
+        e.registrado_por = uuid.UUID(user_id) if user_id else e.registrado_por
+        count += 1
+    await db.flush()
+    return count
+
+
+# ── Doble aprobación en depósitos grandes a bóveda ───────────────────────
+#
+# Umbral a partir del cual un depósito a bóveda no se ejecuta de un solo
+# paso: queda retenido hasta que Supervisor Y Gerente aprueben (mismo
+# patrón que credit_accounts y la corrección de saldo de Bancos). Valor
+# inicial razonable, ajustable — no hay un umbral "correcto" único, solo
+# uno que empieza a exigir un segundo par de ojos en montos grandes.
+VAULT_DEPOSIT_APPROVAL_THRESHOLD = Decimal("10000000")
+
+
+async def request_or_execute_vault_deposit(
+    db: AsyncSession, company_id: str, entry_ids: list[str], bank_transaction_id: str | None, user_id: str | None,
+) -> dict:
+    result = await db.execute(
+        select(VaultEntry).where(
+            VaultEntry.id.in_([uuid.UUID(i) for i in entry_ids]),
+            VaultEntry.company_id == uuid.UUID(company_id),
+            VaultEntry.estado == "en_boveda",
+        )
+    )
+    entries = list(result.scalars().all())
+    if not entries:
+        return {"error": "Ninguna de las entradas seleccionadas está disponible para depositar"}
+
+    monto_total = sum((e.monto_pyg for e in entries), Decimal("0"))
+
+    if monto_total <= VAULT_DEPOSIT_APPROVAL_THRESHOLD:
+        count = await deposit_vault_entries(db, company_id, [str(e.id) for e in entries], bank_transaction_id, user_id)
+        return {"deposited": True, "depositadas": count}
+
+    request = VaultDepositApprovalRequest(
+        company_id=uuid.UUID(company_id),
+        entry_ids=[e.id for e in entries],
+        monto_total_pyg=monto_total,
+        solicitado_por=uuid.UUID(user_id) if user_id else None,
+    )
+    db.add(request)
+    await db.flush()
+    await db.refresh(request)
+    return {"pending_approval": True, "request_id": str(request.id), "monto_total_pyg": float(monto_total)}
+
+
+async def list_vault_deposit_approvals(db: AsyncSession, company_id: str, estado: str | None = "pendiente") -> list[dict]:
+    query = select(VaultDepositApprovalRequest).where(VaultDepositApprovalRequest.company_id == uuid.UUID(company_id))
+    if estado:
+        query = query.where(VaultDepositApprovalRequest.estado == estado)
+    query = query.order_by(VaultDepositApprovalRequest.created_at.desc())
+    result = await db.execute(query)
+    return [
+        {
+            "id": str(r.id),
+            "entry_ids": [str(i) for i in r.entry_ids],
+            "monto_total_pyg": float(r.monto_total_pyg),
+            "estado": r.estado,
+            "aprobado_supervisor_id": str(r.aprobado_supervisor_id) if r.aprobado_supervisor_id else None,
+            "aprobado_gerente_id": str(r.aprobado_gerente_id) if r.aprobado_gerente_id else None,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in result.scalars().all()
+    ]
+
+
+async def approve_vault_deposit(db: AsyncSession, request_id: str, company_id: str, user_id: str, tenant_id: str) -> dict:
+    from api.src.rbac.service import get_user_roles
+
+    result = await db.execute(
+        select(VaultDepositApprovalRequest).where(
+            VaultDepositApprovalRequest.id == uuid.UUID(request_id),
+            VaultDepositApprovalRequest.company_id == uuid.UUID(company_id),
+        )
+    )
+    request = result.scalar_one_or_none()
+    if not request:
+        return {"error": "Solicitud no encontrada"}
+    if request.estado != "pendiente":
+        return {"error": f"La solicitud ya está en estado '{request.estado}'"}
+
+    uid = uuid.UUID(user_id)
+    roles = {r["role_name"] for r in await get_user_roles(db, uid, uuid.UUID(tenant_id))}
+
+    # Un solo llamado llena UN solo slot. Ademas de exigir que el slot este
+    # vacio, se exige que la OTRA persona (si ya aprobo) no sea la misma —
+    # sin este segundo chequeo, alguien con Supervisor+Gerente podria
+    # llenar los dos slots solo con roles, sin que importe el orden.
+    filled_now = None
+    if "Supervisor" in roles and not request.aprobado_supervisor_id and request.aprobado_gerente_id != uid:
+        request.aprobado_supervisor_id = uid
+        request.aprobado_supervisor_at = datetime.now(timezone.utc)
+        filled_now = "supervisor"
+    elif "Gerente" in roles and not request.aprobado_gerente_id and request.aprobado_supervisor_id != uid:
+        request.aprobado_gerente_id = uid
+        request.aprobado_gerente_at = datetime.now(timezone.utc)
+        filled_now = "gerente"
+
+    if not filled_now:
+        return {"error": "No autorizado: se requiere rol Supervisor o Gerente, y tiene que ser una persona distinta a quien ya aprobó"}
+
+    await db.flush()
+
+    completo = bool(request.aprobado_supervisor_id and request.aprobado_gerente_id)
+    if completo:
+        request.estado = "aprobado"
+        await deposit_vault_entries(db, company_id, [str(i) for i in request.entry_ids], None, user_id)
+        await db.flush()
+
+    await db.refresh(request)
+    return {"success": True, "completo": completo, "request_id": str(request.id)}
+
+
+async def reject_vault_deposit(db: AsyncSession, request_id: str, company_id: str, user_id: str, tenant_id: str, motivo: str) -> dict:
+    from api.src.rbac.service import get_user_roles
+
+    result = await db.execute(
+        select(VaultDepositApprovalRequest).where(
+            VaultDepositApprovalRequest.id == uuid.UUID(request_id),
+            VaultDepositApprovalRequest.company_id == uuid.UUID(company_id),
+        )
+    )
+    request = result.scalar_one_or_none()
+    if not request:
+        return {"error": "Solicitud no encontrada"}
+    if request.estado != "pendiente":
+        return {"error": f"La solicitud ya está en estado '{request.estado}'"}
+
+    roles = {r["role_name"] for r in await get_user_roles(db, uuid.UUID(user_id), uuid.UUID(tenant_id))}
+    if "Supervisor" not in roles and "Gerente" not in roles:
+        return {"error": "No autorizado: se requiere rol Supervisor o Gerente"}
+
+    request.estado = "rechazado"
+    request.rechazado_por = uuid.UUID(user_id)
+    request.rechazado_at = datetime.now(timezone.utc)
+    request.rechazado_motivo = motivo
+    await db.flush()
+    await db.refresh(request)
+    return {"success": True}
+
+
+# ── Datos para reportes PDF ────────────────────────────────────────────
+
+async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: datetime, fecha_hasta: datetime) -> list[dict]:
+    query = (
+        select(CashSession, CashCount, CashRegister.nombre)
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .join(CashCount, CashCount.session_id == CashSession.id)
+        .where(
+            CashRegister.company_id == uuid.UUID(company_id),
+            CashSession.estado == "cerrada",
+            CashSession.fecha_cierre >= fecha_desde,
+            CashSession.fecha_cierre <= fecha_hasta,
+        )
+        .order_by(CashSession.fecha_cierre.desc())
+    )
+    result = await db.execute(query)
+    out = []
+    for session_obj, count, register_nombre in result.all():
+        monto_cierre_esperado = float(session_obj.monto_apertura) + (float(count.monto_total) - float(count.diferencia or 0))
+        out.append({
+            "cajero_nombre": session_obj.cajero_nombre,
+            "register_nombre": register_nombre,
+            "fecha_cierre": session_obj.fecha_cierre,
+            "monto_cierre_esperado": monto_cierre_esperado,
+            "monto_cierre": float(session_obj.monto_cierre) if session_obj.monto_cierre is not None else None,
+            "diferencia": float(count.diferencia) if count.diferencia is not None else None,
+            "requiere_revision": bool(count.requiere_revision),
+        })
+    return out
+
+
+async def get_vault_movimientos(db: AsyncSession, company_id: str, fecha_desde: datetime, fecha_hasta: datetime) -> list[dict]:
+    query = (
+        select(VaultEntry)
+        .where(
+            VaultEntry.company_id == uuid.UUID(company_id),
+            VaultEntry.created_at >= fecha_desde,
+            VaultEntry.created_at <= fecha_hasta,
+        )
+        .order_by(VaultEntry.created_at.desc())
+    )
+    result = await db.execute(query)
+    return [
+        {
+            "origen": v.origen,
+            "created_at": v.created_at,
+            "monto_pyg": float(v.monto_pyg),
+            "estado": v.estado,
+            "fecha_deposito": v.fecha_deposito,
+        }
+        for v in result.scalars().all()
+    ]
+
+
+# ── Performance de cajeros ────────────────────────────────────────────
+
+async def get_cajero_performance(db: AsyncSession, company_id: str) -> list[dict]:
+    """Ranking de cajeros por descuadre de caja acumulado, usando datos reales
+    de cash_sessions/cash_counts (no hay tabla de turnos/horarios porque el
+    legado nunca la tuvo — armar una fabricaria datos que no existen; esto
+    se calcula sobre lo que sí hay: cada cierre real y su diferencia)."""
+    query = (
+        select(
+            CashSession.cajero_nombre,
+            func.count(CashCount.id).label("total_cierres"),
+            func.coalesce(func.sum(CashCount.monto_efectivo), 0).label("monto_total_manejado"),
+            func.coalesce(func.sum(func.abs(CashCount.diferencia)), 0).label("diferencia_acumulada"),
+            func.count(CashCount.id).filter(CashCount.requiere_revision == True).label("cierres_con_revision"),
+            func.max(CashSession.fecha_cierre).label("ultimo_cierre"),
+        )
+        .select_from(CashSession)
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .join(CashCount, CashCount.session_id == CashSession.id)
+        .where(CashRegister.company_id == uuid.UUID(company_id), CashSession.estado == "cerrada")
+        .group_by(CashSession.cajero_nombre)
+        .order_by(func.coalesce(func.sum(func.abs(CashCount.diferencia)), 0).desc())
+    )
+    result = await db.execute(query)
+    rows = result.all()
+    return [
+        {
+            "cajero_nombre": r.cajero_nombre or "Sin nombre",
+            "total_cierres": r.total_cierres,
+            "monto_total_manejado": float(r.monto_total_manejado),
+            "diferencia_acumulada": float(r.diferencia_acumulada),
+            "diferencia_promedio": float(r.diferencia_acumulada) / r.total_cierres if r.total_cierres else 0.0,
+            "cierres_con_revision": r.cierres_con_revision,
+            "pct_con_revision": round((r.cierres_con_revision / r.total_cierres) * 100, 1) if r.total_cierres else 0.0,
+            "ultimo_cierre": r.ultimo_cierre.isoformat() if r.ultimo_cierre else None,
+        }
+        for r in rows
+    ]

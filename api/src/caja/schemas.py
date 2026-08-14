@@ -27,8 +27,8 @@ class CashRegisterResponse(BaseModel):
     nombre: str
     codigo: str
     activo: bool
-    cash_drop_threshold: Optional[Decimal] = None
-    diferencia_maxima_tolerada: Optional[Decimal] = None
+    cash_drop_threshold: Optional[float] = None
+    diferencia_maxima_tolerada: Optional[float] = None
     created_at: datetime
 
     class Config:
@@ -48,9 +48,9 @@ class CashSessionResponse(BaseModel):
     user_id: UUID
     cajero_nombre: Optional[str] = None
     fecha_apertura: datetime
-    monto_apertura: Decimal
+    monto_apertura: float
     fecha_cierre: Optional[datetime] = None
-    monto_cierre: Optional[Decimal] = None
+    monto_cierre: Optional[float] = None
     estado: str
     ultimo_cash_drop_at: Optional[datetime] = None
     observaciones: Optional[str] = None
@@ -70,3 +70,20 @@ class CashSessionClose(BaseModel):
 class CashDropCreate(BaseModel):
     monto: Decimal
     observaciones: Optional[str] = None
+
+
+class ConfirmHandoffRequest(BaseModel):
+    recibido_por: UUID
+    recibido_por_nombre: str
+    monto_confirmado_pyg: Optional[Decimal] = None
+    monto_confirmado_usd: Optional[Decimal] = None
+    monto_confirmado_brl: Optional[Decimal] = None
+
+
+class DepositVaultEntriesRequest(BaseModel):
+    entry_ids: list[UUID]
+    bank_transaction_id: Optional[UUID] = None
+
+
+class RejectVaultDepositRequest(BaseModel):
+    motivo: str
