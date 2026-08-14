@@ -245,7 +245,7 @@ function AppRoutes() {
         <Route path="pos" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pos"><CajaRapidaPage /></FeatureRoute></Suspense>} />
         <Route path="self-checkout" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SelfCheckoutPage /></FeatureRoute></Suspense>} />
         <Route path="transferencias" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><TransferenciasPage /></FeatureRoute></Suspense>} />
-        <Route path="boveda" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><BovedaPage /></FeatureRoute></Suspense>} />
+        <Route path="boveda" element={<Suspense fallback={<PageLoader />}><BovedaPage /></Suspense>} />
         <Route path="edge-agent" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><EdgeAgentPage /></FeatureRoute></Suspense>} />
         <Route path="auto-replenish" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><AutoReplenishPage /></FeatureRoute></Suspense>} />
         <Route path="sifen" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sifen"><SifenPage /></FeatureRoute></Suspense>} />
@@ -259,8 +259,8 @@ function AppRoutes() {
         <Route path="kuapay" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="kuapay"><KuapayPage /></FeatureRoute></Suspense>} />
         <Route path="spi" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="spi"><SpiPage /></FeatureRoute></Suspense>} />
         <Route path="branches" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="branches"><BranchesPage /></FeatureRoute></Suspense>} />
-        <Route path="credit-accounts" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="credit_accounts"><CreditAccountsPage /></FeatureRoute></Suspense>} />
-        <Route path="checks" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="credit_accounts"><ChecksPage /></FeatureRoute></Suspense>} />
+        <Route path="credit-accounts" element={<Suspense fallback={<PageLoader />}><CreditAccountsPage /></Suspense>} />
+        <Route path="checks" element={<Suspense fallback={<PageLoader />}><ChecksPage /></Suspense>} />
         <Route path="proveedor-kpis" element={<Suspense fallback={<PageLoader />}><SupplierKpisPage /></Suspense>} />
         <Route path="deposito" element={<Suspense fallback={<PageLoader />}><DepositoPage /></Suspense>} />
         <Route path="devoluciones-proveedores" element={<Suspense fallback={<PageLoader />}><SupplierReturnsPage /></Suspense>} />
