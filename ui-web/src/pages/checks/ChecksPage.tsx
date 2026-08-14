@@ -4,7 +4,7 @@ import {
   ArrowRightLeft, Banknote, Plus, AlertTriangle, FileText, Calendar, 
   ShieldAlert, ShieldCheck, Clock, RefreshCw, ChevronRight, Check,
   CreditCard, DollarSign, Wallet, ArrowDownRight, User, Building2,
-  FileCheck, AlertOctagon, Scale
+  FileCheck, AlertOctagon, Scale, Eye
 } from "lucide-react"
 import { api, type Check as CheckType, type CheckEvent, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
