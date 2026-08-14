@@ -1,8 +1,18 @@
 ﻿export function formatPYG(value: number | string | null | undefined): string {
   if (value == null) return "₲ 0"
-  const num = typeof value === "string" ? parseFloat(value.replace(/\./g, "").replace(",", ".")) : value
+  let num: number
+  if (typeof value === "number") {
+    num = value
+  } else {
+    const str = String(value).trim()
+    if (str.includes(".") && str.includes(",")) {
+      num = parseFloat(str.replace(/\./g, "").replace(",", "."))
+    } else {
+      num = parseFloat(str)
+    }
+  }
   if (isNaN(num)) return "₲ 0"
-  return `₲ ${num.toLocaleString("es-PY", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+  return `₲ ${Math.round(num).toLocaleString("es-PY")}`
 }
 
 export function formatUSD(value: number | string | null | undefined): string {
