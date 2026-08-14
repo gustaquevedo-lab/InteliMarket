@@ -125,10 +125,17 @@ class AccountingPeriodResponse(BaseModel):
     estado: str
     fecha_apertura: Optional[datetime] = None
     fecha_cierre: Optional[datetime] = None
+    reabierto_por: Optional[UUID] = None
+    fecha_reapertura: Optional[datetime] = None
+    motivo_reapertura: Optional[str] = None
     observaciones: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class PeriodReopenBody(BaseModel):
+    motivo: str
 
 
 # ── Accounting Entry ─────────────────────────────────────────────────────────
@@ -155,10 +162,43 @@ class AccountingEntryResponse(BaseModel):
     monto: float
     concepto: Optional[str] = None
     asiento_numero: Optional[str] = None
+    reversa_de_asiento: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+class EntryReversalBody(BaseModel):
+    motivo: str
+
+class EntryReversalResponse(BaseModel):
+    asiento_numero_original: str
+    asiento_numero_reversa: str
+    fecha: date
+    motivo: str
+    lines: list[AccountingEntryResponse]
+
+
+class ManualEntryLine(BaseModel):
+    account_id: str
+    tipo: str  # "debe" | "haber"
+    monto: float
+    concepto: Optional[str] = None
+
+class ManualEntryCreate(BaseModel):
+    fecha: date
+    concepto: str
+    lines: list[ManualEntryLine]
+
+class ManualEntryResponse(BaseModel):
+    asiento_numero: str
+    fecha: date
+    concepto: str
+    total_debe: float
+    total_haber: float
+    lines: list[AccountingEntryResponse]
+
 
 class TrialBalanceItem(BaseModel):
     account_id: str
@@ -234,6 +274,7 @@ class CustomerScoreResponse(BaseModel):
     id: UUID
     company_id: UUID
     customer_id: UUID
+    customer_nombre: Optional[str] = None
     score: int
     pago_puntual: float
     dias_mora_promedio: float
@@ -268,6 +309,26 @@ class AutoReconcileResult(BaseModel):
     no_conciliadas: int
     monto_no_conciliado: float
     detalle: list[dict]
+
+
+# ── Integración de silos (Fase 4) ────────────────────────────────────────────
+
+class CashReconciliationResponse(BaseModel):
+    saldo_ledger_caja_y_bancos: float
+    saldo_real_bancos_pyg: float
+    diferencia: float
+    cuentas_excluidas_otra_moneda: int
+    nota: str
+
+class PnlReconciliationResponse(BaseModel):
+    periodo: str
+    ledger: dict
+    gerencial: dict
+    diferencia_ingresos: float
+    diferencia_costos: float
+    diferencia_gastos: float
+    diferencia_resultado_neto: float
+    nota: str
 
 
 # ── Consolidated Dashboard ───────────────────────────────────────────────────

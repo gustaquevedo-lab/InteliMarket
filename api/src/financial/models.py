@@ -73,10 +73,42 @@ class BankAccount(Base):
     saldo_actual = Column(Numeric(15, 2), default=0)
     titular = Column(String(200))
     activo = Column(Boolean, default=True)
+    saldo_minimo_alerta = Column(Numeric(15, 2))  # NULL = alerta de saldo bajo desactivada
+    saldo_verificado_manualmente = Column(Boolean, nullable=False, default=False)
+    saldo_verificado_at = Column(DateTime(timezone=True))
+    saldo_verificado_por = Column(UUID(as_uuid=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     transactions = relationship("BankTransaction", back_populates="bank_account", cascade="all, delete-orphan")
+
+
+class BankBalanceCorrectionRequest(Base):
+    """Divergencia grande detectada por sync_bank_balances contra un saldo ya
+    verificado manualmente (origen='auto_divergencia'), o una corrección de
+    saldo pedida a mano (origen='manual') -- en ambos casos el saldo NO se
+    toca hasta que Supervisor Y Gerente aprueben, mismo patrón de dos slots
+    que CreditApprovalRequest en Cuentas por Cobrar."""
+    __tablename__ = "bank_balance_correction_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    bank_account_id = Column(UUID(as_uuid=True), ForeignKey("bank_accounts.id"), nullable=False, index=True)
+    origen = Column(String(20), nullable=False)  # auto_divergencia | manual
+    saldo_actual = Column(Numeric(15, 2), nullable=False)
+    saldo_propuesto = Column(Numeric(15, 2), nullable=False)
+    motivo = Column(Text)
+    estado = Column(String(20), nullable=False, default="pendiente")  # pendiente, aprobado, rechazado
+    solicitado_por = Column(UUID(as_uuid=True))
+    aprobado_supervisor_id = Column(UUID(as_uuid=True))
+    aprobado_supervisor_at = Column(DateTime(timezone=True))
+    aprobado_gerente_id = Column(UUID(as_uuid=True))
+    aprobado_gerente_at = Column(DateTime(timezone=True))
+    rechazado_por = Column(UUID(as_uuid=True))
+    rechazado_at = Column(DateTime(timezone=True))
+    rechazado_motivo = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class BankTransaction(Base):
@@ -95,6 +127,7 @@ class BankTransaction(Base):
     conciliado = Column(Boolean, default=False)
     fecha_conciliacion = Column(DateTime(timezone=True))
     invoice_id = Column(UUID(as_uuid=True))
+    cheque_id = Column(UUID(as_uuid=True))
     categoria = Column(String(30), default="otros")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -228,3 +261,34 @@ class PayrollMovement(Base):
     cerrado = Column(Boolean, default=False)  # BO_FINALIZADO — ya incluido en una liquidacion cerrada
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class APPaymentApprovalRequest(Base):
+    """Pago de factura individual o ejecucion de lote de pago que supera el
+    umbral configurado (Cuentas por Pagar Fase 3) -- retenido hasta que
+    Supervisor Y Gerente aprueben, mismo patron de dos slots que
+    CreditApprovalRequest y BankBalanceCorrectionRequest."""
+    __tablename__ = "ap_payment_approval_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    entidad_tipo = Column(String(20), nullable=False)  # invoice | payment_run
+    entidad_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    monto = Column(Numeric(15, 2), nullable=False)
+    payment_method = Column(String(30))
+    moneda = Column(String(3))
+    fecha_pago = Column(Date)
+    referencia = Column(String(100))
+    comprobante_url = Column(Text)
+    bank_account_id = Column(UUID(as_uuid=True))
+    estado = Column(String(20), nullable=False, default="pendiente")  # pendiente, aprobado, rechazado
+    solicitado_por = Column(UUID(as_uuid=True))
+    aprobado_supervisor_id = Column(UUID(as_uuid=True))
+    aprobado_supervisor_at = Column(DateTime(timezone=True))
+    aprobado_gerente_id = Column(UUID(as_uuid=True))
+    aprobado_gerente_at = Column(DateTime(timezone=True))
+    rechazado_por = Column(UUID(as_uuid=True))
+    rechazado_at = Column(DateTime(timezone=True))
+    rechazado_motivo = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

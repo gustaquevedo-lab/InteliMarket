@@ -45,3 +45,9 @@ class FinanceAgentRunResponse(BaseModel):
 class DecisionRequest(BaseModel):
     approved_by: UUID
     comments: Optional[str] = None
+
+
+class BulkDecisionRequest(BaseModel):
+    ids: list[UUID]
+    approved_by: UUID
+    comments: Optional[str] = None

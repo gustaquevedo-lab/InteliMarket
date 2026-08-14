@@ -50,3 +50,37 @@ class CustomerAging(BaseModel):
 class PaymentAllocationInput(BaseModel):
     sale_id: UUID
     monto: Decimal = Field(gt=0)
+
+
+class ReceivableAllocationInput(BaseModel):
+    accounts_receivable_id: UUID
+    monto: Decimal = Field(gt=0)
+
+
+class ReceivablePaymentCreate(BaseModel):
+    customer_id: UUID
+    monto_total: Decimal = Field(gt=0)
+    moneda: str = "PYG"
+    forma_pago: Optional[str] = None
+    referencia: Optional[str] = None
+    fecha: Optional[date] = None
+    observaciones: Optional[str] = None
+    allocations: list[ReceivableAllocationInput] = Field(min_length=1)
+
+
+class ReceivablePaymentResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    customer_id: UUID
+    monto_total: Decimal
+    moneda: str
+    forma_pago: Optional[str] = None
+    referencia: Optional[str] = None
+    fecha: date
+    observaciones: Optional[str] = None
+    registrado_por: Optional[UUID] = None
+    created_at: datetime
+    allocations: list[dict] = []
+
+    class Config:
+        from_attributes = True

@@ -18,6 +18,7 @@ from api.src.integrated_finance.schemas import (
     AccountingEntryCreate,
     CollectionActionCreate,
     ConsolidatedDashboard,
+    ManualEntryCreate,
 )
 
 
@@ -97,7 +98,7 @@ async def get_withholding_dashboard(db: AsyncSession, company_id: str):
 
     env_q = await db.execute(
         select(func.count(), func.coalesce(func.sum(WithholdingDocument.monto_retenido), 0))
-        .where(WithholdingDocument.company_id == cid, WithholdingDocument.estado == "enviado")
+        .where(WithholdingDocument.company_id == cid, WithholdingDocument.estado == "aprobado")
     )
     env_count, env_monto = env_q.one()
 
@@ -177,19 +178,6 @@ async def approve_withholding_document(db: AsyncSession, doc_id: str):
     return doc
 
 
-async def send_withholding_to_sifen(db: AsyncSession, doc_id: str):
-    r = await db.execute(select(WithholdingDocument).where(WithholdingDocument.id == uuid.UUID(doc_id)))
-    doc = r.scalar_one_or_none()
-    if not doc or doc.estado not in ("aprobado", "pendiente"):
-        return None
-    doc.estado = "enviado"
-    doc.fecha_envio_sifen = _now()
-    doc.cdc = f"CDC-{str(doc.id)[:16].upper()}"
-    await db.flush()
-    await db.refresh(doc)
-    return doc
-
-
 # ── ACCOUNT PLAN ──────────────────────────────────────────────────────────────
 
 async def list_account_plans(db: AsyncSession, company_id: str):
@@ -250,6 +238,28 @@ async def close_accounting_period(db: AsyncSession, period_id: str, user_id: str
     await db.flush()
     await db.refresh(period)
     return period
+
+
+async def reopen_accounting_period(db: AsyncSession, period_id: str, user_id: str, motivo: str) -> dict:
+    """Reabrir un periodo cerrado -- accion excepcional y auditada (motivo
+    obligatorio, queda quien y cuando). Gateado a Gerente unicamente en el
+    router, un nivel mas estricto que el resto de las acciones contables,
+    porque reabrir un periodo ya cerrado puede invalidar reportes que ya se
+    entregaron con ese periodo como definitivo."""
+    r = await db.execute(select(AccountingPeriod).where(AccountingPeriod.id == uuid.UUID(period_id)))
+    period = r.scalar_one_or_none()
+    if not period:
+        return {"error": "Período no encontrado"}
+    if period.estado != "cerrado":
+        return {"error": "El período no está cerrado"}
+
+    period.estado = "abierto"
+    period.reabierto_por = uuid.UUID(user_id)
+    period.fecha_reapertura = _now()
+    period.motivo_reapertura = motivo
+    await db.flush()
+    await db.refresh(period)
+    return {"success": True, "period": period}
 
 
 async def get_trial_balance(db: AsyncSession, company_id: str, period_id: str) -> dict:
@@ -381,7 +391,97 @@ async def get_pnl(db: AsyncSession, company_id: str, period_id: str) -> dict:
     }
 
 
-async def post_accounting_entry(db: AsyncSession, data: AccountingEntryCreate, user_id: str | None = None):
+# ── Integración de silos (Fase 4) ────────────────────────────────────────────
+# El auditoria de este modulo encontro que "Contabilidad Integrada" no
+# integraba nada en realidad: el P&L de Gerencial se calcula directo de
+# sales/petty_cash sin tocar el mayor, y la conciliacion bancaria de Bancos
+# nunca actualiza la cuenta Caja y Bancos del mayor. Fusionar ambos motores
+# de un solo saque es de alto riesgo (Gerencial ya alimenta otros
+# dashboards en produccion, y el mayor solo tiene 8/28 cuentas con
+# movimiento real). En cambio, esto hace visible y cuantificada la
+# divergencia -- integracion real es primero saber cuanto se desvia, no
+# fusionar a ciegas dos motores que evolucionaron por separado.
+
+async def get_cash_reconciliation(db: AsyncSession, company_id: str) -> dict:
+    from api.src.financial.models import BankAccount
+
+    cid = uuid.UUID(company_id)
+
+    caja_r = await db.execute(
+        select(AccountPlan.id).where(AccountPlan.company_id == cid, AccountPlan.codigo == "1.1.01")
+    )
+    caja_account_id = caja_r.scalar_one_or_none()
+
+    saldo_ledger = Decimal("0")
+    if caja_account_id:
+        mov_r = await db.execute(
+            select(
+                func.coalesce(func.sum(case((AccountingEntry.tipo == "debe", AccountingEntry.monto), else_=0)), 0),
+                func.coalesce(func.sum(case((AccountingEntry.tipo == "haber", AccountingEntry.monto), else_=0)), 0),
+            ).where(AccountingEntry.company_id == cid, AccountingEntry.account_id == caja_account_id)
+        )
+        debe, haber = mov_r.one()
+        saldo_ledger = Decimal(str(debe)) - Decimal(str(haber))
+
+    bancos_r = await db.execute(
+        select(BankAccount).where(BankAccount.company_id == cid, BankAccount.activo == True)  # noqa: E712
+    )
+    cuentas = list(bancos_r.scalars().all())
+    saldo_real_pyg = sum((Decimal(str(b.saldo_actual)) for b in cuentas if b.moneda == "PYG"), Decimal("0"))
+    excluidas = sum(1 for b in cuentas if b.moneda != "PYG")
+
+    return {
+        "saldo_ledger_caja_y_bancos": float(saldo_ledger),
+        "saldo_real_bancos_pyg": float(saldo_real_pyg),
+        "diferencia": float(saldo_ledger - saldo_real_pyg),
+        "cuentas_excluidas_otra_moneda": excluidas,
+        "nota": (
+            "La cuenta 'Caja y Bancos' del mayor mezcla efectivo de caja registradora "
+            "con depósitos bancarios (posteado desde ventas/cobros/pagos, no desde "
+            "movimientos bancarios reales) — no es una comparación exacta transacción "
+            "por transacción, sino una señal de magnitud del desvío. "
+            f"{f'Se excluyeron {excluidas} cuenta(s) en moneda distinta a PYG.' if excluidas else ''}"
+        ).strip(),
+    }
+
+
+async def get_pnl_reconciliation(db: AsyncSession, company_id: str, period_id: str) -> dict:
+    from api.src.gerencial.service import get_pnl_data as gerencial_get_pnl_data
+
+    pid = uuid.UUID(period_id)
+    r = await db.execute(select(AccountingPeriod).where(AccountingPeriod.id == pid))
+    period = r.scalar_one_or_none()
+    if not period:
+        return {"error": "Período no encontrado"}
+
+    ledger = await get_pnl(db, company_id, period_id)
+    gerencial = await gerencial_get_pnl_data(db, company_id, period.fecha_inicio, period.fecha_fin)
+
+    return {
+        "periodo": ledger["periodo"],
+        "ledger": ledger,
+        "gerencial": gerencial,
+        "diferencia_ingresos": round(ledger["total_ingresos"] - gerencial["total_ingresos"], 2),
+        "diferencia_costos": round(ledger["total_costos"] - gerencial["total_costos"], 2),
+        "diferencia_gastos": round(ledger["total_gastos"] - gerencial["total_gastos"], 2),
+        "diferencia_resultado_neto": round(ledger["resultado_neto"] - gerencial["resultado_neto"], 2),
+        "nota": (
+            "El mayor solo tiene movimiento en 8 de 28 cuentas — Alquileres, Servicios, "
+            "Impuestos, Gastos Financieros y Depreciaciones nunca recibieron asientos, "
+            "así que 'Gastos' en Gerencial (que sí lee caja chica real) va a ser mayor "
+            "que en el mayor mientras esas cuentas sigan sin poblarse."
+        ),
+    }
+
+
+async def post_accounting_entry(db: AsyncSession, data: AccountingEntryCreate, user_id: str | None = None) -> dict:
+    r = await db.execute(select(AccountingPeriod).where(AccountingPeriod.id == uuid.UUID(data.period_id)))
+    period = r.scalar_one_or_none()
+    if not period:
+        return {"error": "Período no encontrado"}
+    if period.estado == "cerrado":
+        return {"error": f"El período {period.mes:02d}/{period.anio} está cerrado. No se pueden cargar asientos en un período cerrado."}
+
     entry = AccountingEntry(
         company_id=uuid.UUID(data.company_id),
         period_id=uuid.UUID(data.period_id),
@@ -398,7 +498,207 @@ async def post_accounting_entry(db: AsyncSession, data: AccountingEntryCreate, u
     db.add(entry)
     await db.flush()
     await db.refresh(entry)
-    return entry
+    return {"success": True, "entry": entry}
+
+
+# ── MANUAL JOURNAL ENTRIES (Fase 1) ─────────────────────────────────────────
+# Hasta ahora accounting_entries solo se poblaba via auto_posting.py (ventas,
+# compras, pagos, cobros, nomina) -- no habia ninguna forma de que un contador
+# cargara un asiento de ajuste, apertura o depreciacion a mano. Este es el
+# primer punto de entrada manual real, con la misma disciplina de partida
+# doble que ya usa PostingEngine.post: no se acepta nada desbalanceado.
+
+_MANUAL_ASIENTO_PREFIX = "M"
+
+
+async def _resolve_period_for_manual(db: AsyncSession, company_id: str, fecha: date) -> AccountingPeriod:
+    cid = uuid.UUID(company_id)
+    r = await db.execute(
+        select(AccountingPeriod).where(
+            AccountingPeriod.company_id == cid,
+            AccountingPeriod.anio == fecha.year,
+            AccountingPeriod.mes == fecha.month,
+        )
+    )
+    period = r.scalar_one_or_none()
+    if period:
+        return period
+    inicio, fin = _month_range(fecha.year, fecha.month)
+    period = AccountingPeriod(
+        company_id=cid, anio=fecha.year, mes=fecha.month,
+        fecha_inicio=inicio, fecha_fin=fin, estado="abierto",
+    )
+    db.add(period)
+    await db.flush()
+    await db.refresh(period)
+    return period
+
+
+async def create_manual_entry(db: AsyncSession, company_id: str, data: ManualEntryCreate, user_id: str) -> dict:
+    if len(data.lines) < 2:
+        return {"error": "Un asiento necesita al menos dos líneas (débito y crédito)"}
+
+    lines = []
+    total_debe = Decimal("0")
+    total_haber = Decimal("0")
+    for line in data.lines:
+        if line.tipo not in ("debe", "haber"):
+            return {"error": f"Tipo de línea inválido: '{line.tipo}' (debe ser 'debe' o 'haber')"}
+        monto = Decimal(str(line.monto))
+        if monto <= 0:
+            return {"error": "Cada línea debe tener un monto mayor a cero"}
+        lines.append((line.account_id, line.tipo, monto, line.concepto))
+        if line.tipo == "debe":
+            total_debe += monto
+        else:
+            total_haber += monto
+
+    if total_debe != total_haber:
+        return {"error": f"El asiento no está balanceado: debe={total_debe} haber={total_haber}"}
+
+    cid = uuid.UUID(company_id)
+    account_ids = {uuid.UUID(l[0]) for l in lines}
+    accounts_r = await db.execute(
+        select(AccountPlan).where(AccountPlan.company_id == cid, AccountPlan.id.in_(account_ids))
+    )
+    accounts = {a.id: a for a in accounts_r.scalars().all()}
+    for account_id in account_ids:
+        acc = accounts.get(account_id)
+        if not acc:
+            return {"error": "Una de las cuentas seleccionadas no existe o no pertenece a esta empresa"}
+        if not acc.acepta_asientos:
+            return {"error": f"La cuenta '{acc.codigo} - {acc.nombre}' es una cuenta de agrupación y no acepta asientos directos"}
+
+    period = await _resolve_period_for_manual(db, company_id, data.fecha)
+    if period.estado == "cerrado":
+        return {"error": f"El período {period.mes:02d}/{period.anio} está cerrado. No se pueden cargar asientos en un período cerrado."}
+
+    count_r = await db.execute(
+        select(func.count(func.distinct(AccountingEntry.asiento_numero))).select_from(AccountingEntry).where(
+            AccountingEntry.company_id == cid,
+            AccountingEntry.fecha == data.fecha,
+            AccountingEntry.asiento_numero.like(f"{_MANUAL_ASIENTO_PREFIX}{data.fecha:%y%m%d}%"),
+        )
+    )
+    seq = (count_r.scalar() or 0) + 1
+    asiento_numero = f"{_MANUAL_ASIENTO_PREFIX}{data.fecha:%y%m%d}{seq:05d}"
+    referencia_id = uuid.uuid4()
+
+    entries = []
+    for account_id, tipo, monto, line_concepto in lines:
+        entry = AccountingEntry(
+            company_id=cid,
+            period_id=period.id,
+            account_id=uuid.UUID(account_id),
+            fecha=data.fecha,
+            tipo=tipo,
+            monto=monto,
+            concepto=line_concepto or data.concepto,
+            referencia_tipo="manual",
+            referencia_id=referencia_id,
+            asiento_numero=asiento_numero,
+            created_by=uuid.UUID(user_id),
+        )
+        db.add(entry)
+        entries.append(entry)
+
+    await db.flush()
+    for e in entries:
+        await db.refresh(e)
+
+    return {
+        "success": True,
+        "asiento_numero": asiento_numero,
+        "fecha": data.fecha,
+        "concepto": data.concepto,
+        "total_debe": float(total_debe),
+        "total_haber": float(total_haber),
+        "lines": entries,
+    }
+
+
+# ── REVERSO DE ASIENTOS (Fase 3) ─────────────────────────────────────────────
+# Los asientos no se editan ni se borran -- correcto, es la base de cualquier
+# auditoria contable seria. Pero hasta ahora, si alguien cargaba algo mal, no
+# habia forma de corregirlo salvo dejarlo mal para siempre. Este reverso crea
+# un asiento NUEVO con las lineas invertidas (debe<->haber, mismo monto),
+# enlazado al original via reversa_de_asiento, sin tocar ni un campo del
+# asiento original. Se postea con fecha de hoy (no la fecha del original,
+# que suele estar en un periodo ya cerrado).
+
+_REVERSA_ASIENTO_PREFIX = "R"
+
+
+async def reverse_accounting_entry(db: AsyncSession, company_id: str, asiento_numero: str, user_id: str, motivo: str) -> dict:
+    cid = uuid.UUID(company_id)
+    r = await db.execute(
+        select(AccountingEntry).where(
+            AccountingEntry.company_id == cid,
+            AccountingEntry.asiento_numero == asiento_numero,
+        )
+    )
+    originales = list(r.scalars().all())
+    if not originales:
+        return {"error": f"No se encontró el asiento '{asiento_numero}'"}
+
+    ya_reversado_r = await db.execute(
+        select(func.count()).select_from(AccountingEntry).where(
+            AccountingEntry.company_id == cid,
+            AccountingEntry.reversa_de_asiento == asiento_numero,
+        )
+    )
+    if (ya_reversado_r.scalar() or 0) > 0:
+        return {"error": f"El asiento '{asiento_numero}' ya fue reversado"}
+
+    hoy = _today()
+    period = await _resolve_period_for_manual(db, company_id, hoy)
+    if period.estado == "cerrado":
+        return {"error": f"El período actual ({period.mes:02d}/{period.anio}) está cerrado. No se puede postear el reverso."}
+
+    count_r = await db.execute(
+        select(func.count(func.distinct(AccountingEntry.asiento_numero))).select_from(AccountingEntry).where(
+            AccountingEntry.company_id == cid,
+            AccountingEntry.fecha == hoy,
+            AccountingEntry.asiento_numero.like(f"{_REVERSA_ASIENTO_PREFIX}{hoy:%y%m%d}%"),
+        )
+    )
+    seq = (count_r.scalar() or 0) + 1
+    asiento_reversa = f"{_REVERSA_ASIENTO_PREFIX}{hoy:%y%m%d}{seq:05d}"
+    referencia_id = uuid.uuid4()
+    concepto = f"Reverso de {asiento_numero}: {motivo}"
+
+    nuevas = []
+    for orig in originales:
+        tipo_invertido = "haber" if orig.tipo == "debe" else "debe"
+        entry = AccountingEntry(
+            company_id=cid,
+            period_id=period.id,
+            account_id=orig.account_id,
+            fecha=hoy,
+            tipo=tipo_invertido,
+            monto=orig.monto,
+            concepto=concepto,
+            referencia_tipo="reversal",
+            referencia_id=referencia_id,
+            asiento_numero=asiento_reversa,
+            reversa_de_asiento=asiento_numero,
+            created_by=uuid.UUID(user_id),
+        )
+        db.add(entry)
+        nuevas.append(entry)
+
+    await db.flush()
+    for e in nuevas:
+        await db.refresh(e)
+
+    return {
+        "success": True,
+        "asiento_numero_original": asiento_numero,
+        "asiento_numero_reversa": asiento_reversa,
+        "fecha": hoy,
+        "motivo": motivo,
+        "lines": nuevas,
+    }
 
 
 # ── COLLECTION ACTIONS ────────────────────────────────────────────────────────
@@ -490,12 +790,41 @@ async def get_customer_score(db: AsyncSession, company_id: str, customer_id: str
 
 
 async def list_customer_scores(db: AsyncSession, company_id: str, min_score: int | None = None):
-    q = select(CustomerScore).where(CustomerScore.company_id == uuid.UUID(company_id))
+    from api.src.customers.models import Customer
+
+    q = (
+        select(CustomerScore, Customer.razon_social)
+        .join(Customer, Customer.id == CustomerScore.customer_id)
+        .where(CustomerScore.company_id == uuid.UUID(company_id))
+    )
     if min_score is not None:
         q = q.where(CustomerScore.score >= min_score)
     q = q.order_by(CustomerScore.score.asc())
     r = await db.execute(q)
-    return list(r.scalars().all())
+    out = []
+    for score, razon_social in r.all():
+        out.append({
+            "id": score.id, "company_id": score.company_id, "customer_id": score.customer_id,
+            "customer_nombre": razon_social,
+            "score": score.score, "pago_puntual": score.pago_puntual, "dias_mora_promedio": score.dias_mora_promedio,
+            "antiguedad_dias": score.antiguedad_dias, "total_compras": score.total_compras, "total_pagos": score.total_pagos,
+            "veces_mora": score.veces_mora, "ultima_actualizacion": score.ultima_actualizacion,
+        })
+    return out
+
+
+async def recalculate_all_scores(db: AsyncSession, company_id: str) -> int:
+    """Seed/actualiza el score de todos los clientes con historial real en AR
+    — sin esto, activar Scoring de a un cliente por vez no escala (443
+    clientes reales con documentos en accounts_receivable)."""
+    r = await db.execute(
+        text("SELECT DISTINCT customer_id FROM accounts_receivable WHERE company_id = :cid"),
+        {"cid": company_id},
+    )
+    customer_ids = [row[0] for row in r.all()]
+    for cuid in customer_ids:
+        await recalculate_score(db, company_id, str(cuid))
+    return len(customer_ids)
 
 
 async def recalculate_score(db: AsyncSession, company_id: str, customer_id: str):
@@ -628,7 +957,7 @@ async def compute_ebitda(db: AsyncSession, company_id: str, month: str | None = 
     sales_r = await db.execute(
         select(func.coalesce(func.sum(Sale.total), 0)).where(
             Sale.company_id == cid,
-            Sale.estado != 'anulado',
+            Sale.estado == 'confirmado',
             func.date(Sale.fecha) >= inicio,
             func.date(Sale.fecha) <= fin,
         )
@@ -643,7 +972,7 @@ async def compute_ebitda(db: AsyncSession, company_id: str, month: str | None = 
         .join(Sale, Sale.id == SaleItem.sale_id)
         .where(
             Sale.company_id == cid,
-            Sale.estado != 'anulado',
+            Sale.estado == 'confirmado',
             func.date(Sale.fecha) >= inicio,
             func.date(Sale.fecha) <= fin,
         )
@@ -859,7 +1188,7 @@ async def get_consolidated_dashboard(db: AsyncSession, company_id: str) -> dict:
     ventas_anual_q = await db.execute(
         select(func.coalesce(func.sum(Sale.total), 0)).where(
             Sale.company_id == cid,
-            Sale.estado != 'anulado',
+            Sale.estado == 'confirmado',
             func.date(Sale.fecha) >= date(today.year - 1, today.month, 1),
         )
     )

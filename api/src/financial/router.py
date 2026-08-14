@@ -1,23 +1,39 @@
 """Financial API router — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 
 from api.src.db import get_db
+from sqlalchemy import text
+from fastapi.responses import StreamingResponse
+from api.src.integrated_finance import pdf_reports
+from api.src.financial import pdf_reports as bancos_pdf_reports
+from api.src.financial import ap_pdf_reports
+from api.src.auth.middleware import require_auth
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoiceResponse, SupplierInvoiceWithPayments,
     SupplierInvoicePaymentCreate, SupplierInvoicePaymentResponse,
     BankAccountCreate, BankAccountUpdate, BankAccountResponse,
     BankTransactionCreate, BankTransactionImport, BankTransactionResponse,
     ReconcileRequest,
+    BulkReconcileRequest,
+    BalanceCorrectionCreate, BalanceCorrectionDecision, BankBalanceCorrectionResponse,
     CashFlowProjectionResponse, CashFlowProjectionUpdate,
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetVsActual,
     PaymentRunCreate, PaymentRunResponse, PaymentRunWithItems, PaymentRunItemResponse,
+    APPaymentRejectRequest,
+    CashFlowAlertConfig,
 )
 from api.src.financial import service
 
 router = APIRouter(prefix="/api/v1/financial", tags=["financial"])
+
+
+async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
+    r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    row = r.first()
+    return {"razon_social": row.razon_social, "ruc": row.ruc, "logo_url": row.logo_url} if row else {"razon_social": "Empresa", "ruc": "N/A"}
 
 
 # ── AP: Supplier Invoices ──────────────────────────────────────────────────────
@@ -50,6 +66,14 @@ async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db)):
     return invoice
 
 
+@router.get("/invoices/by-receipt/{receipt_id}", response_model=dict)
+async def get_invoice_by_receipt(receipt_id: str, db: AsyncSession = Depends(get_db)):
+    invoice = await service.get_invoice_by_receipt(db, receipt_id)
+    if not invoice:
+        return {"found": False}
+    return {"found": True, "id": str(invoice.id), "numero_factura": invoice.numero_factura, "total": float(invoice.total), "estado": invoice.estado}
+
+
 @router.post("/invoices/{invoice_id}/approve", response_model=SupplierInvoiceResponse)
 async def approve_invoice(invoice_id: str, user_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     result = await service.approve_invoice(db, invoice_id, user_id)
@@ -58,13 +82,15 @@ async def approve_invoice(invoice_id: str, user_id: str | None = Query(None), db
     return result
 
 
-@router.post("/invoices/{invoice_id}/pay", response_model=SupplierInvoicePaymentResponse)
-async def pay_invoice(invoice_id: str, body: SupplierInvoicePaymentCreate, db: AsyncSession = Depends(get_db)):
-    result = await service.register_payment(db, invoice_id, body)
-    if not result:
-        raise HTTPException(status_code=400, detail="No se pudo registrar el pago")
-    payment, _ = result
-    return payment
+@router.post("/invoices/{invoice_id}/pay", response_model=dict)
+async def pay_invoice(invoice_id: str, body: SupplierInvoicePaymentCreate, user_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    result = await service.register_payment_gated(db, invoice_id, body, user_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    if result["pending_approval"]:
+        return {"pending_approval": True, "request_id": str(result["request"].id), "monto": float(result["request"].monto)}
+    payment = result["payment"]
+    return {"pending_approval": False, "id": str(payment.id), "invoice_id": str(payment.invoice_id), "monto": float(payment.monto), "estado": payment.estado}
 
 
 @router.get("/aging", response_model=dict)
@@ -75,6 +101,59 @@ async def get_aging(company_id: str = Query(), db: AsyncSession = Depends(get_db
 @router.get("/dashboard", response_model=dict)
 async def get_ap_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
     return await service.get_ap_dashboard(db, company_id)
+
+
+@router.get("/ap/payment-queue", response_model=dict)
+async def get_payment_queue(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.get_payment_queue(db, company_id)
+
+
+@router.get("/suppliers/{supplier_id}/statement.pdf")
+async def supplier_statement_pdf(supplier_id: str, company_id: str = Query(...), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    sup_r = await db.execute(text("SELECT razon_social, ruc FROM suppliers WHERE id = :id"), {"id": supplier_id})
+    sup = sup_r.first()
+    if not sup:
+        raise HTTPException(404, "Proveedor no encontrado")
+
+    docs_r = await db.execute(
+        text("""
+            SELECT numero_factura, fecha_emision, fecha_vencimiento, total, saldo_pendiente
+            FROM supplier_invoices
+            WHERE company_id = :cid AND supplier_id = :sup_id AND estado IN ('pendiente', 'aprobada', 'parcial')
+            ORDER BY fecha_vencimiento
+        """),
+        {"cid": company_id, "sup_id": supplier_id},
+    )
+    from datetime import date as _date
+    today = _date.today()
+    documentos = []
+    for r in docs_r.all():
+        dias_mora = (today - r.fecha_vencimiento).days if r.fecha_vencimiento and r.fecha_vencimiento < today else None
+        documentos.append({
+            "numero": r.numero_factura or "-",
+            "fecha_emision": r.fecha_emision.strftime("%d/%m/%Y") if r.fecha_emision else "-",
+            "fecha_vencimiento": r.fecha_vencimiento.strftime("%d/%m/%Y") if r.fecha_vencimiento else "-",
+            "monto_original": float(r.total or 0),
+            "saldo_pendiente": float(r.saldo_pendiente or 0),
+            "dias_mora": dias_mora,
+        })
+
+    comp_r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    comp = comp_r.first()
+    company = {"razon_social": comp.razon_social, "ruc": comp.ruc, "logo_url": comp.logo_url} if comp else {"razon_social": "Empresa", "ruc": "N/A"}
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+
+    pdf_bytes = pdf_reports.generate_account_statement_pdf(
+        company, {"nombre": sup.razon_social, "ruc": sup.ruc}, "proveedor", documentos, generated_by
+    )
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=estado_cuenta_proveedor_{supplier_id[:8]}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
 
 
 # ── Banking ────────────────────────────────────────────────────────────────────
@@ -92,6 +171,75 @@ async def list_bank_accounts(company_id: str = Query(), db: AsyncSession = Depen
 @router.get("/banks/dashboard", response_model=dict)
 async def get_bank_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
     return await service.get_bank_dashboard(db, company_id)
+
+
+@router.get("/banks/cash-position", response_model=dict)
+async def get_cash_position(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.get_cash_position(db, company_id)
+
+
+@router.get("/banks/outstanding-items", response_model=dict)
+async def get_outstanding_items(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.get_outstanding_items(db, company_id)
+
+
+# ── Reportes PDF (Bancos Fase 7) ────────────────────────────────────────────
+
+@router.get("/banks/{account_id}/export/reconciliation.pdf")
+async def export_reconciliation_pdf(
+    account_id: str, company_id: str = Query(), desde: date | None = Query(None), hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db), user=Depends(require_auth),
+):
+    try:
+        reporte = await service.get_reconciliation_report(db, company_id, account_id, desde, hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = bancos_pdf_reports.generate_reconciliation_pdf(company, reporte["account"], reporte, desde, hasta, generated_by)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=conciliacion_bancaria_{account_id[:8]}.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/banks/export/cash-position.pdf")
+async def export_cash_position_pdf(company_id: str = Query(), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    cash_position = await service.get_cash_position(db, company_id)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = bancos_pdf_reports.generate_cash_position_pdf(company, cash_position, generated_by)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=posicion_de_caja.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/ap/export/aging.pdf")
+async def export_ap_aging_pdf(company_id: str = Query(), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    aging = await service.get_ap_aging(db, company_id)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = ap_pdf_reports.generate_ap_aging_pdf(company, aging, generated_by)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=antiguedad_saldos_ap.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
+
+
+@router.get("/ap/export/top-suppliers.pdf")
+async def export_top_suppliers_pdf(
+    company_id: str = Query(), desde: date | None = Query(None), hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db), user=Depends(require_auth),
+):
+    report = await service.get_top_suppliers_report(db, company_id, desde, hasta)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = ap_pdf_reports.generate_top_suppliers_pdf(company, report, desde, hasta, generated_by)
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=top_proveedores_dpo.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
 
 
 @router.get("/banks/transactions", response_model=list[BankTransactionResponse])
@@ -112,6 +260,15 @@ async def list_all_bank_transactions(
     formed hexadecimal UUID string) cuando este endpoint estaba más abajo.
     """
     return await service.list_bank_transactions(db, company_id, None, conciliado, desde, hasta, categoria, limit, offset)
+
+
+@router.get("/banks/balance-corrections", response_model=list[BankBalanceCorrectionResponse])
+async def list_balance_corrections(company_id: str = Query(), estado: str | None = Query("pendiente"), db: AsyncSession = Depends(get_db)):
+    """Registrada antes de /banks/{account_id} — mismo problema de orden de
+    rutas que /banks/transactions: "balance-corrections" caía en account_id
+    (ValueError: badly formed hexadecimal UUID string) cuando este endpoint
+    estaba más abajo, junto con los otros endpoints de Bancos Fase 5."""
+    return await service.list_balance_corrections(db, company_id, estado)
 
 
 @router.get("/banks/{account_id}", response_model=BankAccountResponse)
@@ -163,9 +320,106 @@ async def import_bank_statement(
     return await service.import_bank_statement(db, company_id, account_id, body.transactions)
 
 
+# ── Carga real de extractos bancarios (Bancos Fase 6) ──────────────────────────
+
+@router.post("/banks/{account_id}/import-file/preview")
+async def preview_import_bank_statement_file(
+    account_id: str,
+    mes: int = Form(...),
+    anio: int = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos Excel (.xlsx/.xls)")
+    content = await file.read()
+    try:
+        return await service.preview_bank_statement_file(db, account_id, content, mes, anio)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/banks/{account_id}/import-file")
+async def import_bank_statement_file(
+    account_id: str,
+    company_id: str = Form(...),
+    mes: int = Form(...),
+    anio: int = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos Excel (.xlsx/.xls)")
+    content = await file.read()
+    try:
+        return await service.import_bank_statement_file(db, company_id, account_id, content, mes, anio)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Verificación de saldo y correcciones (Bancos Fase 5) ───────────────────────
+
+@router.post("/banks/{account_id}/verify-balance", response_model=BankAccountResponse)
+async def verify_balance(account_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.verify_bank_balance(db, account_id, user["id"])
+    if not result:
+        raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada")
+    return result
+
+
+@router.post("/banks/{account_id}/request-correction", status_code=status.HTTP_201_CREATED)
+async def request_balance_correction(account_id: str, body: BalanceCorrectionCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.request_balance_correction(db, account_id, body.saldo_propuesto, body.motivo, str(user["id"]))
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"success": True, "request_id": str(result["request"].id)}
+
+
+@router.post("/banks/balance-corrections/{request_id}/approve")
+async def approve_balance_correction(request_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.approve_balance_correction(db, request_id, user["id"], user["tenant_id"])
+    if "error" in result:
+        raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
+    return {"success": True, "completo": result["completo"]}
+
+
+@router.post("/banks/balance-corrections/{request_id}/reject")
+async def reject_balance_correction(request_id: str, body: BalanceCorrectionDecision, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.reject_balance_correction(db, request_id, user["id"], user["tenant_id"], body.motivo)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
+    return {"success": True}
+
+
+@router.get("/transactions/{transaction_id}/suggestions")
+async def suggest_matches(transaction_id: str, company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    return await service.suggest_reconciliation_matches(db, company_id, transaction_id)
+
+
 @router.post("/transactions/{transaction_id}/reconcile", response_model=BankTransactionResponse)
-async def reconcile_transaction(transaction_id: str, body: ReconcileRequest, db: AsyncSession = Depends(get_db)):
-    result = await service.reconcile_transaction(db, transaction_id, str(body.invoice_id))
+async def reconcile_transaction(transaction_id: str, body: ReconcileRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    matched_id = str(body.matched_id) if body.matched_id else None
+    result = await service.reconcile_transaction(
+        db, transaction_id, body.matched_type, matched_id,
+        user.get("id") or user.get("sub"), user.get("user_nombre"),
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Transacción no encontrada")
+    return result
+
+
+@router.post("/transactions/bulk-reconcile")
+async def bulk_reconcile(body: BulkReconcileRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    matches = [
+        {"transaction_id": str(m.transaction_id), "matched_type": m.matched_type, "matched_id": str(m.matched_id) if m.matched_id else None}
+        for m in body.matches
+    ]
+    return await service.bulk_reconcile(db, matches, user.get("id") or user.get("sub"), user.get("user_nombre"))
+
+
+@router.post("/transactions/{transaction_id}/unreconcile", response_model=BankTransactionResponse)
+async def unreconcile_transaction(transaction_id: str, db: AsyncSession = Depends(get_db)):
+    result = await service.unreconcile_transaction(db, transaction_id)
     if not result:
         raise HTTPException(status_code=404, detail="Transacción no encontrada")
     return result
@@ -203,6 +457,21 @@ async def update_projection(projection_id: str, body: CashFlowProjectionUpdate, 
 @router.get("/cash-flow/dashboard", response_model=dict)
 async def get_cash_flow_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
     return await service.get_cash_flow_dashboard(db, company_id)
+
+
+@router.get("/cash-flow/alert-config", response_model=CashFlowAlertConfig)
+async def get_cash_flow_alert_config(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.get_cash_flow_alert_config(db, company_id)
+
+
+@router.put("/cash-flow/alert-config", response_model=CashFlowAlertConfig)
+async def update_cash_flow_alert_config(body: CashFlowAlertConfig, company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.update_cash_flow_alert_config(db, company_id, body)
+
+
+@router.post("/cash-flow/alert-check", response_model=dict)
+async def trigger_cash_flow_alert_check(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.check_negative_cash_flow_alert(db, company_id)
 
 
 # ── Budgets ────────────────────────────────────────────────────────────────────
@@ -245,9 +514,20 @@ async def get_budget_vs_actual(company_id: str = Query(), periodo: str = Query()
 
 # ── Payment Runs ───────────────────────────────────────────────────────────────
 
+@router.get("/ap/payable-invoices", response_model=list[dict])
+async def get_payable_invoices(
+    company_id: str = Query(), supplier_id: str | None = Query(None), hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_payable_invoices(db, company_id, supplier_id, hasta)
+
+
 @router.post("/payment-runs", response_model=PaymentRunResponse, status_code=status.HTTP_201_CREATED)
 async def create_payment_run(body: PaymentRunCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_payment_run(db, body)
+    result = await service.create_payment_run(db, body)
+    if isinstance(result, dict) and "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 @router.get("/payment-runs", response_model=list[PaymentRunResponse])
@@ -263,16 +543,52 @@ async def get_payment_run(run_id: str, db: AsyncSession = Depends(get_db)):
     return run
 
 
-@router.post("/payment-runs/{run_id}/execute", response_model=PaymentRunResponse)
+@router.post("/payment-runs/{run_id}/execute", response_model=dict)
 async def execute_payment_run(
     run_id: str,
     user_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await service.execute_payment_run(db, run_id, user_id)
-    if not result:
-        raise HTTPException(status_code=400, detail="No se pudo ejecutar. El lote debe estar en borrador")
-    return result
+    result = await service.execute_payment_run_gated(db, run_id, user_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    if result["pending_approval"]:
+        return {"pending_approval": True, "request_id": str(result["request"].id), "monto": float(result["request"].monto)}
+    run = result["run"]
+    return {"pending_approval": False, "id": str(run.id), "estado": run.estado, "total_monto": float(run.total_monto)}
+
+
+# ── Aprobación de pagos grandes (Cuentas por Pagar Fase 3) ──────────────────────
+
+@router.get("/ap/approvals", response_model=list[dict])
+async def list_ap_approvals(company_id: str = Query(), estado: str | None = Query("pendiente"), db: AsyncSession = Depends(get_db)):
+    requests = await service.list_ap_approvals(db, company_id, estado)
+    return [
+        {
+            "id": str(r.id), "entidad_tipo": r.entidad_tipo, "entidad_id": str(r.entidad_id),
+            "monto": float(r.monto), "estado": r.estado,
+            "aprobado_supervisor_id": str(r.aprobado_supervisor_id) if r.aprobado_supervisor_id else None,
+            "aprobado_gerente_id": str(r.aprobado_gerente_id) if r.aprobado_gerente_id else None,
+            "created_at": r.created_at,
+        }
+        for r in requests
+    ]
+
+
+@router.post("/ap/approvals/{request_id}/approve")
+async def approve_ap_payment(request_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.approve_ap_payment(db, request_id, user["id"], user["tenant_id"])
+    if "error" in result:
+        raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
+    return {"success": True, "completo": result["completo"]}
+
+
+@router.post("/ap/approvals/{request_id}/reject")
+async def reject_ap_payment(request_id: str, body: APPaymentRejectRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.reject_ap_payment(db, request_id, user["id"], user["tenant_id"], body.motivo)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
+    return {"success": True}
 
 
 # ── Consolidated ───────────────────────────────────────────────────────────────

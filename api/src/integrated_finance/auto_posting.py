@@ -45,6 +45,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.integrated_finance.models import AccountPlan, AccountingPeriod, AccountingEntry
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
+from api.src.petty_cash.models import Expense, ExpenseCategory
+
+
+class PeriodClosedError(Exception):
+    """El periodo contable de la fecha en cuestion esta cerrado -- no se
+    postea, se salta ese item puntual (Fase 2: antes esto no se chequeaba
+    en absoluto y un periodo cerrado no evitaba nada)."""
+    def __init__(self, anio: int, mes: int):
+        self.anio = anio
+        self.mes = mes
+        super().__init__(f"Período {mes:02d}/{anio} está cerrado")
 
 
 # ── Cuentas requeridas (codigo -> se crea si falta) ─────────────────────────
@@ -62,6 +73,43 @@ ACC_IVA_DEBITO = "2.1.03"
 ACC_VENTAS = "4.1.01"
 ACC_COSTO_VENTA = "5.1.01"
 ACC_SUELDOS = "6.1.01"
+ACC_ALQUILERES = "6.1.02"
+ACC_SERVICIOS = "6.1.03"
+ACC_IMPUESTOS = "6.1.04"
+ACC_GASTOS_FINANCIEROS = "6.1.05"
+ACC_DEPRECIACIONES = "6.1.06"
+ACC_GASTOS_VARIOS = "6.1.07"
+
+# Mapeo por palabra clave de categoria de caja chica -> cuenta del mayor.
+# Las categorias de caja chica son texto libre cargado por el cliente (ej.
+# "AGUA, LUZ Y TELEFONO", "COMISIONES DE COBRO ELECTRONICO (POS)") -- no
+# calzan 1 a 1 con las 6 cuentas de gasto del plan contable, asi que se
+# clasifican por palabra clave y todo lo que no matchea cae en Gastos
+# Varios (no se inventa una cuenta nueva por cada categoria real).
+# Sueldos/jornales/aportes patronales se EXCLUYEN a proposito: ya postean
+# via post_payroll_monthly desde payroll_movements -- postearlos de nuevo
+# aca duplicaria el gasto.
+_CATEGORIA_KEYWORDS_EXCLUIDAS = ("SUELDO", "JORNAL", "HABERES", "APORTE PATRONAL", "IPS")
+_CATEGORIA_KEYWORDS_CUENTA = (
+    (("ALQUILER",), ACC_ALQUILERES),
+    (("LUZ", "AGUA", "TELEFONO", "TELÉFONO", "INTERNET", "SERVICIO"), ACC_SERVICIOS),
+    (("IMPUESTO", "TASA MUNICIPAL", "TASA"), ACC_IMPUESTOS),
+    (("BANCARIO", "FINANCIERO", "COMISION", "COMISIÓN", "INTERES", "INTERÉS"), ACC_GASTOS_FINANCIEROS),
+    (("DEPRECIACION", "DEPRECIACIÓN", "AMORTIZACION", "AMORTIZACIÓN"), ACC_DEPRECIACIONES),
+)
+
+
+def _clasificar_categoria_gasto(nombre_categoria: str) -> str | None:
+    """Devuelve el codigo de cuenta contable para una categoria de caja
+    chica, o None si debe excluirse (ya cubierta por otro posteo, ej.
+    nomina)."""
+    nombre = (nombre_categoria or "").upper()
+    if any(kw in nombre for kw in _CATEGORIA_KEYWORDS_EXCLUIDAS):
+        return None
+    for keywords, cuenta in _CATEGORIA_KEYWORDS_CUENTA:
+        if any(kw in nombre for kw in keywords):
+            return cuenta
+    return ACC_GASTOS_VARIOS
 
 
 def _q(v) -> Decimal:
@@ -127,6 +175,8 @@ class PostingEngine:
             )
             self.db.add(period)
             await self.db.flush()
+        elif period.estado == "cerrado":
+            raise PeriodClosedError(fecha.year, fecha.month)
         self._periods[key] = period.id
         return period.id
 
@@ -192,7 +242,7 @@ class PostingEngine:
 
 # ── Ventas: resumen diario ──────────────────────────────────────────────────
 
-async def post_sales_daily(engine: PostingEngine, desde: date, hasta: date) -> int:
+async def post_sales_daily(engine: PostingEngine, desde: date, hasta: date) -> tuple[int, int]:
     rows = await engine.db.execute(
         text("""
             SELECT
@@ -242,6 +292,7 @@ async def post_sales_daily(engine: PostingEngine, desde: date, hasta: date) -> i
     costo_por_dia = {r.dia: Decimal(str(r.costo)) for r in costo_rows}
 
     posted = 0
+    skipped = 0
     for dia, d in por_dia.items():
         ref_id = uuid.uuid5(uuid.NAMESPACE_URL, f"ventas-diarias:{engine.company_id}:{dia.isoformat()}")
         lines = [
@@ -256,14 +307,17 @@ async def post_sales_daily(engine: PostingEngine, desde: date, hasta: date) -> i
                 (ACC_COSTO_VENTA, "debe", _q(costo)),
                 (ACC_INVENTARIO, "haber", _q(costo)),
             ]
-        if await engine.post(dia, f"Resumen de ventas del {dia.isoformat()}", "ventas_diarias", ref_id, lines):
-            posted += 1
-    return posted
+        try:
+            if await engine.post(dia, f"Resumen de ventas del {dia.isoformat()}", "ventas_diarias", ref_id, lines):
+                posted += 1
+        except PeriodClosedError:
+            skipped += 1
+    return posted, skipped
 
 
 # ── Compras (AP): un asiento por factura ────────────────────────────────────
 
-async def post_supplier_invoices(engine: PostingEngine, desde: date, hasta: date) -> int:
+async def post_supplier_invoices(engine: PostingEngine, desde: date, hasta: date) -> tuple[int, int]:
     result = await engine.db.execute(
         select(SupplierInvoice).where(
             SupplierInvoice.company_id == engine.cid,
@@ -273,6 +327,7 @@ async def post_supplier_invoices(engine: PostingEngine, desde: date, hasta: date
         )
     )
     posted = 0
+    skipped = 0
     for inv in result.scalars().all():
         iva = _q(inv.iva_5) + _q(inv.iva_10)
         neto = _q(inv.total) - iva
@@ -281,14 +336,17 @@ async def post_supplier_invoices(engine: PostingEngine, desde: date, hasta: date
             (ACC_IVA_CREDITO, "debe", iva),
             (ACC_CXP, "haber", _q(inv.total)),
         ]
-        if await engine.post(inv.fecha_emision, f"Factura proveedor {inv.numero_factura}", "supplier_invoice", inv.id, lines):
-            posted += 1
-    return posted
+        try:
+            if await engine.post(inv.fecha_emision, f"Factura proveedor {inv.numero_factura}", "supplier_invoice", inv.id, lines):
+                posted += 1
+        except PeriodClosedError:
+            skipped += 1
+    return posted, skipped
 
 
 # ── Pagos a proveedor: un asiento por pago ──────────────────────────────────
 
-async def post_supplier_payments(engine: PostingEngine, desde: date, hasta: date) -> int:
+async def post_supplier_payments(engine: PostingEngine, desde: date, hasta: date) -> tuple[int, int]:
     result = await engine.db.execute(
         select(SupplierInvoicePayment, SupplierInvoice.numero_factura)
         .join(SupplierInvoice, SupplierInvoice.id == SupplierInvoicePayment.invoice_id)
@@ -299,19 +357,23 @@ async def post_supplier_payments(engine: PostingEngine, desde: date, hasta: date
         )
     )
     posted = 0
+    skipped = 0
     for pago, numero_factura in result.all():
         lines = [
             (ACC_CXP, "debe", _q(pago.monto)),
             (ACC_CAJA, "haber", _q(pago.monto)),
         ]
-        if await engine.post(pago.fecha_pago, f"Pago factura {numero_factura} ({pago.payment_method})", "supplier_payment", pago.id, lines):
-            posted += 1
-    return posted
+        try:
+            if await engine.post(pago.fecha_pago, f"Pago factura {numero_factura} ({pago.payment_method})", "supplier_payment", pago.id, lines):
+                posted += 1
+        except PeriodClosedError:
+            skipped += 1
+    return posted, skipped
 
 
 # ── Cobros de CxC: un asiento por cobro real de una venta a credito ─────────
 
-async def post_ar_collections(engine: PostingEngine, desde: date, hasta: date) -> int:
+async def post_ar_collections(engine: PostingEngine, desde: date, hasta: date) -> tuple[int, int]:
     """El legado nunca guardo la fecha/monto real de cobro de una venta a
     credito (sale_payments no tiene filas para ventas 'credito' -- fin_recebimento
     solo capta el cobro al contado al momento de la venta; accounts_receivable.
@@ -333,6 +395,7 @@ async def post_ar_collections(engine: PostingEngine, desde: date, hasta: date) -
         {"cid": engine.company_id, "desde": desde, "hasta": hasta},
     )
     posted = 0
+    skipped = 0
     for r in result.all():
         monto = _q(r.monto_original)
         if monto <= 0:
@@ -341,14 +404,17 @@ async def post_ar_collections(engine: PostingEngine, desde: date, hasta: date) -
             (ACC_CAJA, "debe", monto),
             (ACC_CXC, "haber", monto),
         ]
-        if await engine.post(r.fecha_vencimiento, "Cobro de cuenta por cobrar (fecha aproximada por vencimiento — no se registro la fecha real de cobro)", "ar_collection", r.id, lines):
-            posted += 1
-    return posted
+        try:
+            if await engine.post(r.fecha_vencimiento, "Cobro de cuenta por cobrar (fecha aproximada por vencimiento — no se registro la fecha real de cobro)", "ar_collection", r.id, lines):
+                posted += 1
+        except PeriodClosedError:
+            skipped += 1
+    return posted, skipped
 
 
 # ── Nomina: resumen mensual ──────────────────────────────────────────────────
 
-async def post_payroll_monthly(engine: PostingEngine, desde: date, hasta: date) -> int:
+async def post_payroll_monthly(engine: PostingEngine, desde: date, hasta: date) -> tuple[int, int]:
     result = await engine.db.execute(
         text("""
             SELECT date_trunc('month', fecha)::date AS mes,
@@ -362,6 +428,7 @@ async def post_payroll_monthly(engine: PostingEngine, desde: date, hasta: date) 
         {"cid": engine.company_id, "desde": desde, "hasta": hasta},
     )
     posted = 0
+    skipped = 0
     for r in result.all():
         # Gasto bruto (creditos = haberes del empleado) menos descuentos
         # (debitos: adelantos, faltante de caja, vale compras, etc.) que no
@@ -375,9 +442,70 @@ async def post_payroll_monthly(engine: PostingEngine, desde: date, hasta: date) 
             (ACC_SUELDOS, "debe", gasto_neto),
             (ACC_CAJA, "haber", gasto_neto),
         ]
-        if await engine.post(ultimo_dia, f"Nomina de {r.mes.strftime('%B %Y')}", "payroll_monthly", ref_id, lines):
-            posted += 1
-    return posted
+        try:
+            if await engine.post(ultimo_dia, f"Nomina de {r.mes.strftime('%B %Y')}", "payroll_monthly", ref_id, lines):
+                posted += 1
+        except PeriodClosedError:
+            skipped += 1
+    return posted, skipped
+
+
+# ── Gastos de caja chica: resumen diario (Fase 5) ────────────────────────────
+# Hasta esta fase, 5 de las 6 cuentas de gasto del plan (todo salvo Sueldos y
+# Jornales) nunca habian recibido un asiento -- caja chica movia efectivo
+# real (fondo fijo, aprobacion, comprobantes) sin que el mayor se enterara.
+# Se postea por cuenta clasificada, un asiento diario, igual patron que
+# ventas. Se excluyen gastos anulados (Fase 4 de Caja Chica).
+#
+# Nota sobre 'estado': el flujo de aprobacion (Caja Chica Fase 2) nunca se
+# ejercito sobre datos reales -- 0 gastos en TODA la base estan en estado
+# 'aprobado' (2073 reales de esta empresa, 100% siguen en 'pendiente',
+# probablemente cargados antes de que existiera el flujo de aprobacion).
+# Gerencial ya trata todo gasto no anulado como gasto real sin mirar estado
+# (asi es como calculo los Gs 271.9M de junio que aparecieron en la
+# reconciliacion de la Fase 4) -- exigir 'aprobado' aca dejaria estas 5
+# cuentas en cero para siempre y no cerraria nada. Se sigue el mismo
+# criterio que el reporte que el negocio ya usa y confia.
+
+async def post_petty_cash_expenses_daily(engine: PostingEngine, desde: date, hasta: date) -> tuple[int, int]:
+    result = await engine.db.execute(
+        text("""
+            SELECT
+                e.fecha_gasto AS dia,
+                COALESCE(ec.nombre, 'Sin categoría') AS categoria,
+                COALESCE(SUM(e.monto), 0) AS total
+            FROM expenses e
+            LEFT JOIN expense_categories ec ON ec.id = e.category_id
+            WHERE e.company_id = :cid AND e.anulado = false
+              AND e.fecha_gasto >= :desde AND e.fecha_gasto <= :hasta
+            GROUP BY e.fecha_gasto, COALESCE(ec.nombre, 'Sin categoría')
+            ORDER BY e.fecha_gasto
+        """),
+        {"cid": engine.company_id, "desde": desde, "hasta": hasta},
+    )
+    por_dia: dict[date, dict[str, Decimal]] = {}
+    for r in result.all():
+        cuenta = _clasificar_categoria_gasto(r.categoria)
+        if not cuenta:
+            continue
+        d = por_dia.setdefault(r.dia, {})
+        d[cuenta] = d.get(cuenta, Decimal("0")) + _q(r.total)
+
+    posted = 0
+    skipped = 0
+    for dia, por_cuenta in por_dia.items():
+        total_dia = sum(por_cuenta.values())
+        if total_dia <= 0:
+            continue
+        ref_id = uuid.uuid5(uuid.NAMESPACE_URL, f"petty-cash-expenses:{engine.company_id}:{dia.isoformat()}")
+        lines = [(cuenta, "debe", monto) for cuenta, monto in por_cuenta.items()]
+        lines.append((ACC_CAJA, "haber", total_dia))
+        try:
+            if await engine.post(dia, f"Gastos de caja chica del {dia.isoformat()}", "petty_cash_expenses_daily", ref_id, lines):
+                posted += 1
+        except PeriodClosedError:
+            skipped += 1
+    return posted, skipped
 
 
 # ── Orquestador ───────────────────────────────────────────────────────────────
@@ -386,16 +514,18 @@ async def run_auto_posting(db: AsyncSession, company_id: str, desde: date, hasta
     engine = PostingEngine(db, company_id)
     await engine.ensure_accounts()
 
-    resultados: dict[str, int | str] = {}
+    resultados: dict[str, dict | str] = {}
     for nombre, fn in (
         ("ventas_diarias", post_sales_daily),
         ("facturas_proveedor", post_supplier_invoices),
         ("pagos_proveedor", post_supplier_payments),
         ("cobros_cxc", post_ar_collections),
         ("nomina_mensual", post_payroll_monthly),
+        ("gastos_caja_chica", post_petty_cash_expenses_daily),
     ):
         try:
-            resultados[nombre] = await fn(engine, desde, hasta)
+            posted, skipped = await fn(engine, desde, hasta)
+            resultados[nombre] = {"posteados": posted, "omitidos_periodo_cerrado": skipped}
             await db.commit()
         except Exception as e:  # noqa: BLE001 — un area que falla no debe tumbar el resto
             await db.rollback()

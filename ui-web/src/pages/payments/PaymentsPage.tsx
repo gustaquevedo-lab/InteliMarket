@@ -29,7 +29,7 @@ export default function PaymentsPage() {
       ])
       if (methods.status === "fulfilled") setPaymentMethods(methods.value)
       if (paymentsData.status === "fulfilled") setPayments(paymentsData.value)
-      if (methods.status === "rejected") toast.info("Datos demo", "Conectá el backend para ver datos reales")
+      if (methods.status === "rejected") toast.error("Error de conexión", "Conectá el backend para ver datos reales")
     } catch {
       toast.error("Error", "No se pudo cargar")
     } finally {
@@ -83,18 +83,14 @@ export default function PaymentsPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2"><ArrowUpRight className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Cobros</span></div>
-          <p className="text-2xl font-bold text-green-500">{formatPYG(cobros > 0 ? cobros : 5050000)}</p>
+          <p className="text-2xl font-bold text-green-500">{formatPYG(cobros)}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2"><ArrowDownRight className="w-5 h-5 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Pagos</span></div>
-          <p className="text-2xl font-bold text-red-500">{formatPYG(pagos > 0 ? pagos : 15000000)}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><TrendingUp className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Crédito pendiente</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatPYG(72500000)}</p>
+          <p className="text-2xl font-bold text-red-500">{formatPYG(pagos)}</p>
         </div>
       </div>
 
@@ -109,20 +105,9 @@ export default function PaymentsPage() {
             </div>
           ))
         ) : (
-          [
-            { id: "1", nombre: "Efectivo", tipo: "efectivo", activo: true },
-            { id: "2", nombre: "Tarjeta Crédito", tipo: "tarjeta", activo: true },
-            { id: "3", nombre: "Tarjeta Débito", tipo: "tarjeta", activo: true },
-            { id: "4", nombre: "Transferencia", tipo: "transferencia", activo: true },
-            { id: "5", nombre: "Billetera", tipo: "billetera", activo: true },
-            { id: "6", nombre: "Crédito", tipo: "credito", activo: true },
-          ].map((m) => (
-            <div key={m.id} className="card p-4 text-center">
-              <CreditCard className="w-6 h-6 mx-auto mb-2 text-primary" />
-              <p className="text-sm font-bold text-gray-900 dark:text-white">{m.nombre}</p>
-              <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full badge-success">Activo</span>
-            </div>
-          ))
+          <div className="col-span-full text-center py-8 text-gray-400 text-sm">
+            No hay métodos de pago configurados todavía.
+          </div>
         )}
       </div>
 

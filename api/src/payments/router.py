@@ -26,6 +26,11 @@ async def list_payment_methods(company_id: str, db: AsyncSession = Depends(get_d
     return await service.list_payment_methods(db, company_id)
 
 
+@router.get("/companies/{company_id}/payments")
+async def list_payments(company_id: str, tipo: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.list_payments(db, company_id, tipo)
+
+
 @router.post("/payments", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED)
 async def create_payment(body: PaymentCreate, db: AsyncSession = Depends(get_db)):
     return await service.create_payment(db, body)

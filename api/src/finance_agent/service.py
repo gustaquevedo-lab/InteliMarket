@@ -9,16 +9,17 @@ queda para cuando el diagnóstico esté validado con el cliente).
 """
 
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.config import settings
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.financial import service as financial_service
 from api.src.accounts_receivable import service as ar_service
+from api.src.petty_cash import service as petty_cash_service
 
 # Proveedor de LLM intercambiable vía settings.llm_provider ("gemini" | "anthropic").
 # Gemini es el default por costo; Anthropic queda listo para reactivar con solo
@@ -39,7 +40,7 @@ RECOMMENDATION_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "tipo": {"type": "string", "enum": ["cobranza", "pago_proveedor", "alerta_presupuesto", "otro"]},
+                    "tipo": {"type": "string", "enum": ["cobranza", "pago_proveedor", "alerta_presupuesto", "reduccion_gasto", "otro"]},
                     "titulo": {"type": "string"},
                     "descripcion": {"type": "string"},
                     "entidad_relacionada": {"type": ["string", "null"]},
@@ -65,7 +66,7 @@ GEMINI_RECOMMENDATION_SCHEMA = {
             "items": {
                 "type": "OBJECT",
                 "properties": {
-                    "tipo": {"type": "STRING", "enum": ["cobranza", "pago_proveedor", "alerta_presupuesto", "otro"]},
+                    "tipo": {"type": "STRING", "enum": ["cobranza", "pago_proveedor", "alerta_presupuesto", "reduccion_gasto", "otro"]},
                     "titulo": {"type": "STRING"},
                     "descripcion": {"type": "STRING"},
                     "entidad_relacionada": {"type": "STRING", "nullable": True},
@@ -80,7 +81,21 @@ GEMINI_RECOMMENDATION_SCHEMA = {
 
 SYSTEM_PROMPT = """Sos el Gerente Financiero IA de InteliMarket para un supermercado en Paraguay.
 
-Recibís el estado actual de finanzas, cuentas por pagar y cuentas por cobrar.
+Recibís el estado actual de finanzas, cuentas por pagar, cuentas por cobrar, y
+el dashboard de gastos (caja chica) con desglose por categoría —con presupuesto
+y variación vs. período anterior— y por sector/centro de costo del supermercado
+(carnicería, panadería, caja, administración, etc.), incluyendo cuánto de esos
+gastos son directos de cada sector y cuánto es prorrateo de gastos globales.
+
+La reducción de gastos es un pilar de la rentabilidad tanto como el aumento de
+ventas: analizá el dashboard de gastos con el mismo rigor que el financiero.
+Si una categoría superó su presupuesto, creció de forma inusual, o un proveedor
+concentra una porción grande del gasto, proponé una recomendación tipo
+"reduccion_gasto" concreta — con el monto y la categoría/sector involucrado,
+nunca "reducir gastos" en genérico. Si detectás que la mayoría de los gastos no
+tienen sector asignado, señalalo: sin esa imputación no se puede medir cuánto
+gana o pierde cada sector del supermercado.
+
 Tu trabajo: dar un diagnóstico honesto y proponer recomendaciones concretas y
 accionables — nunca vagas ("mejorar la cobranza"), siempre con la entidad y el
 monto involucrado cuando el dato esté disponible.
@@ -99,6 +114,8 @@ def _json_default(obj):
 
 
 async def _gather_context(db: AsyncSession, company_id: str) -> dict:
+    hoy = date.today()
+    hace_30 = hoy - timedelta(days=29)
     return {
         "financial_dashboard": await financial_service.get_financial_dashboard(db, company_id),
         "ap_dashboard": await financial_service.get_ap_dashboard(db, company_id),
@@ -106,6 +123,7 @@ async def _gather_context(db: AsyncSession, company_id: str) -> dict:
         "financial_ratios": await financial_service.get_financial_ratios(db, company_id),
         "ar_aging": await ar_service.get_aging_report(db, company_id),
         "ar_summary": await ar_service.get_receivable_summary(db, company_id),
+        "gastos_dashboard": await petty_cash_service.get_expense_dashboard(db, company_id, hace_30, hoy),
     }
 
 
@@ -189,13 +207,27 @@ async def run_diagnosis(db: AsyncSession, company_id: str) -> FinanceAgentRun:
     return run
 
 
-async def list_recommendations(db: AsyncSession, company_id: str, status: str | None = None) -> list[FinanceRecommendation]:
+async def list_recommendations(
+    db: AsyncSession, company_id: str, status: str | None = None, tipo: str | None = None,
+    limit: int = 100, offset: int = 0,
+) -> list[FinanceRecommendation]:
     query = select(FinanceRecommendation).where(FinanceRecommendation.company_id == company_id)
     if status:
         query = query.where(FinanceRecommendation.status == status)
-    query = query.order_by(FinanceRecommendation.created_at.desc())
+    if tipo:
+        query = query.where(FinanceRecommendation.tipo == tipo)
+    query = query.order_by(FinanceRecommendation.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
+
+
+async def count_recommendations_by_tipo(db: AsyncSession, company_id: str, status: str | None = None) -> list[dict]:
+    query = select(FinanceRecommendation.tipo, func.count()).where(FinanceRecommendation.company_id == company_id)
+    if status:
+        query = query.where(FinanceRecommendation.status == status)
+    query = query.group_by(FinanceRecommendation.tipo).order_by(func.count().desc())
+    result = await db.execute(query)
+    return [{"tipo": t, "cantidad": c} for t, c in result.all()]
 
 
 async def decide_recommendation(db: AsyncSession, recommendation_id: str, approve: bool, approved_by: str, comments: str | None) -> FinanceRecommendation | None:
@@ -213,3 +245,16 @@ async def decide_recommendation(db: AsyncSession, recommendation_id: str, approv
     await db.commit()
     await db.refresh(rec)
     return rec
+
+
+async def bulk_decide_recommendations(db: AsyncSession, ids: list[str], approve: bool, approved_by: str, comments: str | None) -> int:
+    result = await db.execute(
+        select(FinanceRecommendation).where(FinanceRecommendation.id.in_(ids), FinanceRecommendation.status == "pending")
+    )
+    recs = list(result.scalars().all())
+    for rec in recs:
+        rec.status = "approved" if approve else "rejected"
+        rec.approved_by = approved_by
+        rec.comments = comments
+    await db.commit()
+    return len(recs)

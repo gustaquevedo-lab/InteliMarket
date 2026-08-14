@@ -4,15 +4,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.integrated_finance.schemas import (
     WithholdingConfigCreate, WithholdingConfigUpdate, WithholdingConfigResponse,
     WithholdingDocumentCreate, WithholdingDocumentResponse, WithholdingDashboard,
     AccountPlanCreate, AccountPlanResponse,
     AccountingPeriodCreate, AccountingPeriodResponse,
     AccountingEntryCreate, AccountingEntryResponse,
+    ManualEntryCreate, ManualEntryResponse,
+    PeriodReopenBody,
+    EntryReversalBody, EntryReversalResponse,
     CollectionActionCreate, CollectionActionResponse,
     CustomerScoreResponse, EbitdaResponse,
     AutoReconcileResult, ConsolidatedDashboard,
+    CashReconciliationResponse, PnlReconciliationResponse,
 )
 from api.src.integrated_finance import service, auto_posting, pdf_reports
 from datetime import date
@@ -21,6 +26,20 @@ from sqlalchemy import text
 import uuid
 
 router = APIRouter(prefix="/api/v1/integrated-finance", tags=["integrated-finance"])
+
+_LEDGER_ROLES = {"Finanzas", "Gerente"}
+
+
+async def _require_ledger_role(db: AsyncSession, user: dict):
+    """Cargar el plan de cuentas, abrir/cerrar periodos y postear asientos son
+    acciones contables sensibles -- antes este router no tenia NINGUN control
+    de auth ni de rol (company_id llegaba como query param sin validar).
+    Se restringe a Finanzas/Gerente, mismo patron ya usado en Caja Chica y AP."""
+    from api.src.rbac.service import get_user_roles
+
+    roles = {r["role_name"] for r in await get_user_roles(db, uuid.UUID(user["id"]), uuid.UUID(user["tenant_id"]))}
+    if not roles & _LEDGER_ROLES:
+        raise HTTPException(status_code=403, detail="Se requiere rol Finanzas o Gerente para esta acción contable")
 
 
 async def _get_company(db: AsyncSession, company_id: str) -> dict:
@@ -127,10 +146,12 @@ async def run_auto_posting(
     desde: date = Query(...),
     hasta: date = Query(...),
     db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
 ):
     """Postea automaticamente asientos contables desde ventas/compras/pagos/
     cobros/nomina reales para el rango dado. Idempotente: correr de nuevo
     sobre un rango ya posteado no duplica asientos."""
+    await _require_ledger_role(db, user)
     return await auto_posting.run_auto_posting(db, company_id, desde, hasta)
 
 
@@ -193,14 +214,6 @@ async def approve_withholding_document(doc_id: str, db: AsyncSession = Depends(g
     return result
 
 
-@router.post("/withholding/documents/{doc_id}/send", response_model=WithholdingDocumentResponse)
-async def send_withholding_to_sifen(doc_id: str, db: AsyncSession = Depends(get_db)):
-    result = await service.send_withholding_to_sifen(db, doc_id)
-    if not result:
-        raise HTTPException(status_code=400, detail="No se pudo enviar a SIFEN")
-    return result
-
-
 # ── ACCOUNT PLAN ──────────────────────────────────────────────────────────────
 
 @router.get("/account-plan", response_model=list[AccountPlanResponse])
@@ -209,7 +222,8 @@ async def list_account_plans(company_id: str = Query(), db: AsyncSession = Depen
 
 
 @router.post("/account-plan", response_model=AccountPlanResponse, status_code=status.HTTP_201_CREATED)
-async def create_account_plan(body: AccountPlanCreate, db: AsyncSession = Depends(get_db)):
+async def create_account_plan(body: AccountPlanCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    await _require_ledger_role(db, user)
     return await service.create_account_plan(db, body)
 
 
@@ -221,16 +235,35 @@ async def list_accounting_periods(company_id: str = Query(), db: AsyncSession = 
 
 
 @router.post("/accounting/periods", response_model=AccountingPeriodResponse, status_code=status.HTTP_201_CREATED)
-async def open_accounting_period(body: AccountingPeriodCreate, db: AsyncSession = Depends(get_db)):
+async def open_accounting_period(body: AccountingPeriodCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    await _require_ledger_role(db, user)
     return await service.open_accounting_period(db, body)
 
 
 @router.post("/accounting/periods/{period_id}/close", response_model=AccountingPeriodResponse)
-async def close_accounting_period(period_id: str, user_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
-    result = await service.close_accounting_period(db, period_id, user_id)
+async def close_accounting_period(period_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    await _require_ledger_role(db, user)
+    result = await service.close_accounting_period(db, period_id, user["id"])
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo cerrar. El período debe estar abierto")
     return result
+
+
+@router.post("/accounting/periods/{period_id}/reopen", response_model=AccountingPeriodResponse)
+async def reopen_accounting_period(period_id: str, body: PeriodReopenBody, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Reabrir un periodo cerrado -- accion excepcional, gateada solo a
+    Gerente (no Finanzas), y con motivo obligatorio para dejar rastro de
+    por que se reabrio algo que ya se habia dado por definitivo."""
+    from api.src.rbac.service import get_user_roles
+
+    roles = {r["role_name"] for r in await get_user_roles(db, uuid.UUID(user["id"]), uuid.UUID(user["tenant_id"]))}
+    if "Gerente" not in roles:
+        raise HTTPException(status_code=403, detail="Se requiere rol Gerente para reabrir un período contable")
+
+    result = await service.reopen_accounting_period(db, period_id, user["id"], body.motivo)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result["period"]
 
 
 # ── ACCOUNTING ENTRIES ───────────────────────────────────────────────────────
@@ -255,8 +288,49 @@ async def list_accounting_entries(
 
 
 @router.post("/accounting/entries", response_model=AccountingEntryResponse, status_code=status.HTTP_201_CREATED)
-async def post_accounting_entry(body: AccountingEntryCreate, user_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
-    return await service.post_accounting_entry(db, body, user_id)
+async def post_accounting_entry(body: AccountingEntryCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    await _require_ledger_role(db, user)
+    result = await service.post_accounting_entry(db, body, user["id"])
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result["entry"]
+
+
+@router.post("/accounting/entries/manual", response_model=ManualEntryResponse, status_code=status.HTTP_201_CREATED)
+async def create_manual_entry(
+    body: ManualEntryCreate,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Asiento manual real de partida doble -- hasta ahora un contador no
+    tenia forma de cargar un ajuste, una apertura o una depreciacion: solo
+    existian los asientos automaticos de auto_posting.py. Requiere que las
+    lineas balanceen (debe == haber) y que la cuenta acepte asientos
+    directos (no sea una cuenta de agrupacion)."""
+    await _require_ledger_role(db, user)
+    result = await service.create_manual_entry(db, company_id, body, user["id"])
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/accounting/entries/{asiento_numero}/reverse", response_model=EntryReversalResponse, status_code=status.HTTP_201_CREATED)
+async def reverse_accounting_entry(
+    asiento_numero: str,
+    body: EntryReversalBody,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Reverso real de un asiento (manual o automático) -- crea un asiento
+    nuevo con las líneas invertidas, sin tocar el original. No se puede
+    reversar un asiento que ya fue reversado."""
+    await _require_ledger_role(db, user)
+    result = await service.reverse_accounting_entry(db, company_id, asiento_numero, user["id"], body.motivo)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 @router.get("/accounting/trial-balance", response_model=dict)
@@ -328,6 +402,12 @@ async def recalculate_score(
     return await service.recalculate_score(db, company_id, customer_id)
 
 
+@router.post("/scoring/recalculate-all")
+async def recalculate_all_scores(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    count = await service.recalculate_all_scores(db, company_id)
+    return {"clientes_recalculados": count}
+
+
 # ── EBITDA ────────────────────────────────────────────────────────────────────
 
 @router.get("/ebitda", response_model=EbitdaResponse)
@@ -355,3 +435,18 @@ async def auto_reconcile(
 @router.get("/dashboard", response_model=ConsolidatedDashboard)
 async def get_consolidated_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
     return await service.get_consolidated_dashboard(db, company_id)
+
+
+# ── Integración de silos (Fase 4) ────────────────────────────────────────────
+
+@router.get("/reconciliation/cash", response_model=CashReconciliationResponse)
+async def get_cash_reconciliation(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    return await service.get_cash_reconciliation(db, company_id)
+
+
+@router.get("/reconciliation/pnl", response_model=dict)
+async def get_pnl_reconciliation(company_id: str = Query(), period_id: str = Query(), db: AsyncSession = Depends(get_db)):
+    result = await service.get_pnl_reconciliation(db, company_id, period_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result

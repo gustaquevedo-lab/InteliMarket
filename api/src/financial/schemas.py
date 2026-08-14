@@ -47,6 +47,7 @@ class SupplierInvoiceResponse(BaseModel):
     id: UUID
     company_id: UUID
     supplier_id: UUID
+    supplier_nombre: Optional[str] = None
     numero_factura: str
     timbrado: Optional[str] = None
     cdc: Optional[str] = None
@@ -155,6 +156,7 @@ class BankAccountUpdate(BaseModel):
     numero_cuenta: Optional[str] = None
     titular: Optional[str] = None
     activo: Optional[bool] = None
+    saldo_minimo_alerta: Optional[Decimal] = None
 
 
 class BankAccountResponse(BaseModel):
@@ -168,6 +170,10 @@ class BankAccountResponse(BaseModel):
     saldo_actual: Decimal
     titular: Optional[str] = None
     activo: bool
+    saldo_minimo_alerta: Optional[Decimal] = None
+    saldo_verificado_manualmente: bool = False
+    saldo_verificado_at: Optional[datetime] = None
+    saldo_verificado_por: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
 
@@ -198,7 +204,7 @@ class BankTransactionResponse(BaseModel):
     bank_account_id: UUID
     fecha: date
     tipo: str
-    monto: Decimal
+    monto: float
     moneda: str
     descripcion: Optional[str] = None
     referencia: Optional[str] = None
@@ -206,6 +212,7 @@ class BankTransactionResponse(BaseModel):
     conciliado: bool
     fecha_conciliacion: Optional[datetime] = None
     invoice_id: Optional[UUID] = None
+    cheque_id: Optional[UUID] = None
     categoria: str
     created_at: datetime
 
@@ -214,7 +221,53 @@ class BankTransactionResponse(BaseModel):
 
 
 class ReconcileRequest(BaseModel):
-    invoice_id: UUID
+    matched_type: str = "manual"  # "invoice" | "cheque" | "manual"
+    matched_id: Optional[UUID] = None
+
+
+class BulkReconcileMatch(BaseModel):
+    transaction_id: UUID
+    matched_type: str
+    matched_id: Optional[UUID] = None
+
+
+class BulkReconcileRequest(BaseModel):
+    matches: list[BulkReconcileMatch]
+
+
+# ── Verificación de saldo y correcciones (Bancos Fase 5) ───────────────────────
+
+class BalanceCorrectionCreate(BaseModel):
+    saldo_propuesto: Decimal
+    motivo: str = Field(min_length=1)
+
+
+class BalanceCorrectionDecision(BaseModel):
+    motivo: Optional[str] = None  # solo para rechazo
+
+
+class BankBalanceCorrectionResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    bank_account_id: UUID
+    origen: str
+    saldo_actual: Decimal
+    saldo_propuesto: Decimal
+    motivo: Optional[str] = None
+    estado: str
+    solicitado_por: Optional[UUID] = None
+    aprobado_supervisor_id: Optional[UUID] = None
+    aprobado_supervisor_at: Optional[datetime] = None
+    aprobado_gerente_id: Optional[UUID] = None
+    aprobado_gerente_at: Optional[datetime] = None
+    rechazado_por: Optional[UUID] = None
+    rechazado_at: Optional[datetime] = None
+    rechazado_motivo: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ── Cash Flow ──────────────────────────────────────────────────────────────────
@@ -311,6 +364,7 @@ class PaymentRunCreate(BaseModel):
     fecha_programada: date
     metodo_pago: str = "transferencia"
     bank_account_id: Optional[UUID] = None
+    invoice_ids: list[UUID] = Field(min_length=1)
 
 
 class PaymentRunResponse(BaseModel):
@@ -340,6 +394,8 @@ class PaymentRunItemResponse(BaseModel):
     payment_run_id: UUID
     invoice_id: UUID
     supplier_id: UUID
+    supplier_nombre: Optional[str] = None
+    numero_factura: Optional[str] = None
     monto_programado: Decimal
     monto_pagado: Optional[Decimal] = None
     estado: str
@@ -376,3 +432,37 @@ class FinancialRatios(BaseModel):
     ciclo_efectivo_dias: float
     ap_total: Decimal
     ar_total: Decimal
+
+
+# ── Aprobación de pagos grandes (Cuentas por Pagar Fase 3) ─────────────────────
+
+class APPaymentApprovalResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    entidad_tipo: str
+    entidad_id: UUID
+    monto: Decimal
+    estado: str
+    solicitado_por: Optional[UUID] = None
+    aprobado_supervisor_id: Optional[UUID] = None
+    aprobado_supervisor_at: Optional[datetime] = None
+    aprobado_gerente_id: Optional[UUID] = None
+    aprobado_gerente_at: Optional[datetime] = None
+    rechazado_por: Optional[UUID] = None
+    rechazado_at: Optional[datetime] = None
+    rechazado_motivo: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class APPaymentRejectRequest(BaseModel):
+    motivo: Optional[str] = None
+
+
+class CashFlowAlertConfig(BaseModel):
+    activo: bool = False
+    dias_horizonte: int = 30
+    telefono: Optional[str] = None
