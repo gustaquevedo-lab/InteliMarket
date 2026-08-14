@@ -33,6 +33,11 @@ async def list_checks(
     return await service.list_checks(db, user["company_id"], customer_id, estado, limit=limit, offset=offset)
 
 
+@router.get("/summary")
+async def get_summary(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_checks_summary(db, user["company_id"])
+
+
 @router.get("/cartera")
 async def get_cartera(
     dias: int = Query(30, le=180),

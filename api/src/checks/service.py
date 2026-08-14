@@ -56,16 +56,71 @@ async def get_check(db: AsyncSession, check_id: str) -> Check | None:
 
 async def list_checks(
     db: AsyncSession, company_id: str, customer_id: str | None = None,
-    estado: str | None = None, limit: int = 50, offset: int = 0,
-) -> list[Check]:
-    query = select(Check).where(Check.company_id == company_id)
+    estado: str | None = None, search: str | None = None, limit: int = 200, offset: int = 0,
+) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    where_clauses = ["ch.company_id = :cid"]
+    params = {"cid": cid, "limit": limit, "offset": offset}
+
     if customer_id:
-        query = query.where(Check.customer_id == uuid.UUID(customer_id))
+        where_clauses.append("ch.customer_id = :customer_id")
+        params["customer_id"] = uuid.UUID(customer_id)
     if estado:
-        query = query.where(Check.estado == estado)
-    query = query.order_by(Check.fecha_vencimiento.asc()).limit(limit).offset(offset)
-    result = await db.execute(query)
-    return list(result.scalars().all())
+        where_clauses.append("ch.estado = :estado")
+        params["estado"] = estado
+    if search:
+        where_clauses.append("(ch.numero ILIKE :search OR c.razon_social ILIKE :search OR c.ruc ILIKE :search)")
+        params["search"] = f"%{search}%"
+
+    where_stmt = " AND ".join(where_clauses)
+
+    query = text(f"""
+        SELECT 
+            ch.id, ch.company_id, ch.customer_id, c.razon_social as customer_name, c.ruc as customer_ruc,
+            ch.tipo, ch.numero, ch.banco, ch.titular, ch.monto, ch.moneda,
+            ch.fecha_emision, ch.fecha_vencimiento, ch.payment_id, ch.accounts_receivable_id,
+            ch.reemplaza_check_id, ch.estado, ch.observaciones, ch.created_at, ch.updated_at
+        FROM checks ch
+        LEFT JOIN customers c ON c.id = ch.customer_id
+        WHERE {where_stmt}
+        ORDER BY 
+            CASE WHEN ch.fecha_vencimiento IS NULL OR ch.fecha_vencimiento < '1950-01-01' THEN 0 ELSE 1 END ASC,
+            ch.fecha_vencimiento DESC,
+            ch.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    res = await db.execute(query, params)
+    rows = res.fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+async def get_checks_summary(db: AsyncSession, company_id: str) -> dict:
+    query = text("""
+        SELECT 
+            COUNT(id) as total_documentos,
+            COALESCE(SUM(CASE WHEN estado IN ('cartera', 'depositado') THEN monto ELSE 0 END), 0) as total_cartera,
+            COALESCE(COUNT(CASE WHEN estado IN ('cartera', 'depositado') THEN id END), 0) as cant_cartera,
+            COALESCE(SUM(CASE WHEN estado = 'rechazado' THEN monto ELSE 0 END), 0) as total_rechazado,
+            COALESCE(COUNT(CASE WHEN estado = 'rechazado' THEN id END), 0) as cant_rechazado,
+            COALESCE(SUM(CASE WHEN estado = 'acreditado' THEN monto ELSE 0 END), 0) as total_acreditado,
+            COALESCE(COUNT(CASE WHEN estado = 'acreditado' THEN id END), 0) as cant_acreditado,
+            COALESCE(SUM(CASE WHEN tipo = 'pagare' AND estado != 'reemplazado' THEN monto ELSE 0 END), 0) as total_pagares
+        FROM checks
+        WHERE company_id = :cid
+    """)
+    res = await db.execute(query, {"cid": uuid.UUID(company_id)})
+    r = res.fetchone()
+    return {
+        "total_documentos": int(r.total_documentos or 0),
+        "total_cartera": float(r.total_cartera or 0),
+        "cant_cartera": int(r.cant_cartera or 0),
+        "total_rechazado": float(r.total_rechazado or 0),
+        "cant_rechazado": int(r.cant_rechazado or 0),
+        "total_acreditado": float(r.total_acreditado or 0),
+        "cant_acreditado": int(r.cant_acreditado or 0),
+        "total_pagares": float(r.total_pagares or 0),
+    }
+
 
 
 async def get_cartera(db: AsyncSession, company_id: str, dias: int = 30) -> list[dict]:

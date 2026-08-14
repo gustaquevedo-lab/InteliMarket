@@ -454,6 +454,7 @@ export const api = {
       client.post<{ authorization_id: string; credit_account_id: string; monto: number; autorizado_por: string }>(`/v1/credit-accounts/${id}/authorize-excess`, data),
   },
   checks: {
+    summary: () => client.get<any>("/v1/checks/summary"),
     list: (params?: { customer_id?: string; estado?: string; limit?: number; offset?: number }) => client.get<Check[]>("/v1/checks", params),
     get: (id: string) => client.get<Check>(`/v1/checks/${id}`),
     cartera: (dias?: number) => client.get<Check[]>("/v1/checks/cartera", dias ? { dias } : undefined),

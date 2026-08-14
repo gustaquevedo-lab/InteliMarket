@@ -10,6 +10,8 @@ import uuid
 class CheckCreate(BaseModel):
     company_id: uuid.UUID
     customer_id: uuid.UUID
+    customer_name: Optional[str] = None
+    customer_ruc: Optional[str] = None
     tipo: str = "cheque"
     numero: str
     banco: Optional[str] = None
@@ -27,6 +29,8 @@ class CheckResponse(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     customer_id: uuid.UUID
+    customer_name: Optional[str] = None
+    customer_ruc: Optional[str] = None
     tipo: str
     numero: str
     banco: Optional[str] = None
