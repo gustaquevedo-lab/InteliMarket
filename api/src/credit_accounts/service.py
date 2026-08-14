@@ -1,6 +1,6 @@
 """Credit account service"""
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from decimal import Decimal
@@ -130,6 +130,26 @@ async def process_purchase(
         await db.flush()
         return {"success": True, "account": account, "dias_plazo": account.dias_plazo}
 
+    # 1. Candado estricto de cheques rechazados pendientes de canje
+    q_rej = await db.execute(
+        text("SELECT COUNT(*), COALESCE(SUM(monto), 0) FROM checks WHERE company_id = :cid AND customer_id = :cust_id AND tipo = 'cheque' AND estado = 'rechazado'"),
+        {"cid": uuid.UUID(company_id), "cust_id": uuid.UUID(customer_id)}
+    )
+    rej_row = q_rej.fetchone()
+    rej_count = rej_row[0] if rej_row else 0
+    rej_total = float(rej_row[1]) if rej_row else 0.0
+    if rej_count > 0:
+        return {
+            "requiere_autorizacion": True,
+            "motivo": f"Cliente bloqueado: posee {rej_count} cheque(s) rechazado(s) pendiente(s) por ₲ {rej_total:,.0f}".replace(",", "."),
+            "credit_account_id": str(account.id),
+            "disponible": float(account.saldo_disponible),
+            "monto": float(monto),
+            "cheques_rechazados_cant": rej_count,
+            "cheques_rechazados_monto": rej_total,
+        }
+
+    # 2. Score de riesgo crediticio
     from api.src.credit_scoring.service import get_credit_score
     score = await get_credit_score(db, company_id, customer_id)
     if score and score.get("is_auto_blocked"):
