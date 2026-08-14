@@ -1035,3 +1035,37 @@ async def get_financial_ratios(db: AsyncSession, company_id: str) -> dict:
         "ap_total": ap_val,
         "ar_total": ar_val,
     }
+
+
+async def get_financial_pnl(db: AsyncSession, company_id: str) -> dict:
+    from sqlalchemy import text
+    import uuid
+
+    cid = uuid.UUID(company_id)
+
+    # Sales
+    r_sales = await db.execute(text("SELECT COALESCE(SUM(total), 0) FROM sales WHERE company_id = :cid AND estado != 'anulado'"), {"cid": cid})
+    total_ventas = float(r_sales.scalar() or 0)
+
+    # Cost of sales
+    r_cost = await db.execute(text("SELECT COALESCE(SUM(cantidad * COALESCE(costo_unitario, precio_unitario * 0.7)), 0) FROM sale_items"))
+    total_costo = float(r_cost.scalar() or 0)
+
+    # Operating Expenses
+    r_exp = await db.execute(text("SELECT COALESCE(SUM(monto), 0) FROM expenses WHERE company_id = :cid"), {"cid": cid})
+    total_gastos = float(r_exp.scalar() or 0)
+
+    margen_bruto = total_ventas - total_costo
+    resultado_neto = margen_bruto - total_gastos
+    margen_pct = round((margen_bruto / total_ventas * 100), 2) if total_ventas > 0 else 0.0
+    neto_pct = round((resultado_neto / total_ventas * 100), 2) if total_ventas > 0 else 0.0
+
+    return {
+        "ventas_netas": total_ventas,
+        "costo_ventas": total_costo,
+        "margen_bruto": margen_bruto,
+        "margen_bruto_pct": margen_pct,
+        "gastos_operativos": total_gastos,
+        "resultado_neto": resultado_neto,
+        "resultado_neto_pct": neto_pct,
+    }

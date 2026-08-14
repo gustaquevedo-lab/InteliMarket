@@ -264,3 +264,8 @@ async def get_financial_dashboard(company_id: str = Query("00000000-0000-0000-00
 @router.get("/ratios", response_model=dict)
 async def get_financial_ratios(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
     return await service.get_financial_ratios(db, company_id)
+
+
+@router.get("/pnl")
+async def get_pnl(company_id: str = "00000000-0000-0000-0000-000000000010", db: AsyncSession = Depends(get_db)):
+    return await service.get_financial_pnl(db, company_id)
