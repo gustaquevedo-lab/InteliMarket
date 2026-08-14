@@ -71,6 +71,7 @@ from api.src.commissions.router import router as commissions_router
 from api.src.commercial_agreements.router import router as commercial_agreements_router
 from api.src.kits.router import router as kits_router
 from api.src.accounts_receivable.router import router as accounts_receivable_router
+from api.src.accounts_payable.router import router as accounts_payable_router
 from api.src.public.router import router as public_router
 from api.src.rbac.router import router as rbac_router
 from api.src.whatsapp.router import router as whatsapp_router
@@ -230,6 +231,7 @@ app.include_router(commissions_router)
 app.include_router(commercial_agreements_router)
 app.include_router(kits_router)
 app.include_router(accounts_receivable_router)
+app.include_router(accounts_payable_router)
 app.include_router(public_router)
 app.include_router(rbac_router)
 app.include_router(whatsapp_router)

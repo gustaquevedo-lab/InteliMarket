@@ -700,6 +700,14 @@ export const api = {
     approve: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/approve`, { approved_by, comments }),
     reject: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/reject`, { approved_by, comments }),
   },
+  
+  accountsPayable: {
+    list: (params?: { estado?: string; search?: string; supplier_id?: string }) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-payable`, params as any),
+    aging: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-payable/aging`),
+    summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-payable/summary`),
+    documentDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-payable/documents/${id}`),
+    createPaymentOrder: (data: any) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-payable/payment`, data),
+  },
   accountsReceivable: {
     list: (params?: { estado?: string }) => client.get<AccountsReceivable[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable`, params),
     get: (id: string) => client.get<AccountsReceivable>(`/v1/accounts-receivable/${id}`),

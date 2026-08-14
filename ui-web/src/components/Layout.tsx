@@ -131,7 +131,7 @@ const navGroups: NavGroup[] = [
       { icon: Landmark, label: "Bóveda Central", path: "/boveda", feature: "supermercado" },
       { icon: Landmark, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
       { icon: ShieldAlert, label: "Deuda Total Consolidada", path: "/deudas-consolidadas" },
-      { icon: HandCoins, label: "Cuentas por Pagar", path: "/payments" },
+      { icon: HandCoins, label: "Cuentas por Pagar", path: "/accounts-payable" },
       { icon: Wallet, label: "Líneas de Crédito", path: "/credit-accounts", feature: "credit_accounts" },
       { icon: Landmark, label: "Cheques y Pagarés", path: "/checks", feature: "credit_accounts" },
       { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
