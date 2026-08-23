@@ -7,28 +7,20 @@ directories:
   buildResources: ../electron/assets
 
 files:
-  - ../ui-web-dist/**/*
-  - ../electron/**/*
+  - package.json
+  - from: ../ui-web-dist
+    to: .
+  - from: ../electron
+    to: electron
+    filter:
+      - "main.cjs"
+      - "preload.cjs"
+      - "pos-config.json"
 
 win:
   target:
-    - nsis
+    - dir
   icon: ../electron/assets/icon.ico
-  artifactName: ${productName}-${version}-setup.${ext}
-
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
-  createStartMenuShortcut: true
-
-mac:
-  target: dmg
-  category: public.app-category.business
-
-linux:
-  target: AppImage
-  category: Office
 
 extraMetadata:
-  main: electron/main.js
+  main: electron/main.cjs
