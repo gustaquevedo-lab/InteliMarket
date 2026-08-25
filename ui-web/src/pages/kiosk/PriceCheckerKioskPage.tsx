@@ -320,10 +320,10 @@ export default function PriceCheckerKioskPage() {
             que entraran en 768px de alto -- en horizontal sobra ancho de
             sobra, así que cada elemento puede ser grande de verdad. */}
         {!scannedProduct && !notFoundCode && !connError && (
-          <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start animate-in fade-in zoom-in-95 duration-300">
+          <div className="w-full h-full grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-stretch animate-in fade-in zoom-in-95 duration-300">
 
             {/* COLUMNA IZQUIERDA -- identidad + llamado a escanear */}
-            <div className="lg:col-span-5 flex flex-col items-center space-y-4">
+            <div className="lg:col-span-5 flex flex-col items-center justify-center space-y-5">
               <div className="relative flex flex-col items-center">
                 <div className="absolute -inset-8 rounded-full bg-gradient-to-r from-orange-500 via-blue-600 to-amber-400 opacity-30 dark:opacity-40 blur-2xl animate-pulse-glow pointer-events-none" />
                 <div className="relative w-48 h-48 sm:w-56 sm:h-56 rounded-full bg-white p-3.5 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
@@ -375,9 +375,9 @@ export default function PriceCheckerKioskPage() {
             {/* COLUMNA DERECHA -- banner de marketing grande + cotizaciones
                 grandes, una arriba de la otra pero con espacio real porque
                 no compiten por ancho con la columna izquierda. */}
-            <div className="lg:col-span-7 flex flex-col space-y-4">
+            <div className="lg:col-span-7 h-full flex flex-col justify-between gap-6">
               {currentBanner ? (
-                <div className="w-full rounded-3xl border-2 border-slate-200 dark:border-white/20 shadow-2xl relative overflow-hidden bg-white dark:bg-slate-900/95">
+                <div className="w-full flex-1 flex flex-col rounded-3xl border-2 border-slate-200 dark:border-white/20 shadow-2xl relative overflow-hidden bg-white dark:bg-slate-900/95">
                   {currentBanner.imagen_url ? (
                     <div className="relative w-full aspect-[16/9]">
                       <img src={currentBanner.imagen_url} alt={currentBanner.titulo} className="w-full h-full object-cover" />
@@ -423,7 +423,7 @@ export default function PriceCheckerKioskPage() {
                   )}
                 </div>
               ) : (
-                <div className="w-full aspect-[16/9] rounded-3xl border-2 border-dashed border-slate-300 dark:border-white/15 flex flex-col items-center justify-center text-center p-6 bg-slate-50/50 dark:bg-white/5">
+                <div className="w-full flex-1 min-h-[220px] rounded-3xl border-2 border-dashed border-slate-300 dark:border-white/15 flex flex-col items-center justify-center text-center p-6 bg-slate-50/50 dark:bg-white/5">
                   <Sparkles className="w-8 h-8 text-slate-300 dark:text-slate-600 mb-2" />
                   <p className="text-sm font-bold text-slate-400 dark:text-slate-500">Sin ofertas cargadas todavía</p>
                   <p className="text-xs text-slate-400 dark:text-slate-600 mt-1">Marketing puede subir el primer creativo desde Gerente de Marketing IA → Verificador de Precios</p>
