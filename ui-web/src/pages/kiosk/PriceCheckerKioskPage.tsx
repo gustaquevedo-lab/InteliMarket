@@ -67,7 +67,12 @@ const BANNER_ROTATE_MS = 6000
 const monoFont = { fontFamily: "'IBM Plex Mono', monospace" }
 
 export default function PriceCheckerKioskPage() {
-  const { dark, toggle: toggleTheme } = useTheme()
+  const { dark, setTheme } = useTheme()
+  // Toggle de 2 estados nomas -- en un kiosco fijo no tiene sentido un
+  // tercer estado "sistema" que la mayoria de las veces resuelve a claro
+  // sin que nadie lo haya elegido. Un toque cambia entre claro y oscuro,
+  // sin estados intermedios ambiguos en una pantalla tactil.
+  const toggleTheme = () => setTheme(dark ? "light" : "dark")
 
   // Nunca arrancar con una cotizacion inventada en pantalla -- null hasta
   // que llegue la configuracion real del tenant. Mientras tanto no se
@@ -315,7 +320,7 @@ export default function PriceCheckerKioskPage() {
             que entraran en 768px de alto -- en horizontal sobra ancho de
             sobra, así que cada elemento puede ser grande de verdad. */}
         {!scannedProduct && !notFoundCode && !connError && (
-          <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center animate-in fade-in zoom-in-95 duration-300">
+          <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start animate-in fade-in zoom-in-95 duration-300">
 
             {/* COLUMNA IZQUIERDA -- identidad + llamado a escanear */}
             <div className="lg:col-span-5 flex flex-col items-center space-y-4">
