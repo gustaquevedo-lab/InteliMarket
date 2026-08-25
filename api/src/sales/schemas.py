@@ -18,6 +18,12 @@ class SaleItemInput(BaseModel):
     costo_unitario: Optional[Decimal] = None
 
 
+class SalePaymentInput(BaseModel):
+    forma_pago: str
+    monto: Decimal = Field(gt=0)
+    moneda: str = "PYG"
+
+
 class SaleCreate(BaseModel):
     company_id: UUID
     branch_id: Optional[UUID] = None
@@ -29,11 +35,13 @@ class SaleCreate(BaseModel):
     moneda: str = "PYG"
     tipo_cambio: Decimal = Decimal("1")
     items: list[SaleItemInput]
+    payments: list[SalePaymentInput] = []
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None
     session_id: Optional[UUID] = None
     recibo_html: Optional[str] = None
     recibo_escpos_b64: Optional[str] = None
+    admin_override_credito: bool = False
 
 
 class SaleResponse(BaseModel):

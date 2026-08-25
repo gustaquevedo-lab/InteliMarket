@@ -44,7 +44,8 @@ async def list_customers(
             (Customer.razon_social.ilike(f"%{search}%")) |
             (Customer.ruc.ilike(f"%{search}%")) |
             (Customer.ci.ilike(f"%{search}%")) |
-            (Customer.telefono.ilike(f"%{search}%"))
+            (Customer.telefono.ilike(f"%{search}%")) |
+            (Customer.extra_club_numero.ilike(f"%{search}%"))
         )
     if activo is not None:
         query = query.where(Customer.activo == activo)

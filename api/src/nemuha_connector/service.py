@@ -160,6 +160,15 @@ async def _save_map(db: AsyncSession, company_id: str, source_table: str, source
 
 # ── Resolución de terceros (bs_pessoa) ──────────────────────────────────────────
 
+def _format_uuid_hex(hex32: str | None) -> str | None:
+    """HEX(UUID_FIDELIZACAO) devuelve 32 caracteres sin guiones -- se
+    formatea como UUID estandar (8-4-4-4-12) para que sea el mismo numero
+    largo que el cliente ya conoce/usa como socio Extra Club."""
+    if not hex32 or len(hex32) != 32:
+        return None
+    return f"{hex32[0:8]}-{hex32[8:12]}-{hex32[12:16]}-{hex32[16:20]}-{hex32[20:32]}".lower()
+
+
 async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol: Literal["customer", "supplier"]) -> UUID:
     source_table = f"bs_pessoa:{rol}"
     existing = await _get_mapped_target(db, company_id, source_table, id_pessoa)
@@ -167,7 +176,7 @@ async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol
         return existing
 
     rows = await _fetch(
-        "SELECT ID_PESSOA, NOME, RUC, TELEFONE, EMAIL, ENDERECO FROM bs_pessoa WHERE ID_PESSOA = %s",
+        "SELECT ID_PESSOA, NOME, RUC, TELEFONE, EMAIL, ENDERECO, HEX(UUID_FIDELIZACAO) AS UUID_FIDELIZACAO FROM bs_pessoa WHERE ID_PESSOA = %s",
         (id_pessoa,),
     )
     if not rows:
@@ -186,6 +195,7 @@ async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol
             company_id=company_id,
             razon_social=p["NOME"] or f"Cliente legacy #{id_pessoa}",
             ruc=p["RUC"], telefono=p["TELEFONE"], email=p["EMAIL"], direccion=p["ENDERECO"],
+            extra_club_numero=_format_uuid_hex(p.get("UUID_FIDELIZACAO")),
         )
         target_table = "customers"
 
@@ -1449,6 +1459,33 @@ async def sync_credit_accounts(db: AsyncSession, company_id: str, since: date | 
     return count
 
 
+# ── Numero de socio Extra Club (bs_pessoa.UUID_FIDELIZACAO) ─────────────────
+#
+# 488 de 4919 personas tienen este numero (verificado contra datos reales);
+# 482 de esas tambien tienen VL_LIMITE_CREDITO > 0, es decir, son socios
+# Extra Club con linea de credito realmente operativa. _resolve_pessoa ya lo
+# setea para clientes NUEVOS -- este sync rellena a los que ya existian
+# antes de que este campo existiera.
+
+async def sync_extra_club_numeros(db: AsyncSession, company_id: str, since: date | None) -> int:
+    rows = await _fetch(
+        "SELECT ID_PESSOA, HEX(UUID_FIDELIZACAO) AS UUID_FIDELIZACAO FROM bs_pessoa WHERE UUID_FIDELIZACAO IS NOT NULL"
+    )
+    count = 0
+    for r in rows:
+        numero = _format_uuid_hex(r["UUID_FIDELIZACAO"])
+        if not numero:
+            continue
+        customer_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "customer")
+        result = await db.execute(select(Customer).where(Customer.id == customer_id))
+        customer = result.scalar_one_or_none()
+        if customer and customer.extra_club_numero != numero:
+            customer.extra_club_numero = numero
+            count += 1
+    await db.flush()
+    return count
+
+
 # ── Saldos de proveedor (fin_saldo_fornecedor) — control cruzado ───────────────
 #
 # Solo 35 filas reales: no es una fuente primaria, es un saldo que el legado
@@ -2089,6 +2126,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("stock", sync_stock),
         ("inventory_adjustments", sync_inventory_adjustments),
         ("credit_accounts", sync_credit_accounts),
+        ("extra_club_numeros", sync_extra_club_numeros),
         ("supplier_balances", sync_supplier_balances),
         ("purchase_orders", sync_purchase_orders),
         ("purchase_receipts", sync_purchase_receipts),

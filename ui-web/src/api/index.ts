@@ -135,7 +135,7 @@ async function downloadAuthenticated(path: string, params: Record<string, string
 // ========== TYPE STUBS ==========
 export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; imagen_url?: string | null; precio_venta?: number; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
-export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
+export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; extra_club_numero?: string | null; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
 export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; numero_interno?: string; recibo_html?: string; recibo_escpos_b64?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
 export interface SaleItem { id?: string; sale_id?: string; product_id?: string; producto?: Product; product?: Product; descripcion?: string; cantidad?: number; cantidad_devuelta?: number; cantidad_disponible?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; iva_monto?: number; total?: number; descuento?: number }
 export interface PaymentMethod { id: string; nombre: string; codigo?: string; tipo?: string; moneda?: string; activo?: boolean; permite_parcial?: boolean; requiere_autorizacion?: boolean; created_at?: string }
@@ -739,7 +739,7 @@ export const api = {
   sales: {
     list: (params?: { fecha_desde?: string; fecha_hasta?: string; desde?: string; hasta?: string; estado?: string }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
     get: (id: string) => client.get<Sale>(`/v1/sales/${id}`),
-    create: (data: Partial<Sale> & { items: SaleItem[] }) => client.post<Sale>("/v1/sales", data),
+    create: (data: Partial<Sale> & { items: SaleItem[]; payments?: { forma_pago: string; monto: number; moneda?: string }[]; admin_override_credito?: boolean }) => client.post<Sale>("/v1/sales", data),
     cancel: (id: string) => client.post<void>(`/v1/sales/${id}/cancel`),
     items: (id: string) => client.get<SaleItem[]>(`/v1/sales/${id}/items`),
     getItems: (id: string) => client.get<SaleItem[]>(`/v1/sales/${id}/items`),

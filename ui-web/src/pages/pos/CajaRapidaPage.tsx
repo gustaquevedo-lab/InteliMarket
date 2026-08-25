@@ -4,7 +4,7 @@ import {
   Percent, X, CheckCircle, Printer, RefreshCw, Banknote,
   CreditCard, QrCode, Building, ArrowRight, Check, AlertCircle, Clock,
   DollarSign, Globe, Settings, FileText, ChevronDown, Sparkles, Receipt,
-  Award, ShieldCheck, KeyRound, Star, Wallet, Scale, AlertTriangle,
+  Award, ShieldCheck, KeyRound, Star, Wallet, Scale, AlertTriangle, ChevronRight, ArrowLeft,
   Usb, ArrowDownRight, CornerDownLeft, ArrowRightLeft, CornerRightDown,
   Maximize2, Eye, Image as ImageIcon, ZoomIn, LogOut, Lock, Unlock,
   Coins, HelpCircle, Package, Flame, ShoppingBag, LayoutGrid, ListFilter,
@@ -219,6 +219,14 @@ function escposLogoFromDataUrl(dataUrl: string, maxWidthPx = 384): Promise<strin
     img.onerror = () => resolve('')
     img.src = dataUrl
   })
+}
+
+const FORMA_PAGO_LABEL: Record<string, string> = {
+  EFECTIVO: "Efectivo",
+  TARJETA_BANCARD: "Tarjeta Bancard",
+  TARJETA_DINELCO: "Tarjeta Dinelco",
+  QR: "QR / Transferencia",
+  EXTRA_CLUB: "Extra Club (Crédito)",
 }
 
 const DEFAULT_CUSTOMER: Customer = {
@@ -471,7 +479,7 @@ export default function POSPage() {
   const [verifyingSupervisor, setVerifyingSupervisor] = useState(false)
   const [supervisorReason, setSupervisorReason] = useState("Error de escaneo / digitación")
   const [pendingSupervisorAction, setPendingSupervisorAction] = useState<{
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal"
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment"
     itemId?: string
     delta?: number
   } | null>(null)
@@ -566,7 +574,7 @@ export default function POSPage() {
 
   // ── MODALES DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO ─────────
   const [showPaymentModal, setShowPaymentModal] = useState(false)
-  const [paymentTab, setPaymentTab] = useState<"cash" | "bancard" | "dinelco" | "qr" | "mixed">("cash")
+  const [paymentTab, setPaymentTab] = useState<"cash" | "bancard" | "dinelco" | "qr" | "extra_club" | "mixed">("cash")
   
   // Efectivo Multimoneda simultáneo (Guaraníes NUNCA tiene decimales)
   const [payCashPyg, setPayCashPyg] = useState<string>("")
@@ -581,6 +589,7 @@ export default function POSPage() {
   const mixedCashBrlInputRef = useRef<HTMLInputElement>(null)
   const mixedCardPygInputRef = useRef<HTMLInputElement>(null)
   const mixedQrPygInputRef = useRef<HTMLInputElement>(null)
+  const mixedExtraClubPygInputRef = useRef<HTMLInputElement>(null)
 
   // Tarjetas POS Bancard & Dinelco vinculadas a la caja activa
   const [posTerminalId, setPosTerminalId] = useState(activePosConfig.bancardTerminalId)
@@ -618,6 +627,22 @@ export default function POSPage() {
   const [mixedCashBrl, setMixedCashBrl] = useState("")
   const [mixedCardPyg, setMixedCardPyg] = useState("")
   const [mixedQrPyg, setMixedQrPyg] = useState("")
+  const [mixedExtraClubPyg, setMixedExtraClubPyg] = useState("")
+
+  // ── Extra Club (pago a credito) -- busqueda propia dentro del tab de pago,
+  // separada del selector general de "Cliente" del ticket: acá además hace
+  // falta ver la línea de crédito real antes de dejar avanzar el cobro.
+  const [extraClubQuery, setExtraClubQuery] = useState("")
+  const [extraClubResults, setExtraClubResults] = useState<Customer[]>([])
+  const [extraClubSearching, setExtraClubSearching] = useState(false)
+  const [extraClubCredit, setExtraClubCredit] = useState<{ limite_credito: number; saldo_disponible: number; saldo_utilizado: number; activo: boolean } | null | "loading">(null)
+  const [extraClubAdminOverride, setExtraClubAdminOverride] = useState(false)
+  const [showExtraClubBalanceModal, setShowExtraClubBalanceModal] = useState(false)
+  const [balanceModalQuery, setBalanceModalQuery] = useState("")
+  const [balanceModalResults, setBalanceModalResults] = useState<Customer[]>([])
+  const [balanceModalSearching, setBalanceModalSearching] = useState(false)
+  const [balanceModalSelected, setBalanceModalSelected] = useState<Customer | null>(null)
+  const [balanceModalCredit, setBalanceModalCredit] = useState<{ limite_credito: number; saldo_disponible: number; saldo_utilizado: number; activo: boolean } | null | "loading">(null)
 
   const [showLostDemandModal, setShowLostDemandModal] = useState(false)
   const [lostDemandCliente, setLostDemandCliente] = useState("")
@@ -786,6 +811,73 @@ export default function POSPage() {
 
     return () => clearTimeout(timer)
   }, [customerSearch, showCustomerModal])
+
+  // Busqueda de socio Extra Club por numero/RUC/cedula/nombre -- mismo
+  // criterio de fallback pedido explicitamente ("estandar, con fallback a
+  // cedula y nombre"), ya cubierto por el search del backend que matchea
+  // extra_club_numero/ruc/ci/razon_social en un solo query.
+  useEffect(() => {
+    if (paymentTab !== "extra_club") return
+    const query = extraClubQuery.trim()
+    if (!query) { setExtraClubResults([]); setExtraClubSearching(false); return }
+    const timer = setTimeout(async () => {
+      setExtraClubSearching(true)
+      try {
+        const res = await api.customers.list({ search: query, limit: 15 })
+        setExtraClubResults((res || []).map(normalizeCustomer))
+      } catch (e) {
+      } finally {
+        setExtraClubSearching(false)
+      }
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [extraClubQuery, paymentTab])
+
+  // Linea de credito real del cliente elegido para Extra Club -- se pide
+  // apenas hay un cliente real seleccionado en ese tab (no el generico
+  // DEFAULT_CUSTOMER). Sin cuenta de credito, extraClubCredit queda null
+  // -- eso es lo que bloquea el cobro salvo override de admin.
+  useEffect(() => {
+    if (paymentTab !== "extra_club" || !customer || customer.id === DEFAULT_CUSTOMER.id) {
+      setExtraClubCredit(null)
+      return
+    }
+    let cancelled = false
+    setExtraClubCredit("loading")
+    api.creditAccounts.getByCustomer(customer.id)
+      .then((acc) => { if (!cancelled) setExtraClubCredit(acc ? { limite_credito: Number(acc.limite_credito || 0), saldo_disponible: Number(acc.saldo_disponible || 0), saldo_utilizado: Number(acc.saldo_utilizado || 0), activo: acc.activo !== false } : null) })
+      .catch(() => { if (!cancelled) setExtraClubCredit(null) })
+    return () => { cancelled = true }
+  }, [customer, paymentTab])
+
+  // Busqueda para el boton dedicado de consulta de saldo (Electron toolbar)
+  // -- no toca el carrito ni el cliente de la venta, es solo lectura.
+  useEffect(() => {
+    if (!showExtraClubBalanceModal) return
+    const query = balanceModalQuery.trim()
+    if (!query) { setBalanceModalResults([]); setBalanceModalSearching(false); return }
+    const timer = setTimeout(async () => {
+      setBalanceModalSearching(true)
+      try {
+        const res = await api.customers.list({ search: query, limit: 15 })
+        setBalanceModalResults((res || []).map(normalizeCustomer))
+      } catch (e) {
+      } finally {
+        setBalanceModalSearching(false)
+      }
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [balanceModalQuery, showExtraClubBalanceModal])
+
+  useEffect(() => {
+    if (!balanceModalSelected) { setBalanceModalCredit(null); return }
+    let cancelled = false
+    setBalanceModalCredit("loading")
+    api.creditAccounts.getByCustomer(balanceModalSelected.id)
+      .then((acc) => { if (!cancelled) setBalanceModalCredit(acc ? { limite_credito: Number(acc.limite_credito || 0), saldo_disponible: Number(acc.saldo_disponible || 0), saldo_utilizado: Number(acc.saldo_utilizado || 0), activo: acc.activo !== false } : null) })
+      .catch(() => { if (!cancelled) setBalanceModalCredit(null) })
+    return () => { cancelled = true }
+  }, [balanceModalSelected])
 
   // Autocompletado de RUC y cálculo de DV en alta rápida de clientes
   useEffect(() => {
@@ -1605,6 +1697,12 @@ export default function POSPage() {
         return "Abrir configuración de terminales POS"
       case "assign_terminal":
         return `Asignar esta caja (${machineHostname || "terminal"}) a un punto de emisión`
+      case "extra_club_payment": {
+        const nombre = customer.razon_social || customer.nombre || "Cliente"
+        const numero = customer.extra_club_numero ? ` · Socio ${customer.extra_club_numero}` : ""
+        const saldoTxt = extraClubCredit && extraClubCredit !== "loading" ? ` · Disponible ${formatPYG(extraClubCredit.saldo_disponible)}` : ""
+        return `Pago Extra Club: ${nombre}${numero} · ${formatPYG(totalPyg)}${saldoTxt}`
+      }
       default:
         return "Autorización de supervisor"
     }
@@ -1615,12 +1713,14 @@ export default function POSPage() {
       await submitDevolucion(resolverId, resolverNombre)
     } else if (action.type === "assign_terminal") {
       await submitAssignTerminal()
+    } else if (action.type === "extra_club_payment") {
+      await handleProcessCheckout()
     } else {
       executeSupervisorAction(action)
     }
   }
 
-  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal", itemId?: string, delta?: number }) => {
+  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment", itemId?: string, delta?: number }) => {
     if (isSupervisorUser) {
       if (action.type === "process_return") {
         await submitDevolucion(user!.id, user?.nombre || "Supervisor")
@@ -1691,8 +1791,10 @@ export default function POSPage() {
     return () => clearInterval(interval)
   }, [showRemoteAuthModal, remoteAuthRequestId, pendingSupervisorAction])
 
-  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal", itemId?: string, delta?: number }) => {
-    if (action.type === "remove_item" && action.itemId) {
+  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment", itemId?: string, delta?: number }) => {
+    if (action.type === "extra_club_payment") {
+      handleProcessCheckout()
+    } else if (action.type === "remove_item" && action.itemId) {
       const itemToDelete = cart.find(i => i.id === action.itemId)
       setCart((prev) => prev.filter((i) => i.id !== action.itemId))
       toast.info("Ítem Anulado", `${itemToDelete?.nombre || 'Producto'} eliminado de la venta.`)
@@ -1745,6 +1847,8 @@ export default function POSPage() {
           await submitDevolucion(res.id!, res.nombre || "Supervisor")
         } else if (pendingSupervisorAction.type === "assign_terminal") {
           await submitAssignTerminal()
+        } else if (pendingSupervisorAction.type === "extra_club_payment") {
+          await handleProcessCheckout()
         } else {
           executeSupervisorAction(pendingSupervisorAction)
         }
@@ -2319,12 +2423,15 @@ export default function POSPage() {
       recibido = parseInt(dinelcoMontoPyg.replace(/\D/g, "") || String(totalPyg), 10)
     } else if (paymentTab === "qr") {
       recibido = totalPyg
+    } else if (paymentTab === "extra_club") {
+      recibido = totalPyg
     } else if (paymentTab === "mixed") {
       const pyg = parseInt(mixedCashPyg.replace(/\D/g, "") || "0", 10)
       const brl = parseFloat(mixedCashBrl.replace(/,/g, ".") || "0") * rates.BRL
       const card = parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)
       const qr = parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)
-      recibido = pyg + brl + card + qr
+      const extraClub = parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)
+      recibido = pyg + brl + card + qr + extraClub
     }
 
     // El guaraní no circula en billetes/monedas por debajo de ₲500 -- al
@@ -2344,7 +2451,7 @@ export default function POSPage() {
       saldoRestantePyg: Math.round(saldo),
       vueltoPyg: Math.round(vuelto)
     }
-  }, [paymentTab, payCashPyg, payCashBrl, payCashUsd, posCardMontoPyg, dinelcoMontoPyg, mixedCashPyg, mixedCashBrl, mixedCardPyg, mixedQrPyg, totalPyg, rates])
+  }, [paymentTab, payCashPyg, payCashBrl, payCashUsd, posCardMontoPyg, dinelcoMontoPyg, mixedCashPyg, mixedCashBrl, mixedCardPyg, mixedQrPyg, mixedExtraClubPyg, totalPyg, rates])
 
   // Al abrir el modal de cobro, foco directo al campo de Guaraníes (ya viene
   // precargado con el monto exacto) con el texto seleccionado -- así el
@@ -2613,7 +2720,11 @@ export default function POSPage() {
       const showIva = tpl.mostrar_liquidacion_iva !== false
       const showPagos = tpl.mostrar_desglose_pagos !== false
       const showClub = tpl.habilitar_extra_club !== false
-      const isClubMember = customer && customer.id !== DEFAULT_CUSTOMER.id
+      // isClubMember antes se calculaba solo por "hay un cliente elegido"
+      // (cualquier venta con nombre de cliente salia rotulada "FACTURA
+      // CREDITO", incluso pagada en efectivo) -- ahora es especificamente
+      // "se pago con Extra Club", que es lo unico que realmente es credito.
+      const isClubMember = paymentTab === "extra_club" || (paymentTab === "mixed" && (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0))
       const msgSocio = tpl.mensaje_socio_club || `⭐ SOCIO EXTRA CLUB: Sumaste +${Math.round(totalPyg / 1000)} Puntos. Saldo Total: 2.850 Puntos.`
       const msgInvitacion = tpl.mensaje_invitacion_club || "🎁 ¿Aún no eres socio Extra Club? Regístrate gratis en caja o en club.extrasuper.com.py y acumula puntos para canjear por premios y descuentos exclusivos."
       const showMarketing = tpl.habilitar_mensaje_marketing && tpl.mensaje_marketing
@@ -2672,7 +2783,44 @@ export default function POSPage() {
           iva_tasa: i.iva_tasa,
           subtotal: i.precio * i.quantity
         }))
-      const salePaymentsForCreate = [{ forma: paymentTab === "cash" ? "efectivo" : paymentTab === "bancard" ? "tarjeta_bancard" : paymentTab === "dinelco" ? "tarjeta_dinelco" : "qr", monto: totalPyg }]
+      // Desglose real de medios de pago -- antes era una sola linea fija
+      // por pestaña (ni "mixed" ni "extra_club" quedaban bien representados)
+      // y ademas se descartaba en silencio del lado del backend (ver fix en
+      // sales/service.py). Los codigos EFECTIVO/QR/etc en mayuscula
+      // coinciden con lo que ya usa caja/service.py para calcular el
+      // efectivo acumulado de la alerta de retiro.
+      const salePaymentsForCreate: { forma_pago: string; monto: number; moneda?: string }[] = (() => {
+        if (paymentTab === "cash") {
+          const out: { forma_pago: string; monto: number; moneda?: string }[] = []
+          const pyg = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
+          const brl = parseFloat(payCashBrl.replace(/,/g, ".") || "0")
+          const usd = parseFloat(payCashUsd.replace(/,/g, ".") || "0")
+          if (pyg > 0) out.push({ forma_pago: "EFECTIVO", monto: pyg, moneda: "PYG" })
+          if (brl > 0) out.push({ forma_pago: "EFECTIVO", monto: brl, moneda: "BRL" })
+          if (usd > 0) out.push({ forma_pago: "EFECTIVO", monto: usd, moneda: "USD" })
+          if (out.length === 0) out.push({ forma_pago: "EFECTIVO", monto: totalPyg, moneda: "PYG" })
+          return out
+        }
+        if (paymentTab === "bancard") return [{ forma_pago: "TARJETA_BANCARD", monto: totalPyg, moneda: "PYG" }]
+        if (paymentTab === "dinelco") return [{ forma_pago: "TARJETA_DINELCO", monto: totalPyg, moneda: "PYG" }]
+        if (paymentTab === "qr") return [{ forma_pago: "QR", monto: totalPyg, moneda: "PYG" }]
+        if (paymentTab === "extra_club") return [{ forma_pago: "EXTRA_CLUB", monto: totalPyg, moneda: "PYG" }]
+        if (paymentTab === "mixed") {
+          const out: { forma_pago: string; monto: number; moneda?: string }[] = []
+          const pyg = parseInt(mixedCashPyg.replace(/\D/g, "") || "0", 10)
+          const brl = parseFloat(mixedCashBrl.replace(/,/g, ".") || "0")
+          const card = parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)
+          const qr = parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)
+          const extraClub = parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)
+          if (pyg > 0) out.push({ forma_pago: "EFECTIVO", monto: pyg, moneda: "PYG" })
+          if (brl > 0) out.push({ forma_pago: "EFECTIVO", monto: brl, moneda: "BRL" })
+          if (card > 0) out.push({ forma_pago: "TARJETA_BANCARD", monto: card, moneda: "PYG" })
+          if (qr > 0) out.push({ forma_pago: "QR", monto: qr, moneda: "PYG" })
+          if (extraClub > 0) out.push({ forma_pago: "EXTRA_CLUB", monto: extraClub, moneda: "PYG" })
+          return out
+        }
+        return [{ forma_pago: "EFECTIVO", monto: totalPyg, moneda: "PYG" }]
+      })()
       const saleBasePayload = {
         company_id: COMPANY_ID,
         customer_id: customer.id,
@@ -2689,6 +2837,7 @@ export default function POSPage() {
         estado: "completada",
         items: saleItemsForCreate,
         payments: salePaymentsForCreate,
+        admin_override_credito: paymentTab === "extra_club" ? extraClubAdminOverride : false,
       }
 
       let numeroComprobante = saleNumber
@@ -2789,14 +2938,13 @@ export default function POSPage() {
                 <col style="width: 50%;">
                 <col style="width: 50%;">
               </colgroup>
-              <tr>
-                <td>Forma de Pago:</td>
-                <td style="text-align: right; font-weight: bold; text-transform: uppercase;">${paymentTab === "cash" ? "Efectivo" : paymentTab === "bancard" ? "Tarjeta Bancard" : paymentTab === "dinelco" ? "Tarjeta Dinelco" : paymentTab}</td>
-              </tr>
-              <tr>
-                <td>Monto Recibido:</td>
-                <td style="text-align: right;">Gs. ${fmtGs(totalRecibidoPyg)}</td>
-              </tr>
+              <tr><td colspan="2" style="font-weight: bold; padding-bottom: 1px;">Medios de Pago Utilizados:</td></tr>
+              ${salePaymentsForCreate.map((p) => `
+                <tr>
+                  <td>${FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}${p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}:</td>
+                  <td style="text-align: right;">${p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : `Gs. ${fmtGs(p.monto)}`}</td>
+                </tr>
+              `).join("")}
               <tr style="font-weight: bold; font-size: 10.5px;">
                 <td style="padding-top: 2px;">VUELTO:</td>
                 <td style="text-align: right; padding-top: 2px; white-space: nowrap;">
@@ -2804,6 +2952,15 @@ export default function POSPage() {
                 </td>
               </tr>
             </table>
+          ` : ''}
+
+          ${isClubMember ? `
+            <div style="border-top: 1px dashed #000; margin-top: 6px; padding-top: 4px; font-size: 9px;">
+              <div>Cliente: ${(customer.razon_social || customer.nombre || "").toUpperCase()}</div>
+              <div>C.I./RUC: ${customer.ci || customer.ruc || "-"}</div>
+              <div style="text-align: center; margin-top: 14px; border-top: 1px solid #000; padding-top: 2px; width: 70%; margin-left: auto; margin-right: auto;">Firma del cliente</div>
+              <div style="text-align: center; font-size: 8px; margin-top: 3px;">Factura a crédito Extra Club -- documento con valor para cobro</div>
+            </div>
           ` : ''}
 
           ${showIva ? `
@@ -2995,10 +3152,26 @@ export default function POSPage() {
 
         if (showPagos) {
           t += escposDashes(W) + '\n'
-          const formaPagoLabel = paymentTab === "cash" ? "EFECTIVO" : paymentTab === "bancard" ? "TARJETA BANCARD" : paymentTab === "dinelco" ? "TARJETA DINELCO" : paymentTab.toUpperCase()
-          t += escposTwoCol('Forma de Pago:', formaPagoLabel) + '\n'
-          t += escposTwoCol('Monto Recibido:', fmtGs(totalRecibidoPyg)) + '\n'
+          t += 'Medios de Pago Utilizados:\n'
+          for (const p of salePaymentsForCreate) {
+            const label = (FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago) + (p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : "")
+            const montoTxt = p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : fmtGs(p.monto)
+            t += escposTwoCol(escposStripAccents(label) + ':', montoTxt) + '\n'
+          }
           t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', fmtGs(vueltoPyg)) + ESCPOS_BOLD_OFF + '\n'
+        }
+
+        if (isClubMember) {
+          t += escposDashes(W) + '\n'
+          t += `Cliente: ${escposStripAccents((customer.razon_social || customer.nombre || "").toUpperCase())}\n`
+          t += `C.I./RUC: ${customer.ci || customer.ruc || "-"}\n`
+          t += '\n\n'
+          t += ESCPOS_ALIGN_CENTER
+          t += escposDashes(28) + '\n'
+          t += 'Firma del cliente\n'
+          t += 'Factura a credito Extra Club\n'
+          t += 'Documento con valor para cobro\n'
+          t += ESCPOS_ALIGN_LEFT
         }
 
         if (showIva) {
@@ -3320,6 +3493,17 @@ export default function POSPage() {
             {(cashDropStatus?.cash_drop_alert || cashDropStatus?.cash_drop_warning) && (
               <span className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${cashDropStatus?.cash_drop_alert ? "bg-rose-500" : "bg-amber-500"}`} />
             )}
+          </button>
+
+          {/* Extra Club -- consulta rapida de saldo de linea de credito,
+              sin tocar el carrito ni la venta en curso. */}
+          <button
+            onClick={() => { setShowExtraClubBalanceModal(true); setBalanceModalQuery(""); setBalanceModalResults([]); setBalanceModalSelected(null) }}
+            title="Consultar saldo de línea de crédito Extra Club"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-600/10 text-purple-600 border border-purple-500/30 hover:bg-purple-600/20 cursor-pointer"
+          >
+            <Star className="w-3.5 h-3.5" />
+            <span className="text-[11px] hidden sm:inline">Extra Club</span>
           </button>
 
           {/* Cierre de Caja */}
@@ -4753,7 +4937,8 @@ export default function POSPage() {
                   { id: "cash", label: "Efectivo Multimoneda", icon: Banknote, show: isEnabled("EFECTIVO") },
                   { id: "bancard", label: `POS Bancard (${posTerminalId})`, icon: CreditCard, show: isEnabled("BANCARD") },
                   { id: "dinelco", label: `POS Dinelco (${dinelcoTerminalId})`, icon: CreditCard, show: isEnabled("DINELCO") },
-                  { id: "qr", label: "QR / Pix / Extra Club", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") || isEnabled("EXTRA_CLUB") },
+                  { id: "qr", label: "QR / Pix", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
+                  { id: "extra_club", label: "Extra Club (Crédito)", icon: Star, show: isEnabled("EXTRA_CLUB") },
                   { id: "mixed", label: "Pago Mixto", icon: Coins, show: true },
                 ]
 
@@ -5091,6 +5276,116 @@ export default function POSPage() {
                 </div>
               )}
 
+              {/* Extra Club (credito) -- busqueda propia por numero de
+                  socio/RUC/cedula/nombre, muestra la linea de credito real
+                  y bloquea el cobro si no hay cuenta activa, salvo que un
+                  admin (su propio login, no un supervisor cualquiera) la
+                  habilite ahi mismo. La aprobacion de supervisora sigue
+                  siendo obligatoria despues, sea cual sea el resultado acá. */}
+              {paymentTab === "extra_club" && (
+                <div className="space-y-2.5">
+                  {(!customer || customer.id === DEFAULT_CUSTOMER.id) ? (
+                    <>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Busque por número de socio Extra Club, RUC, cédula o nombre.
+                      </p>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={extraClubQuery}
+                        onChange={(e) => setExtraClubQuery(e.target.value)}
+                        placeholder="Número de socio / RUC / cédula / nombre"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm outline-none focus:border-purple-500 text-slate-900 dark:text-white"
+                      />
+                      {extraClubSearching && (
+                        <div className="flex items-center justify-center py-4 text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                      )}
+                      {!extraClubSearching && extraClubQuery.trim() && extraClubResults.length === 0 && (
+                        <div className="text-center text-xs text-slate-500 dark:text-slate-400 py-4">Sin resultados.</div>
+                      )}
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {extraClubResults.map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => { setCustomer(c); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false) }}
+                            className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-purple-500 cursor-pointer"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{c.razon_social || c.nombre}</div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                {c.extra_club_numero ? `Socio ${c.extra_club_numero.slice(0, 8)}…` : "Sin número de socio"} · {c.ruc || c.ci || "sin RUC/CI"}
+                              </div>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-purple-50 dark:bg-purple-500/10 border border-purple-300 dark:border-purple-500/30">
+                        <div className="min-w-0">
+                          <div className="text-xs font-black text-slate-900 dark:text-white truncate">{customer.razon_social || customer.nombre}</div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                            {customer.extra_club_numero || "Sin número de socio"} · {customer.ruc || customer.ci || "sin RUC/CI"}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setCustomer(DEFAULT_CUSTOMER); setExtraClubCredit(null); setExtraClubAdminOverride(false) }}
+                          className="text-[10px] font-bold text-purple-600 dark:text-purple-400 cursor-pointer shrink-0"
+                        >
+                          Cambiar
+                        </button>
+                      </div>
+
+                      {extraClubCredit === "loading" && (
+                        <div className="flex items-center justify-center py-4 text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                      )}
+
+                      {extraClubCredit && extraClubCredit !== "loading" && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                            <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Límite</div>
+                            <div className="font-black text-sm font-posMono tabular-nums text-slate-900 dark:text-white">{formatPYG(extraClubCredit.limite_credito)}</div>
+                          </div>
+                          <div className={`p-2.5 rounded-xl border ${extraClubCredit.saldo_disponible >= totalPyg ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-300 dark:border-emerald-500/30" : "bg-rose-50 dark:bg-rose-500/10 border-rose-300 dark:border-rose-500/30"}`}>
+                            <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Disponible</div>
+                            <div className={`font-black text-sm font-posMono tabular-nums ${extraClubCredit.saldo_disponible >= totalPyg ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>{formatPYG(extraClubCredit.saldo_disponible)}</div>
+                          </div>
+                          {!extraClubCredit.activo && (
+                            <div className="col-span-2 text-[11px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5" /> Cuenta de crédito inactiva.
+                            </div>
+                          )}
+                          {extraClubCredit.activo && extraClubCredit.saldo_disponible < totalPyg && (
+                            <div className="col-span-2 text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5" /> Supera el saldo disponible -- quedará pendiente de aprobación de crédito además de la de supervisora.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {extraClubCredit === null && (
+                        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/30">
+                          <div className="text-xs font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 mb-1">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Este cliente no tiene línea de crédito habilitada.
+                          </div>
+                          {(user?.rol === "admin" || user?.is_superadmin) ? (
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-300 mt-2 cursor-pointer">
+                              <input type="checkbox" checked={extraClubAdminOverride} onChange={(e) => setExtraClubAdminOverride(e.target.checked)} className="w-4 h-4 accent-rose-500 cursor-pointer" />
+                              Autorizar esta venta a crédito de todos modos (queda una cuenta de crédito real, con límite justo para esta compra)
+                            </label>
+                          ) : (
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400">Solo un administrador puede autorizar una venta a crédito sin línea habilitada.</div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* 5. COBRO MIXTO -- combinar dos o más formas de pago. Cada
                   campo, al presionar Enter, sugiere cuánto falta (ya
                   convertido a esa moneda) para el siguiente método, y el
@@ -5202,7 +5497,7 @@ export default function POSPage() {
                             const clean = e.target.value.replace(/\D/g, "")
                             setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
                           }}
-                          onKeyDown={(e) => handleMixedFieldKeyDown(e, mixedCashPygInputRef, (f) => setMixedCashPyg(Math.ceil(f).toLocaleString("es-PY")))}
+                          onKeyDown={(e) => handleMixedFieldKeyDown(e, mixedExtraClubPygInputRef, (f) => setMixedExtraClubPyg(Math.ceil(f).toLocaleString("es-PY")))}
                           onFocus={(e) => e.target.select()}
                           onClick={(e) => e.currentTarget.select()}
                           placeholder="0"
@@ -5218,16 +5513,67 @@ export default function POSPage() {
                         </button>
                       </div>
                     </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
+                        <Star className="w-3 h-3" /> Extra Club Crédito (₲):
+                      </label>
+                      <div className="flex gap-1">
+                        <input
+                          ref={mixedExtraClubPygInputRef}
+                          type="text"
+                          value={mixedExtraClubPyg}
+                          onChange={(e) => {
+                            const clean = e.target.value.replace(/\D/g, "")
+                            setMixedExtraClubPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
+                          }}
+                          onKeyDown={(e) => handleMixedFieldKeyDown(e, mixedCashPygInputRef, (f) => setMixedCashPyg(Math.ceil(f).toLocaleString("es-PY")))}
+                          onFocus={(e) => e.target.select()}
+                          onClick={(e) => e.currentTarget.select()}
+                          placeholder="0"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-fuchsia-600 dark:text-fuchsia-400 outline-none focus:border-fuchsia-500"
+                        />
+                        <button
+                          type="button"
+                          title="Completar con el resto"
+                          onClick={() => setMixedExtraClubPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                        >
+                          Resto
+                        </button>
+                      </div>
+                      {parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0 && (!customer || customer.id === DEFAULT_CUSTOMER.id) && (
+                        <div className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1">Elija un cliente (F9) para la porción a crédito.</div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
 
             </div>
 
-            {/* Botón Final de Cobro e Impresión */}
+            {/* Botón Final de Cobro e Impresión -- Extra Club siempre pasa
+                por aprobación de supervisora antes de imprimir, sea cual
+                sea el resultado del chequeo de crédito (pedido explícito:
+                "siempre, cualquier monto", "bloqueante, antes de imprimir"). */}
             <button
               ref={confirmCheckoutBtnRef}
-              onClick={handleProcessCheckout}
+              onClick={() => {
+                const montoExtraClubMixto = paymentTab === "mixed" ? (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)) : 0
+                if (paymentTab === "extra_club" || montoExtraClubMixto > 0) {
+                  if (!customer || customer.id === DEFAULT_CUSTOMER.id) {
+                    toast.warning("Elija un socio Extra Club", "Busque al cliente por número de socio, RUC, cédula o nombre.")
+                    return
+                  }
+                  const tieneLinea = extraClubCredit && extraClubCredit !== "loading" && extraClubCredit.activo
+                  if (!tieneLinea && !extraClubAdminOverride) {
+                    toast.warning("Sin línea de crédito", "Este cliente no tiene cuenta de crédito activa. Solo un admin puede autorizar la excepción.")
+                    return
+                  }
+                  requestSupervisorAuthorization({ type: "extra_club_payment" })
+                  return
+                }
+                handleProcessCheckout()
+              }}
               disabled={submitting}
               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 rounded-xl shadow-lg transition-all text-sm flex items-center justify-center gap-2 cursor-pointer active:scale-98 focus:ring-4 focus:ring-emerald-400"
             >
@@ -6022,6 +6368,106 @@ export default function POSPage() {
                 Registrar Retiro
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CONSULTA DE SALDO EXTRA CLUB -- boton dedicado, no toca la venta ── */}
+      {showExtraClubBalanceModal && (
+        <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border-2 border-purple-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-600 flex items-center justify-center text-white font-black shadow-sm">
+                  <Star className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Saldo Extra Club</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Consulta de línea de crédito, no afecta la venta actual.</p>
+                </div>
+              </div>
+              <button onClick={() => setShowExtraClubBalanceModal(false)} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+
+            {!balanceModalSelected ? (
+              <>
+                <input
+                  type="text"
+                  autoFocus
+                  value={balanceModalQuery}
+                  onChange={(e) => setBalanceModalQuery(e.target.value)}
+                  placeholder="Número de socio / RUC / cédula / nombre"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm outline-none focus:border-purple-500 text-slate-900 dark:text-white mb-2"
+                />
+                {balanceModalSearching && (
+                  <div className="flex items-center justify-center py-4 text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                )}
+                {!balanceModalSearching && balanceModalQuery.trim() && balanceModalResults.length === 0 && (
+                  <div className="text-center text-xs text-slate-500 dark:text-slate-400 py-4">Sin resultados.</div>
+                )}
+                <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                  {balanceModalResults.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => setBalanceModalSelected(c)}
+                      className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-purple-500 cursor-pointer"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{c.razon_social || c.nombre}</div>
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                          {c.extra_club_numero ? `Socio ${c.extra_club_numero.slice(0, 8)}…` : "Sin número de socio"} · {c.ruc || c.ci || "sin RUC/CI"}
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => { setBalanceModalSelected(null); setBalanceModalCredit(null) }}
+                  className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 mb-3 cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" /> Buscar otro
+                </button>
+                <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-500/10 border border-purple-300 dark:border-purple-500/30 mb-3">
+                  <div className="text-sm font-black text-slate-900 dark:text-white truncate">{balanceModalSelected.razon_social || balanceModalSelected.nombre}</div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {balanceModalSelected.extra_club_numero || "Sin número de socio"} · {balanceModalSelected.ruc || balanceModalSelected.ci || "sin RUC/CI"}
+                  </div>
+                </div>
+                {balanceModalCredit === "loading" && (
+                  <div className="flex items-center justify-center py-8 text-slate-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
+                )}
+                {balanceModalCredit && balanceModalCredit !== "loading" && (
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center">
+                      <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Límite</div>
+                      <div className="font-black text-sm font-posMono tabular-nums text-slate-900 dark:text-white">{formatPYG(balanceModalCredit.limite_credito)}</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center">
+                      <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Utilizado</div>
+                      <div className="font-black text-sm font-posMono tabular-nums text-amber-600 dark:text-amber-400">{formatPYG(balanceModalCredit.saldo_utilizado)}</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 text-center">
+                      <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Disponible</div>
+                      <div className="font-black text-sm font-posMono tabular-nums text-emerald-600 dark:text-emerald-400">{formatPYG(balanceModalCredit.saldo_disponible)}</div>
+                    </div>
+                    {!balanceModalCredit.activo && (
+                      <div className="col-span-3 text-[11px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 mt-1">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Cuenta de crédito inactiva.
+                      </div>
+                    )}
+                  </div>
+                )}
+                {balanceModalCredit === null && (
+                  <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/30 text-xs font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Este cliente no tiene línea de crédito habilitada.
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

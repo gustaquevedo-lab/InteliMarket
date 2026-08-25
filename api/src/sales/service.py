@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 
-from api.src.sales.models import Sale, SaleItem
+from api.src.sales.models import Sale, SaleItem, SalePayment
+from api.src.auth.models import User
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
 from api.src.fiscal import service as fiscal_service
@@ -160,10 +161,58 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     sale.total = subtotal + iva_10 + iva_5
     sale.saldo = sale.total
 
+    # ── Desglose real de medios de pago -- antes este array se armaba en el
+    # frontend pero SaleCreate no tenia el campo, asi que Pydantic lo
+    # descartaba en silencio: ninguna venta en vivo (a diferencia de las
+    # sincronizadas del legado) dejaba un solo SalePayment guardado. Sin
+    # esto no hay forma real de saber que medios de pago se usaron en una
+    # venta, ni de calcular el efectivo acumulado para la alerta de retiro.
+    now = datetime.now(timezone.utc)
+    for p in data.payments:
+        db.add(SalePayment(
+            company_id=data.company_id,
+            sale_id=sale.id,
+            forma_pago=p.forma_pago,
+            monto=p.monto,
+            moneda=p.moneda,
+            fecha=now,
+        ))
+
     if data.condicion == "credito" and data.customer_id:
         from api.src.credit_accounts.service import get_credit_check, create_approval_request, process_purchase
+        from api.src.credit_accounts.models import CreditAccount
 
-        check = await get_credit_check(db, str(data.company_id), str(data.customer_id), sale.total)
+        # ── Pago mixto: solo la porcion EXTRA_CLUB va a credito real -- antes
+        # esto siempre usaba sale.total entero, asi que una venta mitad
+        # efectivo mitad Extra Club le habria descontado el TOTAL de la
+        # linea de credito, no solo la parte que realmente se pidio fiado.
+        monto_credito = sum(
+            (p.monto for p in data.payments if p.forma_pago == "EXTRA_CLUB"), Decimal("0")
+        ) or sale.total
+
+        check = await get_credit_check(db, str(data.company_id), str(data.customer_id), monto_credito)
+
+        # ── Excepcion de admin cuando el cliente no tiene linea de credito ──
+        # Pedido explicito: sin linea de credito no se puede vender a
+        # credito, salvo que un admin lo autorice -- en ese caso se crea una
+        # cuenta de credito real, con limite justo para esta compra, en vez
+        # de saltarse el control contable. La venta sigue pasando por el
+        # mismo camino auditado de siempre (get_credit_check de nuevo).
+        if check.get("no_account") and data.admin_override_credito and data.user_id:
+            admin_result = await db.execute(select(User).where(User.id == data.user_id))
+            admin_user = admin_result.scalar_one_or_none()
+            if admin_user and (admin_user.rol == "admin" or admin_user.is_superadmin):
+                db.add(CreditAccount(
+                    company_id=data.company_id,
+                    customer_id=data.customer_id,
+                    limite_credito=monto_credito,
+                    saldo_utilizado=Decimal("0"),
+                    saldo_disponible=monto_credito,
+                    activo=True,
+                ))
+                await db.flush()
+                check = await get_credit_check(db, str(data.company_id), str(data.customer_id), monto_credito)
+
         if check.get("no_account"):
             raise ValueError("Credit account error: No credit account for customer")
         if check.get("inactive"):
@@ -177,7 +226,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             await db.flush()
             await create_approval_request(
                 db, data.company_id, sale.id, data.customer_id, check["credit_account_id"],
-                sale.total, check["limite_credito"], check["saldo_disponible"],
+                monto_credito, check["limite_credito"], check["saldo_disponible"],
             )
             await db.flush()
             await db.refresh(sale)
@@ -187,18 +236,23 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             db,
             str(data.company_id),
             str(data.customer_id),
-            sale.total,
+            monto_credito,
             sale.id,
         )
         if "error" in credit_result:
             raise ValueError(f"Credit account error: {credit_result['error']}")
         sale.estado = "confirmado"
-        sale.total_pagado = sale.total
-        sale.saldo = Decimal("0")
+        # El resto de la venta (efectivo/tarjeta/qr) ya esta cubierto por lo
+        # que llego en data.payments -- solo la porcion a credito faltaba.
+        otros_pagos = sum(
+            (p.monto for p in data.payments if p.forma_pago != "EXTRA_CLUB"), Decimal("0")
+        )
+        sale.total_pagado = min(sale.total, otros_pagos + monto_credito)
+        sale.saldo = max(Decimal("0"), sale.total - sale.total_pagado)
 
         from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
         await create_accounts_receivable_for_sale(
-            db, str(data.company_id), str(data.customer_id), str(sale.id), sale.total, sale.numero,
+            db, str(data.company_id), str(data.customer_id), str(sale.id), monto_credito, sale.numero,
         )
 
     await _deduct_stock_for_sale(db, sale, data)
