@@ -243,12 +243,16 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             raise ValueError(f"Credit account error: {credit_result['error']}")
         sale.estado = "confirmado"
         # El resto de la venta (efectivo/tarjeta/qr) ya esta cubierto por lo
-        # que llego en data.payments -- solo la porcion a credito faltaba.
-        otros_pagos = sum(
-            (p.monto for p in data.payments if p.forma_pago != "EXTRA_CLUB"), Decimal("0")
-        )
-        sale.total_pagado = min(sale.total, otros_pagos + monto_credito)
-        sale.saldo = max(Decimal("0"), sale.total - sale.total_pagado)
+        # que llego en data.payments -- pero esos montos pueden venir en
+        # BRL/USD sin convertir (el POS solo manda el monto crudo en esa
+        # moneda), asi que sumarlos tal cual junto al monto en credito
+        # (siempre PYG) daria un total_pagado mal calculado. El frontend ya
+        # exige que el pago cubra el total completo antes de habilitar el
+        # boton de cobro, asi que la porcion no-credito en PYG es
+        # simplemente el resto del total -- no hace falta re-sumar
+        # monedas mezcladas aca.
+        sale.total_pagado = sale.total
+        sale.saldo = Decimal("0")
 
         from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
         await create_accounts_receivable_for_sale(

@@ -855,7 +855,11 @@ export default function POSPage() {
   // DEFAULT_CUSTOMER). Sin cuenta de credito, extraClubCredit queda null
   // -- eso es lo que bloquea el cobro salvo override de admin.
   useEffect(() => {
-    if (paymentTab !== "extra_club" || !customer || customer.id === DEFAULT_CUSTOMER.id) {
+    // Antes esto solo corria en el tab "extra_club" -- en "mixed" (efectivo
+    // + Extra Club) extraClubCredit se quedaba en null para siempre, sin
+    // importar si el cliente tenia limite real, y el boton de cobro
+    // rechazaba la venta diciendo "sin linea de credito" a cualquiera.
+    if ((paymentTab !== "extra_club" && paymentTab !== "mixed") || !customer || customer.id === DEFAULT_CUSTOMER.id) {
       setExtraClubCredit(null)
       return
     }
