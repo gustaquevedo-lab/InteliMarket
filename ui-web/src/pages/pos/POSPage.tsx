@@ -634,12 +634,14 @@ export default function POSPage() {
   // falta ver la línea de crédito real antes de dejar avanzar el cobro.
   const [extraClubQuery, setExtraClubQuery] = useState("")
   const [extraClubResults, setExtraClubResults] = useState<Customer[]>([])
+  const [extraClubHighlight, setExtraClubHighlight] = useState(0)
   const [extraClubSearching, setExtraClubSearching] = useState(false)
   const [extraClubCredit, setExtraClubCredit] = useState<{ limite_credito: number; saldo_disponible: number; saldo_utilizado: number; activo: boolean } | null | "loading">(null)
   const [extraClubAdminOverride, setExtraClubAdminOverride] = useState(false)
   const [showExtraClubBalanceModal, setShowExtraClubBalanceModal] = useState(false)
   const [balanceModalQuery, setBalanceModalQuery] = useState("")
   const [balanceModalResults, setBalanceModalResults] = useState<Customer[]>([])
+  const [balanceModalHighlight, setBalanceModalHighlight] = useState(0)
   const [balanceModalSearching, setBalanceModalSearching] = useState(false)
   const [balanceModalSelected, setBalanceModalSelected] = useState<Customer | null>(null)
   const [balanceModalCredit, setBalanceModalCredit] = useState<{ limite_credito: number; saldo_disponible: number; saldo_utilizado: number; activo: boolean } | null | "loading">(null)
@@ -823,8 +825,20 @@ export default function POSPage() {
     const timer = setTimeout(async () => {
       setExtraClubSearching(true)
       try {
-        const res = await api.customers.list({ search: query, limit: 15 })
-        setExtraClubResults((res || []).map(normalizeCustomer))
+        const res = (await api.customers.list({ search: query, limit: 15 })) || []
+        const normalized = res.map(normalizeCustomer)
+        setExtraClubResults(normalized)
+        setExtraClubHighlight(0)
+        // Consulta directa: si trae la tarjeta (numero unico) o el fallback
+        // por cedula/nombre da una sola coincidencia, mostrar sus datos de
+        // una -- no tiene sentido pedir un click mas cuando ya no hay
+        // ambiguedad que resolver.
+        if (normalized.length === 1) {
+          setCustomer(normalized[0])
+          setExtraClubQuery("")
+          setExtraClubResults([])
+          setExtraClubAdminOverride(false)
+        }
       } catch (e) {
       } finally {
         setExtraClubSearching(false)
@@ -859,8 +873,13 @@ export default function POSPage() {
     const timer = setTimeout(async () => {
       setBalanceModalSearching(true)
       try {
-        const res = await api.customers.list({ search: query, limit: 15 })
-        setBalanceModalResults((res || []).map(normalizeCustomer))
+        const res = (await api.customers.list({ search: query, limit: 15 })) || []
+        const normalized = res.map(normalizeCustomer)
+        setBalanceModalResults(normalized)
+        setBalanceModalHighlight(0)
+        if (normalized.length === 1) {
+          setBalanceModalSelected(normalized[0])
+        }
       } catch (e) {
       } finally {
         setBalanceModalSearching(false)
@@ -5294,6 +5313,15 @@ export default function POSPage() {
                         autoFocus
                         value={extraClubQuery}
                         onChange={(e) => setExtraClubQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "ArrowDown") { e.preventDefault(); setExtraClubHighlight((h) => Math.min(h + 1, extraClubResults.length - 1)) }
+                          else if (e.key === "ArrowUp") { e.preventDefault(); setExtraClubHighlight((h) => Math.max(h - 1, 0)) }
+                          else if (e.key === "Enter") {
+                            e.preventDefault()
+                            const c = extraClubResults[extraClubHighlight]
+                            if (c) { setCustomer(c); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false) }
+                          }
+                        }}
                         placeholder="Número de socio / RUC / cédula / nombre"
                         className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm outline-none focus:border-purple-500 text-slate-900 dark:text-white"
                       />
@@ -5303,12 +5331,16 @@ export default function POSPage() {
                       {!extraClubSearching && extraClubQuery.trim() && extraClubResults.length === 0 && (
                         <div className="text-center text-xs text-slate-500 dark:text-slate-400 py-4">Sin resultados.</div>
                       )}
+                      {extraClubResults.length > 1 && (
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500">↑↓ para elegir, Enter para confirmar</p>
+                      )}
                       <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                        {extraClubResults.map((c) => (
+                        {extraClubResults.map((c, idx) => (
                           <button
                             key={c.id}
                             onClick={() => { setCustomer(c); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false) }}
-                            className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-purple-500 cursor-pointer"
+                            onMouseEnter={() => setExtraClubHighlight(idx)}
+                            className={`w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-lg border cursor-pointer ${idx === extraClubHighlight ? "border-purple-500 bg-purple-50 dark:bg-purple-500/10" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-purple-500"}`}
                           >
                             <div className="min-w-0">
                               <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{c.razon_social || c.nombre}</div>
@@ -6396,6 +6428,15 @@ export default function POSPage() {
                   autoFocus
                   value={balanceModalQuery}
                   onChange={(e) => setBalanceModalQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown") { e.preventDefault(); setBalanceModalHighlight((h) => Math.min(h + 1, balanceModalResults.length - 1)) }
+                    else if (e.key === "ArrowUp") { e.preventDefault(); setBalanceModalHighlight((h) => Math.max(h - 1, 0)) }
+                    else if (e.key === "Enter") {
+                      e.preventDefault()
+                      const c = balanceModalResults[balanceModalHighlight]
+                      if (c) setBalanceModalSelected(c)
+                    }
+                  }}
                   placeholder="Número de socio / RUC / cédula / nombre"
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm outline-none focus:border-purple-500 text-slate-900 dark:text-white mb-2"
                 />
@@ -6405,12 +6446,16 @@ export default function POSPage() {
                 {!balanceModalSearching && balanceModalQuery.trim() && balanceModalResults.length === 0 && (
                   <div className="text-center text-xs text-slate-500 dark:text-slate-400 py-4">Sin resultados.</div>
                 )}
+                {balanceModalResults.length > 1 && (
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mb-1">↑↓ para elegir, Enter para confirmar</p>
+                )}
                 <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                  {balanceModalResults.map((c) => (
+                  {balanceModalResults.map((c, idx) => (
                     <button
                       key={c.id}
                       onClick={() => setBalanceModalSelected(c)}
-                      className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-purple-500 cursor-pointer"
+                      onMouseEnter={() => setBalanceModalHighlight(idx)}
+                      className={`w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-lg border cursor-pointer ${idx === balanceModalHighlight ? "border-purple-500 bg-purple-50 dark:bg-purple-500/10" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-purple-500"}`}
                     >
                       <div className="min-w-0">
                         <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{c.razon_social || c.nombre}</div>
