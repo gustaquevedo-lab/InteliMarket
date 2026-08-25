@@ -2,18 +2,20 @@
 
 import secrets
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy import select, update, text
+from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
-from api.src.auth.models import User
-from api.src.auth.jwt import hash_password, verify_password, create_access_token, create_refresh_token
+from api.src.auth.models import User, StaffShift
+from api.src.auth.jwt import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from api.src.auth.schemas import (
     LoginRequest, RegisterRequest, TokenResponse, UserResponse,
     ChangePasswordRequest, ResetPasswordRequest, ResetPasswordResponse,
     AdminCreateUserRequest, AdminCreateUserResponse, UpdateUserRequest, TenantUserResponse,
     VerifySupervisorRequest, VerifySupervisorResponse,
+    PosStaffItem, PosStaffListResponse, ActiveSupervisorResponse,
 )
 from api.src.auth.middleware import get_current_user
 from api.src.tenants.service import create_tenant_with_schema, get_user_tenants, get_tenant_by_id
@@ -67,8 +69,16 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user.activo:
         raise HTTPException(status_code=403, detail="Usuario desactivado")
 
+    # Generar token único de sesión activa para invalidar sesiones concurrentes
+    session_id = secrets.token_hex(16)
+
     await db.execute(
-        update(User).where(User.id == user.id).values(last_login=datetime.now(timezone.utc))
+        update(User)
+        .where(User.id == user.id)
+        .values(
+            last_login=datetime.now(timezone.utc),
+            current_session_id=session_id
+        )
     )
     await db.commit()
 
@@ -90,6 +100,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
     access_token = create_access_token({
         "sub": str(user.id),
+        "sid": session_id,
         "user_email": user.email,
         "user_nombre": user.nombre,
         "rol": user.rol,
@@ -100,6 +111,49 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     refresh_token = create_refresh_token({"sub": str(user.id)})
 
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token_endpoint(body: dict, db: AsyncSession = Depends(get_db)):
+    raw_token = body.get("refresh_token")
+    if not raw_token:
+        raise HTTPException(status_code=400, detail="Falta refresh_token")
+    try:
+        payload = decode_token(raw_token)
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=400, detail="Token no es de tipo refresh")
+        user_id = payload.get("sub")
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user or not user.activo:
+            raise HTTPException(status_code=401, detail="Usuario inactivo o no encontrado")
+
+        tenant_id = None
+        tenant_slug = None
+        user_tenants = await get_user_tenants(db, user.id)
+        if user_tenants:
+            primary = next((t for t in user_tenants if t.is_default), user_tenants[0])
+            tenant = await get_tenant_by_id(db, primary.tenant_id)
+            if tenant:
+                tenant_id = str(tenant.id)
+                tenant_slug = tenant.slug
+
+        access_token = create_access_token({
+            "sub": str(user.id),
+            "user_email": user.email,
+            "user_nombre": user.nombre,
+            "rol": user.rol,
+            "is_superadmin": user.is_superadmin or user.rol == "super_admin",
+            "tenant_id": tenant_id,
+            "tenant_slug": tenant_slug,
+        })
+        new_refresh = create_refresh_token({"sub": str(user.id)})
+        return TokenResponse(access_token=access_token, refresh_token=new_refresh)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Token de refresco inválido o expirado")
+
 
 
 @router.post("/verify-supervisor", response_model=VerifySupervisorResponse)
@@ -121,10 +175,123 @@ async def verify_supervisor(
     if not user or not user.activo or not verify_password(body.password, user.password_hash):
         return VerifySupervisorResponse(valid=False)
 
-    if user.rol != "admin" and not user.is_superadmin:
+    if user.rol not in ("admin", "supervisor") and not user.is_superadmin:
         return VerifySupervisorResponse(valid=False)
 
     return VerifySupervisorResponse(valid=True, id=str(user.id), nombre=user.nombre, rol=user.rol)
+
+
+@router.get("/pos-staff", response_model=PosStaffListResponse)
+async def list_pos_staff(db: AsyncSession = Depends(get_db)):
+    """Lista publica (sin login previo) de cajeros/supervisores activos, para
+    el selector de la pantalla de login de Electron -- reemplaza tener que
+    tipear el usuario. Solo expone id/email/nombre/rol/foto (nunca password
+    ni nada sensible); el login real sigue exigiendo contraseña."""
+    result = await db.execute(
+        select(User)
+        .where(User.rol.in_(["cajero", "supervisor"]), User.activo == True)
+        .order_by(User.nombre)
+    )
+    users = result.scalars().all()
+    if not users:
+        return PosStaffListResponse(staff=[])
+
+    shifts_result = await db.execute(
+        select(StaffShift.user_id).where(StaffShift.ended_at.is_(None))
+    )
+    on_shift_ids = {str(uid) for (uid,) in shifts_result.all()}
+
+    return PosStaffListResponse(staff=[
+        PosStaffItem(
+            id=str(u.id), email=u.email, nombre=u.nombre, rol=u.rol,
+            foto_url=u.foto_url, en_turno=str(u.id) in on_shift_ids,
+        )
+        for u in users
+    ])
+
+
+@router.get("/pos-authorizers", response_model=PosStaffListResponse)
+async def list_pos_authorizers(
+    db: AsyncSession = Depends(get_db),
+    token_data: dict = Depends(get_current_user),
+):
+    """Lista de usuarios con nivel supervisor/admin, para el selector del
+    modal de autorización de acciones sensibles dentro del POS (anular item,
+    devolución, etc). A diferencia de /pos-staff (pantalla de login, pública
+    y sin sesión), este endpoint exige sesión ya iniciada y también incluye
+    rol admin, porque en varias empresas no hay usuarios con rol "supervisor"
+    dedicado y quien autoriza en la práctica es un admin."""
+    result = await db.execute(
+        select(User)
+        .where(
+            (User.rol.in_(["supervisor", "admin"])) | (User.is_superadmin == True),
+            User.activo == True,
+        )
+        .order_by(User.nombre)
+    )
+    users = result.scalars().all()
+    return PosStaffListResponse(staff=[
+        PosStaffItem(id=str(u.id), email=u.email, nombre=u.nombre, rol=u.rol, foto_url=u.foto_url, en_turno=False)
+        for u in users
+    ])
+
+
+@router.post("/pos-shift/start")
+async def start_pos_shift(
+    db: AsyncSession = Depends(get_db),
+    token_data: dict = Depends(get_current_user),
+):
+    """Marca el inicio de turno del usuario ya autenticado (llamar justo
+    despues de un login exitoso desde Electron). Si ya tenia un turno abierto
+    (ej. cerro la app sin marcar salida), lo reutiliza en vez de duplicar."""
+    user_id = token_data.get("sub")
+    existing = await db.execute(
+        select(StaffShift).where(StaffShift.user_id == user_id, StaffShift.ended_at.is_(None))
+    )
+    shift = existing.scalar_one_or_none()
+    if shift:
+        return {"shift_id": str(shift.id), "started_at": shift.started_at, "reused": True}
+
+    shift = StaffShift(user_id=user_id, rol_en_turno=token_data.get("rol") or "cajero")
+    db.add(shift)
+    await db.commit()
+    await db.refresh(shift)
+    return {"shift_id": str(shift.id), "started_at": shift.started_at, "reused": False}
+
+
+@router.post("/pos-shift/end")
+async def end_pos_shift(
+    db: AsyncSession = Depends(get_db),
+    token_data: dict = Depends(get_current_user),
+):
+    user_id = token_data.get("sub")
+    await db.execute(
+        update(StaffShift)
+        .where(StaffShift.user_id == user_id, StaffShift.ended_at.is_(None))
+        .values(ended_at=func.now())
+    )
+    await db.commit()
+    return {"success": True}
+
+
+@router.get("/pos-active-supervisor", response_model=ActiveSupervisorResponse)
+async def get_active_supervisor(
+    db: AsyncSession = Depends(get_db),
+    token_data: dict = Depends(get_current_user),
+):
+    """Usado para exigir que exista un supervisor con turno realmente
+    iniciado antes de habilitar el flujo de autorizacion de acciones
+    sensibles en el POS (anular item, descuento, cierre de caja, etc)."""
+    result = await db.execute(
+        select(User.nombre)
+        .join(StaffShift, StaffShift.user_id == User.id)
+        .where(StaffShift.ended_at.is_(None), StaffShift.rol_en_turno == "supervisor")
+        .limit(1)
+    )
+    row = result.first()
+    if row:
+        return ActiveSupervisorResponse(has_supervisor=True, nombre=row[0])
+    return ActiveSupervisorResponse(has_supervisor=False)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -271,6 +438,7 @@ async def list_tenant_users(
             telefono=user.telefono,
             rol=user.rol,
             activo=user.activo,
+            foto_url=user.foto_url,
             is_superadmin=user.is_superadmin or False,
             last_login=user.last_login,
             created_at=user.created_at,
@@ -310,21 +478,28 @@ async def admin_create_user(
         nombre=body.nombre,
         telefono=body.telefono,
         rol=body.rol,
+        foto_url=body.foto_url,
+        activo=True,
     )
     db.add(user)
     await db.flush()
 
-    user_tenant = UserTenant(user_id=user.id, tenant_id=tenant_id, rol=body.rol)
+    user_tenant = UserTenant(
+        user_id=user.id,
+        tenant_id=tenant_id,
+        rol=body.rol,
+        is_owner=False,
+    )
     db.add(user_tenant)
 
     if body.role_id:
         await db.execute(
             text("""
-                INSERT INTO rbac_user_roles (user_id, tenant_id, role_id)
-                VALUES (:user_id, :tenant_id, :role_id)
+                INSERT INTO rbac_user_roles (user_id, role_id, tenant_id)
+                VALUES (:user_id, :role_id, :tenant_id)
                 ON CONFLICT DO NOTHING
             """),
-            {"user_id": str(user.id), "tenant_id": tenant_id, "role_id": str(body.role_id)},
+            {"user_id": str(user.id), "role_id": str(body.role_id), "tenant_id": tenant_id},
         )
 
     await db.commit()
@@ -371,6 +546,8 @@ async def admin_update_user(
     if body.rol is not None:
         values["rol"] = body.rol
         user_tenant.rol = body.rol
+    if body.foto_url is not None:
+        values["foto_url"] = body.foto_url
 
     if values:
         await db.execute(update(User).where(User.id == user.id).values(**values))
@@ -396,9 +573,54 @@ async def admin_update_user(
         telefono=user.telefono,
         rol=user.rol,
         activo=user.activo,
+        foto_url=user.foto_url,
         is_superadmin=user.is_superadmin or False,
         last_login=user.last_login,
         created_at=user.created_at,
         tenant_rol=user_tenant.rol,
         role_names=role_names,
     )
+
+
+@router.post("/users/{user_id}/photo")
+async def upload_user_photo(
+    user_id: str,
+    file: UploadFile = File(...),
+    token_data: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not _is_tenant_admin(token_data) and str(token_data.get("sub")) != str(user_id):
+        raise HTTPException(status_code=403, detail="No tienes permisos para modificar la foto de este usuario")
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="El archivo excede el tamaño máximo permitido (10MB)")
+
+    from pathlib import Path
+    import time
+    upload_dir = Path("uploads/avatars")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in [".png", ".jpg", ".jpeg", ".webp", ".svg"]:
+        ext = ".png"
+
+    filename = f"user_{user_id}_{int(time.time())}{ext}"
+    file_path = upload_dir / filename
+    file_path.write_bytes(content)
+
+    foto_url = f"/uploads/avatars/{filename}"
+    await db.execute(
+        update(User).where(User.id == user.id).values(foto_url=foto_url)
+    )
+    await db.commit()
+
+    return {
+        "foto_url": f"{foto_url}?t={int(time.time())}",
+        "message": "Foto de perfil actualizada y guardada con éxito"
+    }

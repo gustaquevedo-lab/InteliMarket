@@ -59,7 +59,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   useEffect(() => { loadOfflineData() }, [])
 
   const syncCatalogFn = useCallback(async (): Promise<boolean> => {
-    if (!navigator.onLine) return false
+    if (!navigator.onLine || !localStorage.getItem("access_token")) return false
     const result = await syncFullCatalog()
     if (result.success) {
       const catalog = await getCachedCatalog()

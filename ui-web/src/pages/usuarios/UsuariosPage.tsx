@@ -115,7 +115,7 @@ export default function UsuariosPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <Users className="w-6 h-6 text-primary" />
             Usuarios
           </h1>
@@ -136,15 +136,15 @@ export default function UsuariosPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-5">
           <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Usuarios</span>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">{totalUsers}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white mt-2">{totalUsers}</p>
         </div>
         <div className="card p-5">
           <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Activos</span>
-          <p className="text-2xl font-bold text-green-500 mt-2">{totalActivos}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-500 mt-2">{totalActivos}</p>
         </div>
         <div className="card p-5">
           <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Administradores</span>
-          <p className="text-2xl font-bold text-amber-500 mt-2">{totalAdmins}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-500 mt-2">{totalAdmins}</p>
         </div>
       </div>
 

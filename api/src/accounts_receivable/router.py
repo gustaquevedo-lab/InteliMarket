@@ -26,11 +26,12 @@ async def list_receivables(
     company_id: str,
     customer_id: str | None = Query(None),
     estado: str | None = Query(None),
+    search: str | None = Query(None),
     limit: int = Query(50, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.get_accounts_receivable(db, company_id, customer_id, estado, limit, offset)
+    return await service.get_accounts_receivable(db, company_id, customer_id, estado, search, limit, offset)
 
 
 @router.get("/companies/{company_id}/accounts-receivable/count")

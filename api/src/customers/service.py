@@ -1,6 +1,6 @@
 """Customer service"""
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.customers.models import Customer
@@ -33,7 +33,9 @@ async def list_customers(
     company_id: str,
     search: str | None = None,
     activo: bool | None = None,
-    limit: int = 100,
+    tipo: str | None = None,
+    exclude_proveedores: bool = False,
+    limit: int = 10000,
     offset: int = 0,
 ) -> list[Customer]:
     query = select(Customer).where(Customer.company_id == company_id)
@@ -41,11 +43,16 @@ async def list_customers(
         query = query.where(
             (Customer.razon_social.ilike(f"%{search}%")) |
             (Customer.ruc.ilike(f"%{search}%")) |
-            (Customer.ci.ilike(f"%{search}%"))
+            (Customer.ci.ilike(f"%{search}%")) |
+            (Customer.telefono.ilike(f"%{search}%"))
         )
     if activo is not None:
         query = query.where(Customer.activo == activo)
-    query = query.order_by(Customer.razon_social).limit(limit).offset(offset)
+    if tipo:
+        query = query.where(Customer.tipo == tipo)
+    elif exclude_proveedores:
+        query = query.where(or_(Customer.tipo != "proveedor", Customer.tipo.is_(None)))
+    query = query.order_by(Customer.razon_social.asc().nulls_last()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 

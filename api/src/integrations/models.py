@@ -34,3 +34,21 @@ class IntegrationDelivery(Base):
     success = Column(Boolean, default=False)
     retry_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PosTerminalClaim(Base):
+    """Registra qué transacción real de fin_operacao_pos (Bancard/Dinelco,
+    MySQL de Ñemuha) ya fue usada para verificar un cobro de InteliMarket
+    -- evita que la misma transacción física se le asigne por error a dos
+    ventas distintas si coinciden en monto y ventana de tiempo."""
+    __tablename__ = "pos_terminal_claims"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False)
+    fin_operacao_pos_id = Column(String(30), nullable=False, unique=True)
+    sale_id = Column(UUID(as_uuid=True))
+    procesador = Column(String(20), nullable=False)
+    monto = Column(Integer, nullable=False)
+    voucher = Column(String(60))
+    tarjeta_marca = Column(String(200))
+    claimed_at = Column(DateTime(timezone=True), server_default=func.now())

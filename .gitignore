@@ -70,3 +70,23 @@ certs/
 
 # Docker
 docker-compose.override.yml
+
+# Build artifacts / distributables (GB-scale, nunca a git)
+dist-electron/
+downloads/
+ui-web/public/*.zip
+*.AppImage
+
+# Archivos subidos por usuarios en runtime
+uploads/
+api/uploads/
+api/static/
+
+# Variantes de .env
+.env.*
+
+# Backups locales de edicion manual
+*.bak-*
+
+# Build info de TS
+ui-web/tsconfig.tsbuildinfo

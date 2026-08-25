@@ -26,6 +26,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
+    if (isElectron) {
+      // En modo POS / Electron SIEMPRE requerir contraseña al abrir la aplicación
+      localStorage.removeItem("access_token")
+      localStorage.removeItem("refresh_token")
+      setUser(null)
+      setLoading(false)
+      return
+    }
+
     const token = localStorage.getItem("access_token")
     if (token) {
       api.auth.me().then((u) => {

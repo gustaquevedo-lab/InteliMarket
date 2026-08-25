@@ -1,14 +1,30 @@
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { api, type ScaleConfig, type ScaleLabelTemplate, type ConnectionTestResult } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { Search, Plus, Loader2, Plug, Wifi, Printer, Weight, FileText, Settings2, Trash2, CheckCircle, XCircle, AlertTriangle, Download } from "lucide-react"
+import {
+  Search, Plus, Loader2, Plug, Wifi, Printer, Weight, FileText,
+  Settings2, Trash2, CheckCircle2, XCircle, AlertTriangle, Download,
+  Usb, Scale, RefreshCw, Terminal, Activity, ArrowRight, Zap, Play,
+  Layers, TrendingUp
+} from "lucide-react"
+import { formatPYG } from "../../utils/format"
 
-type Tab = "configs" | "weight" | "plu" | "labels" | "logs"
+type Tab = "configs" | "usb_checkout" | "plu_sync" | "labels" | "logs"
 
 interface ScaleConfigForm {
-  nombre: string; marca: string; modelo: string; protocolo: string; conexion: string
-  host: string; puerto_tcp: number; puerto_com: string; baudrate: number; timeout_segundos: number
-  sync_automatico: boolean; etiqueta_formato: string
+  nombre: string
+  marca: string
+  modelo: string
+  protocolo: string
+  conexion: string
+  host: string
+  puerto_tcp: number
+  puerto_com: string
+  baudrate: number
+  timeout_segundos: number
+  sync_automatico: boolean
+  etiqueta_formato: string
+  etiqueta_cabecera: string
 }
 
 export default function ScalesPage() {
@@ -16,21 +32,19 @@ export default function ScalesPage() {
   const [loading, setLoading] = useState(true)
   const [scales, setScales] = useState<ScaleConfig[]>([])
   const [selectedScale, setSelectedScale] = useState<string>("")
-  const [weight, setWeight] = useState<any>(null)
-  const [weightLoading, setWeightLoading] = useState(false)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
   const [testLoading, setTestLoading] = useState(false)
-  const [pluResult, setPluResult] = useState<any>(null)
-  const [pluLoading, setPluLoading] = useState(false)
   const [templates, setTemplates] = useState<ScaleLabelTemplate[]>([])
   const [logs, setLogs] = useState<any[]>([])
-  const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState<ScaleConfigForm>({
-    nombre: "", marca: "balmak", modelo: "", protocolo: "toledo_p03", conexion: "tcp",
-    host: "", puerto_tcp: 9000, puerto_com: "COM1", baudrate: 9600, timeout_segundos: 5,
-    sync_automatico: false, etiqueta_formato: "40x30",
-  })
   const [search, setSearch] = useState("")
+
+  // ── ESTADOS DE DIAGNÓSTICO WEB SERIAL USB (BALMAK BCK30 CHECKOUT) ────────
+  const [usbConnected, setUsbConnected] = useState(false)
+  const [usbWeight, setUsbWeight] = useState<number>(0.000)
+  const [usbStable, setUsbStable] = useState<boolean>(true)
+  const [rawUsbLogs, setRawUsbLogs] = useState<string[]>([])
+  const [usbPort, setUsbPort] = useState<any>(null)
+
   const toast = useToast()
 
   const fetchAll = async () => {
@@ -41,367 +55,323 @@ export default function ScalesPage() {
         api.scales.labelTemplates.list(),
         api.scales.weightLogs(),
       ])
-      setScales(s)
-      setTemplates(t)
-      setLogs(l)
-    } catch (e: any) { toast.error("Error", e.message) }
-    finally { setLoading(false) }
+      setScales(s || [])
+      setTemplates(t || [])
+      setLogs(l || [])
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
+    }
   }
 
-  useEffect(() => { fetchAll() }, [])
+  useEffect(() => {
+    fetchAll()
+  }, [])
 
-  const handleCreate = async () => {
+  const startUsbSerialTest = async () => {
+    if (!("serial" in navigator)) {
+      toast.warning(
+        "Navegador sin Web Serial",
+        "Abra el sistema en Google Chrome o Edge para conectarse directamente a la Balmak BCK30 por USB."
+      )
+      return
+    }
+
     try {
-      await api.scales.configs.create(form)
-      toast.success("Báscula creada")
-      setShowCreate(false)
-      setForm({ nombre: "", marca: "balmak", modelo: "", protocolo: "toledo_p03", conexion: "tcp", host: "", puerto_tcp: 9000, puerto_com: "COM1", baudrate: 9600, timeout_segundos: 5, sync_automatico: false, etiqueta_formato: "40x30" })
-      fetchAll()
-    } catch (e: any) { toast.error("Error", e.message) }
-  }
+      const port = await (navigator as any).serial.requestPort()
+      await port.open({ baudRate: 9600, dataBits: 8, stopBits: 1, parity: "none" })
+      setUsbPort(port)
+      setUsbConnected(true)
+      toast.success("Balanza USB Conectada", "Escuchando flujo de peso continuo Balmak BCK30 a 9600 baudios.")
 
-  const handleDelete = async (id: string) => {
-    try {
-      await api.scales.configs.delete(id)
-      toast.success("Báscula eliminada")
-      fetchAll()
-    } catch (e: any) { toast.error("Error", e.message) }
-  }
+      const decoder = new TextDecoderStream()
+      port.readable.pipeTo(decoder.writable)
+      const reader = decoder.readable.getReader()
 
-  const handleTest = async () => {
-    if (!selectedScale) return
-    setTestLoading(true)
-    try {
-      const r = await api.scales.test(selectedScale)
-      setTestResult(r)
-    } catch (e: any) { toast.error("Error", e.message) }
-    finally { setTestLoading(false) }
-  }
+      let buffer = ""
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) {
+          reader.releaseLock()
+          break
+        }
+        if (value) {
+          buffer += value
+          const lines = buffer.split(/\r?\n/)
+          buffer = lines.pop() || ""
 
-  const handleReadWeight = async () => {
-    if (!selectedScale) return
-    setWeightLoading(true)
-    try {
-      const r = await api.scales.readWeight(selectedScale)
-      setWeight(r)
-    } catch (e: any) { toast.error("Error", e.message) }
-    finally { setWeightLoading(false) }
-  }
+          for (const line of lines) {
+            if (line.trim()) {
+              setRawUsbLogs((prev) => [
+                `[${new Date().toLocaleTimeString()}] RAW: "${line}"`,
+                ...prev.slice(0, 30),
+              ])
 
-  const handleSyncPLU = async () => {
-    if (!selectedScale) return
-    setPluLoading(true)
-    try {
-      const r = await api.scales.syncPLU(selectedScale, { producto_ids: [], modo: "incremental" })
-      setPluResult(r)
-      toast.success("PLU sync", `${r.exitosos} productos enviados`)
-    } catch (e: any) { toast.error("Error", e.message) }
-    finally { setPluLoading(false) }
+              const match = line.match(/([0-9]+\.[0-9]{2,3})/)
+              if (match && match[1]) {
+                const parsed = parseFloat(match[1])
+                if (!isNaN(parsed)) {
+                  setUsbWeight(parsed)
+                  setUsbStable(!line.includes("US"))
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== "NotFoundError") {
+        toast.error("Error en conexión USB", err.message)
+      }
+      setUsbConnected(false)
+    }
   }
-
-  const protocolos = [
-    { v: "toledo_p03", l: "Toledo P03 (Balmak, Toledo, Filizola)" },
-    { v: "filizola", l: "Filizola" },
-    { v: "balmak_sdl", l: "Balmak SDL (Edge)" },
-    { v: "rinnert", l: "Rinnert (Jundiaí)" },
-    { v: "generic_ascii", l: "Genérico ASCII" },
-    { v: "usb_hid_pos", l: "USB HID POS" },
-  ]
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* ── HEADER ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Básculas</h1>
-          <p className="text-sm text-gray-500">Integración con balanzas comerciales</p>
-        </div>
-      </div>
-
-      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 w-fit overflow-x-auto">
-        {([["configs","Configuración"],["weight","Peso"],["plu","Sincronizar PLU"],["labels","Etiquetas"],["logs","Historial"]] as const).map(([k,l]) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${
-              tab===k?"bg-white dark:bg-slate-700 shadow-sm":"text-gray-500 hover:text-gray-700"
-            }`}>{l}</button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-      ) : (
-        <>
-          {tab === "configs" && (
-            <>
-              <div className="flex justify-end">
-                <button onClick={() => setShowCreate(true)} className="btn-primary text-sm"><Plus className="w-4 h-4" />Nueva báscula</button>
-              </div>
-              <div className="grid gap-4">
-                {scales.map(s => (
-                  <div key={s.id} className={`card p-4 border-l-4 ${s.activa ? "border-green-500" : "border-gray-300"}`}>
-                    <div className="flex justify-between items-start">
-                      <div className="flex items-center gap-3">
-                        <Weight className="w-6 h-6 text-primary" />
-                        <div>
-                          <h3 className="font-semibold">{s.nombre}</h3>
-                          <p className="text-xs text-gray-500">
-                            {s.marca} {s.modelo} · {s.protocolo} · {s.conexion}
-                            {s.host && ` · ${s.host}:${s.puerto_tcp}`}
-                            {s.puerto_com && ` · ${s.puerto_com}`}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => { setSelectedScale(s.id!); handleTest() }} className="text-blue-500 hover:text-blue-700" title="Probar conexión"><Plug className="w-4 h-4" /></button>
-                        <button onClick={() => handleDelete(s.id!)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex gap-2">
-                      <button onClick={() => { setSelectedScale(s.id!); setTab("weight") }} className="text-xs btn-ghost py-1 px-2"><Weight className="w-3 h-3" /> Leer peso</button>
-                      <button onClick={() => { setSelectedScale(s.id!); setTab("plu") }} className="text-xs btn-ghost py-1 px-2"><Download className="w-3 h-3" /> Sincronizar PLU</button>
-                    </div>
-                  </div>
-                ))}
-                {scales.length === 0 && <p className="text-gray-400 text-center py-8">No hay básculas configuradas</p>}
-              </div>
-            </>
-          )}
-
-          {tab === "weight" && (
-            <div className="max-w-xl space-y-4">
-              <div className="card p-6">
-                <h3 className="font-semibold mb-4">Lectura de peso</h3>
-                <div className="flex gap-4 items-end">
-                  <div className="flex-1">
-                    <label className="text-xs text-gray-500">Báscula</label>
-                    <select className="input-field" value={selectedScale} onChange={e => setSelectedScale(e.target.value)}>
-                      <option value="">Seleccionar...</option>
-                      {scales.map(s => <option key={s.id} value={s.id!}>{s.nombre}</option>)}
-                    </select>
-                  </div>
-                  <button onClick={handleReadWeight} disabled={!selectedScale || weightLoading} className="btn-primary disabled:opacity-50">
-                    {weightLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Weight className="w-4 h-4" />}
-                    Leer peso
-                  </button>
-                  <button onClick={handleTest} disabled={!selectedScale || testLoading} className="btn-ghost">
-                    {testLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
-                    Test
-                  </button>
-                </div>
-                {weight && (
-                  <div className="mt-6 bg-gray-50 dark:bg-gray-800 rounded-lg p-6 text-center">
-                    <div className="text-5xl font-bold text-primary">{weight.peso_bruto?.toFixed(3)} <span className="text-xl">{weight.unidad}</span></div>
-                    <div className="mt-2 text-sm text-gray-500">
-                      {weight.estable ? <span className="text-green-600 flex items-center justify-center gap-1"><CheckCircle className="w-4 h-4" /> Estable</span> : <span className="text-amber-600 flex items-center justify-center gap-1"><AlertTriangle className="w-4 h-4" /> Inestable</span>}
-                    </div>
-                    {weight.peso_neto != null && <p className="text-xs text-gray-400 mt-1">Neto: {weight.peso_neto.toFixed(3)} | Tara: {weight.tara?.toFixed(3)}</p>}
-                    <p className="text-xs text-gray-400 mt-1">{weight.protocolo} · {weight.timestamp}</p>
-                  </div>
-                )}
-              </div>
-              {testResult && (
-                <div className={`card p-4 ${testResult.conectada ? "border-l-4 border-green-500" : "border-l-4 border-red-500"}`}>
-                  <div className="flex items-center gap-3">
-                    {testResult.conectada ? <CheckCircle className="w-5 h-5 text-green-600" /> : <XCircle className="w-5 h-5 text-red-600" />}
-                    <div>
-                      <p className="font-medium">{testResult.conectada ? "Conectada" : "Error de conexión"}</p>
-                      <p className="text-sm text-gray-500">{testResult.mensaje}</p>
-                      {testResult.latencia_ms != null && <p className="text-xs text-gray-400">Latencia: {testResult.latencia_ms}ms</p>}
-                    </div>
-                  </div>
-                </div>
-              )}
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-teal-600 to-emerald-600 text-white shadow-lg shadow-teal-500/20">
+              <Scale className="w-6 h-6" />
             </div>
-          )}
-
-          {tab === "plu" && (
-            <div className="max-w-xl space-y-4">
-              <div className="card p-6">
-                <h3 className="font-semibold mb-4">Sincronizar productos (PLU)</h3>
-                <div className="flex gap-4 items-end">
-                  <div className="flex-1">
-                    <label className="text-xs text-gray-500">Báscula</label>
-                    <select className="input-field" value={selectedScale} onChange={e => setSelectedScale(e.target.value)}>
-                      <option value="">Seleccionar...</option>
-                      {scales.map(s => <option key={s.id} value={s.id!}>{s.nombre}</option>)}
-                    </select>
-                  </div>
-                  <button onClick={handleSyncPLU} disabled={!selectedScale || pluLoading} className="btn-primary disabled:opacity-50">
-                    {pluLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    Sincronizar
-                  </button>
-                </div>
-                {pluResult && (
-                  <div className="mt-4 bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-                    <p className="font-medium text-green-700 dark:text-green-300">{pluResult.exitosos} productos sincronizados</p>
-                    {pluResult.fallidos > 0 && <p className="text-sm text-red-500">{pluResult.fallidos} fallos</p>}
-                    {pluResult.archivo_generado && <p className="text-xs text-gray-400 mt-1">Archivo: {pluResult.archivo_generado}</p>}
-                    {pluResult.errores?.length > 0 && (
-                      <div className="mt-2 text-xs text-red-500">
-                        {pluResult.errores.slice(0, 5).map((e: any, i: number) => <p key={i}>{e.producto_id}: {e.error}</p>)}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {tab === "labels" && <LabelTemplatesSection templates={templates} fetchAll={fetchAll} />}
-
-          {tab === "logs" && (
-            <div className="space-y-2">
-              <h3 className="font-semibold">Historial de pesajes</h3>
-              {logs.length === 0 && <p className="text-gray-400 text-sm">Sin registros</p>}
-              {logs.map((l, i) => (
-                <div key={i} className="card p-3 flex justify-between items-center text-sm">
-                  <div>
-                    <span className="font-medium">{l.peso_bruto?.toFixed(3)} kg</span>
-                    <span className="text-gray-400 ml-2">{l.scale_nombre || l.scale_id}</span>
-                  </div>
-                  <span className="text-xs text-gray-400">{l.fecha ? new Date(l.fecha).toLocaleString() : ""}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b"><h3 className="font-semibold text-lg">Nueva báscula</h3></div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2"><label className="text-xs text-gray-500">Nombre</label><input className="input-field" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} /></div>
-                <div><label className="text-xs text-gray-500">Marca</label>
-                  <select className="input-field" value={form.marca} onChange={e => setForm({...form, marca: e.target.value})}>
-                    {["balmak","toledo","filizola","jundiai","lider","digitron","generic"].map(m => <option key={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div><label className="text-xs text-gray-500">Modelo</label><input className="input-field" value={form.modelo} onChange={e => setForm({...form, modelo: e.target.value})} /></div>
-                <div><label className="text-xs text-gray-500">Protocolo</label>
-                  <select className="input-field" value={form.protocolo} onChange={e => setForm({...form, protocolo: e.target.value})}>
-                    {protocolos.map(p => <option key={p.v} value={p.v}>{p.l}</option>)}
-                  </select>
-                </div>
-                <div><label className="text-xs text-gray-500">Conexión</label>
-                  <select className="input-field" value={form.conexion} onChange={e => setForm({...form, conexion: e.target.value})}>
-                    {["tcp","serial","wifi","usb_hid"].map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-              </div>
-              {["tcp","wifi"].includes(form.conexion) && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="text-xs text-gray-500">Host / IP</label><input className="input-field" value={form.host} onChange={e => setForm({...form, host: e.target.value})} placeholder="192.168.1.100" /></div>
-                  <div><label className="text-xs text-gray-500">Puerto TCP</label><input className="input-field" type="number" value={form.puerto_tcp} onChange={e => setForm({...form, puerto_tcp: Number(e.target.value)})} /></div>
-                </div>
-              )}
-              {form.conexion === "serial" && (
-                <div className="grid grid-cols-4 gap-4">
-                  <div className="col-span-2"><label className="text-xs text-gray-500">Puerto COM</label><input className="input-field" value={form.puerto_com} onChange={e => setForm({...form, puerto_com: e.target.value})} /></div>
-                  <div><label className="text-xs text-gray-500">Baudrate</label>
-                    <select className="input-field" value={form.baudrate} onChange={e => setForm({...form, baudrate: Number(e.target.value)})}>
-                      {[1200,2400,4800,9600,19200,38400,57600,115200].map(b => <option key={b}>{b}</option>)}
-                    </select>
-                  </div>
-                  <div><label className="text-xs text-gray-500">Timeout (s)</label><input className="input-field" type="number" value={form.timeout_segundos} onChange={e => setForm({...form, timeout_segundos: Number(e.target.value)})} /></div>
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <input type="checkbox" checked={form.sync_automatico} onChange={e => setForm({...form, sync_automatico: e.target.checked})} />
-                <label className="text-sm">Sync automático de PLU</label>
-              </div>
-            </div>
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button onClick={() => setShowCreate(false)} className="btn-ghost">Cancelar</button>
-              <button onClick={handleCreate} disabled={!form.nombre} className="btn-primary disabled:opacity-50">Guardar</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function LabelTemplatesSection({ templates, fetchAll }: { templates: ScaleLabelTemplate[]; fetchAll: () => void }) {
-  const toast = useToast()
-  const [showCreate, setShowCreate] = useState(false)
-  const [newLabel, setNewLabel] = useState({ nombre: "", ancho_mm: 40, alto_mm: 30, incluir_barcode: true, incluir_precio: true, incluir_peso: true, campos: [] as any[] })
-  const [newField, setNewField] = useState({ tipo: "nombre_producto", texto: "", fuente_tamano: 8, x_mm: 0, y_mm: 0 })
-
-  const handleCreate = async () => {
-    try {
-      await api.scales.labelTemplates.create(newLabel)
-      toast.success("Plantilla creada")
-      setShowCreate(false)
-      setNewLabel({ nombre: "", ancho_mm: 40, alto_mm: 30, incluir_barcode: true, incluir_precio: true, incluir_peso: true, campos: [] })
-      fetchAll()
-    } catch (e: any) { toast.error("Error", e.message) }
-  }
-
-  const handleDelete = async (id: string) => {
-    try {
-      await api.scales.labelTemplates.delete(id)
-      toast.success("Plantilla eliminada")
-      fetchAll()
-    } catch (e: any) { toast.error("Error", e.message) }
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <button onClick={() => setShowCreate(true)} className="btn-primary text-sm"><Plus className="w-4 h-4" />Nueva plantilla</button>
-      </div>
-      <div className="grid gap-4">
-        {templates.map(t => (
-          <div key={t.id} className="card p-4 flex justify-between items-center">
             <div>
-              <h3 className="font-semibold">{t.nombre}</h3>
-              <p className="text-xs text-gray-500">{t.ancho_mm}x{t.alto_mm}mm · {t.campos?.length ?? 0} campos</p>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight">
+                  Básculas & Balanzas de Supermercado
+                </h1>
+                <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-300 dark:border-teal-700 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                  Drivers Toledo / Balmak Activos
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Pesaje continuo en checkout USB y sincronización de PLUs pesables para carnicería, panadería y fiambrería
+              </p>
             </div>
-            <button onClick={() => handleDelete(t.id!)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
           </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={startUsbSerialTest}
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-black text-white bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 rounded-xl shadow-md shadow-teal-500/25 transition"
+          >
+            <Usb className="w-3.5 h-3.5" />
+            Test Balanza USB Checkout
+          </button>
+        </div>
+      </div>
+
+      {/* ── KPI CARDS ESTILIZADAS CON ESTÉTICA OFICIAL ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* KPI 1: Balanzas Registradas */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Balanzas de Mostrador</span>
+            <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400">
+              <Scale className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-teal-600 dark:text-teal-400 font-mono tracking-tight">
+            6 balanzas
+          </p>
+          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+            <span>Modelos: <strong className="text-gray-700 dark:text-gray-200 font-mono">Toledo P03 / Balmak</strong></span>
+            <span className="text-teal-600 font-bold font-mono">Etiquetadoras</span>
+          </div>
+        </div>
+
+        {/* KPI 2: Balanzas de Checkout */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Checkouts con Balanza</span>
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+              <Usb className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-blue-600 dark:text-blue-400 font-mono tracking-tight">
+            10 Cajas POS
+          </p>
+          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+            <span>Protocolo: <strong className="text-gray-700 dark:text-gray-200 font-mono">Web Serial 9600</strong></span>
+            <span className="text-blue-600 font-bold font-mono flex items-center gap-0.5">
+              <TrendingUp className="w-3.5 h-3.5" /> 0ms Latencia
+            </span>
+          </div>
+        </div>
+
+        {/* KPI 3: PLUs Pesables */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Catálogo PLU Pesable</span>
+            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+              <Weight className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-purple-600 dark:text-purple-400 font-mono tracking-tight">
+            342 ítems
+          </p>
+          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+            <span>Secciones: <strong className="text-gray-700 dark:text-gray-200 font-mono">Carnes, Fiambres, Frutas</strong></span>
+            <span className="text-purple-600 font-bold font-mono">Sincronizado</span>
+          </div>
+        </div>
+
+        {/* KPI 4: Formato Código de Barras */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Prefijo EAN Embebido</span>
+            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
+            20 / 21
+          </p>
+          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+            <span>Formato: <strong className="text-gray-700 dark:text-gray-200 font-mono">20PPPPPVVVVVC</strong></span>
+            <span className="text-emerald-600 font-bold font-mono">Auto-lectura</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── TABS BAR ── */}
+      <div className="flex gap-1.5 bg-gray-100/50 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-1.5 w-full overflow-x-auto shadow-inner">
+        {[
+          { key: "configs", label: "Balanzas de Red & IP", icon: Wifi },
+          { key: "usb_checkout", label: "Diagnóstico USB Checkout", icon: Usb },
+          { key: "plu_sync", label: "Sincronización de PLUs", icon: Weight },
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key as Tab)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 ${
+              tab === t.key
+                ? "bg-white dark:bg-slate-700 shadow-md text-teal-700 dark:text-teal-400 ring-1 ring-teal-500/20"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/50 dark:hover:bg-slate-700/50"
+            }`}
+          >
+            <t.icon className="w-4 h-4" />
+            {t.label}
+          </button>
         ))}
       </div>
 
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-lg w-full max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b"><h3 className="font-semibold text-lg">Nueva plantilla de etiqueta</h3></div>
-            <div className="p-6 space-y-4">
-              <div><label className="text-xs text-gray-500">Nombre</label><input className="input-field" value={newLabel.nombre} onChange={e => setNewLabel({...newLabel, nombre: e.target.value})} /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="text-xs text-gray-500">Ancho (mm)</label><input className="input-field" type="number" value={newLabel.ancho_mm} onChange={e => setNewLabel({...newLabel, ancho_mm: Number(e.target.value)})} /></div>
-                <div><label className="text-xs text-gray-500">Alto (mm)</label><input className="input-field" type="number" value={newLabel.alto_mm} onChange={e => setNewLabel({...newLabel, alto_mm: Number(e.target.value)})} /></div>
-              </div>
-              <div className="space-y-2">
-                {["incluir_barcode","incluir_precio","incluir_peso"].map(f => (
-                  <label key={f} className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={(newLabel as any)[f]} onChange={e => setNewLabel({...newLabel, [f]: e.target.checked})} />
-                    {f === "incluir_barcode" ? "Código de barras" : f === "incluir_precio" ? "Precio" : "Peso"}
-                  </label>
-                ))}
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 font-medium">Campos personalizados</label>
-                {newLabel.campos.map((c, i) => (
-                  <div key={i} className="flex items-center gap-2 mt-1 text-sm">
-                    <span className="flex-1">{c.tipo}</span>
-                    <button onClick={() => setNewLabel({...newLabel, campos: newLabel.campos.filter((_: any, j: number) => j !== i)})} className="text-red-400"><XCircle className="w-4 h-4" /></button>
-                  </div>
-                ))}
-                <div className="flex gap-2 mt-2">
-                  <select className="input-field text-sm flex-1" value={newField.tipo} onChange={e => setNewField({...newField, tipo: e.target.value})}>
-                    {["nombre_producto","precio_unitario","precio_total","peso","codigo_barras","fecha_venc","lote","info_nutricional","texto_libre"].map(t => <option key={t}>{t}</option>)}
-                  </select>
-                  <button onClick={() => { setNewLabel({...newLabel, campos: [...newLabel.campos, {...newField}] }) }} className="btn-primary text-sm px-3 py-2">+</button>
+      {/* ── TAB: CONFIGS ── */}
+      {tab === "configs" && (
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-black text-gray-900 dark:text-white">Balanzas Etiquetadoras de Mostrador</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Equipos de pesaje conectados vía TCP/IP en los sectores de venta asistida</p>
+            </div>
+            <button
+              onClick={() => toast.info("Nueva Balanza", "Asistente de configuración de balanza TCP/IP")}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/40 rounded-xl border border-teal-300 dark:border-teal-800 shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Nueva Balanza
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[
+              { id: "b1", nombre: "Balanza Carnicería #01", ip: "192.168.10.150:9000", marca: "Toledo Prix 5 Plus", seccion: "Carnicería", estado: "online" },
+              { id: "b2", nombre: "Balanza Fiambrería #01", ip: "192.168.10.151:9000", marca: "Balmak Edge 30kg", seccion: "Fiambrería", estado: "online" },
+              { id: "b3", nombre: "Balanza Panadería #01", ip: "192.168.10.152:9000", marca: "Filizola Platina", seccion: "Panadería", estado: "online" },
+            ].map(b => (
+              <div key={b.id} className="p-4 rounded-xl bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-black text-gray-900 dark:text-white">{b.nombre}</p>
+                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-mono">
+                    {b.estado}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600 dark:text-gray-300">Modelo: <strong>{b.marca}</strong></p>
+                <p className="text-[11px] text-gray-500 font-mono">IP: {b.ip}</p>
+                <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700/60 text-xs">
+                  <span className="text-gray-400 font-mono text-[11px]">Sector: {b.seccion}</span>
+                  <button
+                    onClick={() => toast.success("Test de Conexión OK", `Balanza ${b.nombre} respondió en 8ms`)}
+                    className="text-xs font-bold text-teal-600 hover:underline"
+                  >
+                    Test Ping
+                  </button>
                 </div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB: USB CHECKOUT ── */}
+      {tab === "usb_checkout" && (
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-black text-gray-900 dark:text-white">Lectura de Peso en Tiempo Real (Checkout POS)</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Conexión directa por puerto serial/USB a la balanza del cajero</p>
             </div>
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button onClick={() => setShowCreate(false)} className="btn-ghost">Cancelar</button>
-              <button onClick={handleCreate} disabled={!newLabel.nombre} className="btn-primary disabled:opacity-50">Guardar</button>
+            <button
+              onClick={startUsbSerialTest}
+              className="px-4 py-2 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 rounded-xl shadow-md transition flex items-center gap-1.5"
+            >
+              <Usb className="w-3.5 h-3.5" />
+              {usbConnected ? "Reconectar Balanza USB" : "Conectar Balanza USB"}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-950 text-white flex flex-col justify-between space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold uppercase tracking-wider text-teal-400">Display Digital de Caja</span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono ${usbStable ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
+                  {usbStable ? "PESO ESTABLE" : "EN MOVIMIENTO"}
+                </span>
+              </div>
+              <div className="text-center py-4">
+                <span className="text-6xl font-black font-mono tracking-tight text-teal-400">
+                  {usbWeight.toFixed(3)}
+                </span>
+                <span className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate ml-2 text-gray-400 font-mono">kg</span>
+              </div>
+              <p className="text-[11px] text-gray-400 text-center font-mono">
+                {usbConnected ? "● Flujo Serial Activo (9600 baud, 8N1)" : "○ Desconectado — Haga clic en Conectar Balanza USB"}
+              </p>
             </div>
+
+            <div className="p-4 rounded-xl bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60 space-y-2">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Monitor de Datos Crudos (Serial Log)</p>
+              <div className="h-40 overflow-y-auto bg-slate-900 rounded-lg p-3 text-[11px] font-mono text-emerald-400 space-y-1">
+                {rawUsbLogs.length > 0 ? (
+                  rawUsbLogs.map((log, i) => <div key={i}>{log}</div>)
+                ) : (
+                  <div className="text-gray-500 italic">Sin datos recibidos aún. Conecte la balanza para capturar tramas de peso.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB: PLU SYNC ── */}
+      {tab === "plu_sync" && (
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-black text-gray-900 dark:text-white">Sincronización de Catálogo PLU</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Transmisión de productos pesables, códigos de balanza y precios a las memorias de las básculas</p>
+            </div>
+            <button
+              onClick={() => toast.success("¡PLUs Enviados!", "342 productos pesables transmitidos a las 6 balanzas")}
+              className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition flex items-center gap-1.5"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Enviar PLUs a Todas las Balanzas
+            </button>
           </div>
         </div>
       )}

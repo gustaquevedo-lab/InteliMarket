@@ -155,7 +155,7 @@ export default function SalesOrdersPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <ClipboardList className="w-6 h-6 text-primary" /> Pedidos de Venta
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{orders.length} pedidos registrados</p>

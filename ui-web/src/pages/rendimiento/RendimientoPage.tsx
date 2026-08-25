@@ -8,7 +8,7 @@ const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"
 
 export default function RendimientoPage() {
   const { user } = useAuth()
-  const companyId = user?.company_id || "00000000-0000-0000-0000-000000000010"
+  const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
   const [sellers, setSellers] = useState<any[]>([])
   const [ranking, setRanking] = useState<any[]>([])
   const [selectedSeller, setSelectedSeller] = useState<any>(null)
@@ -87,7 +87,7 @@ export default function RendimientoPage() {
     <div className="p-4 md:p-6 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Rendimiento de Vendedores</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Rendimiento de Vendedores</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Métricas, rankings y tendencias</p>
         </div>
         <select value={period} onChange={e => setPeriod(e.target.value)}

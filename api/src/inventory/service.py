@@ -75,6 +75,43 @@ async def get_stock_by_warehouse(db: AsyncSession, warehouse_id: str) -> list[di
     ]
 
 
+async def get_stock_by_product(db: AsyncSession, company_id: str, product_id: str) -> dict:
+    """Stock real (no stock_minimo) de un producto, sumado en todos los
+    depositos de la empresa -- usado por Consulta de Precios en el POS,
+    que antes no mostraba stock en absoluto."""
+    result = await db.execute(
+        select(Stock.cantidad, Stock.cantidad_reservada, Warehouse.nombre)
+        .join(Warehouse, Stock.warehouse_id == Warehouse.id)
+        .where(Stock.product_id == product_id, Warehouse.company_id == company_id)
+    )
+    rows = result.all()
+    total = sum(r[0] for r in rows)
+    reservado = sum(r[1] for r in rows)
+    return {
+        "product_id": product_id,
+        "cantidad_total": total,
+        "cantidad_reservada": reservado,
+        "cantidad_disponible": total - reservado,
+        "por_deposito": [{"nombre": r[2], "cantidad": r[0]} for r in rows],
+    }
+
+
+async def get_stock_map(db: AsyncSession, company_id: str) -> dict:
+    """Mapa liviano product_id -> cantidad disponible, sumado en todos los
+    depositos de la empresa. Usado por la grilla del POS -- antes esa
+    pantalla mostraba stock_minimo (el umbral de reposicion) etiquetado
+    como si fuera el stock real, con un fallback fijo de 36 si faltaba."""
+    result = await db.execute(
+        select(Stock.product_id, Stock.cantidad, Stock.cantidad_reservada)
+        .join(Warehouse, Stock.warehouse_id == Warehouse.id)
+        .where(Warehouse.company_id == company_id)
+    )
+    totals: dict[str, int] = {}
+    for product_id, cantidad, reservada in result.all():
+        totals[str(product_id)] = totals.get(str(product_id), 0) + (cantidad - reservada)
+    return totals
+
+
 async def get_low_stock(db: AsyncSession, company_id: str) -> list[dict]:
     result = await db.execute(
         select(Stock, Product.nombre, Product.stock_minimo, Product.sku)
@@ -272,14 +309,340 @@ async def list_movements(
     tipo: str | None = None,
     limit: int = 100,
     offset: int = 0,
-) -> list[InventoryMovement]:
-    query = select(InventoryMovement).where(InventoryMovement.company_id == company_id)
+) -> list[dict]:
+    from sqlalchemy import text
+    import uuid
+
+    comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    where = "im.company_id = :comp_id"
+    params: dict = {"comp_id": comp_uuid, "limit": limit, "offset": offset}
+
     if product_id:
-        query = query.where(InventoryMovement.product_id == product_id)
+        where += " AND im.product_id = :prod_id"
+        params["prod_id"] = uuid.UUID(product_id) if isinstance(product_id, str) else product_id
     if warehouse_id:
-        query = query.where(InventoryMovement.warehouse_id == warehouse_id)
+        where += " AND im.warehouse_id = :wh_id"
+        params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
     if tipo:
-        query = query.where(InventoryMovement.tipo == tipo)
-    query = query.order_by(InventoryMovement.created_at.desc()).limit(limit).offset(offset)
-    result = await db.execute(query)
-    return list(result.scalars().all())
+        where += " AND im.tipo = :tipo"
+        params["tipo"] = tipo
+
+    query = f"""
+        SELECT 
+            im.id, im.company_id, im.warehouse_id, im.product_id, im.variant_id,
+            im.tipo, im.cantidad, im.costo_unitario, im.referencia_type, im.referencia_id,
+            im.motivo, im.user_id, im.created_at,
+            p.nombre as product_nombre, p.sku as product_sku,
+            w.nombre as warehouse_nombre, w.codigo as warehouse_codigo
+        FROM inventory_movements im
+        LEFT JOIN products p ON p.id = im.product_id
+        LEFT JOIN warehouses w ON w.id = im.warehouse_id
+        WHERE {where}
+        ORDER BY im.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """
+    result = await db.execute(text(query), params)
+    return [dict(r._mapping) for r in result]
+
+
+async def list_adjustments(
+    db: AsyncSession,
+    company_id: str,
+    warehouse_id: str | None = None,
+    estado: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    import uuid
+    from sqlalchemy import text
+    
+    comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    where = "a.company_id = :comp_id"
+    params: dict = {"comp_id": comp_uuid, "limit": limit, "offset": offset}
+    
+    if warehouse_id:
+        where += " AND a.warehouse_id = :wh_id"
+        params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+    if estado:
+        where += " AND a.estado = :estado"
+        params["estado"] = estado
+        
+    query = f"""
+        SELECT 
+            a.id, a.codigo, a.motivo, a.estado, a.observaciones, a.created_at, a.fecha_aprobacion,
+            w.nombre as warehouse_nombre, w.codigo as warehouse_codigo,
+            COUNT(ai.id) as total_items,
+            COALESCE(SUM(ai.diferencia), 0) as diferencia_unidades,
+            COALESCE(SUM(ai.diferencia * COALESCE(ai.costo_unitario, p.costo_promedio, 0)), 0) as diferencia_valorizada_gs
+        FROM inventory_adjustments a
+        LEFT JOIN warehouses w ON w.id = a.warehouse_id
+        LEFT JOIN inventory_adjustment_items ai ON ai.adjustment_id = a.id
+        LEFT JOIN products p ON p.id = ai.product_id
+        WHERE {where}
+        GROUP BY a.id, a.codigo, a.motivo, a.estado, a.observaciones, a.created_at, a.fecha_aprobacion, w.nombre, w.codigo
+        ORDER BY a.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """
+    result = await db.execute(text(query), params)
+    return [dict(r._mapping) for r in result]
+
+
+async def record_quick_merma(
+    db: AsyncSession,
+    company_id: str,
+    warehouse_id: str,
+    product_id: str,
+    cantidad: float,
+    motivo: str,
+    observaciones: str = "",
+    user_id: uuid.UUID | None = None,
+) -> dict:
+    import uuid
+    from datetime import datetime, timezone
+    
+    comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    wh_uuid = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+    prod_uuid = uuid.UUID(product_id) if isinstance(product_id, str) else product_id
+    
+    product = await db.get(Product, prod_uuid)
+    if not product:
+        raise ValueError("Producto no encontrado")
+        
+    costo = float(product.costo_promedio or product.ultimo_costo or 0)
+    
+    # 1. Crear ajuste tipo merma
+    adj_code = f"MRM-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    adjustment = InventoryAdjustment(
+        company_id=comp_uuid,
+        warehouse_id=wh_uuid,
+        codigo=adj_code,
+        motivo=f"Merma: {motivo}",
+        estado="aprobado",
+        observaciones=observaciones,
+        user_id=user_id,
+        aprobado_por=user_id,
+        fecha_aprobacion=datetime.now(timezone.utc),
+    )
+    db.add(adjustment)
+    await db.flush()
+    
+    # 2. Obtener stock actual
+    stock = await get_stock(db, warehouse_id, product_id)
+    stock_actual = stock.cantidad if stock else 0
+    nuevo_stock = max(0, stock_actual - int(cantidad))
+    
+    # 3. Item de ajuste
+    adj_item = InventoryAdjustmentItem(
+        adjustment_id=adjustment.id,
+        product_id=prod_uuid,
+        cantidad_sistema=stock_actual,
+        cantidad_fisica=nuevo_stock,
+        diferencia=-int(cantidad),
+        costo_unitario=costo,
+    )
+    db.add(adj_item)
+    
+    # 4. Movimiento Kardex
+    movement = InventoryMovement(
+        company_id=comp_uuid,
+        warehouse_id=wh_uuid,
+        product_id=prod_uuid,
+        tipo="merma",
+        cantidad=-int(cantidad),
+        costo_unitario=costo,
+        referencia_type="adjustment",
+        referencia_id=adjustment.id,
+        motivo=f"Merma ({motivo}): {observaciones}",
+        user_id=user_id,
+    )
+    db.add(movement)
+    
+    # 5. Actualizar stock
+    if stock:
+        stock.cantidad = nuevo_stock
+        stock.updated_at = datetime.now(timezone.utc)
+    else:
+        stock = Stock(
+            warehouse_id=wh_uuid,
+            product_id=prod_uuid,
+            cantidad=nuevo_stock,
+            costo_unitario=costo,
+        )
+        db.add(stock)
+        
+    await db.flush()
+    return {
+        "id": str(adjustment.id),
+        "codigo": adjustment.codigo,
+        "product_nombre": product.nombre,
+        "cantidad_merma": cantidad,
+        "costo_unitario": costo,
+        "impacto_financiero_gs": cantidad * costo,
+        "stock_restante": nuevo_stock,
+    }
+
+
+async def get_inventory_stats(db: AsyncSession, company_id: str) -> dict:
+    from sqlalchemy import text
+    import uuid
+    
+    comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    
+    row = await db.execute(
+        text("""
+            WITH inv_agg AS (
+                SELECT 
+                    COUNT(DISTINCT s.product_id) as total_skus_almacenados,
+                    COALESCE(SUM(s.cantidad), 0) as total_unidades_fisicas,
+                    COALESCE(SUM(s.cantidad_reservada), 0) as total_unidades_reservadas,
+                    COALESCE(SUM(s.cantidad * COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)), 0) as valor_total_costo,
+                    COALESCE(SUM(s.cantidad * COALESCE(p.precio_venta, 0)), 0) as valor_total_venta_proyectada,
+                    COUNT(s.product_id) FILTER (WHERE s.cantidad <= 0) as total_quiebres,
+                    COUNT(s.product_id) FILTER (WHERE s.cantidad > 0 AND s.cantidad <= COALESCE(p.stock_minimo, 5)) as total_bajos
+                FROM stock s
+                JOIN products p ON p.id = s.product_id
+                WHERE p.company_id = :comp_id AND p.activo = true
+            ),
+            mermas_agg AS (
+                SELECT 
+                    COALESCE(COUNT(im.id), 0) as cant_mermas_mes,
+                    COALESCE(SUM(ABS(im.cantidad) * COALESCE(im.costo_unitario, 0)), 0) as monto_mermas_mes_gs
+                FROM inventory_movements im
+                WHERE im.company_id = :comp_id 
+                  AND im.tipo = 'merma'
+                  AND im.created_at >= NOW() - INTERVAL '30 days'
+            )
+            SELECT * FROM inv_agg, mermas_agg;
+        """),
+        {"comp_id": comp_uuid}
+    )
+    res = row.first()
+    return {
+        "total_skus_almacenados": int(res.total_skus_almacenados or 0) if res else 0,
+        "total_unidades_fisicas": float(res.total_unidades_fisicas or 0) if res else 0,
+        "total_unidades_reservadas": float(res.total_unidades_reservadas or 0) if res else 0,
+        "valor_total_costo": float(res.valor_total_costo or 0) if res else 0.0,
+        "valor_total_venta_proyectada": float(res.valor_total_venta_proyectada or 0) if res else 0.0,
+        "total_quiebres": int(res.total_quiebres or 0) if res else 0,
+        "total_bajos": int(res.total_bajos or 0) if res else 0,
+        "cant_mermas_mes": int(res.cant_mermas_mes or 0) if res else 0,
+        "monto_mermas_mes_gs": float(res.monto_mermas_mes_gs or 0) if res else 0.0,
+    }
+
+
+async def get_lots_expiries(
+    db: AsyncSession,
+    company_id: str,
+    warehouse_id: str | None = None,
+    estado: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    from sqlalchemy import text
+    from datetime import datetime, timezone, timedelta
+    import uuid
+
+    comp_id = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+
+    # 1. Query KPIs for lots
+    kpis_q = await db.execute(text("""
+        SELECT 
+            COUNT(*) as total_lotes,
+            COALESCE(SUM(CASE WHEN fecha_vencimiento IS NOT NULL AND fecha_vencimiento < NOW() AND cantidad_disponible > 0 THEN 1 ELSE 0 END), 0) as vencidos,
+            COALESCE(SUM(CASE WHEN fecha_vencimiento IS NOT NULL AND fecha_vencimiento >= NOW() AND fecha_vencimiento <= NOW() + INTERVAL '7 days' AND cantidad_disponible > 0 THEN 1 ELSE 0 END), 0) as critico_7d,
+            COALESCE(SUM(CASE WHEN fecha_vencimiento IS NOT NULL AND fecha_vencimiento > NOW() + INTERVAL '7 days' AND fecha_vencimiento <= NOW() + INTERVAL '30 days' AND cantidad_disponible > 0 THEN 1 ELSE 0 END), 0) as alerta_30d,
+            COALESCE(SUM(CASE WHEN fecha_vencimiento IS NOT NULL AND fecha_vencimiento <= NOW() + INTERVAL '30 days' AND cantidad_disponible > 0 THEN costo_unitario * cantidad_disponible ELSE 0 END), 0) as valor_en_riesgo,
+            COALESCE(SUM(CASE WHEN cantidad_disponible > 0 THEN costo_unitario * cantidad_disponible ELSE 0 END), 0) as valor_total_stock
+        FROM stock_lots
+        WHERE company_id = :comp_id AND cantidad_disponible > 0
+    """), {"comp_id": comp_id})
+    k_row = kpis_q.fetchone()
+
+    # 2. Query individual lots
+    query_str = """
+        SELECT 
+            sl.id,
+            sl.referencia,
+            sl.warehouse_id,
+            sl.product_id,
+            COALESCE(p.nombre, 'Producto ' || SUBSTRING(sl.product_id::text, 1, 8)) as product_nombre,
+            COALESCE(p.codigo_barra, p.sku, '') as product_codigo,
+            COALESCE(cat.nombre, 'General') as categoria,
+            sl.cantidad as cantidad_inicial,
+            sl.cantidad_disponible,
+            sl.costo_unitario,
+            (sl.costo_unitario * sl.cantidad_disponible) as costo_total_disponible,
+            sl.fecha_ingreso,
+            sl.fecha_vencimiento,
+            CASE 
+                WHEN sl.fecha_vencimiento IS NULL THEN 9999
+                ELSE EXTRACT(DAY FROM sl.fecha_vencimiento - NOW())::int
+            END as dias_restantes,
+            CASE 
+                WHEN sl.fecha_vencimiento IS NULL THEN 'sin_vencimiento'
+                WHEN sl.fecha_vencimiento < NOW() THEN 'vencido'
+                WHEN sl.fecha_vencimiento <= NOW() + INTERVAL '7 days' THEN 'critico_7d'
+                WHEN sl.fecha_vencimiento <= NOW() + INTERVAL '30 days' THEN 'alerta_30d'
+                ELSE 'vigente'
+            END as estado_vencimiento
+        FROM stock_lots sl
+        LEFT JOIN products p ON sl.product_id = p.id
+        LEFT JOIN product_categories cat ON p.categoria_id = cat.id
+        WHERE sl.company_id = :comp_id AND sl.cantidad_disponible > 0
+    """
+    params: dict = {"comp_id": comp_id, "limit": limit, "offset": offset}
+    if warehouse_id:
+        query_str += " AND sl.warehouse_id = :wh_id"
+        params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+
+    if estado == "vencido":
+        query_str += " AND sl.fecha_vencimiento IS NOT NULL AND sl.fecha_vencimiento < NOW()"
+    elif estado == "critico_7d":
+        query_str += " AND sl.fecha_vencimiento IS NOT NULL AND sl.fecha_vencimiento >= NOW() AND sl.fecha_vencimiento <= NOW() + INTERVAL '7 days'"
+    elif estado == "alerta_30d":
+        query_str += " AND sl.fecha_vencimiento IS NOT NULL AND sl.fecha_vencimiento > NOW() + INTERVAL '7 days' AND sl.fecha_vencimiento <= NOW() + INTERVAL '30 days'"
+    elif estado == "vigente":
+        query_str += " AND (sl.fecha_vencimiento IS NULL OR sl.fecha_vencimiento > NOW() + INTERVAL '30 days')"
+
+    query_str += """
+        ORDER BY 
+            CASE 
+                WHEN sl.fecha_vencimiento IS NULL THEN 2 
+                ELSE 1 
+            END,
+            sl.fecha_vencimiento ASC
+        LIMIT :limit OFFSET :offset
+    """
+
+    res = await db.execute(text(query_str), params)
+    lots = []
+    for r in res.fetchall():
+        lots.append({
+            "id": str(r.id),
+            "referencia": r.referencia or "LOTE-STD",
+            "warehouse_id": str(r.warehouse_id),
+            "product_id": str(r.product_id),
+            "product_nombre": r.product_nombre,
+            "product_codigo": r.product_codigo,
+            "categoria": r.categoria.strip() if r.categoria else "General",
+            "cantidad_inicial": int(r.cantidad_inicial or 0),
+            "cantidad_disponible": int(r.cantidad_disponible or 0),
+            "costo_unitario": float(r.costo_unitario or 0),
+            "costo_total_disponible": float(r.costo_total_disponible or 0),
+            "fecha_ingreso": r.fecha_ingreso.isoformat() if r.fecha_ingreso else None,
+            "fecha_vencimiento": r.fecha_vencimiento.isoformat() if r.fecha_vencimiento else None,
+            "dias_restantes": int(r.dias_restantes),
+            "estado_vencimiento": r.estado_vencimiento,
+        })
+
+    return {
+        "kpis": {
+            "total_lotes": int(k_row.total_lotes or 0) if k_row else 0,
+            "vencidos": int(k_row.vencidos or 0) if k_row else 0,
+            "critico_7d": int(k_row.critico_7d or 0) if k_row else 0,
+            "alerta_30d": int(k_row.alerta_30d or 0) if k_row else 0,
+            "valor_en_riesgo": float(k_row.valor_en_riesgo or 0) if k_row else 0.0,
+            "valor_total_stock": float(k_row.valor_total_stock or 0) if k_row else 0.0,
+        },
+        "lots": lots,
+    }

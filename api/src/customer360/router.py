@@ -25,6 +25,20 @@ async def get_dashboard(
     return await service.get_dashboard(db, user["company_id"])
 
 
+@router.get("/profile/{customer_id}")
+async def get_customer_profile(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.get_customer_profile_360(db, user["company_id"], customer_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al calcular perfil 360: {str(e)}")
+
+
 @router.post("/basket/compute/{customer_id}")
 async def compute_basket(
     customer_id: str,

@@ -59,3 +59,28 @@ async def update_variant_stock(db: AsyncSession, variant_id: str, delta: int) ->
     await db.commit()
     await db.refresh(variant)
     return variant
+
+
+async def list_all_company_variants(db: AsyncSession, company_id: str, product_id: str | None = None) -> list[dict]:
+    from sqlalchemy import text
+    comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    where = "pv.company_id = :comp_id AND pv.activo = true"
+    params = {"comp_id": comp_uuid}
+
+    if product_id:
+        where += " AND pv.product_id = :prod_id"
+        params["prod_id"] = uuid.UUID(product_id) if isinstance(product_id, str) else product_id
+
+    query = f"""
+        SELECT pv.id, pv.product_id, pv.company_id, pv.tipo, pv.valor,
+               pv.sku_variante, pv.codigo_barra, pv.precio_extra, pv.stock,
+               pv.orden, pv.activo, pv.created_at, pv.updated_at,
+               p.nombre as product_nombre, p.sku as product_sku, p.precio_venta as product_precio_base
+        FROM product_variants pv
+        JOIN products p ON p.id = pv.product_id
+        WHERE {where}
+        ORDER BY p.nombre ASC, pv.orden ASC, pv.valor ASC
+    """
+    res = await db.execute(text(query), params)
+    return [dict(r._mapping) for r in res]
+

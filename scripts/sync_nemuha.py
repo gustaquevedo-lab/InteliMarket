@@ -1,3 +1,11 @@
+import os
+import time
+os.environ['TZ'] = 'America/Asuncion'
+try:
+    time.tzset()
+except Exception:
+    pass
+
 import asyncio
 import logging
 import sys

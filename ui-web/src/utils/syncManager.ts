@@ -30,9 +30,10 @@ export async function restoreCart(): Promise<Array<{ id: string; nombre: string;
 
 export async function syncFullCatalog(): Promise<{ products: number; customers: number; success: boolean }> {
   try {
+    // Descarga el catálogo completo (todos los SKUs) y clientes con líneas de crédito
     const [products, customers] = await Promise.all([
-      api.products.list({ activo: true }),
-      api.customers.list({ activo: true }),
+      api.products.list({ limit: 10000, activo: true }),
+      api.customers.list({ limit: 10000, activo: true }),
     ])
 
     const cachedProducts: CachedProduct[] = products.map(p => ({
@@ -43,25 +44,34 @@ export async function syncFullCatalog(): Promise<{ products: number; customers: 
       category_id: p.categoria_id ?? null,
       iva_tasa: p.iva_tasa || 10,
       activo: p.activo !== false,
-      precio: p.precio || 0,
+      precio: Number(p.precio ?? p.precio_venta ?? 0),
       stock: p.stock ?? 0,
       categoria_nombre: p.categoria?.nombre || null,
       data: p,
       cached_at: new Date().toISOString(),
     }))
 
-    const cachedCustomers: CachedCustomer[] = customers.map(c => ({
-      id: c.id,
-      razon_social: c.razon_social ?? "",
-      ruc: c.ruc ?? null,
-      ci: c.ci ?? null,
-      telefono: c.telefono ?? null,
-      email: c.email ?? null,
-      tipo_persona: c.tipo_persona || "fisica",
-      credito_limite: c.credito_limite || 0,
-      activo: c.activo !== false,
-      cached_at: new Date().toISOString(),
-    }))
+    const cachedCustomers: CachedCustomer[] = customers.map(c => {
+      const limite = Number(c.credito_limite ?? c.limite_credito ?? 0)
+      const usado = Number(c.credito_usado ?? c.saldo_pendiente ?? 0)
+      return {
+        id: c.id,
+        razon_social: c.razon_social ?? c.nombre ?? "",
+        nombre: c.nombre ?? "",
+        ruc: c.ruc ?? null,
+        ci: c.ci ?? null,
+        telefono: c.telefono ?? null,
+        email: c.email ?? null,
+        tipo_persona: c.tipo_persona || "fisica",
+        credito_limite: limite,
+        credito_usado: usado,
+        credito_disponible: Math.max(0, limite - usado),
+        puntos_fidelidad: (c as any).puntos_acumulados || (c as any).puntos || 0,
+        descuento_afinidad_pct: (c as any).descuento_afinidad_pct || 0,
+        activo: c.activo !== false,
+        cached_at: new Date().toISOString(),
+      }
+    })
 
     await Promise.all([
       offlineDB.products.setAll(cachedProducts),
@@ -154,10 +164,10 @@ export function generateOfflineReceipt(
   iva5: number,
   paymentMethod: string,
   customerName: string | null,
-  branchName: string,
+  branchName: string = "EXTRA SUPERMERCADO S.A.",
 ): string {
   const now = new Date().toLocaleString("es-PY")
-  const lines = items.map((i, idx) => {
+  const lines = items.map((i) => {
     const precio = i.precio.toLocaleString("es-PY")
     const subtotal = (i.precio * i.cantidad).toLocaleString("es-PY")
     return `<tr><td>${i.nombre}</td><td align="right">${i.cantidad}</td><td align="right">${precio}</td><td align="right">${subtotal}</td></tr>`
@@ -166,38 +176,40 @@ export function generateOfflineReceipt(
   return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Comprobante ${saleNumber}</title>
 <style>
-  body { font-family: 'Courier New', monospace; font-size: 12px; width: 72mm; margin: 0 auto; padding: 8px; }
+  @page { size: 80mm auto; margin: 0; }
+  body { font-family: 'Courier New', monospace; font-size: 11px; width: 72mm; margin: 0 auto; padding: 4px; line-height: 1.2; }
   .center { text-align: center; }
   .line { border-top: 1px dashed #000; margin: 4px 0; }
   table { width: 100%; border-collapse: collapse; }
   th { border-bottom: 1px solid #000; text-align: left; font-size: 10px; }
   td { font-size: 11px; padding: 1px 0; }
-  .total { font-size: 16px; font-weight: bold; }
+  .total { font-size: 14px; font-weight: bold; }
 </style></head><body>
 <div class="center">
-  <h3 style="margin:0">${branchName}</h3>
-  <p style="margin:2px 0;font-size:10px;">RUC: 80012345-6 | Timbrado: 12345678</p>
+  <h3 style="margin:0; font-size: 13px;">${branchName}</h3>
+  <p style="margin:2px 0;font-size:10px;">RUC: 80092451-2 | Timbrado DNIT: 18545636</p>
+  <p style="margin:1px 0;font-size:9px;">Avda. Principal esq. Curupayty Nº 1450</p>
   <p style="margin:2px 0;font-size:10px;">${now}</p>
 </div>
 <div class="line"></div>
-<p style="margin:4px 0;">Comprobante: <strong>${saleNumber}</strong></p>
-${customerName ? `<p style="margin:4px 0;">Cliente: ${customerName}</p>` : ""}
-<p style="margin:4px 0;">Pago: ${paymentMethod}</p>
+<p style="margin:3px 0;">Ticket Factura: <strong>${saleNumber}</strong></p>
+${customerName ? `<p style="margin:3px 0;">Cliente: ${customerName}</p>` : "<p style=\"margin:3px 0;\">Cliente: Consumidor Final</p>"}
+<p style="margin:3px 0;">Condición: CONTADO | Pago: ${paymentMethod}</p>
 <div class="line"></div>
 <table>
-  <tr><th>Producto</th><th align="right">Cant</th><th align="right">P.U.</th><th align="right">Subtotal</th></tr>
+  <tr><th>Ítem / SKU</th><th align="right">Cant</th><th align="right">P.U.</th><th align="right">Total</th></tr>
   ${lines}
 </table>
 <div class="line"></div>
 <div class="center">
-  <p class="total">TOTAL: Gs. ${total.toLocaleString("es-PY")}</p>
-  ${iva10 > 0 ? `<p style="font-size:10px;">IVA 10%: Gs. ${iva10.toLocaleString("es-PY")}</p>` : ""}
-  ${iva5 > 0 ? `<p style="font-size:10px;">IVA 5%: Gs. ${iva5.toLocaleString("es-PY")}</p>` : ""}
+  <p class="total">TOTAL A PAGAR: Gs. ${total.toLocaleString("es-PY")}</p>
+  ${iva10 > 0 ? `<p style="font-size:10px; margin: 2px 0;">Liquidación IVA 10%: Gs. ${iva10.toLocaleString("es-PY")}</p>` : ""}
+  ${iva5 > 0 ? `<p style="font-size:10px; margin: 2px 0;">Liquidación IVA 5%: Gs. ${iva5.toLocaleString("es-PY")}</p>` : ""}
 </div>
 <div class="line"></div>
 <div class="center">
-  <p style="font-size:9px;">Gracias por su compra</p>
-  <p style="font-size:9px;">InteliMarket ERP</p>
+  <p style="font-size:9px; margin: 2px 0;">Resolución DNIT Autoimpresor Vigente</p>
+  <p style="font-size:9px; margin: 2px 0;">¡Gracias por preferirnos!</p>
 </div>
 </body></html>`
 }

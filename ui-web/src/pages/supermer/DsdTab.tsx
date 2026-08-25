@@ -29,7 +29,7 @@ export default function DsdTab() {
       const p: Promise<any>[] = []
       if (subTab === "schedules") p.push(api.dsd.schedules.list().then(setSchedules))
       if (subTab === "receivings" || subTab === "items" || subTab === "rejections") p.push(api.dsd.receivings.list().then(setReceivings))
-      if (subTab === "dashboard") p.push(api.dsd.dashboard().then(setDashData))
+      // dashboard tab: sin endpoint disponible
       await Promise.all(p.map(p => p.catch(() => {})))
     } finally { setLoading(false) }
   }
@@ -68,7 +68,7 @@ export default function DsdTab() {
                 <p className="text-sm text-gray-500 dark:text-gray-400">{s.label}</p>
                 <s.icon className={`w-5 h-5 ${s.color}`} />
               </div>
-              <p className="text-3xl font-bold text-gray-800 dark:text-gray-100 mt-2">{s.value}</p>
+              <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-gray-800 dark:text-gray-100 mt-2">{s.value}</p>
             </div>
           ))}
           <div className="md:col-span-4 bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-5 shadow-sm">

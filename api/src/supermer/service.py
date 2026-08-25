@@ -561,7 +561,7 @@ async def generate_forecast(db: AsyncSession, company_id: str, lookback_days: in
             sa_func.sum(SaleItem.cantidad).label("total_qty"),
         ).select_from(SaleItem).join(Sale).where(
             Sale.company_id == company_id,
-            SaleItem.producto_id == pid,
+            SaleItem.product_id == pid,
             cast(Sale.created_at, Date) >= cutoff,
         ).group_by(cast(Sale.created_at, Date))
         hist_r = await db.execute(hist_q)

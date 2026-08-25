@@ -728,3 +728,176 @@ async def get_dashboard(db: AsyncSession, company_id: str) -> dict:
         penetration_summary={},
         churn_trend=churn_trend,
     ).model_dump()
+
+
+
+# ── Comprehensive 360 Profile ──────────────────────────────────────────
+
+async def get_customer_profile_360(db: AsyncSession, company_id: str, customer_id: str) -> dict:
+    cid = uuid.UUID(customer_id) if isinstance(customer_id, str) else customer_id
+    comp_id = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+
+    # 1. Customer
+    from api.src.customers.models import Customer
+    c_res = await db.execute(select(Customer).where(Customer.id == cid, Customer.company_id == comp_id))
+    customer = c_res.scalar_one_or_none()
+    if not customer:
+        # Fallback without company filter if multi-tenant cross reference
+        c_res2 = await db.execute(select(Customer).where(Customer.id == cid))
+        customer = c_res2.scalar_one_or_none()
+        if not customer:
+            raise ValueError("Cliente no encontrado")
+
+    # 2. Sales Stats from real sales table
+    sales_stats_q = await db.execute(text("""
+        SELECT 
+            COUNT(*) as total_tickets,
+            COALESCE(SUM(total), 0) as total_spent,
+            MIN(COALESCE(fecha, created_at)) as first_purchase,
+            MAX(COALESCE(fecha, created_at)) as last_purchase
+        FROM sales
+        WHERE customer_id = :cid AND estado = 'confirmado'
+    """), {"cid": str(cid)})
+    s_row = sales_stats_q.fetchone()
+    total_tickets = int(s_row.total_tickets or 0)
+    total_spent = float(s_row.total_spent or 0)
+    avg_ticket = round(total_spent / max(1, total_tickets))
+    first_purchase = s_row.first_purchase.isoformat() if s_row.first_purchase else None
+    last_purchase = s_row.last_purchase.isoformat() if s_row.last_purchase else None
+
+    days_since = 999
+    if s_row.last_purchase:
+        now = datetime.now(timezone.utc)
+        lp = s_row.last_purchase if s_row.last_purchase.tzinfo else s_row.last_purchase.replace(tzinfo=timezone.utc)
+        days_since = max(0, (now - lp).days)
+
+    # Average days between visits
+    avg_days_between_visits = 0
+    if total_tickets >= 2 and s_row.first_purchase and s_row.last_purchase:
+        span_days = max(1, (s_row.last_purchase - s_row.first_purchase).days)
+        avg_days_between_visits = round(span_days / max(1, total_tickets - 1), 1)
+
+    # 3. Loyalty Points
+    pts_q = await db.execute(text("""
+        SELECT COALESCE(SUM(puntos), 0) FROM loyalty_points WHERE customer_id = :cid
+    """), {"cid": str(cid)})
+    total_points = int(pts_q.scalar() or 0)
+
+    # Tier Calculation
+    tier = "Plata"
+    tier_color = "text-slate-400"
+    if total_spent >= 10000000 or total_points >= 10000:
+        tier = "VIP Platino"
+        tier_color = "text-purple-500"
+    elif total_spent >= 3000000 or total_points >= 3000:
+        tier = "Oro"
+        tier_color = "text-amber-500"
+
+    # 4. RFM Segmentation & Scoring
+    if days_since <= 15 and (total_tickets >= 10 or total_spent >= 3000000):
+        rfm_segment = "Champions (VIP Platino)"
+        rfm_score = 95
+        risk_level = "Bajo"
+    elif days_since <= 30 and total_tickets >= 4:
+        rfm_segment = "Leales Recurrentes (Oro/Plata)"
+        rfm_score = 80
+        risk_level = "Bajo"
+    elif days_since <= 45:
+        rfm_segment = "Potenciales / Nuevos"
+        rfm_score = 65
+        risk_level = "Medio"
+    else:
+        rfm_segment = "En Riesgo de Fuga"
+        rfm_score = 35
+        risk_level = "Alto"
+
+    # 5. Top Frequent Products (Canasta Habitual)
+    top_prods_q = await db.execute(text("""
+        SELECT 
+            si.product_id,
+            COALESCE(p.nombre, 'Producto ' || SUBSTRING(si.product_id::text, 1, 8)) as producto_nombre,
+            COALESCE(cat.nombre, 'General') as categoria,
+            COUNT(DISTINCT s.id) as veces_comprado,
+            SUM(si.cantidad) as cantidad_total,
+            SUM(si.total) as monto_total
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        LEFT JOIN products p ON si.product_id = p.id
+        LEFT JOIN product_categories cat ON p.categoria_id = cat.id
+        WHERE s.customer_id = :cid AND s.estado = 'confirmado'
+        GROUP BY si.product_id, p.nombre, cat.nombre
+        ORDER BY SUM(si.total) DESC
+        LIMIT 10
+    """), {"cid": str(cid)})
+    frequent_basket = [
+        {
+            "product_id": str(r.product_id),
+            "producto": r.producto_nombre,
+            "categoria": r.categoria.strip() if r.categoria else "General",
+            "veces": int(r.veces_comprado),
+            "unidades": float(r.cantidad_total or 0),
+            "total": float(r.monto_total or 0),
+        }
+        for r in top_prods_q.fetchall()
+    ]
+
+    # 6. Recent Sales
+    recent_sales_q = await db.execute(text("""
+        SELECT s.id, s.numero, COALESCE(s.fecha, s.created_at) as fecha, s.total, s.estado,
+               (SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id) as items_count
+        FROM sales s
+        WHERE s.customer_id = :cid AND s.estado = 'confirmado'
+        ORDER BY COALESCE(s.fecha, s.created_at) DESC
+        LIMIT 10
+    """), {"cid": str(cid)})
+    recent_sales = [
+        {
+            "id": str(r.id),
+            "numero": r.numero or str(r.id)[:8],
+            "fecha": r.fecha.isoformat() if r.fecha else None,
+            "total": float(r.total or 0),
+            "estado": r.estado,
+            "items_count": int(r.items_count or 0),
+        }
+        for r in recent_sales_q.fetchall()
+    ]
+
+    return {
+        "customer": {
+            "id": str(customer.id),
+            "razon_social": customer.razon_social,
+            "ruc": customer.ruc or "S/R",
+            "ci": customer.ci,
+            "telefono": customer.telefono or "",
+            "email": customer.email or "",
+            "ciudad": customer.ciudad or "Asunción",
+            "limite_credito": float(getattr(customer, 'limite_credito', None) or getattr(customer, 'credito_limite', 0) or 0),
+            "credito_usado": float(customer.credito_usado or 0),
+            "tipo": getattr(customer, 'tipo', 'cliente'),
+        },
+        "kpis": {
+            "total_tickets": total_tickets,
+            "total_spent": total_spent,
+            "avg_ticket": avg_ticket,
+            "first_purchase": first_purchase,
+            "last_purchase": last_purchase,
+            "days_since_last_purchase": days_since,
+            "avg_days_between_visits": avg_days_between_visits,
+        },
+        "loyalty": {
+            "total_points": total_points,
+            "tier": tier,
+            "tier_color": tier_color,
+            "redeemable_value_pyg": total_points * 10,
+        },
+        "rfm": {
+            "segment": rfm_segment,
+            "score": rfm_score,
+            "risk_level": risk_level,
+            "days_since": days_since,
+            "total_tickets": total_tickets,
+            "total_spent": total_spent,
+        },
+        "frequent_basket": frequent_basket,
+        "recent_sales": recent_sales,
+    }

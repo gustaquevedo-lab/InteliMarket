@@ -1,3 +1,4 @@
+import { useEntityLookup, getCustomerName } from "../../hooks/useEntityLookup"
 import { useState, useEffect } from "react"
 import {
   ShoppingCart, Scan, CreditCard, ShieldCheck, BarChart3, Loader2,
@@ -8,14 +9,26 @@ import { api } from "../../api/index"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
+
 export default function ScanAndGoPage() {
+  useEntityLookup()
+  const [custMap, setCustMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    api.customers.list({ limit: 500 }).then((res: any) => {
+      const list = Array.isArray(res) ? res : res?.data || []
+      const map: Record<string, string> = {}
+      list.forEach((c: any) => { if (c.id) map[c.id] = c.razon_social || c.nombre || c.ruc })
+      setCustMap(map)
+    }).catch(() => {})
+  }, [])
+
   const [tab, setTab] = useState("dashboard")
 
   return (
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Scan&Go — Autopago</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Scan&Go — Autopago</h1>
           <p className="text-sm text-gray-500 mt-1">App mobile para escanear productos y pagar sin pasar por caja</p>
         </div>
       </div>
@@ -155,7 +168,7 @@ function SesionesTab() {
 
   const load = () => {
     setLoading(true)
-    api.scanandgo.listSessions(COMPANY_ID).then(setSessions).catch(() => {}).finally(() => setLoading(false))
+    api.scanandgo.listSessions().then(setSessions).catch(() => {}).finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
@@ -187,7 +200,7 @@ function SesionesTab() {
               {sessions.map((s: any) => (
                 <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
                   <td className="px-4 py-2 font-mono text-xs">{s.id?.slice(0, 8)}...</td>
-                  <td className="px-4 py-2">{s.customer_id?.slice(0, 8)}...</td>
+                  <td className="px-4 py-2">{getCustomerName(s.customer_id)}</td>
                   <td className="px-4 py-2">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.status === "active" ? "bg-green-100 text-green-700" : s.status === "completed" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{s.status}</span>
                   </td>
@@ -216,7 +229,7 @@ function AuditoriasTab() {
 
   const load = () => {
     setLoading(true)
-    api.scanandgo.listPendingAudits(COMPANY_ID).then(setAudits).catch(() => {}).finally(() => setLoading(false))
+    api.scanandgo.listPendingAudits(50).then(setAudits).catch(() => {}).finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])

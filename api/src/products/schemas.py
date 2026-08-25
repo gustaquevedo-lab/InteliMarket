@@ -45,6 +45,7 @@ class ProductCreate(BaseModel):
     stock_minimo: int = 0
     stock_maximo: Optional[int] = None
     peso_kg: Optional[Decimal] = None
+    imagen_url: Optional[str] = None
     precio_venta: Decimal = Decimal("0")
     costo_promedio: Decimal = Decimal("0")
     ultimo_costo: Decimal = Decimal("0")
@@ -67,6 +68,7 @@ class ProductUpdate(BaseModel):
     stock_minimo: Optional[int] = None
     stock_maximo: Optional[int] = None
     peso_kg: Optional[Decimal] = None
+    imagen_url: Optional[str] = None
     activo: Optional[bool] = None
     precio_venta: Optional[Decimal] = None
     costo_promedio: Optional[Decimal] = None
@@ -93,6 +95,7 @@ class ProductResponse(BaseModel):
     stock_minimo: int
     stock_maximo: Optional[int] = None
     peso_kg: Optional[Decimal] = None
+    imagen_url: Optional[str] = None
     precio_venta: Decimal = Decimal("0")
     costo_promedio: Decimal = Decimal("0")
     ultimo_costo: Decimal = Decimal("0")

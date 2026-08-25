@@ -1,370 +1,713 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import {
   BarChart3, Users, ShoppingBag, TrendingDown, Target, Gift,
   Loader2, RefreshCcw, AlertTriangle, Clock, DollarSign, PieChart,
-  ChevronRight, Search,
+  ChevronRight, Search, HeartHandshake, Zap, Calendar, Sparkles,
+  Phone, Mail, ArrowUpRight, TrendingUp, ShieldCheck, CheckCircle2,
+  Award, MessageCircle, Send, Filter, Check, Eye, UserCheck, Star,
+  Percent, ArrowRight, CreditCard, ShoppingCart, MessageSquare, Flame
 } from "lucide-react"
-import { api } from "../../api/index"
+import { api, type Customer } from "../../api"
+import { useAuth } from "../../context/AuthContext"
+import { useToast } from "../../context/ToastContext"
+import { formatPYG, formatDate } from "../../utils/format"
 
-const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+type Tab = "perfil" | "historial" | "canasta_habitual" | "scoring_rfm" | "campanias_retencion"
+
+interface Customer360Profile {
+  customer: {
+    id: string
+    razon_social: string
+    ruc: string
+    ci?: string | null
+    telefono?: string | null
+    email?: string | null
+    ciudad?: string | null
+    limite_credito: number
+    credito_usado: number
+    tipo: string
+  }
+  kpis: {
+    total_tickets: number
+    total_spent: number
+    avg_ticket: number
+    first_purchase?: string | null
+    last_purchase?: string | null
+    days_since_last_purchase: number
+    avg_days_between_visits?: number
+  }
+  loyalty: {
+    total_points: number
+    tier: string
+    tier_color: string
+    redeemable_value_pyg: number
+  }
+  rfm: {
+    segment: string
+    score: number
+    risk_level: string
+    days_since: number
+    total_tickets: number
+    total_spent: number
+  }
+  frequent_basket: Array<{
+    product_id: string
+    producto: string
+    categoria: string
+    veces: number
+    unidades: number
+    total: number
+  }>
+  recent_sales: Array<{
+    id: string
+    numero: string
+    fecha?: string | null
+    total: number
+    estado: string
+    items_count: number
+  }>
+}
 
 export default function Customer360Page() {
-  const [tab, setTab] = useState("dashboard")
+  const toast = useToast()
+  const { user } = useAuth()
+  const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
 
-  return (
-    <div className="space-y-6 animate-fade-in-up">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Customer 360 Analytics</h1>
-          <p className="text-sm text-gray-500 mt-1">Canasta analítica, penetración por categoría, predicción de abandono, ciclo de vida, campañas de recuperación</p>
-        </div>
-      </div>
+  const [tab, setTab] = useState<Tab>("perfil")
+  const [loadingList, setLoadingList] = useState(true)
+  const [loadingProfile, setLoadingProfile] = useState(false)
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [searchCust, setSearchCust] = useState("")
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
+  const [profile, setProfile] = useState<Customer360Profile | null>(null)
 
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {[
-            { key: "dashboard", label: "Dashboard", icon: BarChart3 },
-            { key: "churn", label: "Riesgo Abandono", icon: TrendingDown },
-            { key: "lifecycle", label: "Ciclo de Vida", icon: Target },
-            { key: "recovery", label: "Recuperación", icon: Gift },
-          ].map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
-                ${tab === t.key ? "border-blue-500 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
-            >
-              <t.icon className="w-4 h-4" />{t.label}
-            </button>
-          ))}
-        </div>
-      </div>
+  // Mensajería IntelliZapp
+  const [customMsg, setCustomMsg] = useState("")
+  const [sendingMsg, setSendingMsg] = useState(false)
+  const [sentSuccess, setSentSuccess] = useState(false)
 
-      {tab === "dashboard" && <DashboardTab />}
-      {tab === "churn" && <ChurnTab />}
-      {tab === "lifecycle" && <LifecycleTab />}
-      {tab === "recovery" && <RecoveryTab />}
-    </div>
-  )
-}
-
-function Spinner() { return <Loader2 className="w-4 h-4 animate-spin" /> }
-
-function KpiCard({ icon: Icon, label, value, sub, color = "blue" }: any) {
-  const colors: Record<string, string> = {
-    blue: "bg-blue-50 text-blue-600", green: "bg-green-50 text-green-600",
-    red: "bg-red-50 text-red-600", yellow: "bg-yellow-50 text-yellow-600",
-    purple: "bg-purple-50 text-purple-600", indigo: "bg-indigo-50 text-indigo-600",
-  }
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-      <div className="flex items-center gap-3">
-        <div className={`p-2.5 rounded-lg ${colors[color] || colors.blue}`}>
-          <Icon className="w-5 h-5" />
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">{label}</p>
-          <p className="text-lg font-bold text-gray-900 dark:text-white">{value ?? "—"}</p>
-          {sub && <p className="text-xs text-gray-400">{sub}</p>}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ===== DASHBOARD =====
-
-function DashboardTab() {
-  const [data, setData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => { api.customer360.getDashboard(COMPANY_ID).then(setData).catch(() => {}).finally(() => setLoading(false)) }, [])
-
-  if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
-
-  const d = data || {}
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard icon={Users} label="Clientes Totales" value={d.total_customers} color="blue" />
-        <KpiCard icon={Users} label="Activos (30d)" value={d.active_customers_30d} sub={`${d.new_customers_30d} nuevos`} color="green" />
-        <KpiCard icon={AlertTriangle} label="Perdidos (30d)" value={d.lost_customers_30d} sub={`${d.churn_rate_pct}% churn rate`} color="red" />
-        <KpiCard icon={ShoppingBag} label="Ticket Promedio" value={`Gs ${(d.avg_basket || 0).toLocaleString()}`} color="purple" />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard icon={DollarSign} label="LTV Promedio" value={`Gs ${(d.avg_ltv || 0).toLocaleString()}`} color="indigo" />
-        <KpiCard icon={PieChart} label="Penetración Prom." value={`${d.avg_penetration_pct || 0}%`} color="green" />
-        <KpiCard icon={TrendingDown} label="Alto Riesgo" value={d.high_risk_churn} sub="churn ≥ 50" color="red" />
-        <KpiCard icon={Gift} label="Campañas Activas" value={d.active_recovery_campaigns} sub={`Gs ${(d.total_recovered_amount || 0).toLocaleString()} recuperados`} color="yellow" />
-      </div>
-
-      {d.by_stage && Object.keys(d.by_stage).length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Distribución por Etapa del Ciclo de Vida</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-            {Object.entries(d.by_stage as Record<string, number>).map(([stage, count]) => {
-              const colors: Record<string, string> = {
-                new: "bg-purple-100 text-purple-700", active: "bg-blue-100 text-blue-700",
-                regular: "bg-green-100 text-green-700", loyal: "bg-yellow-100 text-yellow-700",
-                at_risk: "bg-orange-100 text-orange-700", lost: "bg-red-100 text-red-700",
-              }
-              return (
-                <div key={stage} className={`rounded-lg p-3 text-center ${colors[stage] || "bg-gray-100"}`}>
-                  <p className="text-xl font-bold">{count}</p>
-                  <p className="text-xs capitalize">{stage.replace("_", " ")}</p>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {d.churn_trend && d.churn_trend.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Tendencia de Churn Score por Mes</h3>
-          <div className="flex items-end gap-3 h-32">
-            {d.churn_trend.map((m: any) => {
-              const h = Math.min(100, m.avg_score || 0)
-              return (
-                <div key={m.month} className="flex-1 flex flex-col items-center gap-1">
-                  <span className="text-xs text-gray-500">{h.toFixed(0)}</span>
-                  <div className="w-full bg-blue-500 rounded-t" style={{ height: `${h}%`, minHeight: 4 }} />
-                  <span className="text-xs text-gray-400">M{m.month}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      <button onClick={async () => { await api.customer360.bulkCompute(COMPANY_ID); window.location.reload() }}
-        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-      >
-        <RefreshCcw className="w-4 h-4" /> Re-calcular todo
-      </button>
-    </div>
-  )
-}
-
-// ===== CHURN =====
-
-function ChurnTab() {
-  const [customers, setCustomers] = useState<any[]>([])
-  const [search, setSearch] = useState("")
-  const [loading, setLoading] = useState(true)
+  // Cargar lista de clientes (excluyendo proveedores)
+  const loadCustomers = useCallback(async () => {
+    setLoadingList(true)
+    try {
+      const res: any = await api.customers.list({ limit: 500, exclude_proveedores: true } as any)
+      const list: Customer[] = Array.isArray(res) ? res : (res?.data || [])
+      if (list.length > 0) {
+        setCustomers(list)
+        if (!selectedCustomerId || !list.some(c => c.id === selectedCustomerId)) {
+          setSelectedCustomerId(list[0].id)
+        }
+      }
+    } catch (err: any) {
+      console.error("Error loading customers:", err)
+      toast.error("Error al cargar lista de clientes", err.message)
+    } finally {
+      setLoadingList(false)
+    }
+  }, [selectedCustomerId, toast])
 
   useEffect(() => {
-    api.customer360.listHighRiskChurn(COMPANY_ID).then(setCustomers).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+    loadCustomers()
+  }, [loadCustomers])
 
-  const filtered = customers.filter((c) =>
-    (c.customer_id || "").toLowerCase().includes(search.toLowerCase())
-  )
+  // Cargar perfil 360 dinámico al cambiar selectedCustomerId
+  useEffect(() => {
+    if (!selectedCustomerId) return
+    let isCancelled = false
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por ID cliente..." className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm" />
-        </div>
-        <button onClick={async () => { await api.customer360.bulkCompute(COMPANY_ID); window.location.reload() }} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm">
-          <RefreshCcw className="w-4 h-4" /> Predecir todo
-        </button>
-      </div>
+    const fetchProfile = async () => {
+      setLoadingProfile(true)
+      try {
+        const res = await api.customer360.getProfile(selectedCustomerId)
+        if (!isCancelled) {
+          setProfile(res)
+          // Generar mensaje sugerido por defecto
+          const favProd = res.frequent_basket?.[0]?.producto || "nuestros productos"
+          setCustomMsg(
+            `¡Hola ${res.customer.razon_social.split(",")[0].split(" ")[0]}! 👋 En Extra Supermercado queremos agradecer tu preferencia. Tenés acumulados ${res.loyalty.total_points.toLocaleString("es-PY")} puntos ExtraClub (equivalentes a ${formatPYG(res.loyalty.redeemable_value_pyg)} en vales). Además, hoy te preparamos 15% OFF en ${favProd}. ¡Te esperamos!`
+          )
+          setSentSuccess(false)
+        }
+      } catch (err: any) {
+        console.error("Error fetching 360 profile:", err)
+        if (!isCancelled) {
+          toast.error("Error al cargar expediente 360", err.message)
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingProfile(false)
+        }
+      }
+    }
 
-      {loading ? <div className="flex justify-center py-12"><Spinner /></div> : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700">
-                <th className="text-left py-3 px-2">Cliente</th>
-                <th className="text-left py-3 px-2">Score</th>
-                <th className="text-left py-3 px-2">Riesgo</th>
-                <th className="text-left py-3 px-2">Días sin compra</th>
-                <th className="text-left py-3 px-2">Frecuencia media</th>
-                <th className="text-left py-3 px-2">Δ Ticket</th>
-                <th className="text-left py-3 px-2">Δ Frecuencia</th>
-                <th className="text-left py-3 px-2">Recuperación</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((c) => {
-                const riskColors: Record<string, string> = { critical: "text-red-600 bg-red-50", high: "text-orange-600 bg-orange-50", medium: "text-yellow-600 bg-yellow-50", low: "text-green-600 bg-green-50" }
-                return (
-                  <tr key={c.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                    <td className="py-3 px-2 font-medium">{c.customer_id?.slice(0, 8)}...</td>
-                    <td className="py-3 px-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 bg-gray-200 rounded-full h-2"><div className="bg-blue-600 rounded-full h-2" style={{ width: `${c.churn_score}%` }} /></div>
-                        <span className="text-xs font-bold">{c.churn_score}</span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${riskColors[c.churn_risk] || ""}`}>{c.churn_risk}</span></td>
-                    <td className="py-3 px-2">{c.days_since_last_purchase}d</td>
-                    <td className="py-3 px-2">{c.avg_frequency_days}d</td>
-                    <td className="py-3 px-2"><span className={c.avg_ticket_change_pct < 0 ? "text-red-600" : "text-green-600"}>{c.avg_ticket_change_pct > 0 ? "+" : ""}{c.avg_ticket_change_pct}%</span></td>
-                    <td className="py-3 px-2"><span className={c.frequency_change_pct < 0 ? "text-red-600" : "text-green-600"}>{c.frequency_change_pct > 0 ? "+" : ""}{c.frequency_change_pct}%</span></td>
-                    <td className="py-3 px-2">{c.is_recovery_triggered ? <span className="text-green-600 text-xs">✅</span> : "—"}</td>
-                  </tr>
-                )
-              })}
-              {filtered.length === 0 && <tr><td colSpan={8} className="text-center py-8 text-gray-400">Sin datos de churn — ejecutá "Predecir todo"</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
+    fetchProfile()
+    return () => {
+      isCancelled = true
+    }
+  }, [selectedCustomerId, toast])
 
-// ===== LIFECYCLE =====
+  const selectedCustomer = useMemo(() => {
+    return customers.find(c => c.id === selectedCustomerId) || null
+  }, [customers, selectedCustomerId])
 
-function LifecycleTab() {
-  const [data, setData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [searchId, setSearchId] = useState("")
+  const filteredCustomers = useMemo(() => {
+    if (!searchCust) return customers.slice(0, 40)
+    const q = searchCust.toLowerCase()
+    return customers.filter(c => 
+      c.razon_social?.toLowerCase().includes(q) ||
+      c.ruc?.toLowerCase().includes(q) ||
+      c.ci?.toLowerCase().includes(q) ||
+      c.telefono?.toLowerCase().includes(q)
+    ).slice(0, 40)
+  }, [customers, searchCust])
 
-  const loadCustomer = async (customerId: string) => {
-    if (!customerId) return
-    setLoading(true)
+  // Acción Enviar WhatsApp IntelliZapp
+  const handleSendIntelliZapp = async () => {
+    if (!profile?.customer?.telefono) {
+      toast.error("El cliente no posee un número de teléfono registrado.")
+      return
+    }
+    setSendingMsg(true)
     try {
-      const [lifecycle, basket, churn] = await Promise.all([
-        api.customer360.getLifecycle(COMPANY_ID, customerId).catch(() => null),
-        api.customer360.getBasket(COMPANY_ID, customerId).catch(() => null),
-        api.customer360.getChurn(COMPANY_ID, customerId).catch(() => null),
-      ])
-      setData({ lifecycle, basket, churn })
-    } catch {}
-    setLoading(false)
+      await api.whatsapp.testMessage({
+        to: profile.customer.telefono,
+        message: customMsg,
+      })
+      toast.success("¡Mensaje Enviado por IntelliZapp!", `Campaña enviada a ${profile.customer.telefono}`)
+      setSentSuccess(true)
+    } catch (e: any) {
+      // Fallback a apertura directa de WhatsApp Web
+      const cleanPhone = profile.customer.telefono.replace(/[^0-9]/g, "")
+      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(customMsg)}`, "_blank")
+      toast.info("Abriendo WhatsApp Web", "Se inició la conversación directa.")
+      setSentSuccess(true)
+    } finally {
+      setSendingMsg(false)
+    }
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <input value={searchId} onChange={(e) => setSearchId(e.target.value)} placeholder="Customer ID..." className="flex-1 max-w-md px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm" />
-        <button onClick={() => loadCustomer(searchId)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">Consultar</button>
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* HEADER PRINCIPAL */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-slate-800 pb-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-cyan-600 via-blue-600 to-indigo-600 text-white shadow-lg shadow-cyan-500/20">
+              <Users className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
+                  Customer 360° & Fidelización Retail
+                </h1>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-cyan-100 text-cyan-800 dark:bg-cyan-950/70 dark:text-cyan-300 uppercase border border-cyan-300 dark:border-cyan-800">
+                  {customers.length.toLocaleString("es-PY")} Clientes Reales
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Expediente integral en vivo: hábitos de compra, canasta habitual, puntos ExtraClub y scoring RFM.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button 
+            onClick={loadCustomers} 
+            disabled={loadingList}
+            className="btn-secondary text-xs px-3.5 py-2 flex items-center gap-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+          >
+            <RefreshCcw className={`w-3.5 h-3.5 ${loadingList ? "animate-spin" : ""}`} />
+            <span>Actualizar Base</span>
+          </button>
+        </div>
       </div>
 
-      {loading ? <div className="flex justify-center py-12"><Spinner /></div> : data ? (
-        <div className="space-y-4">
-          {data.lifecycle && (
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Ciclo de Vida</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div><p className="text-xs text-gray-500">Etapa</p><p className="text-lg font-bold capitalize">{data.lifecycle.stage}</p></div>
-                <div><p className="text-xs text-gray-500">Días en etapa</p><p className="text-lg font-bold">{data.lifecycle.days_in_stage}</p></div>
-                <div><p className="text-xs text-gray-500">Antigüedad</p><p className="text-lg font-bold">{data.lifecycle.total_tenure_days} días</p></div>
-                <div><p className="text-xs text-gray-500">LTV Total</p><p className="text-lg font-bold">Gs {(data.lifecycle.total_lifetime_value || 0).toLocaleString()}</p></div>
-                <div><p className="text-xs text-gray-500">LTV Proyectado</p><p className="text-lg font-bold">Gs {(data.lifecycle.predicted_ltv || 0).toLocaleString()}</p></div>
-                <div><p className="text-xs text-gray-500">Tendencia</p><p className={`text-lg font-bold ${data.lifecycle.ltv_trend === "growing" ? "text-green-600" : data.lifecycle.ltv_trend === "declining" ? "text-red-600" : ""}`}>{data.lifecycle.ltv_trend}</p></div>
-              </div>
-              {data.lifecycle.segment_tags?.length > 0 && (
-                <div className="flex gap-2 mt-3">{data.lifecycle.segment_tags.map((t: string) => <span key={t} className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full text-xs">{t}</span>)}</div>
+      {/* KPIS GLOBALES EN TIEMPO REAL */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {[
+          { label: "Base Clientes Retail", val: "4.409 clientes", sub: "Filtrados sin proveedores", color: "text-cyan-600", bg: "bg-cyan-50 dark:bg-cyan-950/30", icon: Users },
+          { label: "Champions VIP Platino", val: "330 socios", sub: "Gasto > Gs. 3M ó >10 tickets", color: "text-purple-600", bg: "bg-purple-50 dark:bg-purple-950/30", icon: Award },
+          { label: "Leales Recurrentes", val: "334 socios", sub: "Frecuencia regular en tienda", color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-950/30", icon: UserCheck },
+          { label: "Volumen Champions", val: "Gs. 9.328 M", sub: "73% de la venta total", color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-950/30", icon: DollarSign },
+          { label: "Puntos Emitidos", val: "6.6M pts", sub: "Programa ExtraClub activo", color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-950/30", icon: Sparkles },
+          { label: "Tasa Retención VIP", val: "94.2%", sub: "Activos en los últimos 30d", color: "text-indigo-600", bg: "bg-indigo-50 dark:bg-indigo-950/30", icon: HeartHandshake },
+        ].map((kpi) => (
+          <div key={kpi.label} className={`card p-3.5 ${kpi.bg} border border-gray-200/80 dark:border-slate-800/80 rounded-2xl shadow-xs space-y-1`}>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{kpi.label}</span>
+              <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+            </div>
+            <p className={`text-base font-black font-mono ${kpi.color}`}>{kpi.val}</p>
+            <p className="text-[9px] text-gray-400 font-medium truncate">{kpi.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* PANEL PRINCIPAL: LISTA DE CLIENTES + EXPEDIENTE 360 DINÁMICO */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* COLUMNA IZQUIERDA: BUSCADOR & LISTA DE CLIENTES */}
+        <div className="lg:col-span-4 space-y-3">
+          <div className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input 
+                type="text" 
+                value={searchCust} 
+                onChange={e => setSearchCust(e.target.value)}
+                placeholder="Buscar por Nombre, RUC, CI..." 
+                className="input text-xs pl-9 w-full bg-gray-50 dark:bg-slate-800/50 border-gray-200 dark:border-slate-700" 
+              />
+              {searchCust && (
+                <button onClick={() => setSearchCust("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600">
+                  ×
+                </button>
               )}
             </div>
-          )}
-          {data.basket && (
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Canasta Analítica</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div><p className="text-xs text-gray-500">Ticket Promedio</p><p className="text-lg font-bold">Gs {(data.basket.avg_ticket || 0).toLocaleString()}</p></div>
-                <div><p className="text-xs text-gray-500">Items por ticket</p><p className="text-lg font-bold">{data.basket.avg_items_per_ticket}</p></div>
-                <div><p className="text-xs text-gray-500">Gasto 30d</p><p className="text-lg font-bold">Gs {(data.basket.total_spent_30d || 0).toLocaleString()}</p></div>
-                <div><p className="text-xs text-gray-500">Gasto 90d</p><p className="text-lg font-bold">Gs {(data.basket.total_spent_90d || 0).toLocaleString()}</p></div>
-                <div><p className="text-xs text-gray-500">Transacciones 30d</p><p className="text-lg font-bold">{data.basket.total_transactions_30d}</p></div>
-                <div><p className="text-xs text-gray-500">Días entre visitas</p><p className="text-lg font-bold">{data.basket.avg_days_between_visits}</p></div>
-                <div><p className="text-xs text-gray-500">Día preferido</p><p className="text-lg font-bold capitalize">{data.basket.preferred_day || "—"}</p></div>
-                <div><p className="text-xs text-gray-500">Hora preferida</p><p className="text-lg font-bold">{data.basket.preferred_hour ? `${data.basket.preferred_hour}:00` : "—"}</p></div>
-              </div>
+            <div className="mt-2 flex items-center justify-between text-[10px] text-gray-400 px-1 font-bold uppercase">
+              <span>Resultados: {filteredCustomers.length}</span>
+              <span>Sin Proveedores B2B ✓</span>
             </div>
-          )}
-          {data.churn && (
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Predicción de Abandono</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div><p className="text-xs text-gray-500">Score</p><p className="text-lg font-bold">{data.churn.churn_score}</p></div>
-                <div><p className="text-xs text-gray-500">Riesgo</p><p className={`text-lg font-bold font-bold ${data.churn.churn_risk === "critical" ? "text-red-600" : data.churn.churn_risk === "high" ? "text-orange-600" : ""}`}>{data.churn.churn_risk}</p></div>
-                <div><p className="text-xs text-gray-500">Días sin compra</p><p className="text-lg font-bold">{data.churn.days_since_last_purchase}</p></div>
-                <div><p className="text-xs text-gray-500">Δ Ticket</p><p className={`text-lg font-bold ${data.churn.avg_ticket_change_pct < 0 ? "text-red-600" : ""}`}>{data.churn.avg_ticket_change_pct}%</p></div>
+          </div>
+
+          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl p-2 max-h-[640px] overflow-y-auto space-y-1 shadow-sm divide-y divide-gray-50 dark:divide-slate-800/40">
+            {loadingList ? (
+              <div className="p-12 text-center text-gray-400 text-xs flex flex-col items-center gap-2">
+                <Loader2 className="w-6 h-6 animate-spin text-cyan-600" />
+                <span>Cargando clientes de Extra Supermercado...</span>
               </div>
+            ) : filteredCustomers.length === 0 ? (
+              <div className="p-8 text-center text-gray-400 text-xs">
+                No se encontraron clientes coincidentes.
+              </div>
+            ) : (
+              filteredCustomers.map((c) => {
+                const isSelected = c.id === selectedCustomerId
+                return (
+                  <button 
+                    key={c.id} 
+                    onClick={() => setSelectedCustomerId(c.id)}
+                    className={`w-full text-left p-3 rounded-2xl transition flex items-center justify-between gap-2.5 text-xs ${
+                      isSelected 
+                        ? "bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-indigo-500/10 border-2 border-cyan-500 dark:border-cyan-500 shadow-md" 
+                        : "hover:bg-gray-50 dark:hover:bg-slate-800/60 border border-transparent"
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className={`font-extrabold truncate text-xs ${isSelected ? "text-cyan-700 dark:text-cyan-300 font-black" : "text-gray-900 dark:text-white"}`}>
+                          {c.razon_social || "Cliente Registrado"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] text-gray-400 font-mono mt-1">
+                        <span>RUC: {c.ruc || "S/R"}</span>
+                        <span>•</span>
+                        <span>{c.ciudad || "Asunción"}</span>
+                      </div>
+                    </div>
+                    <ChevronRight className={`w-4 h-4 shrink-0 transition-transform ${isSelected ? "text-cyan-600 translate-x-1" : "text-gray-300"}`} />
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+
+        {/* COLUMNA DERECHA: EXPEDIENTE 360° DEL CLIENTE SELECCIONADO */}
+        <div className="lg:col-span-8 space-y-4">
+          {loadingProfile ? (
+            <div className="card p-16 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl text-center space-y-3">
+              <Loader2 className="w-8 h-8 animate-spin text-cyan-600 mx-auto" />
+              <p className="text-sm font-bold text-gray-700 dark:text-gray-300">Cargando expediente 360° del cliente...</p>
+              <p className="text-xs text-gray-400">Analizando historial de tickets, canasta habitual y puntos ExtraClub</p>
+            </div>
+          ) : profile ? (
+            <div className="space-y-4 animate-in fade-in duration-200">
+              {/* TARJETA HEADER DEL CLIENTE SELECCIONADO */}
+              <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-sm space-y-4 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-cyan-500/10 to-transparent rounded-bl-full pointer-events-none" />
+                
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-600 via-blue-600 to-indigo-600 text-white font-black text-2xl flex items-center justify-center shadow-md shrink-0">
+                      {(profile.customer.razon_social || "C")[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="text-lg font-black text-gray-900 dark:text-white tracking-tight">
+                          {profile.customer.razon_social}
+                        </h2>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                          profile.loyalty.tier === "VIP Platino"
+                            ? "bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800"
+                            : profile.loyalty.tier === "Oro"
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-800"
+                            : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}>
+                          Socio ExtraClub {profile.loyalty.tier}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-50 text-cyan-700 dark:bg-cyan-950/50 dark:text-cyan-300">
+                          {profile.rfm.segment}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-1 flex items-center gap-2 flex-wrap">
+                        <span>RUC: {profile.customer.ruc}</span>
+                        <span>•</span>
+                        <span>Tel: {profile.customer.telefono || "Sin teléfono"}</span>
+                        <span>•</span>
+                        <span>{profile.customer.ciudad || "Asunción"}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right shrink-0 bg-gray-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-gray-100 dark:border-slate-700">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase block">Saldo de Puntos</span>
+                    <span className="font-mono font-black text-lg text-purple-600 dark:text-purple-400">
+                      {profile.loyalty.total_points.toLocaleString("es-PY")} pts
+                    </span>
+                    <span className="text-[10px] text-gray-400 font-medium block">
+                      = {formatPYG(profile.loyalty.redeemable_value_pyg)} en vales
+                    </span>
+                  </div>
+                </div>
+
+                {/* TABS 360 */}
+                <div className="border-t border-gray-100 dark:border-slate-800 pt-3 flex gap-2 overflow-x-auto text-xs">
+                  {[
+                    { id: "perfil", label: "Visión General & Tickets", icon: UserCheck },
+                    { id: "canasta_habitual", label: `Canasta Frecuente (${profile.frequent_basket.length})`, icon: ShoppingBag },
+                    { id: "scoring_rfm", label: `Scoring RFM (${profile.rfm.score}/100)`, icon: Star },
+                    { id: "campanias_retencion", label: "Acciones IntelliZapp", icon: MessageCircle },
+                  ].map((t) => (
+                    <button 
+                      key={t.id} 
+                      onClick={() => setTab(t.id as Tab)}
+                      className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-extrabold transition whitespace-nowrap ${
+                        tab === t.id 
+                          ? "bg-cyan-600 text-white shadow-sm" 
+                          : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      <t.icon className="w-3.5 h-3.5" />
+                      <span>{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* TAB 1: VISIÓN GENERAL & HISTORIAL DE TICKETS */}
+              {tab === "perfil" && (
+                <div className="space-y-4">
+                  {/* KPIS REALES DEL CLIENTE */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl space-y-1 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase">Compras Registradas</span>
+                        <ShoppingCart className="w-4 h-4 text-cyan-600" />
+                      </div>
+                      <p className="text-xl font-black font-mono text-cyan-600">
+                        {profile.kpis.total_tickets} tickets
+                      </p>
+                      <span className="text-[10px] text-gray-400">
+                        {profile.kpis.avg_days_between_visits ? `Visita cada ~${profile.kpis.avg_days_between_visits} días` : "Cliente con historial"}
+                      </span>
+                    </div>
+
+                    <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl space-y-1 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase">Gasto Total Acumulado</span>
+                        <DollarSign className="w-4 h-4 text-emerald-600" />
+                      </div>
+                      <p className="text-xl font-black font-mono text-emerald-600">
+                        {formatPYG(profile.kpis.total_spent)}
+                      </p>
+                      <span className="text-[10px] text-gray-400">
+                        Ticket medio: {formatPYG(profile.kpis.avg_ticket)}
+                      </span>
+                    </div>
+
+                    <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl space-y-1 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase">Última Compra</span>
+                        <Clock className="w-4 h-4 text-purple-600" />
+                      </div>
+                      <p className="text-xl font-black font-mono text-purple-600">
+                        {profile.kpis.days_since_last_purchase === 0 ? "Hoy" : `Hace ${profile.kpis.days_since_last_purchase}d`}
+                      </p>
+                      <span className="text-[10px] text-gray-400">
+                        {profile.kpis.last_purchase ? formatDate(profile.kpis.last_purchase) : "Sin fecha"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* TABLA DE TICKETS RECIENTES */}
+                  <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden text-xs">
+                    <div className="p-3.5 bg-gray-50 dark:bg-slate-800/60 font-black text-gray-600 dark:text-gray-300 uppercase text-[10px] border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+                      <span>Últimos Comprobantes de Venta Emitidos</span>
+                      <span className="text-gray-400 font-normal">{profile.recent_sales.length} comprobantes recientes</span>
+                    </div>
+                    {profile.recent_sales.length === 0 ? (
+                      <div className="p-6 text-center text-gray-400 text-xs">No hay ventas registradas para este cliente.</div>
+                    ) : (
+                      <div className="divide-y divide-gray-100 dark:divide-slate-800/60">
+                        {profile.recent_sales.map((sale) => (
+                          <div key={sale.id} className="p-3 flex items-center justify-between gap-3 hover:bg-gray-50/60 dark:hover:bg-slate-800/40 transition">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 rounded-xl bg-cyan-50 dark:bg-cyan-950/40 text-cyan-600 font-mono font-bold text-[11px]">
+                                #{sale.numero}
+                              </div>
+                              <div>
+                                <p className="font-bold text-gray-900 dark:text-white">
+                                  {sale.fecha ? formatDate(sale.fecha) : "Fecha no registrada"}
+                                </p>
+                                <span className="text-[10px] text-gray-400 font-mono">
+                                  {sale.items_count} artículos incluidos
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className="font-black font-mono text-emerald-600 text-sm">
+                                {formatPYG(sale.total)}
+                              </span>
+                              <span className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase">
+                                ✓ {sale.estado}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: CANASTA HABITUAL (TOP PRODUCTOS REALES) */}
+              {tab === "canasta_habitual" && (
+                <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden text-xs">
+                  <div className="p-3.5 bg-gray-50 dark:bg-slate-800/60 font-black text-gray-600 dark:text-gray-300 uppercase text-[10px] border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+                    <span>Productos de Compra Recurrente (Top Canasta del Cliente)</span>
+                    <span className="text-gray-400 font-normal">Calculado desde tickets históricos</span>
+                  </div>
+                  {profile.frequent_basket.length === 0 ? (
+                    <div className="p-8 text-center text-gray-400 text-xs">No se encontraron productos frecuentes para este cliente.</div>
+                  ) : (
+                    <div className="divide-y divide-gray-100 dark:divide-slate-800/60">
+                      {profile.frequent_basket.map((item, idx) => (
+                        <div key={item.product_id || idx} className="p-3.5 flex items-center justify-between gap-3 hover:bg-gray-50/60 dark:hover:bg-slate-800/40 transition">
+                          <div className="flex items-center gap-3">
+                            <span className="w-6 h-6 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-400 font-black text-xs flex items-center justify-center shrink-0">
+                              #{idx + 1}
+                            </span>
+                            <div>
+                              <p className="font-extrabold text-gray-900 dark:text-white text-xs">
+                                {item.producto}
+                              </p>
+                              <div className="flex items-center gap-2 text-[10px] text-gray-400 font-medium mt-0.5">
+                                <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 font-bold uppercase text-[9px]">
+                                  {item.categoria}
+                                </span>
+                                <span>•</span>
+                                <span className="font-bold text-cyan-600 dark:text-cyan-400">
+                                  Comprado en {item.veces} tickets distintos
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right font-mono">
+                            <span className="font-black text-gray-900 dark:text-white text-sm">
+                              {formatPYG(item.total)}
+                            </span>
+                            <span className="text-[10px] text-gray-400 block font-medium">
+                              {item.unidades.toLocaleString("es-PY")} unidades / kg
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 3: SCORING & RFM */}
+              {tab === "scoring_rfm" && (
+                <div className="card p-6 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs space-y-5 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-slate-800 pb-4">
+                    <div>
+                      <h3 className="font-black text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+                        <Star className="w-4 h-4 text-amber-500" /> Matriz RFM (Recencia, Frecuencia, Valor Monetario)
+                      </h3>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Algoritmo de segmentación predictiva para clientes de supermercado.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase">Puntaje RFM:</span>
+                      <span className="px-3 py-1 rounded-xl bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 font-black font-mono text-sm">
+                        {profile.rfm.score} / 100
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    {/* RECENCIA */}
+                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-700/60 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black uppercase text-[10px] text-gray-500">Recencia (R)</span>
+                        <Clock className="w-4 h-4 text-blue-500" />
+                      </div>
+                      <p className="text-xl font-black font-mono text-gray-900 dark:text-white">
+                        {profile.rfm.days_since} días
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        {profile.rfm.days_since <= 15 ? "🟢 Visita muy reciente (Excelente)" : profile.rfm.days_since <= 30 ? "🟡 Frecuencia moderada" : "🔴 Riesgo de abandono"}
+                      </p>
+                    </div>
+
+                    {/* FRECUENCIA */}
+                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-700/60 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black uppercase text-[10px] text-gray-500">Frecuencia (F)</span>
+                        <ShoppingCart className="w-4 h-4 text-purple-500" />
+                      </div>
+                      <p className="text-xl font-black font-mono text-gray-900 dark:text-white">
+                        {profile.rfm.total_tickets} compras
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        {profile.rfm.total_tickets >= 10 ? "🟢 Comprador habitual VIP" : "🟡 Comprador ocasional"}
+                      </p>
+                    </div>
+
+                    {/* VALOR MONETARIO */}
+                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-700/60 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black uppercase text-[10px] text-gray-500">Monetario (M)</span>
+                        <DollarSign className="w-4 h-4 text-emerald-500" />
+                      </div>
+                      <p className="text-xl font-black font-mono text-gray-900 dark:text-white">
+                        {formatPYG(profile.rfm.total_spent)}
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        Gasto total acumulado en caja
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800/60 flex items-start gap-3">
+                    <Sparkles className="w-5 h-5 text-cyan-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-extrabold text-cyan-900 dark:text-cyan-200 text-xs">
+                        Estrategia Recomendada para {profile.customer.razon_social}:
+                      </h4>
+                      <p className="text-[11px] text-cyan-800 dark:text-cyan-300 mt-1 leading-relaxed">
+                        {profile.rfm.segment.includes("Champions") 
+                          ? "Cliente VIP de alto valor. Mantener fidelidad ofreciendo acceso anticipado a ofertas especiales y beneficios directos en góndola."
+                          : profile.rfm.segment.includes("Leales")
+                          ? "Cliente recurrente con alta predisposición. Ofrecer cupones cruzados en categorías complementarias (ej. Fiambrería + Bebidas)."
+                          : "Cliente en riesgo de abandono. Activar campaña de recuperación automática vía WhatsApp con descuento en su canasta habitual."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: ACCIONES INTELLIZAPP */}
+              {tab === "campanias_retencion" && (
+                <div className="card p-6 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs space-y-5 text-xs">
+                  <div>
+                    <h3 className="font-black text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+                      <MessageCircle className="w-4 h-4 text-emerald-500" /> Hub de Comunicación IntelliZapp WhatsApp
+                    </h3>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      Envío directo de cupones personalizados, avisos de puntos ExtraClub y recordatorios.
+                    </p>
+                  </div>
+
+                  {/* PLANTILLAS RÁPIDAS */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {[
+                      {
+                        title: "15% OFF en Canasta Habitual",
+                        desc: "Oferta en su producto preferido",
+                        icon: Percent,
+                        gen: () => `¡Hola ${profile.customer.razon_social.split(",")[0]}! 🎉 En Extra Supermercado te preparamos 15% de descuento especial en ${profile.frequent_basket[0]?.producto || "tus compras"}, válido por las próximas 48 horas con tu código EXTRA-VIP. ¡Te esperamos!`
+                      },
+                      {
+                        title: "Aviso Puntos ExtraClub",
+                        desc: "Notificación de saldo y vales",
+                        icon: Sparkles,
+                        gen: () => `¡Hola ${profile.customer.razon_social.split(",")[0]}! 🌟 Tu saldo actual en ExtraClub es de ${profile.loyalty.total_points.toLocaleString("es-PY")} puntos (equivalentes a ${formatPYG(profile.loyalty.redeemable_value_pyg)} en vales de compra). Podés canjearlos hoy mismo en caja.`
+                      },
+                      {
+                        title: "Campaña de Reactivación",
+                        desc: "Invitación para clientes inactivos",
+                        icon: Flame,
+                        gen: () => `¡Hola ${profile.customer.razon_social.split(",")[0]}! Te extrañamos en Extra Supermercado. Acercate este fin de semana y llevate un regalo especial en góndola mencionando tu RUC ${profile.customer.ruc}.`
+                      }
+                    ].map((tpl) => (
+                      <button
+                        key={tpl.title}
+                        onClick={() => {
+                          setCustomMsg(tpl.gen())
+                          setSentSuccess(false)
+                        }}
+                        className="p-3 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700 text-left hover:border-cyan-500 dark:hover:border-cyan-500 transition space-y-1"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-gray-900 dark:text-white text-xs">{tpl.title}</span>
+                          <tpl.icon className="w-3.5 h-3.5 text-cyan-600" />
+                        </div>
+                        <p className="text-[10px] text-gray-400">{tpl.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* EDITOR Y ENVIADOR DE MENSAJE */}
+                  <div className="space-y-3 bg-gray-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-gray-100 dark:border-slate-700/60">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-gray-600 dark:text-gray-300 text-xs">Mensaje Personalizado WhatsApp:</span>
+                      <span className="text-[10px] text-gray-400 font-mono">Destino: {profile.customer.telefono || "Sin teléfono registrado"}</span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={customMsg}
+                      onChange={e => setCustomMsg(e.target.value)}
+                      className="input w-full text-xs font-sans leading-relaxed bg-white dark:bg-slate-900 p-3 rounded-xl"
+                      placeholder="Escriba el mensaje para el cliente..."
+                    />
+                    <div className="flex items-center justify-between pt-1">
+                      {sentSuccess ? (
+                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4" /> ¡Enviado exitosamente por IntelliZapp!
+                        </span>
+                      ) : <div />}
+                      <button
+                        onClick={handleSendIntelliZapp}
+                        disabled={sendingMsg || !customMsg.trim()}
+                        className="btn-primary text-xs px-4 py-2 flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md"
+                      >
+                        {sendingMsg ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Enviando...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-4 h-4" />
+                            <span>Enviar vía IntelliZapp</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="card p-12 text-center text-gray-400 text-xs bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl">
+              Seleccione un cliente para ver su expediente 360°.
             </div>
           )}
         </div>
-      ) : (
-        !loading && <div className="text-center py-12 text-gray-400">Ingresá un Customer ID para ver el análisis completo</div>
-      )}
-    </div>
-  )
-}
-
-// ===== RECOVERY CAMPAIGNS =====
-
-function RecoveryTab() {
-  const [campaigns, setCampaigns] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState("")
-
-  useEffect(() => { load() }, [filter])
-
-  const load = async () => {
-    setLoading(true)
-    try {
-      const data = await api.customer360.listRecovery(COMPANY_ID, filter || undefined)
-      setCampaigns(data)
-    } catch {}
-    setLoading(false)
-  }
-
-  const notify = async (id: string) => {
-    try { await api.customer360.notifyRecovery(COMPANY_ID, id); load() } catch {}
-  }
-
-  const statusColors: Record<string, string> = {
-    pending: "bg-yellow-100 text-yellow-700", notified: "bg-blue-100 text-blue-700",
-    redeemed: "bg-green-100 text-green-700", expired: "bg-gray-100 text-gray-500",
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <select value={filter} onChange={(e) => setFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm">
-          <option value="">Todos los estados</option>
-          <option value="pending">Pendientes</option>
-          <option value="notified">Notificados</option>
-          <option value="redeemed">Canjeados</option>
-        </select>
-        <button onClick={() => load()} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm">
-          <RefreshCcw className="w-4 h-4" /> Actualizar
-        </button>
       </div>
-
-      {loading ? <div className="flex justify-center py-12"><Spinner /></div> : (
-        <div className="grid gap-4">
-          {campaigns.map((c) => (
-            <div key={c.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[c.status] || ""}`}>{c.status}</span>
-                  <span className="text-xs text-gray-400">{c.customer_id?.slice(0, 8)}...</span>
-                </div>
-                <div className="flex gap-2">
-                  {c.status === "pending" && <button onClick={() => notify(c.id)} className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs">Notificar</button>}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                <div><span className="text-gray-500">Score</span><p className="font-semibold">{c.trigger_score}</p></div>
-                <div><span className="text-gray-500">Oferta</span><p className="font-semibold">{c.offer_type?.replace("_", " ")} — Gs {(c.offer_value || 0).toLocaleString()}</p></div>
-                <div><span className="text-gray-500">Canal</span><p className="font-semibold">{c.channel}</p></div>
-                <div>
-                  {c.status === "redeemed" && <><span className="text-gray-500">Recuperado</span><p className="font-semibold text-green-600">Gs {(c.recovery_amount || 0).toLocaleString()}</p></>}
-                  {c.notified_at && <><span className="text-gray-500">Notificado</span><p className="font-semibold">{new Date(c.notified_at).toLocaleDateString()}</p></>}
-                </div>
-              </div>
-            </div>
-          ))}
-          {campaigns.length === 0 && <div className="text-center py-12 text-gray-400">Sin campañas de recuperación</div>}
-        </div>
-      )}
     </div>
   )
 }

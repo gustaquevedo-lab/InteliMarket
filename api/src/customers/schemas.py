@@ -10,6 +10,7 @@ from decimal import Decimal
 class CustomerCreate(BaseModel):
     company_id: UUID
     tipo_persona: str = "juridica"
+    tipo: Optional[str] = "cliente"
     ruc: Optional[str] = Field(default=None, max_length=15)
     ci: Optional[str] = Field(default=None, max_length=20)
     razon_social: str = Field(min_length=2, max_length=255)
@@ -22,10 +23,12 @@ class CustomerCreate(BaseModel):
     email: Optional[str] = None
     price_list_id: Optional[UUID] = None
     credito_limite: Decimal = Decimal("0")
+    limite_credito: Optional[Decimal] = Decimal("0")
     pago_default: str = "contado"
 
 
 class CustomerUpdate(BaseModel):
+    tipo: Optional[str] = None
     nombre_fantasia: Optional[str] = None
     condicion_iva: Optional[str] = None
     direccion: Optional[str] = None
@@ -35,6 +38,7 @@ class CustomerUpdate(BaseModel):
     email: Optional[str] = None
     price_list_id: Optional[UUID] = None
     credito_limite: Optional[Decimal] = None
+    limite_credito: Optional[Decimal] = None
     pago_default: Optional[str] = None
     activo: Optional[bool] = None
 
@@ -43,6 +47,7 @@ class CustomerResponse(BaseModel):
     id: UUID
     company_id: UUID
     tipo_persona: str
+    tipo: Optional[str] = "cliente"
     ruc: Optional[str] = None
     ci: Optional[str] = None
     razon_social: str
@@ -54,6 +59,7 @@ class CustomerResponse(BaseModel):
     telefono: Optional[str] = None
     email: Optional[str] = None
     credito_limite: Decimal
+    limite_credito: Optional[Decimal] = Decimal("0")
     credito_usado: Decimal
     pago_default: Optional[str] = None
     activo: bool

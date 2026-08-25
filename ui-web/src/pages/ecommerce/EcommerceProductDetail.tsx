@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useParams, Link } from "react-router-dom"
-import { ArrowLeft, ShoppingCartPlus } from "lucide-react"
+import { ArrowLeft, ShoppingCart } from "lucide-react"
 import { ecommerceApi } from "../../api/ecommerce"
 import EcommerceLayout from "./EcommerceLayout"
 
@@ -44,7 +44,7 @@ export default function EcommerceProductDetail() {
           </div>
 
           <div className="space-y-4">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{product.nombre}</h1>
+            <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{product.nombre}</h1>
             {product.descripcion && <p className="text-gray-500">{product.descripcion}</p>}
 
             <div className="grid grid-cols-2 gap-3 text-sm">

@@ -6,12 +6,19 @@ from sqlalchemy.orm import DeclarativeBase
 
 from api.src.config import settings
 
+_connect_args = {}
+if settings.db_search_path:
+    _connect_args["server_settings"] = {"search_path": settings.db_search_path}
+
 engine = create_async_engine(
     settings.database_url,
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,
     pool_pre_ping=True,
+    pool_recycle=1800,
+    pool_timeout=30,
     echo=settings.app_debug,
+    connect_args=_connect_args,
 )
 
 async_session_factory = async_sessionmaker(

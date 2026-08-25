@@ -9,8 +9,15 @@ export default {
     extend: {
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        posDisplay: ['Archivo Expanded', 'Inter', 'system-ui', 'sans-serif'],
+        posMono: ['IBM Plex Mono', 'ui-monospace', 'monospace'],
       },
       colors: {
+        brand: {
+          orange: '#FF7019',
+          orangeInk: '#C64E00',
+          navy: '#002665',
+        },
         primary: {
           DEFAULT: '#104c91',
           dark: '#0a356b',

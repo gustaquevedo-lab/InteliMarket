@@ -1,6 +1,6 @@
 """Sales service"""
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func, cast, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -52,6 +52,21 @@ async def generate_sale_number(db: AsyncSession, company_id: str, branch_id: str
     return f"{date_part}-{branch_code}-{seq:06d}"
 
 
+async def generate_internal_sale_number(db: AsyncSession, company_id: str) -> str:
+    """Correlativo interno propio de la venta, independiente del numero de
+    factura fiscal -- se guarda en numero_interno y se genera SIEMPRE, tenga
+    o no la empresa timbrado configurado. Mismo esquema que el legacy
+    (campo CD_VENDA de ven_venda, confirmado contra datos reales): un
+    entero simple, sin fecha ni sucursal, que sube de a uno por venta de
+    toda la empresa -- nunca se reinicia."""
+    result = await db.execute(
+        select(func.max(cast(Sale.numero_interno, Integer)))
+        .where(Sale.company_id == company_id, Sale.numero_interno.isnot(None))
+    )
+    last = result.scalar_one_or_none()
+    return str((last or 0) + 1)
+
+
 async def resolve_sale_number(db: AsyncSession, data: SaleCreate) -> str:
     """Si la empresa tiene facturacion fiscal configurada (autoimpresor,
     preimpreso o electronico — mismo numerador para los 3), usa el numero
@@ -68,6 +83,7 @@ async def resolve_sale_number(db: AsyncSession, data: SaleCreate) -> str:
 
 async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     numero = await resolve_sale_number(db, data)
+    numero_interno = await generate_internal_sale_number(db, str(data.company_id))
 
     subtotal = Decimal("0")
     descuento_total = Decimal("0")
@@ -84,6 +100,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         customer_id=data.customer_id,
         emission_point_id=data.emission_point_id,
         numero=numero,
+        numero_interno=numero_interno,
         tipo_comprobante=data.tipo_comprobante,
         condicion=data.condicion,
         moneda=data.moneda,
@@ -91,6 +108,9 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         estado="confirmado",
         observaciones=data.observaciones,
         user_id=data.user_id,
+        session_id=data.session_id,
+        recibo_html=data.recibo_html,
+        recibo_escpos_b64=data.recibo_escpos_b64,
     )
     db.add(sale)
     # Ojo: NO se hace flush aca todavia -- subtotal/total (NOT NULL, sin
@@ -342,6 +362,14 @@ async def get_sale(db: AsyncSession, sale_id: str) -> Sale | None:
     return result.scalar_one_or_none()
 
 
+async def attach_escpos_ticket(db: AsyncSession, sale_id: str, recibo_escpos_b64: str) -> bool:
+    result = await db.execute(
+        update(Sale).where(Sale.id == uuid.UUID(sale_id)).values(recibo_escpos_b64=recibo_escpos_b64)
+    )
+    await db.commit()
+    return result.rowcount > 0
+
+
 async def list_sales(
     db: AsyncSession,
     company_id: str,
@@ -349,6 +377,8 @@ async def list_sales(
     estado: str | None = None,
     fecha_desde: datetime | None = None,
     fecha_hasta: datetime | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Sale]:
@@ -361,6 +391,10 @@ async def list_sales(
         query = query.where(Sale.fecha >= fecha_desde)
     if fecha_hasta:
         query = query.where(Sale.fecha <= fecha_hasta)
+    if user_id:
+        query = query.where(Sale.user_id == user_id)
+    if session_id:
+        query = query.where(Sale.session_id == session_id)
     query = query.order_by(Sale.fecha.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())

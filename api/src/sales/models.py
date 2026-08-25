@@ -18,6 +18,11 @@ class Sale(Base):
     customer_id = Column(UUID(as_uuid=True))
     emission_point_id = Column(UUID(as_uuid=True))
     numero = Column(String(20), nullable=False, unique=True)
+    # Correlativo interno propio (independiente del numero de factura fiscal
+    # 001-XXX-NNNNNNN) -- se genera y guarda SIEMPRE, exista o no timbrado
+    # configurado, para que haya un codigo de venta estable que no dependa
+    # de la config fiscal ni del punto de emision.
+    numero_interno = Column(String(20), unique=True)
     fecha = Column(DateTime(timezone=True), server_default=func.now())
     tipo_comprobante = Column(String(20), nullable=False)
     condicion = Column(String(20), nullable=False, default="contado")
@@ -44,6 +49,8 @@ class Sale(Base):
 
     observaciones = Column(Text)
     user_id = Column(UUID(as_uuid=True))
+    recibo_html = Column(Text)
+    recibo_escpos_b64 = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

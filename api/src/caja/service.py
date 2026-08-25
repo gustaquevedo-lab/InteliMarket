@@ -478,22 +478,32 @@ async def register_cash_drop(db: AsyncSession, session_id: str, monto: Decimal, 
 async def list_pending_handoffs(db: AsyncSession, company_id: str, estado: str | None = None, limit: int = 100) -> list[dict]:
     """Pese al nombre (mantenido por compatibilidad), lista TODAS las entregas
     por defecto, no solo las pendientes — antes una entrega confirmada
-    desaparecia de la lista sin dejar ningun registro visible."""
+    desaparecia de la lista sin dejar ningun registro visible.
+
+    Antes resolvia session_id -> register_nombre con 2 queries POR FILA (N+1
+    real, ~100 queries para 50 entregas) -- con la pantalla de supervisor
+    consultando esto cada 15s, el pool de conexiones se agotaba y algunas
+    llamadas volvian 500. Se resuelve con un join en batch, una sola vuelta."""
     query = select(CashHandoff).where(CashHandoff.company_id == uuid.UUID(company_id))
     if estado:
         query = query.where(CashHandoff.estado == estado)
     query = query.order_by(CashHandoff.created_at.desc()).limit(limit)
     result = await db.execute(query)
     handoffs = list(result.scalars().all())
+
+    session_ids = {h.session_id for h in handoffs if h.session_id}
+    register_by_session: dict = {}
+    if session_ids:
+        rows = await db.execute(
+            select(CashSession.id, CashRegister.nombre)
+            .join(CashRegister, CashRegister.id == CashSession.register_id)
+            .where(CashSession.id.in_(session_ids))
+        )
+        register_by_session = {sid: nombre for sid, nombre in rows.all()}
+
     out = []
     for h in handoffs:
-        session_result = await db.execute(select(CashSession).where(CashSession.id == h.session_id))
-        session_obj = session_result.scalar_one_or_none()
-        register_nombre = None
-        if session_obj:
-            reg_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
-            reg = reg_result.scalar_one_or_none()
-            register_nombre = reg.nombre if reg else None
+        register_nombre = register_by_session.get(h.session_id)
         out.append({
             "id": str(h.id),
             "session_id": str(h.session_id),
@@ -533,7 +543,7 @@ async def confirm_handoff(
     a ese paso antes."""
     user_result = await db.execute(select(User).where(User.id == uuid.UUID(recibido_por)))
     supervisor = user_result.scalar_one_or_none()
-    if not supervisor or not supervisor.activo or (supervisor.rol != "admin" and not supervisor.is_superadmin):
+    if not supervisor or not supervisor.activo or (supervisor.rol not in ("admin", "supervisor") and not supervisor.is_superadmin):
         return "forbidden"
 
     result = await db.execute(

@@ -78,7 +78,7 @@ function getBatteryIcon(level: number): string {
 
 export default function MapaPage() {
   const { user } = useAuth()
-  const companyId = user?.company_id || "00000000-0000-0000-0000-000000000010"
+  const companyId = (user as any)?.company_id || "00000000-0000-0000-0000-000000000010"
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<any>(null)
   const markersRef = useRef<any[]>([])

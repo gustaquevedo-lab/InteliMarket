@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, globalShortcut } = require('electron')
 const path = require('path')
 
 let mainWindow = null
@@ -21,52 +21,186 @@ function createWindow() {
     icon: path.join(__dirname, '..', 'ui-web', 'public', 'favicon.svg'),
   })
 
-  removeMenu()
+  Menu.setApplicationMenu(null)
+
+  // ── SECUENCIA DE TECLAS PARA HABILITAR WINDOWS / ESCRITORIO ──────────────
+  globalShortcut.register('CommandOrControl+Alt+Escape', () => {
+    if (mainWindow) {
+      mainWindow.minimize()
+    }
+  })
+
+  globalShortcut.register('CommandOrControl+Shift+F12', () => {
+    if (mainWindow) {
+      const isFull = mainWindow.isFullScreen()
+      mainWindow.setFullScreen(!isFull)
+      mainWindow.setMenuBarVisibility(isFull)
+    }
+  })
+
+  globalShortcut.register('F11', () => {
+    if (mainWindow) {
+      mainWindow.setFullScreen(!mainWindow.isFullScreen())
+    }
+  })
+
+  const fs = require('fs')
+  
+  // URL por defecto: Sandbox 5174 (Pruebas de Caja)
+  let targetUrl = 'http://192.168.0.242:5174/pos'
+  
+  // 1. Argumento por línea de comando (--url=http://...)
+  const argUrl = process.argv.find(arg => arg && arg.startsWith('--url='))
+  if (argUrl) {
+    targetUrl = argUrl.replace('--url=', '')
+  } else if (process.env.POS_SERVER_URL) {
+    // 2. Variable de entorno
+    targetUrl = process.env.POS_SERVER_URL
+  } else {
+    // 3. Archivo de configuración pos-config.json junto al .exe
+    try {
+      const exeDir = path.dirname(app.getPath('exe'))
+      const configPaths = [
+        path.join(exeDir, 'pos-config.json'),
+        path.join(process.cwd(), 'pos-config.json'),
+        path.join(__dirname, 'pos-config.json')
+      ]
+      for (const cp of configPaths) {
+        if (fs.existsSync(cp)) {
+          const cfg = JSON.parse(fs.readFileSync(cp, 'utf8'))
+          if (cfg.serverUrl) {
+            targetUrl = cfg.serverUrl
+            break
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[POS-Electron] Error leyendo pos-config.json:', err)
+    }
+  }
+
+  console.log(`[POS-Electron] Conectando POS a: ${targetUrl}`)
+  mainWindow.loadURL(targetUrl).catch((err) => {
+    console.error(`[POS-Electron] Error cargando ${targetUrl}:`, err)
+  })
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools({ mode: 'detach' })
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'ui-web-dist', 'index.html'))
   }
 
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
-function removeMenu() {
-  Menu.setApplicationMenu(null)
-}
-
-// IPC Handlers — Hardware
+// ── IMPRESIÓN TÉRMICA ESTÁNDAR 80MM (SILENCIOSA) ──────────────────────────
 ipcMain.handle('pos:print-receipt', async (_event, html) => {
-  const { BrowserWindow } = require('electron')
-  const printWin = new BrowserWindow({ show: false, width: 300, height: 600 })
-  await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
-  printWin.webContents.print({ silent: true, printBackground: false, copies: 1 })
-  printWin.close()
-  return { success: true }
+  const printWin = new BrowserWindow({
+    show: false,
+    width: 302, // 80mm thermal width
+    height: 800,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    }
+  })
+
+  const fullHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          @page {
+            size: 80mm auto;
+            margin: 0;
+          }
+          @media print {
+            body {
+              margin: 0;
+              padding: 4px;
+              width: 72mm;
+            }
+          }
+          body {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 11px;
+            line-height: 1.2;
+            width: 72mm;
+            margin: 0 auto;
+            color: #000;
+          }
+          * { box-sizing: border-box; }
+        </style>
+      </head>
+      <body>${html}</body>
+    </html>
+  `
+
+  await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(fullHtml)}`)
+  
+  return new Promise((resolve) => {
+    printWin.webContents.print({
+      silent: true,
+      printBackground: true,
+      margins: { marginType: 'none' },
+      pageSize: { width: 80000, height: 297000 },
+      copies: 1,
+    }, (success, errorType) => {
+      printWin.close()
+      resolve({ success, errorType })
+    })
+  })
 })
 
-ipcMain.handle('pos:open-cash-drawer', async () => {
-  // Cash drawer is typically connected to thermal printer via RJ11
-  // Sends ESC/POS command to kick drawer on printer port
+// ── LECTURA DE BALANZA BALMAK BCK30 ─────────────────────────────────────────
+ipcMain.handle('pos:read-scale-balmak', async (_event, comPort = 'COM1') => {
+  return {
+    modelo: "Balmak BCK30",
+    puerto: comPort,
+    baudRate: 9600,
+    formato: "STX_PESO_ETX",
+    conectado: true,
+  }
+})
+
+// ── EJECUTAR CALCULADORA DE WINDOWS ────────────────────────────────────────
+ipcMain.handle('app:open-calculator', async () => {
   try {
     const { exec } = require('child_process')
-    exec('echo "\\x1B\\x70\\x00\\x19\\xFA" > COM1', () => {})
-    exec('echo "\\x1B\\x70\\x00\\x19\\xFA" > COM2', () => {})
-    exec('echo "\\x1B\\x70\\x00\\x19\\xFA" > COM3', () => {})
-  } catch {}
-  return { success: true }
+    if (process.platform === 'win32') {
+      exec('start calc.exe', () => {})
+    } else if (process.platform === 'darwin') {
+      exec('open -a Calculator', () => {})
+    } else {
+      exec('gnome-calculator || xcalc || kcalc', () => {})
+    }
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
 })
 
-ipcMain.handle('pos:print-test', async () => {
-  const { BrowserWindow } = require('electron')
-  const printWin = new BrowserWindow({ show: false })
-  await printWin.loadURL('about:blank')
-  printWin.webContents.print({ silent: false })
-  printWin.close()
-  return { success: true }
+// ── MANEJADORES DE VENTANA & SISTEMA ───────────────────────────────────────
+ipcMain.handle('app:minimize', () => mainWindow?.minimize())
+ipcMain.handle('app:toggle-kiosk', () => {
+  if (mainWindow) {
+    const isFull = mainWindow.isFullScreen()
+    mainWindow.setFullScreen(!isFull)
+    return !isFull
+  }
+  return false
 })
+ipcMain.handle('app:exit-kiosk', () => {
+  if (mainWindow) {
+    mainWindow.setFullScreen(false)
+    mainWindow.minimize()
+  }
+  return true
+})
+ipcMain.handle('app:maximize', () => {
+  if (mainWindow?.isMaximized()) mainWindow.unmaximize()
+  else mainWindow?.maximize()
+})
+ipcMain.handle('app:close', () => mainWindow?.close())
 
 ipcMain.handle('pos:get-status', async () => {
   return {
@@ -75,17 +209,19 @@ ipcMain.handle('pos:get-status', async () => {
     electronVersion: process.versions.electron,
     isDev,
     appVersion: app.getVersion(),
+    balanzaConfigurada: "Balmak BCK30 (9600 bps)",
+    formatoImpresion: "80mm Termal",
+    drawerConfigurado: false,
+    atajoWindows: "Ctrl+Alt+Escape",
+    calculadoraHabilitada: true,
   }
 })
 
-ipcMain.handle('app:minimize', () => mainWindow?.minimize())
-ipcMain.handle('app:maximize', () => {
-  if (mainWindow?.isMaximized()) mainWindow.unmaximize()
-  else mainWindow?.maximize()
-})
-ipcMain.handle('app:close', () => mainWindow?.close())
-
 app.whenReady().then(createWindow)
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

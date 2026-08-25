@@ -218,6 +218,48 @@ async def get_fiscal_status(db: AsyncSession, company_id: str) -> dict:
     }
 
 
+async def list_punto_emision_secuencias(db: AsyncSession, company_id: str) -> list[PuntoEmisionSecuencia]:
+    cid = uuid.UUID(company_id)
+    result = await db.execute(
+        select(PuntoEmisionSecuencia)
+        .where(PuntoEmisionSecuencia.company_id == cid)
+        .order_by(PuntoEmisionSecuencia.punto_emision, PuntoEmisionSecuencia.tipo_documento)
+    )
+    return result.scalars().all()
+
+
+async def create_punto_emision_secuencia(db: AsyncSession, data) -> PuntoEmisionSecuencia:
+    existing = await db.execute(
+        select(PuntoEmisionSecuencia).where(
+            PuntoEmisionSecuencia.company_id == data.company_id,
+            PuntoEmisionSecuencia.punto_emision == data.punto_emision,
+            PuntoEmisionSecuencia.tipo_documento == data.tipo_documento,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise ValueError(
+            f"Ya existe una numeracion de '{data.tipo_documento}' para el punto de emision '{data.punto_emision}'"
+        )
+
+    secuencia = PuntoEmisionSecuencia(**data.model_dump())
+    db.add(secuencia)
+    await db.commit()
+    await db.refresh(secuencia)
+    return secuencia
+
+
+async def update_punto_emision_secuencia(db: AsyncSession, secuencia_id: str, data) -> PuntoEmisionSecuencia | None:
+    result = await db.execute(select(PuntoEmisionSecuencia).where(PuntoEmisionSecuencia.id == uuid.UUID(secuencia_id)))
+    secuencia = result.scalar_one_or_none()
+    if not secuencia:
+        return None
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(secuencia, field, value)
+    await db.commit()
+    await db.refresh(secuencia)
+    return secuencia
+
+
 # ─── NC / ND ─────────────────────────────────────────────────────────────────
 
 async def create_nota(

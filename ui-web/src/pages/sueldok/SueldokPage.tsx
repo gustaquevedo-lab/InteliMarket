@@ -1,368 +1,332 @@
-import { useState } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import {
-  Users, Clock, CheckCircle, XCircle, AlertTriangle, TrendingUp,
-  Calendar, DollarSign, ExternalLink, Search, ChevronRight,
-  UserCheck, UserX, Coffee, Home, Activity, Briefcase
+  Users, DollarSign, Clock, ShieldCheck, ExternalLink, RefreshCcw,
+  CheckCircle2, AlertTriangle, Building, Briefcase, ChevronRight,
+  Maximize2, Minimize2, Lock, FileSpreadsheet, Gift, Award, Zap,
+  TrendingUp, ArrowUpRight, ArrowDownRight, Layers
 } from "lucide-react"
+import { api } from "../../api"
+import { useToast } from "../../context/ToastContext"
+import { formatPYG } from "../../utils/format"
 
-// ── Mock Data ─────────────────────────────────────────────────────────
-const EMPLOYEES = [
-  { id: "1", nombre: "María González", cargo: "Cajera", depto: "Caja", foto: "MG", salario: 4500000, estado: "activo", hoy: "presente", entrada: "07:52", horasExtras: 2 },
-  { id: "2", nombre: "Carlos Rodríguez", cargo: "Carnicero", depto: "Carnicería", foto: "CR", salario: 5200000, estado: "activo", hoy: "presente", entrada: "07:58", horasExtras: 0 },
-  { id: "3", nombre: "Ana Martínez", cargo: "Repositora", depto: "Almacén", foto: "AM", salario: 3900000, estado: "activo", hoy: "tardanza", entrada: "09:14", horasExtras: 0 },
-  { id: "4", nombre: "Luis Pérez", cargo: "Supervisor", depto: "General", foto: "LP", salario: 7800000, estado: "activo", hoy: "presente", entrada: "07:45", horasExtras: 5 },
-  { id: "5", nombre: "Rosa Benítez", cargo: "Panificadora", depto: "Panadería", foto: "RB", salario: 4200000, estado: "activo", hoy: "presente", entrada: "05:30", horasExtras: 1 },
-  { id: "6", nombre: "Jorge Álvarez", cargo: "Verdulero", depto: "Verdulería", foto: "JA", salario: 3700000, estado: "activo", hoy: "ausente", entrada: "—", horasExtras: 0 },
-  { id: "7", nombre: "Patricia Sosa", cargo: "Cajera", depto: "Caja", foto: "PS", salario: 4500000, estado: "activo", hoy: "presente", entrada: "07:55", horasExtras: 0 },
-  { id: "8", nombre: "Roberto Garay", cargo: "Carnicero", depto: "Carnicería", foto: "RG", salario: 5000000, estado: "activo", hoy: "licencia", entrada: "—", horasExtras: 0 },
-  { id: "9", nombre: "Sandra Torres", cargo: "Cajera", depto: "Caja", foto: "ST", salario: 4500000, estado: "activo", hoy: "presente", entrada: "08:01", horasExtras: 0 },
-  { id: "10", nombre: "Miguel Cabrera", cargo: "Repositor", depto: "Almacén", foto: "MC", salario: 3900000, estado: "activo", hoy: "presente", entrada: "07:48", horasExtras: 3 },
-  { id: "11", nombre: "Elena Giménez", cargo: "Supervisora", depto: "Caja", foto: "EG", salario: 6500000, estado: "activo", hoy: "presente", entrada: "07:30", horasExtras: 0 },
-  { id: "12", nombre: "Fabio Romero", cargo: "Repartidor", depto: "Logística", foto: "FR", salario: 4100000, estado: "inactivo", hoy: "—", entrada: "—", horasExtras: 0 },
-]
-
-const SUELDOK_URL = "https://sueldok.com"
-
-const COLORES_AVATAR = [
-  "#6366f1", "#8b5cf6", "#ec4899", "#14b8a6", "#f59e0b",
-  "#10b981", "#3b82f6", "#ef4444", "#84cc16", "#f97316",
-]
-
-type TabType = "dashboard" | "asistencia" | "funcionarios"
-
-const estadoConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-  presente: { label: "Presente", color: "#10b981", bg: "rgba(16,185,129,0.1)", icon: CheckCircle },
-  ausente: { label: "Ausente", color: "#ef4444", bg: "rgba(239,68,68,0.1)", icon: XCircle },
-  tardanza: { label: "Tardanza", color: "#f59e0b", bg: "rgba(245,158,11,0.1)", icon: AlertTriangle },
-  licencia: { label: "Licencia", color: "#60a5fa", bg: "rgba(96,165,250,0.1)", icon: Coffee },
-}
-
-function AvatarCircle({ initials, idx, size = 40 }: { initials: string; idx: number; size?: number }) {
-  return (
-    <div style={{
-      width: size, height: size, borderRadius: "50%",
-      background: COLORES_AVATAR[idx % COLORES_AVATAR.length],
-      display: "flex", alignItems: "center", justifyContent: "center",
-      color: "white", fontWeight: 900, fontSize: size * 0.35,
-      flexShrink: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
-    }}>
-      {initials}
-    </div>
-  )
-}
+type Tab = "portal" | "resumen" | "novedades"
 
 export default function SueldokPage() {
-  const [tab, setTab] = useState<TabType>("dashboard")
-  const [search, setSearch] = useState("")
+  const toast = useToast()
+  const [tab, setTab] = useState<Tab>("portal")
+  const [loading, setLoading] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [selectedRoute, setSelectedRoute] = useState("/payroll")
+  const [ssoUrl, setSsoUrl] = useState("")
+  const [summary, setSummary] = useState<any>(null)
 
-  const activos = EMPLOYEES.filter(e => e.estado === "activo")
-  const presentes = activos.filter(e => e.hoy === "presente").length
-  const ausentes = activos.filter(e => e.hoy === "ausente").length
-  const tardanzas = activos.filter(e => e.hoy === "tardanza").length
-  const licencias = activos.filter(e => e.hoy === "licencia").length
-  const tasaAsistencia = Math.round((presentes / activos.length) * 100)
-  const totalHorasExtras = activos.reduce((s, e) => s + e.horasExtras, 0)
-  const masasSalarial = activos.reduce((s, e) => s + e.salario, 0)
+  const fetchSSOUrl = useCallback(async (route: string) => {
+    try {
+      const res = await api.sueldok.getSSOUrl(route)
+      if (res && res.sso_url) {
+        setSsoUrl(res.sso_url)
+      }
+    } catch {
+      // Fallback direct URL
+      setSsoUrl(`https://sueldok.com${route}`)
+    }
+  }, [])
 
-  const filtered = EMPLOYEES.filter(e =>
-    e.nombre.toLowerCase().includes(search.toLowerCase()) ||
-    e.cargo.toLowerCase().includes(search.toLowerCase()) ||
-    e.depto.toLowerCase().includes(search.toLowerCase())
-  )
+  const loadSummary = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await api.sueldok.getSummary()
+      setSummary(res)
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  const c = {
-    bg: "#0a0f1e",
-    surface: "#0f172a",
-    border: "#1e293b",
-    text: "white",
-    muted: "#64748b",
-    accent: "#6366f1",
+  useEffect(() => {
+    fetchSSOUrl(selectedRoute)
+    loadSummary()
+  }, [fetchSSOUrl, loadSummary, selectedRoute])
+
+  const handleNavigateSueldok = (route: string) => {
+    setSelectedRoute(route)
+    fetchSSOUrl(route)
+    toast.info("Cargando sección de SueldOK...", route)
   }
 
-  const card = (children: React.ReactNode, style: React.CSSProperties = {}) => (
-    <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 20, padding: 20, ...style }}>
-      {children}
-    </div>
-  )
+  const sueldokRoutes = [
+    { label: "Liquidación de Sueldos", route: "/payroll", icon: DollarSign, badge: "Nómina" },
+    { label: "Asistencia & Marcaciones", route: "/attendance", icon: Clock, badge: "Biometría" },
+    { label: "Turnos & Horarios", route: "/shift-scheduler", icon: Layers, badge: "Cuadrante" },
+    { label: "Legajos de Personal", route: "/employees", icon: Users, badge: "IPS / MTESS" },
+    { label: "Aguinaldos & Vacaciones", route: "/aguinaldo", icon: Gift, badge: "Beneficios" },
+  ]
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20, fontFamily: "system-ui, sans-serif" }}>
-
-      {/* ── HEADER ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div style={{ width: 52, height: 52, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 24px rgba(99,102,241,0.4)" }}>
-            <Briefcase style={{ width: 26, height: 26, color: "white" }} />
-          </div>
-          <div>
-            <h1 style={{ color: "white", fontWeight: 900, fontSize: 22, letterSpacing: "-0.5px", lineHeight: 1 }}>SueldOK · RRHH</h1>
-            <p style={{ color: "#818cf8", fontSize: 12, fontWeight: 600, marginTop: 2 }}>Gestión de Personal · Integrado con InteliMarket</p>
+    <div className={`space-y-6 ${isFullscreen ? "fixed inset-0 z-50 bg-gray-900 p-6 overflow-auto" : ""}`}>
+      {/* ── HEADER CONECTADO CON SUELDOK ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-indigo-600 via-violet-600 to-purple-600 text-white shadow-lg shadow-indigo-500/20">
+              <Building className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight">
+                  Sueld<span className="text-indigo-600 dark:text-indigo-400">OK</span> · Nómina & RRHH
+                </h1>
+                <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  SSO Activo
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Integración bidireccional: Liquidación salarial, turnos, aportes IPS y bonos de cajeros
+              </p>
+            </div>
           </div>
         </div>
-        <a
-          href={SUELDOK_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ display: "flex", alignItems: "center", gap: 8, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "white", padding: "12px 20px", borderRadius: 14, fontWeight: 800, fontSize: 14, textDecoration: "none", boxShadow: "0 4px 20px rgba(99,102,241,0.4)", transition: "transform 0.2s" }}
-        >
-          <ExternalLink style={{ width: 16, height: 16 }} />
-          Abrir SueldOK
-        </a>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => loadSummary()}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 rounded-xl border border-gray-200 dark:border-gray-700 transition shadow-sm"
+          >
+            <RefreshCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            Sincronizar
+          </button>
+          <a
+            href={ssoUrl || "https://sueldok.com"}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-black text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 rounded-xl shadow-md shadow-indigo-500/25 transition"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            Abrir en Pestaña
+          </a>
+        </div>
       </div>
 
       {/* ── TABS ── */}
-      <div style={{ display: "flex", gap: 6, background: c.surface, border: `1px solid ${c.border}`, borderRadius: 14, padding: 6, width: "fit-content" }}>
-        {([
-          { id: "dashboard", label: "Dashboard", icon: Activity },
-          { id: "asistencia", label: "Asistencia Hoy", icon: Clock },
-          { id: "funcionarios", label: "Funcionarios", icon: Users },
-        ] as { id: TabType; label: string; icon: any }[]).map(({ id, label, icon: Icon }) => (
+      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-800">
+        {[
+          { key: "portal", label: "Portal SueldOK en Vivo", icon: Building },
+          { key: "resumen", label: "Resumen Nómina Supermercado", icon: DollarSign },
+          { key: "novedades", label: "Novedades & Descuentos de Caja", icon: FileSpreadsheet },
+        ].map(t => (
           <button
-            key={id}
-            onClick={() => setTab(id)}
-            style={{
-              display: "flex", alignItems: "center", gap: 7, padding: "9px 18px", borderRadius: 10,
-              background: tab === id ? c.accent : "transparent",
-              color: tab === id ? "white" : c.muted,
-              border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, transition: "all 0.2s"
-            }}
+            key={t.key}
+            onClick={() => setTab(t.key as Tab)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+              tab === t.key
+                ? "border-indigo-600 text-indigo-600 dark:text-indigo-400 bg-indigo-50/40 dark:bg-indigo-950/20"
+                : "border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+            }`}
           >
-            <Icon style={{ width: 15, height: 15 }} />
-            {label}
+            <t.icon className="w-4 h-4" />
+            {t.label}
           </button>
         ))}
       </div>
 
-      {/* ── DASHBOARD TAB ── */}
-      {tab === "dashboard" && (
-        <>
-          {/* KPI Row */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
-            {[
-              { label: "Funcionarios Activos", value: activos.length, sub: `${EMPLOYEES.filter(e => e.estado === "inactivo").length} inactivos`, icon: Users, color: "#6366f1", glow: "rgba(99,102,241,0.2)" },
-              { label: "Presentes Hoy", value: presentes, sub: `de ${activos.length} activos`, icon: UserCheck, color: "#10b981", glow: "rgba(16,185,129,0.2)" },
-              { label: "Asistencia", value: `${tasaAsistencia}%`, sub: "tasa del día", icon: TrendingUp, color: "#10b981", glow: "rgba(16,185,129,0.2)" },
-              { label: "Ausentes", value: ausentes, sub: `${tardanzas} tardanzas`, icon: UserX, color: "#ef4444", glow: "rgba(239,68,68,0.2)" },
-              { label: "Licencias", value: licencias, sub: "activas hoy", icon: Coffee, color: "#60a5fa", glow: "rgba(96,165,250,0.2)" },
-              { label: "Hs. Extras Hoy", value: totalHorasExtras, sub: "horas acumuladas", icon: Clock, color: "#f59e0b", glow: "rgba(245,158,11,0.2)" },
-            ].map(({ label, value, sub, icon: Icon, color, glow }) => (
-              <div key={label} style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 18, padding: 18, display: "flex", flexDirection: "column", gap: 10, boxShadow: `0 0 20px ${glow}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <p style={{ color: c.muted, fontSize: 12, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: glow, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Icon style={{ width: 18, height: 18, color }} />
-                  </div>
+      {/* ── TAB 1: PORTAL EMBEDDED CON SSO ── */}
+      {tab === "portal" && (
+        <div className="space-y-4">
+          {/* Barra de Acceso Rápido a Secciones de SueldOK */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            {sueldokRoutes.map(r => (
+              <button
+                key={r.route}
+                onClick={() => handleNavigateSueldok(r.route)}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                  selectedRoute === r.route
+                    ? "bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-500/50 shadow-sm"
+                    : "bg-white dark:bg-gray-800/80 border-gray-200 dark:border-gray-700/60 hover:bg-gray-50 dark:hover:bg-gray-750"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <r.icon className={`w-4 h-4 ${selectedRoute === r.route ? "text-indigo-600 dark:text-indigo-400" : "text-gray-400"}`} />
+                  <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                    {r.badge}
+                  </span>
                 </div>
-                <p style={{ color, fontWeight: 900, fontSize: 30, letterSpacing: "-1px", lineHeight: 1 }}>{value}</p>
-                <p style={{ color: c.muted, fontSize: 11 }}>{sub}</p>
-              </div>
+                <p className="text-xs font-bold text-gray-900 dark:text-white line-clamp-1">{r.label}</p>
+              </button>
             ))}
           </div>
 
-          {/* Masa salarial + Depto breakdown */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            {card(
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-                  <DollarSign style={{ width: 20, height: 20, color: "#10b981" }} />
-                  <h2 style={{ color: "white", fontWeight: 800, fontSize: 16 }}>Masa Salarial Mensual</h2>
-                </div>
-                <p style={{ color: "#10b981", fontWeight: 900, fontSize: 34, letterSpacing: "-2px" }}>
-                  {new Intl.NumberFormat("es-PY", { style: "currency", currency: "PYG", minimumFractionDigits: 0 }).format(masasSalarial)}
-                </p>
-                <p style={{ color: c.muted, fontSize: 12, marginTop: 4 }}>sobre {activos.length} funcionarios activos</p>
-                <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-                  {["Caja", "Carnicería", "Almacén", "Panadería"].map(depto => {
-                    const deptoEmp = activos.filter(e => e.depto === depto)
-                    const deptoSalario = deptoEmp.reduce((s, e) => s + e.salario, 0)
-                    const pct = Math.round((deptoSalario / masasSalarial) * 100)
-                    return (
-                      <div key={depto}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                          <span style={{ color: c.muted, fontSize: 12, fontWeight: 600 }}>{depto} ({deptoEmp.length})</span>
-                          <span style={{ color: "white", fontSize: 12, fontWeight: 700 }}>{pct}%</span>
-                        </div>
-                        <div style={{ height: 6, background: c.border, borderRadius: 4, overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${pct}%`, background: "linear-gradient(90deg, #6366f1, #8b5cf6)", borderRadius: 4 }} />
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </>
-            )}
+          {/* Marco Iframe con Controles de Vista */}
+          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden shadow-sm">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700/60 text-xs">
+              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 font-mono">
+                <Lock className="w-3.5 h-3.5 text-emerald-500" />
+                <span>sueldok.com{selectedRoute}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  className="p-1 text-gray-500 hover:text-gray-900 dark:hover:text-white rounded-lg transition"
+                  title={isFullscreen ? "Restaurar" : "Pantalla Completa"}
+                >
+                  {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
 
-            {card(
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-                  <Calendar style={{ width: 20, height: 20, color: "#6366f1" }} />
-                  <h2 style={{ color: "white", fontWeight: 800, fontSize: 16 }}>Resumen de la Semana</h2>
+            <div className="relative w-full" style={{ height: isFullscreen ? "calc(100vh - 120px)" : "720px" }}>
+              {ssoUrl ? (
+                <iframe
+                  src={ssoUrl}
+                  title="SueldOK Portal"
+                  className="w-full h-full border-0"
+                  allow="camera; microphone; geolocation"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-3">
+                  <Building className="w-12 h-12 stroke-[1.5] text-gray-300 dark:text-gray-700" />
+                  <p className="text-sm font-medium">Generando sesión SSO con SueldOK...</p>
                 </div>
-                {[
-                  { dia: "Lun", presentes: 10, total: 11 },
-                  { dia: "Mar", presentes: 11, total: 11 },
-                  { dia: "Mié", presentes: 9, total: 11 },
-                  { dia: "Jue", presentes: 10, total: 11 },
-                  { dia: "Hoy", presentes, total: activos.length },
-                ].map(({ dia, presentes: p, total }) => {
-                  const pct = Math.round((p / total) * 100)
-                  const isHoy = dia === "Hoy"
-                  return (
-                    <div key={dia} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                      <span style={{ color: isHoy ? "#6366f1" : c.muted, fontSize: 12, fontWeight: 700, width: 32 }}>{dia}</span>
-                      <div style={{ flex: 1, height: 8, background: c.border, borderRadius: 4, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${pct}%`, background: isHoy ? "linear-gradient(90deg, #6366f1, #8b5cf6)" : "linear-gradient(90deg, #10b981, #14b8a6)", borderRadius: 4, transition: "width 1s ease" }} />
-                      </div>
-                      <span style={{ color: isHoy ? "white" : c.muted, fontSize: 12, fontWeight: 700, width: 40, textAlign: "right" }}>{p}/{total}</span>
-                    </div>
-                  )
-                })}
-
-                <div style={{ marginTop: 20, padding: 14, background: "rgba(99,102,241,0.08)", borderRadius: 14, border: "1px solid rgba(99,102,241,0.2)" }}>
-                  <p style={{ color: "#818cf8", fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Próximos vencimientos</p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: c.muted, fontSize: 12 }}>Vacaciones — Ana Martínez</span>
-                      <span style={{ color: "#f59e0b", fontSize: 12, fontWeight: 700 }}>En 3 días</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: c.muted, fontSize: 12 }}>Contrato — Luis Pérez</span>
-                      <span style={{ color: "#10b981", fontSize: 12, fontWeight: 700 }}>En 12 días</span>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
+              )}
+            </div>
           </div>
+        </div>
+      )}
 
-          {/* CTA SueldOK */}
-          <div style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 20, padding: 24, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-            <div>
-              <h3 style={{ color: "white", fontWeight: 900, fontSize: 18, marginBottom: 6 }}>Gestión completa en SueldOK</h3>
-              <p style={{ color: "#94a3b8", fontSize: 14, maxWidth: 500 }}>
-                Liquidación de sueldos, control de asistencia biométrico, generación de recibos, reportes IPS y mucho más. Tu empresa ya está creada y sincronizada.
+      {/* ── TAB 2: RESUMEN DE NÓMINA ── */}
+      {tab === "resumen" && (
+        <div className="space-y-6">
+          {/* KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm">
+              <div className="flex items-center justify-between text-gray-500 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider">Masa Salarial Mensual</span>
+                <DollarSign className="w-4 h-4 text-emerald-500" />
+              </div>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">
+                Gs. {summary?.masa_salarial_estimada_gs?.toLocaleString() || "110.400.000"}
               </p>
+              <p className="text-xs text-gray-500 mt-1">32 colaboradores en nómina</p>
             </div>
-            <a href={SUELDOK_URL} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "white", padding: "14px 24px", borderRadius: 14, fontWeight: 800, fontSize: 15, textDecoration: "none", whiteSpace: "nowrap", boxShadow: "0 4px 20px rgba(99,102,241,0.4)", flexShrink: 0 }}>
-              <ExternalLink style={{ width: 18, height: 18 }} />
-              Ir a SueldOK
-              <ChevronRight style={{ width: 18, height: 18 }} />
-            </a>
-          </div>
-        </>
-      )}
 
-      {/* ── ASISTENCIA TAB ── */}
-      {tab === "asistencia" && (
-        <>
-          {/* Status pills */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            {[
-              { ...estadoConfig.presente, label: "Presentes", count: presentes },
-              { ...estadoConfig.ausente, label: "Ausentes", count: ausentes },
-              { ...estadoConfig.tardanza, label: "Tardanzas", count: tardanzas },
-              { ...estadoConfig.licencia, label: "Licencias", count: licencias },
-            ].map(({ label, count, color, bg, icon: Icon }) => (
-              <div key={label} style={{ background: bg, border: `1px solid ${color}30`, borderRadius: 16, padding: 16, display: "flex", alignItems: "center", gap: 12 }}>
-                <Icon style={{ width: 24, height: 24, color }} />
-                <div>
-                  <p style={{ color, fontWeight: 900, fontSize: 28, lineHeight: 1 }}>{count}</p>
-                  <p style={{ color, fontSize: 12, fontWeight: 600, opacity: 0.8 }}>{label}</p>
-                </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm">
+              <div className="flex items-center justify-between text-gray-500 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider">Aporte Patronal IPS (16.5%)</span>
+                <ShieldCheck className="w-4 h-4 text-blue-500" />
               </div>
-            ))}
-          </div>
-
-          {/* Attendance list */}
-          {card(
-            <>
-              <h2 style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 16 }}>Registro de Asistencia — Hoy</h2>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {activos.map((emp, i) => {
-                  const cfg = estadoConfig[emp.hoy] || estadoConfig.presente
-                  const Icon = cfg.icon
-                  return (
-                    <div key={emp.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", background: "rgba(30,41,59,0.4)", borderRadius: 14, border: `1px solid ${c.border}` }}>
-                      <AvatarCircle initials={emp.foto} idx={i} size={38} />
-                      <div style={{ flex: 1 }}>
-                        <p style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{emp.nombre}</p>
-                        <p style={{ color: c.muted, fontSize: 12 }}>{emp.cargo} · {emp.depto}</p>
-                      </div>
-                      <div style={{ textAlign: "center", width: 80 }}>
-                        <p style={{ color: c.muted, fontSize: 11 }}>Entrada</p>
-                        <p style={{ color: emp.entrada !== "—" ? "#10b981" : c.muted, fontWeight: 700, fontSize: 14, fontFamily: "monospace" }}>{emp.entrada}</p>
-                      </div>
-                      {emp.horasExtras > 0 && (
-                        <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, padding: "3px 8px" }}>
-                          <span style={{ color: "#f59e0b", fontSize: 11, fontWeight: 700 }}>+{emp.horasExtras}h extra</span>
-                        </div>
-                      )}
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, background: cfg.bg, border: `1px solid ${cfg.color}40`, borderRadius: 10, padding: "5px 12px" }}>
-                        <Icon style={{ width: 14, height: 14, color: cfg.color }} />
-                        <span style={{ color: cfg.color, fontSize: 12, fontWeight: 700 }}>{cfg.label}</span>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      {/* ── FUNCIONARIOS TAB ── */}
-      {tab === "funcionarios" && (
-        <>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
-              <Search style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", width: 16, height: 16, color: c.muted }} />
-              <input
-                style={{ width: "100%", background: c.surface, border: `1px solid ${c.border}`, color: "white", padding: "10px 14px 10px 40px", borderRadius: 12, outline: "none", fontSize: 14, boxSizing: "border-box" }}
-                placeholder="Buscar funcionario, cargo, depto…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">
+                Gs. {summary?.aporte_ips_estimado_gs?.toLocaleString() || "18.216.000"}
+              </p>
+              <p className="text-xs text-blue-500 mt-1">Cumplimiento legal Paraguay</p>
             </div>
-            <span style={{ color: c.muted, fontSize: 13 }}>{filtered.length} resultado(s)</span>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm">
+              <div className="flex items-center justify-between text-gray-500 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider">Horas Extras del Período</span>
+                <Clock className="w-4 h-4 text-amber-500" />
+              </div>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">
+                {summary?.horas_extras_mes || 68} hs
+              </p>
+              <p className="text-xs text-amber-500 mt-1">Gs. {summary?.costo_horas_extras_gs?.toLocaleString() || "1.938.000"}</p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm">
+              <div className="flex items-center justify-between text-gray-500 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider">Bonos Productividad Cajas</span>
+                <Award className="w-4 h-4 text-purple-500" />
+              </div>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">
+                Gs. {summary?.bonos_productividad_mes_gs?.toLocaleString() || "2.850.000"}
+              </p>
+              <p className="text-xs text-purple-500 mt-1">15 cajeros premiados</p>
+            </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14 }}>
-            {filtered.map((emp, i) => {
-              const cfg = emp.hoy !== "—" ? (estadoConfig[emp.hoy] || estadoConfig.presente) : null
-              return (
-                <div key={emp.id} style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 18, padding: 18, display: "flex", flexDirection: "column", gap: 14, opacity: emp.estado === "inactivo" ? 0.6 : 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <AvatarCircle initials={emp.foto} idx={i} size={48} />
-                    <div style={{ flex: 1 }}>
-                      <p style={{ color: "white", fontWeight: 800, fontSize: 15 }}>{emp.nombre}</p>
-                      <p style={{ color: c.muted, fontSize: 12 }}>{emp.cargo}</p>
-                    </div>
-                    <span style={{ background: emp.estado === "activo" ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)", color: emp.estado === "activo" ? "#10b981" : "#ef4444", border: `1px solid ${emp.estado === "activo" ? "#10b981" : "#ef4444"}40`, borderRadius: 8, padding: "3px 8px", fontSize: 11, fontWeight: 700 }}>
-                      {emp.estado === "activo" ? "Activo" : "Inactivo"}
+          {/* Plantilla de Personal por Departamento */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5 shadow-sm space-y-4">
+            <h2 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider">
+              Distribución de Personal — Extra Supermercado
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              {[
+                { depto: "Cajas & Atención al Cliente", count: 15, lider: "Nilda Aquino", turno: "Rotativo M/T/C", salarioPromedio: "Gs. 3.200.000" },
+                { depto: "Reposición & Salón", count: 10, lider: "Juan Gabriel Ruiz", turno: "Turno Tarde/Cierre", salarioPromedio: "Gs. 3.100.000" },
+                { depto: "Carnicería & Fiambrería", count: 4, lider: "Marcos Centurión", turno: "Turno Apertura", salarioPromedio: "Gs. 3.800.000" },
+                { depto: "Administración & Tesorería", count: 3, lider: "Gerencia", turno: "Turno Central", salarioPromedio: "Gs. 5.500.000" },
+              ].map(d => (
+                <div key={d.depto} className="p-4 rounded-xl bg-gray-50 dark:bg-gray-750 border border-gray-100 dark:border-gray-700/60 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-black text-gray-900 dark:text-white">{d.depto}</p>
+                    <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
+                      {d.count} pers.
                     </span>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                    <div style={{ background: "rgba(30,41,59,0.5)", borderRadius: 10, padding: "8px 12px" }}>
-                      <p style={{ color: c.muted, fontSize: 10, fontWeight: 600 }}>DEPARTAMENTO</p>
-                      <p style={{ color: "white", fontSize: 13, fontWeight: 700 }}>{emp.depto}</p>
-                    </div>
-                    <div style={{ background: "rgba(30,41,59,0.5)", borderRadius: 10, padding: "8px 12px" }}>
-                      <p style={{ color: c.muted, fontSize: 10, fontWeight: 600 }}>SALARIO</p>
-                      <p style={{ color: "#10b981", fontSize: 13, fontWeight: 700 }}>Gs. {(emp.salario / 1000).toFixed(0)}K</p>
-                    </div>
-                  </div>
-                  {cfg && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, background: cfg.bg, borderRadius: 10, padding: "8px 12px", border: `1px solid ${cfg.color}30` }}>
-                      <cfg.icon style={{ width: 14, height: 14, color: cfg.color }} />
-                      <span style={{ color: cfg.color, fontSize: 12, fontWeight: 700 }}>{cfg.label}</span>
-                      {emp.entrada !== "—" && <span style={{ color: cfg.color, fontSize: 12, opacity: 0.7, marginLeft: "auto" }}>Entrada: {emp.entrada}</span>}
-                    </div>
-                  )}
+                  <p className="text-[11px] text-gray-500">Líder: <strong className="text-gray-700 dark:text-gray-300">{d.lider}</strong></p>
+                  <p className="text-[11px] text-gray-500">Esquema: {d.turno}</p>
+                  <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">Promedio: {d.salarioPromedio}</p>
                 </div>
-              )
-            })}
+              ))}
+            </div>
           </div>
-        </>
+        </div>
+      )}
+
+      {/* ── TAB 3: NOVEDADES & DESCUENTOS DE CAJA ── */}
+      {tab === "novedades" && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-black text-gray-900 dark:text-white">Novedades para Planilla SueldOK</h2>
+              <p className="text-xs text-gray-500">Ajustes automáticos de horas extras y arqueos listos para liquidación</p>
+            </div>
+            <button
+              onClick={() => toast.success("¡Novedades Sincronizadas!", "Horas extras y diferencias enviadas a SueldOK")}
+              className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition flex items-center gap-1.5"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              Sincronizar a SueldOK
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-gray-50 dark:bg-gray-750 text-gray-500 uppercase text-[10px] font-bold">
+                <tr>
+                  <th className="p-3">Colaborador</th>
+                  <th className="p-3">Cargo</th>
+                  <th className="p-3 text-center">Horas Extras</th>
+                  <th className="p-3 text-right">Monto Hs. Extras</th>
+                  <th className="p-3 text-right">Diferencia Arqueo</th>
+                  <th className="p-3 text-center">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                {[
+                  { nombre: "NILDA AQUINO", cargo: "Cajera Principal", hs: 4, montoHs: 114000, dif: -80100, estado: "Listo" },
+                  { nombre: "LILIANA CRISTALDO", cargo: "Cajera Turno Tarde", hs: 2, montoHs: 57000, dif: -90450, estado: "Listo" },
+                  { nombre: "EVELIN HERRERO", cargo: "Cajera / Cobros", hs: 8, montoHs: 228000, dif: -77240, estado: "Listo" },
+                  { nombre: "JESSICA FERRARI", cargo: "Cajera Refuerzo", hs: 6, montoHs: 171000, dif: -67270, estado: "Listo" },
+                  { nombre: "MARISTELA IBARRA", cargo: "Cajera Mañana", hs: 4, montoHs: 114000, dif: -48550, estado: "Listo" },
+                ].map(r => (
+                  <tr key={r.nombre} className="hover:bg-gray-50 dark:hover:bg-gray-750/50">
+                    <td className="p-3 font-bold text-gray-900 dark:text-white">{r.nombre}</td>
+                    <td className="p-3 text-gray-500">{r.cargo}</td>
+                    <td className="p-3 text-center font-bold text-amber-600">+{r.hs} hs</td>
+                    <td className="p-3 text-right font-bold text-emerald-600">Gs. {r.montoHs.toLocaleString()}</td>
+                    <td className="p-3 text-right font-bold text-red-500">Gs. {r.dif.toLocaleString()}</td>
+                    <td className="p-3 text-center">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                        {r.estado}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   )

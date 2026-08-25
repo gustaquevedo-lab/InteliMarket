@@ -4,7 +4,7 @@ from sqlalchemy import select, text, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone, date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import uuid
 import math
 import logging
@@ -543,7 +543,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             cantidad_disponible=qty,
             costo_unitario=cost,
             costo_total=cost * qty,
-            referencia=receipt.numero,
+            referencia=f"{item_data.lote} - {receipt.numero}" if item_data.lote else receipt.numero,
+            fecha_vencimiento=item_data.fecha_vencimiento,
         )
         db.add(stock_lot)
 
@@ -2146,3 +2147,336 @@ async def award_rfq(db: AsyncSession, rfq_id: str, supplier_id: str,
     await db.refresh(order)
     await _attach_suppliers(db, [order])
     return order
+
+
+# ── Smart Replenishment & Demand Forecast (AI) ────────────────────────────────
+
+async def calculate_smart_replenishment_preview(
+    db: AsyncSession,
+    company_id: str,
+    supplier_id: str | None = None,
+    categoria_id: str | None = None,
+    dias_cobertura: int = 30,
+    lead_time_dias: int = 3,
+    dias_historial_ventas: int = 30,
+    factor_fin_semana: bool = False,
+    factor_fin_mes: bool = False,
+    factor_clima: str = "normal",
+    factor_evento: str = "normal",
+    solo_quiebre_o_bajo: bool = False,
+    search: str | None = None,
+    limit: int = 100,
+) -> dict:
+    cid = company_id
+    dias_hist = max(dias_historial_ventas, 7)
+    
+    where_clauses = ["p.company_id = :cid", "p.activo = true"]
+    params: dict = {"cid": cid, "days": dias_hist, "limit": limit}
+    
+    if supplier_id:
+        params["supplier_id"] = supplier_id
+        where_clauses.append("""
+            EXISTS (
+                SELECT 1 FROM purchase_order_items poi2
+                JOIN purchase_orders po2 ON po2.id = poi2.purchase_order_id
+                WHERE po2.supplier_id = :supplier_id AND poi2.product_id = p.id
+            )
+        """)
+        
+    if categoria_id:
+        params["cat_id"] = categoria_id
+        where_clauses.append("p.categoria_id = :cat_id")
+        
+    if search:
+        params["search"] = f"%{search}%"
+        where_clauses.append("(p.nombre ILIKE :search OR p.sku ILIKE :search OR p.codigo_barra ILIKE :search)")
+
+    sql = f"""
+        SELECT 
+            p.id,
+            p.nombre,
+            p.sku,
+            p.codigo_barra,
+            p.unidad_medida,
+            COALESCE(p.ultimo_costo, p.costo_promedio, 0) as costo_estimado,
+            COALESCE(p.iva_tasa, 10) as iva_tasa,
+            p.categoria_id,
+            COALESCE(stk.total_stock, 0) as stock_actual,
+            COALESCE(sales.total_vendido, 0) as total_vendido_periodo,
+            COALESCE(po_transit.total_en_transito, 0) as stock_en_transito
+        FROM products p
+        LEFT JOIN (
+            SELECT product_id, SUM(cantidad) as total_stock
+            FROM stock
+            GROUP BY product_id
+        ) stk ON stk.product_id = p.id
+        LEFT JOIN (
+            SELECT si.product_id, SUM(si.cantidad) as total_vendido
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE s.company_id = :cid
+              AND s.estado = 'confirmado'
+              AND s.fecha >= NOW() - make_interval(days => :days)
+            GROUP BY si.product_id
+        ) sales ON sales.product_id = p.id
+        LEFT JOIN (
+            SELECT poi.product_id, SUM(poi.cantidad - COALESCE(poi.cantidad_recibida, 0)) as total_en_transito
+            FROM purchase_order_items poi
+            JOIN purchase_orders po ON po.id = poi.purchase_order_id
+            WHERE po.company_id = :cid
+              AND po.estado IN ('enviada', 'confirmada', 'parcial')
+              AND po.fecha >= NOW() - make_interval(days => 60)
+              AND poi.cantidad > COALESCE(poi.cantidad_recibida, 0)
+            GROUP BY poi.product_id
+        ) po_transit ON po_transit.product_id = p.id
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY COALESCE(sales.total_vendido, 0) DESC
+        LIMIT :limit
+    """
+    
+    result = await db.execute(text(sql), params)
+    rows = result.fetchall()
+    
+    items = []
+    total_quiebres = 0
+    total_bajos = 0
+    total_sugeridos = 0
+    monto_total_estimado = Decimal("0")
+    
+    for r in rows:
+        pid = r[0]
+        nombre = r[1]
+        sku = r[2]
+        cod_barra = r[3]
+        unidad = r[4] or "UN"
+        costo_unit = Decimal(str(r[5]))
+        iva_tasa = Decimal(str(r[6]))
+        stock_actual = Decimal(str(r[8]))
+        ventas_periodo = Decimal(str(r[9]))
+        stock_en_transito = Decimal(str(r[10]))
+        
+        # Demanda diaria base
+        demanda_diaria_base = (ventas_periodo / Decimal(str(dias_hist))).quantize(Decimal("0.01"))
+        
+        # Multiplicadores de contexto
+        mult = Decimal("1.0")
+        explicaciones = []
+        
+        nombre_lower = nombre.lower()
+        is_bebida_o_asado = any(w in nombre_lower for w in ["cerv", "coca", "pepsi", "fanta", "agua", "vino", "carne", "costilla", "vacio", "carbon", "snack"])
+        is_canasta_o_limp = any(w in nombre_lower for w in ["arroz", "aceite", "harina", "azucar", "fideo", "leche", "lavandina", "jabon", "detergente", "papel"])
+        is_frio_item = any(w in nombre_lower for w in ["cafe", "te ", "choco", "sopa", "fideo", "harina", "puchero", "guiso"])
+        is_calor_item = any(w in nombre_lower for w in ["hielo", "agua", "cerv", "gaseosa", "jugo", "helado"])
+        
+        if factor_fin_semana:
+            if is_bebida_o_asado:
+                mult *= Decimal("1.40")
+                explicaciones.append("+40% Fin de semana (alta rotación)")
+            else:
+                mult *= Decimal("1.15")
+                explicaciones.append("+15% Fin de semana")
+                
+        if factor_fin_mes:
+            if is_canasta_o_limp:
+                mult *= Decimal("1.35")
+                explicaciones.append("+35% Cobro de salarios / Canasta básica")
+            else:
+                mult *= Decimal("1.10")
+                explicaciones.append("+10% Fin de mes")
+                
+        if factor_clima == "calor":
+            if is_calor_item:
+                mult *= Decimal("1.30")
+                explicaciones.append("+30% Ola de calor (bebidas/refrigerados)")
+        elif factor_clima == "frio":
+            if is_frio_item:
+                mult *= Decimal("1.35")
+                explicaciones.append("+35% Frente frío (infusiones/calientes/harinas)")
+        elif factor_clima == "lluvia":
+            if any(w in nombre_lower for w in ["pan", "harina", "aceite"]):
+                mult *= Decimal("1.25")
+                explicaciones.append("+25% Lluvia (panificados)")
+                
+        if factor_evento == "feriado":
+            if is_bebida_o_asado:
+                mult *= Decimal("1.35")
+                explicaciones.append("+35% Feriado / Reuniones")
+        elif factor_evento == "semana_santa":
+            if any(w in nombre_lower for w in ["pesc", "queso", "harina", "almidon", "choclo"]):
+                mult *= Decimal("1.60")
+                explicaciones.append("+60% Tradición Semana Santa")
+        elif factor_evento == "fin_de_ano":
+            if any(w in nombre_lower for w in ["sidra", "panet", "cerv", "carne", "turron"]):
+                mult *= Decimal("1.50")
+                explicaciones.append("+50% Fiestas de Fin de Año")
+
+        demanda_ajustada = (demanda_diaria_base * mult).quantize(Decimal("0.01"))
+        
+        # Parámetros Estadísticos de Inventario (Objetivos y Dinámicos)
+        lead_time_dec = Decimal(str(lead_time_dias))
+        # Nivel de servicio 95% (Z = 1.65) con volatilidad estimada del 35% de demanda diaria
+        sigma_estimado = demanda_ajustada * Decimal("0.35")
+        import math
+        sqrt_lead = Decimal(str(round(math.sqrt(float(lead_time_dias)), 2)))
+        stock_seguridad = max(
+            Decimal("1.0") if demanda_ajustada > 0 else Decimal("0.0"),
+            (Decimal("1.65") * sigma_estimado * sqrt_lead).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+        
+        # Punto de Reorden Estadístico (ROP = Demanda * LeadTime + StockSeguridad)
+        punto_reorden = ((demanda_ajustada * lead_time_dec) + stock_seguridad).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+        # Días de stock restantes (autonomía)
+        if demanda_ajustada > Decimal("0.001"):
+            dias_restantes = (stock_actual / demanda_ajustada).quantize(Decimal("0.1"))
+        else:
+            dias_restantes = Decimal("999.0") if stock_actual > 0 else Decimal("0.0")
+            
+        # Clasificación Objetiva y Estadística del Estado de Stock
+        # - "critico": Stock físico <= stock de seguridad o se agota dentro del Lead Time
+        # - "bajo": Stock físico <= Punto de Reorden (ROP)
+        # - "optimo": Stock físico > ROP y dentro de cobertura
+        # - "sobrestock": Stock físico > Cobertura * 1.4
+        dias_totales_objetivo = Decimal(str(dias_cobertura + lead_time_dias))
+        target_stock = (demanda_ajustada * dias_totales_objetivo).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        stock_total_disponible = stock_actual + stock_en_transito
+
+        if stock_actual <= 0 or stock_actual <= (demanda_ajustada * lead_time_dec) or stock_actual <= stock_seguridad:
+            autonomia_estado = "critico"
+            total_quiebres += 1
+        elif stock_actual <= punto_reorden:
+            autonomia_estado = "bajo"
+            total_bajos += 1
+        elif stock_actual <= target_stock:
+            autonomia_estado = "optimo"
+        else:
+            autonomia_estado = "sobrestock"
+            
+        if solo_quiebre_o_bajo and autonomia_estado not in ("critico", "bajo"):
+            continue
+            
+        # Cálculo de cantidad sugerida
+        deficit = max(Decimal("0"), target_stock - stock_total_disponible)
+        cantidad_sugerida = deficit
+        
+        if cantidad_sugerida > Decimal("0"):
+            total_sugeridos += 1
+            
+        subtotal_item = (cantidad_sugerida * costo_unit).quantize(Decimal("1"))
+        monto_total_estimado += subtotal_item
+        
+        explicacion_texto = "; ".join(explicaciones) if explicaciones else f"Demanda promedio calculada sobre {dias_hist} días de ventas."
+        
+        items.append({
+            "product_id": pid,
+            "nombre": nombre,
+            "sku": sku,
+            "codigo_barra": cod_barra,
+            "unidad_medida": unidad,
+            "stock_actual": float(stock_actual),
+            "stock_en_transito": float(stock_en_transito),
+            "ventas_periodo": float(ventas_periodo),
+            "demanda_diaria_base": float(demanda_diaria_base),
+            "multiplicador_estacional": float(mult),
+            "demanda_diaria_ajustada": float(demanda_ajustada),
+            "dias_stock_restantes": float(dias_restantes),
+            "autonomia_estado": autonomia_estado,
+            "stock_seguridad": float(stock_seguridad),
+            "punto_reorden": float(punto_reorden),
+            "target_stock": float(target_stock),
+            "cantidad_sugerida": float(cantidad_sugerida),
+            "costo_unitario_estimado": float(costo_unit),
+            "subtotal_estimado": float(subtotal_item),
+            "iva_tasa": float(iva_tasa or 10),
+            "explicacion_ia": explicacion_texto,
+            "generada_automaticamente": True,
+        })
+        
+    return {
+        "total_evaluados": len(rows),
+        "total_quiebres": total_quiebres,
+        "total_bajos": total_bajos,
+        "total_sugeridos": total_sugeridos,
+        "monto_total_estimado": float(monto_total_estimado),
+        "items": items,
+    }
+
+
+async def create_po_from_replenishment(db: AsyncSession, data) -> PurchaseOrder:
+    from api.src.purchases.schemas import POCreate
+    po_create_data = POCreate(
+        company_id=data.company_id,
+        supplier_id=data.supplier_id,
+        fecha_entrega_estimada=data.fecha_entrega_estimada,
+        moneda=data.moneda,
+        prioridad=data.prioridad,
+        condiciones_pago=data.condiciones_pago,
+        observaciones=data.observaciones or "Generado mediante Asistente de Sugerencia de Compra IA",
+        user_id=data.user_id,
+        created_by_name=data.user_name,
+        items=data.items,
+    )
+    return await create_purchase_order(db, po_create_data)
+
+
+
+async def list_lost_demand(
+    db: AsyncSession,
+    company_id: Optional[str] = None,
+    estado: Optional[str] = None,
+):
+    from .models import CustomerLostDemand
+    stmt = select(CustomerLostDemand)
+    if company_id:
+        stmt = stmt.where(CustomerLostDemand.company_id == company_id)
+    if estado:
+        stmt = stmt.where(CustomerLostDemand.estado == estado)
+    stmt = stmt.order_by(CustomerLostDemand.created_at.desc())
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+async def create_lost_demand(
+    db: AsyncSession,
+    data,
+):
+    from .models import CustomerLostDemand
+    item = CustomerLostDemand(
+        company_id=data.company_id,
+        producto_nombre=data.producto_nombre,
+        categoria=data.categoria,
+        marca=data.marca,
+        notas=data.notas,
+        cliente_nombre=data.cliente_nombre,
+        cliente_contacto=data.cliente_contacto,
+        cajero_id=data.cajero_id,
+        cajero_nombre=data.cajero_nombre,
+        caja_id=data.caja_id,
+        estado="PENDIENTE",
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+async def update_lost_demand(
+    db: AsyncSession,
+    demand_id: str,
+    data,
+):
+    from .models import CustomerLostDemand
+    stmt = select(CustomerLostDemand).where(CustomerLostDemand.id == demand_id)
+    res = await db.execute(stmt)
+    item = res.scalar_one_or_none()
+    if not item:
+        return None
+    if data.estado is not None:
+        item.estado = data.estado
+    if data.notas is not None:
+        item.notas = data.notas
+    if data.orden_compra_id is not None:
+        item.orden_compra_id = data.orden_compra_id
+    await db.commit()
+    await db.refresh(item)
+    return item

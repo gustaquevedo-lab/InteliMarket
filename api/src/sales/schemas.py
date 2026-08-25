@@ -31,6 +31,9 @@ class SaleCreate(BaseModel):
     items: list[SaleItemInput]
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None
+    session_id: Optional[UUID] = None
+    recibo_html: Optional[str] = None
+    recibo_escpos_b64: Optional[str] = None
 
 
 class SaleResponse(BaseModel):
@@ -38,7 +41,12 @@ class SaleResponse(BaseModel):
     company_id: UUID
     branch_id: Optional[UUID] = None
     customer_id: Optional[UUID] = None
+    user_id: Optional[UUID] = None
+    session_id: Optional[UUID] = None
+    recibo_html: Optional[str] = None
+    recibo_escpos_b64: Optional[str] = None
     numero: str
+    numero_interno: Optional[str] = None
     fecha: datetime
     tipo_comprobante: str
     condicion: str
@@ -88,3 +96,7 @@ class SaleLinkQuote(BaseModel):
 
 class SaleLinkOrder(BaseModel):
     order_id: UUID
+
+
+class SaleAttachTicket(BaseModel):
+    recibo_escpos_b64: str

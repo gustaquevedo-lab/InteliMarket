@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.sales.schemas import (
     SaleCreate, SaleUpdate, SaleResponse, SaleWithItems,
-    SaleAddPayment, SaleLinkQuote, SaleLinkOrder,
+    SaleAddPayment, SaleLinkQuote, SaleLinkOrder, SaleAttachTicket,
 )
 from api.src.sales import service
 from api.src.events.emitters import emit_sale_completed
@@ -109,10 +109,27 @@ async def create_sale(body: SaleCreate, db: AsyncSession = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Commit inmediato: la venta tiene que quedar guardada pase lo que pase
+    # despues. fire_sale_side_effects hace varias escrituras propias (evento,
+    # asiento contable InteliCont) cada una con su try/except -- pero un
+    # rollback() disparado adentro de cualquiera de esas ramas corre sobre
+    # esta MISMA sesion y se llevaba puesta la venta todavia no comprometida,
+    # aunque el except la atajara y el endpoint respondiera 201 igual. Asi
+    # confirmamos: create_sale devolvia 201 con todos los datos, pero la fila
+    # nunca aparecia en la base -- el commit de get_db() al final del
+    # request terminaba comprometiendo una transaccion ya vaciada.
+    await db.commit()
+    await db.refresh(sale)
+
     if sale.estado == "pend_aprob_credito":
         return sale
 
-    await fire_sale_side_effects(db, sale, body.tipo_comprobante)
+    try:
+        await fire_sale_side_effects(db, sale, body.tipo_comprobante)
+    except Exception:
+        # La venta ya esta guardada (commit de arriba); un efecto secundario
+        # que falle no debe convertirse en un 500 para el cajero.
+        pass
     return sale
 
 
@@ -121,11 +138,13 @@ async def list_sales(
     company_id: str,
     customer_id: str | None = Query(None),
     estado: str | None = Query(None),
+    user_id: str | None = Query(None),
+    session_id: str | None = Query(None),
     limit: int = Query(50, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_sales(db, company_id, customer_id, estado, limit=limit, offset=offset)
+    return await service.list_sales(db, company_id, customer_id, estado, user_id=user_id, session_id=session_id, limit=limit, offset=offset)
 
 
 @router.get("/sales/{sale_id}", response_model=SaleResponse)
@@ -134,6 +153,17 @@ async def get_sale(sale_id: str, db: AsyncSession = Depends(get_db)):
     if not sale:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
     return sale
+
+
+@router.patch("/sales/{sale_id}/ticket")
+async def attach_ticket(sale_id: str, body: SaleAttachTicket, db: AsyncSession = Depends(get_db)):
+    """Adjunta el ticket ESC/POS ya armado (base64) a una venta que se
+    guardó primero sin él -- permite reimprimir después exactamente lo mismo
+    que salió por la impresora térmica, sin recalcular nada."""
+    ok = await service.attach_escpos_ticket(db, sale_id, body.recibo_escpos_b64)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return {"success": True}
 
 
 @router.get("/companies/{company_id}/sales/today")

@@ -23,6 +23,8 @@ from api.src.purchases.schemas import (
     BudgetCreate, BudgetUpdate, BudgetResponse, BudgetConsumptionResponse,
     SpendBySupplierResponse, SpendByCategoryResponse, PriceVarianceResponse, PurchaseKPIsResponse,
     RfqCreate, RfqResponse, RfqWithDetail, RfqResponseSubmit, RfqAwardRequest,
+    SmartReplenishmentRequest, SmartReplenishmentResponse, CreatePOFromReplenishmentRequest,
+    LostDemandCreate, LostDemandResponse, LostDemandUpdate,
 )
 from api.src.purchases import service
 
@@ -518,4 +520,63 @@ async def award_rfq(rfq_id: str, body: RfqAwardRequest, db: AsyncSession = Depen
     result = await service.award_rfq(db, rfq_id, str(body.supplier_id), str(body.user_id) if body.user_id else None, body.user_name)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo adjudicar. El proveedor debe tener una respuesta cargada y la cotizacion debe seguir abierta")
+    return result
+
+
+# ── Smart Replenishment & AI Purchase Assistant ───────────────────────────────
+
+@router.post("/purchases/smart-replenishment-preview", response_model=SmartReplenishmentResponse)
+async def smart_replenishment_preview(body: SmartReplenishmentRequest, db: AsyncSession = Depends(get_db)):
+    return await service.calculate_smart_replenishment_preview(
+        db=db,
+        company_id=str(body.company_id),
+        supplier_id=str(body.supplier_id) if body.supplier_id else None,
+        categoria_id=str(body.categoria_id) if body.categoria_id else None,
+        dias_cobertura=body.dias_cobertura,
+        lead_time_dias=body.lead_time_dias,
+        dias_historial_ventas=body.dias_historial_ventas,
+        factor_fin_semana=body.factor_fin_semana,
+        factor_fin_mes=body.factor_fin_mes,
+        factor_clima=body.factor_clima,
+        factor_evento=body.factor_evento,
+        solo_quiebre_o_bajo=body.solo_quiebre_o_bajo,
+        search=body.search,
+        limit=body.limit,
+    )
+
+
+@router.post("/purchases/generate-po-from-replenishment", response_model=POResponse, status_code=status.HTTP_201_CREATED)
+async def generate_po_from_replenishment(body: CreatePOFromReplenishmentRequest, db: AsyncSession = Depends(get_db)):
+    return await service.create_po_from_replenishment(db, body)
+
+
+
+# ── Demandas de Clientes / Productos No Encontrados ──────────────────────────
+
+@router.get("/purchases/lost-demand", response_model=list[LostDemandResponse])
+async def list_lost_demand(
+    company_id: str | None = None,
+    estado: str | None = None,
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.list_lost_demand(db, company_id, estado)
+
+
+@router.post("/purchases/lost-demand", response_model=LostDemandResponse, status_code=status.HTTP_201_CREATED)
+async def create_lost_demand(
+    body: LostDemandCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    return await service.create_lost_demand(db, body)
+
+
+@router.patch("/purchases/lost-demand/{demand_id}", response_model=LostDemandResponse)
+async def update_lost_demand(
+    demand_id: str,
+    body: LostDemandUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    result = await service.update_lost_demand(db, demand_id, body)
+    if not result:
+        raise HTTPException(status_code=404, detail="Demanda no encontrada")
     return result

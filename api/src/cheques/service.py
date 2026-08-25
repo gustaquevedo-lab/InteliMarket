@@ -105,6 +105,7 @@ async def list_cheques(
     db: AsyncSession, company_id: str,
     estado: str | None = None, supplier_id: str | None = None,
     vencidos: bool | None = None, fecha_desde: date | None = None, fecha_hasta: date | None = None,
+    bank_account_id: str | None = None, search: str | None = None,
     limit: int = 100, offset: int = 0,
 ) -> list[dict]:
     today = date.today()
@@ -119,12 +120,24 @@ async def list_cheques(
         query = query.where(Cheque.estado == estado)
     if supplier_id:
         query = query.where(Cheque.supplier_id == uuid.UUID(supplier_id))
+    if bank_account_id:
+        query = query.where(Cheque.bank_account_id == uuid.UUID(bank_account_id))
     if vencidos:
         query = query.where(Cheque.estado.in_(["pendiente", "entregado"]), Cheque.fecha_pago < today)
     if fecha_desde:
         query = query.where(Cheque.fecha_emision >= fecha_desde)
     if fecha_hasta:
         query = query.where(Cheque.fecha_emision <= fecha_hasta)
+    if search:
+        s = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Cheque.numero.ilike(s),
+                Cheque.beneficiario.ilike(s),
+                Cheque.banco_emisor.ilike(s),
+                Cheque.concepto.ilike(s),
+            )
+        )
     query = query.order_by(Cheque.fecha_pago.desc().nulls_last()).limit(limit).offset(offset)
     result = await db.execute(query)
     cheques = list(result.scalars().all())

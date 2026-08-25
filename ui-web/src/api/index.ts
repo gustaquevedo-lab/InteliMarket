@@ -1,8 +1,27 @@
-const API_BASE = import.meta.env.VITE_API_URL || "/api"
-// El backend sirve archivos subidos (comprobantes, etc.) fuera del prefijo /api,
-// asi que las URLs relativas que devuelve (ej. "/uploads/comprobantes/x.jpg")
-// necesitan resolverse contra el origen, no contra API_BASE.
-export const API_ORIGIN = API_BASE.replace(/\/api\/?$/, "")
+
+export interface CustomerLostDemand {
+  id: string
+  company_id: string
+  producto_nombre: string
+  categoria?: string | null
+  marca?: string | null
+  notas?: string | null
+  cliente_nombre?: string | null
+  cliente_contacto?: string | null
+  cajero_id?: string | null
+  cajero_nombre?: string | null
+  caja_id?: string | null
+  estado: "PENDIENTE" | "EN_EVALUACION" | "COMPRADO" | "DESCARTADO"
+  orden_compra_id?: string | null
+  created_at: string
+  updated_at: string
+}
+
+const rawApiUrl = import.meta.env.VITE_API_URL || ""
+const isLocalhostOrRelative = !rawApiUrl || rawApiUrl.startsWith("/") || rawApiUrl.includes("intelimarket-ia")
+const API_BASE = isLocalhostOrRelative ? "/api" : rawApiUrl
+export const API_ORIGIN = API_BASE.startsWith("http") ? API_BASE.replace(/\/api\/?$/, "") : (typeof window !== "undefined" ? window.location.origin : "")
+export const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("access_token")
@@ -12,7 +31,44 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
   if (token) headers["Authorization"] = `Bearer ${token}`
   const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
-  const response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
+  let response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
+
+  if (response.status === 401 && !cleanEndpoint.includes("/auth/")) {
+    const refreshToken = localStorage.getItem("refresh_token")
+    if (refreshToken) {
+      try {
+        const refreshRes = await fetch(`${API_BASE}/v1/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        })
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json()
+          localStorage.setItem("access_token", refreshData.access_token)
+          if (refreshData.refresh_token) localStorage.setItem("refresh_token", refreshData.refresh_token)
+          headers["Authorization"] = `Bearer ${refreshData.access_token}`
+          response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
+        } else {
+          localStorage.removeItem("access_token")
+          localStorage.removeItem("refresh_token")
+          localStorage.removeItem("user_email")
+          if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
+            window.location.href = "/login"
+          }
+        }
+      } catch {
+        // Refresh fallback
+      }
+    } else {
+      localStorage.removeItem("access_token")
+      localStorage.removeItem("refresh_token")
+      localStorage.removeItem("user_email")
+      if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
+        window.location.href = "/login"
+      }
+    }
+  }
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Error desconocido" }))
     throw new Error(error.detail || `HTTP ${response.status}`)
@@ -50,34 +106,38 @@ export const client = {
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: "DELETE" }),
 }
 
-const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
-
 async function downloadAuthenticated(path: string, params: Record<string, string | undefined> | undefined, filename: string) {
   const token = localStorage.getItem("access_token")
-  const qs = params ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined)) as Record<string, string>).toString() : ""
-  const url = `${API_BASE}${path}${qs ? `?${qs}` : ""}`
+  const cleanPath = path.startsWith("/") ? path : `/${path}`
+  const qs = params ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== "")) as Record<string, string>).toString() : ""
+  const sep = cleanPath.includes("?") ? "&" : "?"
+  const url = `${API_BASE}${cleanPath}${qs ? `${sep}${qs}` : ""}`
   const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
   if (!res.ok) throw new Error(`No se pudo descargar el archivo (${res.status})`)
   const blob = await res.blob()
-  const blobUrl = URL.createObjectURL(blob)
+  const isPdf = filename.toLowerCase().endsWith(".pdf")
+  const fileBlob = new Blob([blob], { type: isPdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+  const blobUrl = URL.createObjectURL(fileBlob)
   const a = document.createElement("a")
   a.href = blobUrl
   a.download = filename
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(blobUrl)
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 20000)
 }
 
 // ========== TYPE STUBS ==========
-export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; precio_venta?: number; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
+export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; imagen_url?: string | null; precio_venta?: number; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
 export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
-export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
+export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; numero_interno?: string; recibo_html?: string; recibo_escpos_b64?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
 export interface SaleItem { id?: string; sale_id?: string; product_id?: string; producto?: Product; product?: Product; descripcion?: string; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; iva_monto?: number; total?: number; descuento?: number }
 export interface PaymentMethod { id: string; nombre: string; codigo?: string; tipo?: string; moneda?: string; activo?: boolean; permite_parcial?: boolean; requiere_autorizacion?: boolean; created_at?: string }
 export interface Payment { id: string; sale_id?: string; metodo_pago_id?: string; payment_method_id?: string; metodo_pago?: PaymentMethod; tipo?: string; monto?: number; moneda?: string; referencia?: string; estado?: string; fecha?: string; created_at?: string }
 export interface Warehouse { id: string; codigo?: string; nombre: string; direccion?: string; ciudad?: string; tipo?: string; activo?: boolean; company_id?: string; created_at?: string }
 export interface StockItem { id?: string; product_id?: string; producto?: Product; product?: Product; nombre?: string; sku?: string; warehouse_id?: string; warehouse?: Warehouse; cantidad?: number; cantidad_reservada?: number; cantidad_disponible?: number; stock_minimo?: number; stock_maximo?: number; costo_promedio?: number; ultimo_costo?: number; costo_unitario?: number; lote?: string; fecha_vencimiento?: string; created_at?: string }
-export interface Company { id: string; nombre: string; ruc?: string; razon_social?: string; direccion?: string; telefono?: string; email?: string; logo_url?: string; activo?: boolean; config?: Record<string, unknown>; iva_condition?: string; regimen_tributario?: string; created_at?: string; updated_at?: string }
+export interface Company { id: string; nombre?: string; nombre_fantasia?: string; ruc?: string; razon_social?: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; logo_url?: string; activo?: boolean; config?: Record<string, unknown>; iva_condition?: string; regimen_tributario?: string; created_at?: string; updated_at?: string }
 export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; cash_drop_threshold?: number | null; diferencia_maxima_tolerada?: number | null; created_at?: string }
 export interface CashHandoff { id: string; session_id: string; register_nombre: string | null; entregado_por_nombre: string | null; recibido_por_nombre?: string | null; monto_pyg: number; monto_usd: number; monto_brl: number; monto_confirmado_pyg?: number | null; monto_confirmado_usd?: number | null; monto_confirmado_brl?: number | null; discrepancia_confirmacion?: boolean; requiere_revision: boolean; estado: string; created_at: string; fecha_confirmacion?: string | null }
 export interface VaultEntry { id: string; origen: string; monto_pyg: number; monto_usd: number; monto_brl: number; estado: string; bank_transaction_id?: string | null; created_at: string; fecha_deposito?: string | null }
@@ -109,7 +169,7 @@ export interface PipelineStats { total?: number; total_valor?: number; by_etapa?
 export interface ActivityStats { total?: number; completadas?: number; pendientes?: number; by_tipo?: Record<string, number>; por_tipo?: Record<string, number> }
 export interface Permission { id: string; name?: string; description?: string | null; module?: string; action?: string; created_at?: string }
 export interface Role { id: string; name?: string; description?: string | null; is_system?: boolean; is_default?: boolean; created_at?: string; permissions?: Permission[] }
-export interface TenantUser { id: string; email: string; nombre: string; telefono?: string | null; rol: string; activo: boolean; is_superadmin: boolean; last_login?: string | null; created_at: string; tenant_rol: string; role_names: string[] }
+export interface TenantUser { id: string; email: string; nombre: string; telefono?: string | null; rol: string; activo: boolean; is_superadmin: boolean; foto_url?: string | null; last_login?: string | null; created_at: string; tenant_rol: string; role_names: string[] }
 export interface PurchaseOrder { id: string; company_id?: string; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; tipo_cambio?: number; fecha_entrega_estimada?: string | null; descuento_total?: number; iva_10?: number; iva_5?: number; observaciones?: string | null; items?: PurchaseOrderItem[]; created_at?: string; updated_at?: string }
 export interface PurchaseRequisitionItem { id: string; requisition_id: string; product_id: string; variant_id?: string | null; descripcion?: string | null; cantidad_solicitada: number; cantidad_aprobada?: number | null; precio_estimado?: number | null; total_estimado?: number | null; observaciones?: string | null; created_at: string }
 export interface PurchaseRequisition { id: string; company_id: string; numero: string; fecha: string; fecha_necesidad?: string | null; departamento?: string | null; solicitante_id?: string | null; solicitante_nombre?: string | null; estado: string; prioridad?: string | null; moneda?: string | null; subtotal?: number | null; total?: number | null; motivo?: string | null; observaciones?: string | null; aprobado_por?: string | null; fecha_aprobacion?: string | null; rechazado_motivo?: string | null; purchase_order_id?: string | null; user_id?: string | null; created_at: string; items?: PurchaseRequisitionItem[] }
@@ -123,6 +183,56 @@ export interface PurchaseBudget { id: string; company_id: string; nombre: string
 export interface PurchaseBudgetConsumption { budget_id: string; nombre: string; anio: number; mes?: number | null; monto_presupuestado: number; monto_ejecutado: number; monto_disponible: number; porcentaje_ejecutado: number }
 export interface PurchaseReceipt { id: string; company_id?: string; purchase_order_id?: string | null; orden?: PurchaseOrder; supplier_id?: string; supplier?: Supplier; warehouse_id?: string; numero?: string; fecha?: string; estado?: string; proveedor_ref?: string | null; total?: number; user_id?: string | null; observaciones?: string | null; requiere_revision?: boolean; motivo_revision?: string | null; items?: PurchaseReceiptItem[]; created_at?: string; updated_at?: string }
 export interface PurchaseReceiptItem { id?: string; receipt_id?: string; product_id?: string; producto?: Product; variant_id?: string | null; cantidad_ordenada?: number | null; cantidad_recibida?: number; precio_unitario?: number; costo_unitario?: number; total?: number; batch_id?: string | null; cantidad_rechazada?: number | null; motivo_rechazo?: string | null; created_at?: string }
+export interface SmartReplenishmentItem {
+  product_id: string
+  nombre: string
+  sku?: string | null
+  codigo_barra?: string | null
+  unidad_medida: string
+  stock_actual: number
+  stock_en_transito: number
+  ventas_periodo: number
+  demanda_diaria_base: number
+  multiplicador_estacional: number
+  demanda_diaria_ajustada: number
+  dias_stock_restantes: number
+  autonomia_estado: "critico" | "bajo" | "optimo" | "sobrestock"
+  stock_seguridad?: number
+  punto_reorden?: number
+  target_stock?: number
+  cantidad_sugerida: number
+  costo_unitario_estimado: number
+  subtotal_estimado: number
+  iva_tasa: number
+  explicacion_ia: string
+  generada_automaticamente?: boolean
+}
+
+export interface SmartReplenishmentResponse {
+  total_evaluados: number
+  total_quiebres: number
+  total_bajos: number
+  total_sugeridos: number
+  monto_total_estimado: number
+  items: SmartReplenishmentItem[]
+}
+
+export interface SmartReplenishmentRequest {
+  company_id?: string
+  supplier_id?: string
+  categoria_id?: string
+  dias_cobertura?: number
+  lead_time_dias?: number
+  dias_historial_ventas?: number
+  factor_fin_semana?: boolean
+  factor_fin_mes?: boolean
+  factor_clima?: "normal" | "calor" | "frio" | "lluvia"
+  factor_evento?: "normal" | "feriado" | "semana_santa" | "fin_de_ano"
+  solo_quiebre_o_bajo?: boolean
+  search?: string
+  limit?: number
+}
+
 export interface FinanceAgentRun { id: string; company_id: string; started_at: string; finished_at?: string; model?: string; status: string; diagnostico?: string; error_message?: string }
 export interface FinanceRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
 export interface SalesAgentRun { id: string; company_id: string; started_at: string; finished_at?: string; model?: string; status: string; diagnostico?: string; error_message?: string }
@@ -131,9 +241,9 @@ export interface Supplier { id: string; company_id?: string; ruc?: string; razon
 export interface Quote { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_vencimiento?: string; valido_hasta?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; observaciones?: string; condiciones_pago?: string; descuento_total?: number; iva_10?: number; iva_5?: number; sale_id?: string; items?: QuoteItem[]; created_at?: string; updated_at?: string }
 export interface QuoteItem { id?: string; cotizacion_id?: string; producto_id?: string; producto?: Product; product?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; descripcion?: string; created_at?: string }
 export interface Discount { id: string; company_id?: string; nombre?: string; descripcion?: string; tipo?: string; valor?: number; aplica_a?: string; monto_minimo?: number; monto_maximo?: number; cantidad_minima?: number; fecha_inicio?: string; fecha_fin?: string; producto_ids?: string[]; categoria_ids?: string[]; cliente_ids?: string[]; activo?: boolean; created_at?: string; updated_at?: string }
-export interface CommissionRule { id: string; company_id?: string; nombre: string; tipo: string; porcentaje?: number; vendedor_id?: string; aplica_a?: string; producto_ids?: string[]; categoria_ids?: string[]; monto_minimo?: number; monto_maximo?: number; valido_desde?: string; valido_hasta?: string; activo?: boolean; created_at?: string; updated_at?: string }
-export interface SalesCommission { id: string; company_id?: string; vendedor_id?: string; vendedor?: Customer; venta_id?: string; venta?: Sale; regla_id?: string; regla?: CommissionRule; monto_venta?: number; porcentaje?: number; comision?: number; monto_comision?: number; base_calculo?: number; estado?: string; fecha_pago?: string; created_at?: string; updated_at?: string }
-export interface Return { id: string; company_id?: string; sale_id?: string; sale?: Sale; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; estado?: string; motivo?: string; motivo_detalle?: string; observaciones?: string; aprobado_por?: string; subtotal?: number; total_iva?: number; total?: number; items?: ReturnItem[]; created_at?: string; updated_at?: string }
+export interface CommissionRule { id: string; company_id?: string; nombre: string; tipo: string; porcentaje?: number; vendedor_id?: string; vendedor_nombre?: string; aplica_a?: string; producto_ids?: string[]; categoria_ids?: string[]; monto_minimo?: number; monto_maximo?: number; valido_desde?: string; valido_hasta?: string; activo?: boolean; created_at?: string; updated_at?: string }
+export interface SalesCommission { id: string; company_id?: string; vendedor_id?: string; vendedor_nombre?: string; vendedor?: Customer; sale_id?: string; sale_numero?: string; venta_id?: string; venta?: Sale; regla_id?: string; rule_id?: string; rule_nombre?: string; regla?: CommissionRule; monto_venta?: number; porcentaje?: number; comision?: number; monto_comision?: number; base_calculo?: number; estado?: string; fecha_pago?: string; created_at?: string; updated_at?: string }
+export interface Return { id: string; company_id?: string; sale_id?: string; sale?: Sale; customer_id?: string; customer?: Customer; numero?: string; sale_numero?: string; nota_credito_numero?: string; nota_credito_error?: string; fecha?: string; estado?: string; motivo?: string; motivo_detalle?: string; observaciones?: string; aprobado_por?: string; subtotal?: number; total_iva?: number; total?: number; items?: ReturnItem[]; created_at?: string; updated_at?: string }
 export interface ReturnItem { id?: string; devolucion_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; motivo?: string; estado?: string; condicion?: string; descripcion?: string; total?: number; created_at?: string }
 export interface SalesOrder { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; prioridad?: string; subtotal?: number; total_iva?: number; total?: number; observaciones?: string; condicion?: string; moneda?: string; iva_10?: number; iva_5?: number; descuento_total?: number; fecha_entrega_solicitada?: string; fecha_entrega_estimada?: string; direccion_entrega?: string; items?: SalesOrderItem[]; created_at?: string; updated_at?: string }
 export interface SalesOrderItem { id?: string; pedido_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; entregado?: number; pendiente?: number; created_at?: string }
@@ -167,6 +277,144 @@ export interface AutoApplyMarkdownByBatchInput { dias_verde?: number; dias_amari
 export interface AutoApplyMarkdownResult { procesados?: number; markdowns_creados?: number; errores?: string[]; detalle?: any[] }
 export interface ForecastEnhanceInput { producto_ids?: string[]; lookback_dias?: number; incluir_estacionalidad?: boolean }
 export interface ProduceDashboard { total_recibido_hoy?: number; lotes_activos?: number; lotes_por_vencer?: number; auditorias_pendientes?: number; scorecards_generados?: number; proveedores_activos?: number; calidad_promedio_general?: string }
+export interface ProductsStatsResponse {
+  total_productos: number
+  total_pesables: number
+  margen_promedio_pct: number
+  total_valorizado_costo: number
+  total_quiebres: number
+  total_bajos: number
+}
+
+export interface Product360Response {
+  product: {
+    id: string
+    sku: string
+    nombre: string
+    codigo_barra?: string | null
+    plu_codigo?: string | null
+    unidad_medida: string
+    tipo: string
+    categoria_id?: string | null
+    categoria_nombre?: string | null
+    precio_venta: number
+    costo_promedio: number
+    ultimo_costo: number
+    stock_minimo: number
+    iva_tasa: number
+    es_perecedero: boolean
+    vida_util_dias?: number
+    activo: boolean
+  }
+  stock: {
+    total_fisico: number
+    total_reservado: number
+    total_disponible: number
+    valor_inventario_costo: number
+    por_deposito: Array<{
+      id: string
+      warehouse_id: string
+      warehouse_nombre: string
+      warehouse_codigo: string
+      cantidad: number
+      cantidad_reservada: number
+      costo_unitario: number
+    }>
+  }
+  rotacion: {
+    ventas_ultimos_30d_unidades: number
+    ventas_ultimos_30d_gs: number
+    demanda_diaria_estimada: number
+    autonomia_dias: number
+    estado_stock: "critico" | "bajo" | "optimo"
+  }
+  metricas_financieras: {
+    precio_venta: number
+    costo_unitario: number
+    margen_bruto_monto: number
+    margen_bruto_pct: number
+    markup_pct: number
+  }
+  ultimas_compras: Array<{
+    id: string
+    numero: string
+    fecha: string
+    estado: string
+    cantidad: number
+    precio_unitario: number
+    total: number
+    supplier_nombre?: string
+    supplier_ruc?: string
+  }>
+  ultimas_ventas: Array<{
+    id: string
+    numero: string
+    fecha: string
+    venta_total: number
+    cantidad: number
+    precio_unitario: number
+    subtotal: number
+    customer_nombre?: string
+  }>
+  kardex_reciente: Array<{
+    id: string
+    tipo: string
+    cantidad: number
+    costo_unitario: number
+    motivo?: string
+    referencia_type?: string
+    created_at: string
+    warehouse_nombre?: string
+  }>
+}
+
+export interface InventoryStatsResponse {
+  total_skus_almacenados: number
+  total_unidades_fisicas: number
+  total_unidades_reservadas: number
+  valor_total_costo: number
+  valor_total_venta_proyectada: number
+  total_quiebres: number
+  total_bajos: number
+  cant_mermas_mes: number
+  monto_mermas_mes_gs: number
+}
+
+export interface InventoryMovementRecord {
+  id: string
+  company_id: string
+  warehouse_id: string
+  product_id: string
+  variant_id?: string | null
+  tipo: string
+  cantidad: number
+  costo_unitario: number
+  referencia_type?: string
+  referencia_id?: string
+  motivo?: string
+  user_id?: string
+  created_at: string
+  product_nombre?: string
+  product_sku?: string
+  warehouse_nombre?: string
+  warehouse_codigo?: string
+}
+
+export interface InventoryAdjustmentRecord {
+  id: string
+  codigo: string
+  motivo: string
+  estado: string
+  observaciones?: string
+  created_at: string
+  fecha_aprobacion?: string
+  warehouse_nombre?: string
+  warehouse_codigo?: string
+  total_items: number
+  diferencia_unidades: number
+  diferencia_valorizada_gs: number
+}
+
 export interface ScaleConfig { id: string; nombre: string; marca: string; modelo?: string; protocolo: string; conexion: string; puerto_com?: string; baudrate: number; data_bits?: number; host?: string; puerto_tcp: number; timeout_segundos: number; vendor_id?: string; product_id?: string; ruta_carga?: string; sync_automatico: boolean; etiqueta_formato: string; etiqueta_cabecera?: string; activa: boolean; created_at: string }
 export interface ScaleWeightResult { scale_id: string; scale_nombre: string; protocolo: string; peso_bruto: number; peso_neto?: number; tara: number; unidad: string; estable: boolean; raw_response?: string; timestamp: string }
 export interface ConnectionTestResult { scale_id: string; scale_nombre: string; conectada: boolean; protocolo_detectado?: string; mensaje: string; latencia_ms?: number; peso_actual?: number }
@@ -358,11 +606,31 @@ export const api = {
       list: () => client.get<TenantUser[]>("/v1/auth/users"),
       create: (data: { email: string; password?: string; nombre: string; telefono?: string; rol?: string; role_id?: string }) =>
         client.post<{ id: string; email: string; nombre: string; rol: string; temporary_password?: string }>("/v1/auth/users", data),
-      update: (id: string, data: { nombre?: string; telefono?: string; rol?: string; activo?: boolean }) =>
+      update: (id: string, data: { nombre?: string; telefono?: string; rol?: string; activo?: boolean; foto_url?: string }) =>
         client.patch<TenantUser>(`/v1/auth/users/${id}`, data),
       resetPassword: (id: string, newPassword?: string) =>
         client.post<{ temporary_password?: string; message: string }>(`/v1/auth/users/${id}/reset-password`, { new_password: newPassword }),
+      uploadPhoto: async (id: string, file: File) => {
+        const formData = new FormData()
+        formData.append("file", file)
+        const token = localStorage.getItem("access_token")
+        const res = await fetch(`${API_BASE}/v1/auth/users/${id}/photo`, {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: "Error al subir la foto" }))
+          throw new Error(err.detail || "Error al subir la foto")
+        }
+        return res.json() as Promise<{ foto_url: string; message: string }>
+      },
     },
+    posStaff: () => client.get<any>("/v1/auth/pos-staff"),
+    startPosShift: (data?: any) => client.post<any>("/v1/auth/pos-shift/start", data),
+    posAuthorizers: () => client.get<any>("/v1/auth/pos-authorizers"),
+    activeSupervisor: () => client.get<any>("/v1/auth/pos-active-supervisor"),
+    endPosShift: () => client.post<any>("/v1/auth/pos-shift/end"),
   },
   admin: {
     tenants: (params?: { estado?: string; plan?: string; search?: string }) => client.get<Tenant[]>("/v1/admin/tenants", params),
@@ -382,6 +650,11 @@ export const api = {
     get: (id: string) => client.get<Company>(`/v1/companies/${id}`),
     create: (data: Partial<Company>) => client.post<Company>("/v1/companies", data),
     update: (id: string, data: Partial<Company>) => client.patch<Company>(`/v1/companies/${id}`, data),
+    uploadLogo: (id: string, file: File) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      return requestMultipart<Company>(`/v1/companies/${id}/logo`, formData)
+    },
     delete: (id: string) => client.delete<void>(`/v1/companies/${id}`),
   },
   categories: {
@@ -394,13 +667,62 @@ export const api = {
   products: {
     list: (params?: { search?: string; categoria_id?: string; activo?: boolean; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, activo: params?.activo?.toString(), limit: params?.limit, offset: params?.offset }),
     get: (id: string) => client.get<Product>(`/v1/products/${id}`),
+    getStats: () => client.get<ProductsStatsResponse>(`/v1/companies/${COMPANY_ID}/products/stats`),
+    get360: (id: string) => client.get<Product360Response>(`/v1/products/${id}/360`),
     create: (data: Partial<Product> & { sku: string; nombre: string }) => client.post<Product>("/v1/products", { ...data, company_id: COMPANY_ID }),
     update: (id: string, data: Partial<Product>) => client.patch<Product>(`/v1/products/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/products/${id}`),
+    variants: {
+      list: (productId?: string) => client.get<ProductVariant[]>(`/v1/companies/${COMPANY_ID}/variants`, { product_id: productId } as any),
+      create: (productId: string, data: { tipo: string; valor: string; sku_variante?: string; codigo_barra?: string; precio_extra?: number; stock?: number }) =>
+        client.post<ProductVariant>(`/v1/products/${productId}/variants`, { ...data, company_id: COMPANY_ID }),
+      delete: (variantId: string) => client.delete<void>(`/v1/variants/${variantId}`),
+    },
+  },
+  inventory: {
+    getStockMap: () => client.get<Record<string, number>>(`/v1/companies/${COMPANY_ID}/inventory/stock-map`),
+    getProductStock: (productId: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/products/${productId}/stock`),
+    getStats: () => client.get<InventoryStatsResponse>(`/v1/companies/${COMPANY_ID}/inventory/stats`),
+    getLotsExpiries: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
+      client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/lots/expiries`, params),
+    listMovements: (params?: { product_id?: string; warehouse_id?: string; tipo?: string; limit?: number; offset?: number }) =>
+      client.get<InventoryMovementRecord[]>(`/v1/inventory/movements`, { company_id: COMPANY_ID, ...params } as any),
+    listAdjustments: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
+      client.get<InventoryAdjustmentRecord[]>(`/v1/companies/${COMPANY_ID}/adjustments`, params as any),
+    recordMerma: (data: { warehouse_id: string; product_id: string; cantidad: number; motivo: string; observaciones?: string }) =>
+      client.post<any>(`/v1/inventory/mermas`, { ...data, company_id: COMPANY_ID }),
+    createAdjustment: (data: any) => client.post<any>(`/v1/inventory/adjustments`, { ...data, company_id: COMPANY_ID }),
+    approveAdjustment: (id: string) => client.post<any>(`/v1/inventory/adjustments/${id}/approve`),
+    sessions: {
+      list: (params?: { area?: string; estado?: string }) => client.get<any[]>("/v1/supermer/inventory/sessions", params),
+      get: (id: string) => client.get<any>(`/v1/supermer/inventory/sessions/${id}`),
+      create: (data: any) => client.post<any>("/v1/supermer/inventory/sessions", data),
+      update: (id: string, data: any) => client.put<any>(`/v1/supermer/inventory/sessions/${id}`, data),
+      complete: (id: string) => client.post<any>(`/v1/supermer/inventory/sessions/${id}/complete`),
+      items: {
+        list: (sessionId: string, params?: { requiere_ajuste?: boolean }) => client.get<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/items`, params),
+        create: (sessionId: string, data: any) => client.post<any>(`/v1/supermer/inventory/sessions/${sessionId}/items`, data),
+        batchCreate: (sessionId: string, data: any[]) => client.post<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/items/batch`, data),
+      },
+      adjustments: {
+        list: (sessionId: string, params?: { estado?: string }) => client.get<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/adjustments`, params),
+        create: (sessionId: string, data: any) => client.post<any>(`/v1/supermer/inventory/sessions/${sessionId}/adjustments`, data),
+      },
+    },
+    items: {
+      update: (itemId: string, data: any) => client.put<any>(`/v1/supermer/inventory/items/${itemId}`, data),
+    },
+    adjustments: {
+      approve: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/approve`),
+      reject: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/reject`),
+    },
+    dashboard: () => client.get<any>("/v1/supermer/inventory/dashboard"),
   },
   customers: {
-    list: (params?: { search?: string; tipo?: string; activo?: boolean }) => client.get<Customer[]>(`/v1/companies/${COMPANY_ID}/customers`, params),
+    list: (params?: { search?: string; tipo?: string; activo?: boolean; exclude_proveedores?: boolean; limit?: number; offset?: number }) => client.get<Customer[]>(`/v1/companies/${COMPANY_ID}/customers`, params),
     get: (id: string) => client.get<Customer>(`/v1/customers/${id}`),
+    get360: (id: string) => client.get<any>(`/v1/customer360/profile/${id}`),
+    lookupRuc: (doc: string) => client.get<{ ruc: string; ci: string; dv: string; nombre: string; razon_social: string; telefono?: string; email?: string; encontrado_en_db: boolean; fuente: string }>(`/v1/customers/lookup-ruc/${doc}`),
     create: (data: Partial<Customer>) => client.post<Customer>("/v1/customers", { ...data, company_id: COMPANY_ID }),
     update: (id: string, data: Partial<Customer>) => client.patch<Customer>(`/v1/customers/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/customers/${id}`),
@@ -415,6 +737,7 @@ export const api = {
     addPayment: (id: string, data: { monto: number; metodo_pago_id?: string; payment_method_id?: string; referencia?: string }) => client.post<any>(`/v1/sales/${id}/payments`, data),
     linkQuote: (id: string, quoteId: string) => client.post<any>(`/v1/sales/${id}/link-quote`, { quote_id: quoteId }),
     linkOrder: (id: string, orderId: string) => client.post<any>(`/v1/sales/${id}/link-order`, { order_id: orderId }),
+    attachTicket: (id: string, ticketB64: string) => client.post<any>(`/v1/sales/${id}/attach-ticket`, { ticket_b64: ticketB64 }),
     downloadReceipt: (id: string) => client.get<Blob>(`/v1/receipts/${id}`),
   },
   payments: {
@@ -608,6 +931,15 @@ export const api = {
     seed: () => client.post<void>("/v1/rbac/seed"),
   },
   purchases: {
+    lostDemand: {
+      list: (params?: { estado?: string; company_id?: string }) =>
+        client.get<CustomerLostDemand[]>("/v1/purchases/lost-demand", { company_id: COMPANY_ID, ...params } as any),
+      create: (data: { producto_nombre: string; categoria?: string; marca?: string; notas?: string; cliente_nombre?: string; cliente_contacto?: string; cajero_id?: string; cajero_nombre?: string; caja_id?: string }) =>
+        client.post<CustomerLostDemand>("/v1/purchases/lost-demand", { company_id: COMPANY_ID, ...data }),
+      update: (id: string, data: { estado?: string; notas?: string; orden_compra_id?: string }) =>
+        client.patch<CustomerLostDemand>("/v1/purchases/lost-demand/" + id, data),
+    },
+
     orders: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
     listPOs: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
     getOrder: (id: string) => client.get<PurchaseOrder>(`/v1/purchase-orders/${id}`),
@@ -634,6 +966,7 @@ export const api = {
       client.post<any>(`/v1/suppliers/${id}/evaluate`, data),
     getSupplierEvaluations: (id: string) => client.get<any[]>(`/v1/suppliers/${id}/evaluations`),
     getSupplierPerformance: (id: string) => client.get<{ supplier_id: string; razon_social: string; total_orders: number; total_spent: number; on_time_rate: number | null; avg_quality_score: number | null; avg_delivery_score: number | null; avg_price_score: number | null; avg_attention_score: number | null; overall_rating: number | null; last_evaluation_date: string | null }>(`/v1/suppliers/${id}/performance`),
+    getSupplierPriceHistory: (id: string) => client.get<{ product_id: string; product_nombre: string; sku: string; purchase_order_id: string; fecha_orden: string; precio_unitario: number; cantidad: number }[]>(`/v1/suppliers/${id}/price-history`),
     requisitions: {
       list: (estado?: string) => client.get<PurchaseRequisition[]>(`/v1/companies/${COMPANY_ID}/purchase-requisitions`, estado ? { estado } : undefined),
       get: (id: string) => client.get<PurchaseRequisition & { items: PurchaseRequisitionItem[] }>(`/v1/purchase-requisitions/${id}`),
@@ -676,6 +1009,27 @@ export const api = {
       downloadSpendBySupplierPdf: () => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/purchase-reports/export/spend-by-supplier.pdf`, undefined, "gasto_por_proveedor.pdf"),
       downloadPriceVariancePdf: () => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/purchase-reports/export/price-variance.pdf`, undefined, "varianza_de_precios.pdf"),
     },
+    smartReplenishmentPreview: (data: SmartReplenishmentRequest) =>
+      client.post<SmartReplenishmentResponse>("/v1/purchases/smart-replenishment-preview", { ...data, company_id: COMPANY_ID }),
+    generatePOFromReplenishment: (data: {
+      supplier_id: string
+      fecha_entrega_estimada?: string
+      moneda?: string
+      prioridad?: string
+      condiciones_pago?: string
+      observaciones?: string
+      user_id?: string
+      user_name?: string
+      items: {
+        product_id: string
+        variant_id?: string
+        descripcion?: string
+        cantidad: number
+        precio_unitario: number
+        descuento_pct?: number
+        iva_tasa?: number
+      }[]
+    }) => client.post<PurchaseOrder>("/v1/purchases/generate-po-from-replenishment", { ...data, company_id: COMPANY_ID }),
   },
   sifen: {
     timbrados: {
@@ -696,6 +1050,19 @@ export const api = {
     check: (cdc: string) => client.get<any>(`/api/v1/sifen/cdc/${cdc}`),
     qr: (cdc: string) => client.get<{ png?: string; base64: string; qr_data_url?: string }>(`/api/v1/sifen/qr/${cdc}`),
   },
+  sifenAvanzado: {
+    getDashboard: (companyId: string) => client.get<any>("/v1/sifen-avanzado/dashboard", { company_id: companyId }),
+    sendDistribuidoraInvoice: (data: any) => client.post<any>("/v1/sifen-avanzado/invoices/distribuidora", data),
+    getIvaBook: (tipo: string, companyId: string, periodo: string) => client.get<any>(`/v1/sifen-avanzado/iva-books/${tipo}`, { company_id: companyId, periodo }),
+    getRetentionBook: (companyId: string, periodo: string) => client.get<any>("/v1/sifen-avanzado/retention-books", { company_id: companyId, periodo }),
+    listDgrVehicles: (companyId: string) => client.get<any[]>("/v1/sifen-avanzado/dgr/vehicles", { company_id: companyId }),
+    createDgrVehicle: (data: any) => client.post<any>("/v1/sifen-avanzado/dgr/vehicles", data),
+    listDgrReports: (companyId: string) => client.get<any[]>("/v1/sifen-avanzado/dgr/reports", { company_id: companyId }),
+    generateDgrReport: (companyId: string, periodo: string) => client.post<any>("/v1/sifen-avanzado/dgr/reports", { company_id: companyId, periodo }),
+    listEkuatiaDocuments: (companyId: string) => client.get<any[]>("/v1/sifen-avanzado/ekuatia/documents", { company_id: companyId }),
+    verifyEkuatiaDocument: (docId: string) => client.post<any>(`/v1/sifen-avanzado/ekuatia/documents/${docId}/verify`),
+    validateCdc: (companyId: string, saleId: string, cdc: string) => client.post<any>("/v1/sifen-avanzado/cdc/validate", { company_id: companyId, sale_id: saleId, cdc }),
+  },
   reports: {
     salesSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/sales/summary", params),
     salesByPeriod: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<any>("/api/reports/sales/by-period", params),
@@ -703,8 +1070,24 @@ export const api = {
     salesByProduct: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<{ producto: string; sku: string; unidad_medida: string; cantidad: number; monto: number; costo: number; margen: number }[]>("/api/reports/sales/by-product", params),
     salesByPaymentMethod: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/sales/by-payment-method", params),
     expensesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ categoria: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/expenses/by-category", params),
+    getDashboardAllKPIs: async (params?: { fecha_desde?: string; fecha_hasta?: string }) => {
+      const [summary, byCat, byProd, period] = await Promise.allSettled([
+        api.reports.salesSummary(params),
+        api.reports.salesByCategory(params),
+        api.reports.salesByProduct(params),
+        api.reports.salesByPeriod(params),
+      ])
+      return {
+        summary: summary.status === "fulfilled" ? summary.value : null,
+        byCat: byCat.status === "fulfilled" ? byCat.value : [],
+        byProd: byProd.status === "fulfilled" ? byProd.value : [],
+        period: period.status === "fulfilled" ? period.value : [],
+      }
+    },
     inventory: () => client.get<any>("/api/reports/inventory/summary"),
     inventorySummary: () => client.get<any>("/api/reports/inventory/summary"),
+    inventoryDetail: () => client.get<any[]>("/api/reports/inventory/detail"),
+    inventoryRotation: () => client.get<any[]>("/api/reports/inventory/rotation"),
     fifo: () => client.get<FifoReport[]>("/api/reports/inventory/fifo"),
     lifo: () => client.get<LifoReport[]>("/api/reports/inventory/lifo"),
     fifoCosting: () => client.get<FifoReport[]>("/api/reports/inventory/fifo"),
@@ -761,6 +1144,7 @@ export const api = {
     list: (params?: { vendedor_id?: string; estado?: string }) => client.get<SalesCommission[]>(`/v1/companies/${COMPANY_ID}/commissions`, params),
     pay: (id: string) => client.post<SalesCommission>(`/v1/commissions/${id}/pay`),
     summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/commissions/summary`),
+    calculateBatch: () => client.post<any>(`/v1/companies/${COMPANY_ID}/commissions/calculate-batch`),
   },
   discounts: {
     list: () => client.get<Discount[]>("/v1/discounts"),
@@ -804,6 +1188,11 @@ export const api = {
   },
   financeAgent: {
     run: () => client.post<FinanceAgentRun>("/v1/finance-agent/run", { company_id: COMPANY_ID }),
+    getControlTower: (companyId?: string) => client.get<any>("/v1/finance-agent/control-tower", { company_id: companyId || COMPANY_ID }),
+    getInterAgentSync: (companyId?: string) => client.get<any>("/v1/finance-agent/inter-agent/sync", { company_id: companyId || COMPANY_ID }),
+    getCashFlowForecast: (companyId?: string) => client.get<any>("/v1/finance-agent/cash-flow-forecast", { company_id: companyId || COMPANY_ID }),
+    chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
+      client.post<{ response: string; suggestions: string[]; action_proposal?: any }>("/v1/finance-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
     recommendations: (status?: string, tipo?: string, limit?: number, offset?: number) =>
       client.get<FinanceRecommendation[]>("/v1/finance-agent/recommendations", { company_id: COMPANY_ID, status, tipo, limit, offset }),
     countByTipo: (status?: string) => client.get<{ tipo: string; cantidad: number }[]>("/v1/finance-agent/recommendations/count-by-tipo", { company_id: COMPANY_ID, status }),
@@ -813,17 +1202,22 @@ export const api = {
       client.post<{ decididas: number }>(`/v1/finance-agent/recommendations/bulk-decide?approve=${approve}`, { ids, approved_by, comments }),
   },
   salesAgent: {
-    run: () => client.post<SalesAgentRun>("/v1/sales-agent/run", { company_id: COMPANY_ID }),
-    recommendations: (status?: string) => client.get<SalesRecommendation[]>("/v1/sales-agent/recommendations", { company_id: COMPANY_ID, status }),
-    approve: (id: string, approved_by: string, comments?: string) => client.post<SalesRecommendation>(`/v1/sales-agent/recommendations/${id}/approve`, { approved_by, comments }),
-    reject: (id: string, approved_by: string, comments?: string) => client.post<SalesRecommendation>(`/v1/sales-agent/recommendations/${id}/reject`, { approved_by, comments }),
+    run: (companyId?: string) => client.post<SalesAgentRun>("/v1/sales-agent/run", { company_id: companyId || COMPANY_ID }),
+    getAnalysis: (companyId?: string) => client.get<any>("/v1/sales-agent/analysis", { company_id: companyId || COMPANY_ID }),
+    chat: (data: { message: string; conversation_history?: any[]; context_tab?: string; company_id?: string }) =>
+      client.post<{ reply: string; action_outcome?: any; suggested_prompts?: string[] }>("/v1/sales-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+    applyPrice: (data: { product_id: string; nuevo_precio: number; motivo?: string; company_id?: string }) =>
+      client.post<{ success: boolean; mensaje: string }>("/v1/sales-agent/apply-price", { company_id: data.company_id || COMPANY_ID, ...data }),
+    recommendations: (status?: string, companyId?: string) => client.get<SalesRecommendation[]>("/v1/sales-agent/recommendations", { company_id: companyId || COMPANY_ID, status }),
+    approve: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/sales-agent/recommendations/${id}/approve`, { approved_by, comments }),
+    reject: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/sales-agent/recommendations/${id}/reject`, { approved_by, comments }),
   },
   generalAgent: {
     chat: (message: string, history: { role: "user" | "assistant"; content: string }[]) =>
       client.post<{ reply: string }>("/v1/general-agent/chat", { company_id: COMPANY_ID, message, history }),
   },
   accountsReceivable: {
-    list: (params?: { estado?: string; customer_id?: string; limit?: number; offset?: number }) => client.get<AccountsReceivable[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable`, params),
+    list: (params?: { estado?: string; customer_id?: string; search?: string; limit?: number; offset?: number }) => client.get<AccountsReceivable[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable`, params),
     count: (params?: { estado?: string }) => client.get<{ total: number }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/count`, params),
     get: (id: string) => client.get<AccountsReceivable>(`/v1/accounts-receivable/${id}`),
     create: (data: Partial<AccountsReceivable>) => client.post<AccountsReceivable>("/v1/accounts-receivable", data),
@@ -861,10 +1255,10 @@ export const api = {
     updateSchedule: (config: Partial<BackupScheduleConfig>) => client.put<BackupScheduleConfig>("/v1/backups/schedule", config),
   },
   variants: {
-    list: (productId: string) => client.get<ProductVariant[]>(`/v1/variants/product/${productId}`),
-    get: (id: string) => client.get<ProductVariant>(`/v1/variants/${id}`),
-    create: (data: Partial<ProductVariant>) => client.post<ProductVariant>("/v1/variants", data),
-    update: (id: string, data: Partial<ProductVariant>) => client.patch<ProductVariant>(`/v1/variants/${id}`, data),
+    list: (productId?: string) => client.get<any[]>("/v1/variants", { product_id: productId } as any),
+    get: (id: string) => client.get<any>(`/v1/variants/${id}`),
+    create: (data: any) => client.post<any>("/v1/variants", { ...data, company_id: COMPANY_ID }),
+    update: (id: string, data: any) => client.patch<any>(`/v1/variants/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/variants/${id}`),
   },
   priceLists: {
@@ -889,6 +1283,10 @@ export const api = {
     deliveries: () => client.get<IntegrationDelivery[]>("/api/integrations/deliveries"),
     getDelivery: (id: string) => client.get<IntegrationDelivery>(`/api/integrations/deliveries/${id}`),
     retryDelivery: (id: string) => client.post<IntegrationDelivery>(`/api/integrations/deliveries/${id}/retry`),
+    posKpis: () => client.get<any>("/v1/integrations/pos/kpis"),
+    posTransactions: (params?: { limit?: number; procesador?: string }) => client.get<any[]>("/v1/integrations/pos/transactions", params),
+    posMatch: (data: any) => client.post<any[]>("/v1/integrations/pos/match", data),
+    posClaim: (data: any) => client.post<any>("/v1/integrations/pos/claim", data),
   },
   intelicont: {
     syncConfig: () => client.get<any>("/v1/intelicont/sync-config"),
@@ -910,6 +1308,12 @@ export const api = {
     pushAnomalies: () => client.post<any>("/v1/inteliaudit/push-anomalies"),
   },
   sueldok: {
+    getSSOUrl: (redirect?: string, companyId?: string) => client.get<any>("/v1/sueldok/sso-url", { redirect, company_id: companyId }),
+    getSummary: (companyId?: string) => client.get<any>("/v1/sueldok/summary", { company_id: companyId }),
+    getShifts: (companyId?: string) => client.get<any>("/v1/sueldok/shifts", { company_id: companyId }),
+    syncShifts: (data: any) => client.post<any>("/v1/sueldok/sync-shifts", data),
+    getProductivityBonuses: (companyId?: string) => client.get<any[]>("/v1/sueldok/productivity-bonuses", { company_id: companyId }),
+    exportBonuses: (data: any) => client.post<any>("/v1/sueldok/export-bonuses", data),
     syncConfig: () => client.get<any>("/v1/sueldok/sync-config"),
     createSyncConfig: (data: unknown) => client.post<any>("/v1/sueldok/sync-config", data),
     updateSyncConfig: (data: unknown) => client.put<any>("/v1/sueldok/sync-config", data),
@@ -983,11 +1387,12 @@ export const api = {
     bySupplier: (companyId: string) => client.get<any>(`/v1/companies/${companyId}/agreements/by-supplier`),
   },
   kits: {
-    list: () => client.get<Kit[]>("/v1/kits"),
-    get: (id: string) => client.get<Kit>(`/v1/kits/${id}`),
-    create: (data: Partial<Kit>) => client.post<Kit>("/v1/kits", data),
-    update: (id: string, data: Partial<Kit>) => client.patch<Kit>(`/v1/kits/${id}`, data),
+    list: () => client.get<any[]>("/v1/kits"),
+    get: (id: string) => client.get<any>(`/v1/kits/${id}`),
+    create: (data: any) => client.post<any>("/v1/kits", { ...data, company_id: COMPANY_ID }),
+    update: (id: string, data: any) => client.put<any>(`/v1/kits/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/kits/${id}`),
+    calculatePrice: (id: string) => client.get<any>(`/v1/kits/${id}/price`),
   },
   loyalty: {
     getConfig: (companyId: string) => client.get<LoyaltyConfig>(`/v1/loyalty/config/${companyId}`),
@@ -1310,6 +1715,12 @@ export const api = {
       create: (data: { sale_id: string; tipo: string; motivo: string; total?: number }) => client.post<NotaCreditoDebito>("/v1/fiscal/notas", data),
       emitir: (notaId: string) => client.post<NotaCreditoDebito>(`/v1/fiscal/notas/${notaId}/emitir`),
     },
+    secuencias: {
+      list: (companyId?: string) => client.get<any[]>(`/v1/fiscal/secuencias`, { company_id: companyId || COMPANY_ID }),
+      create: (data: any) => client.post<any>("/v1/fiscal/secuencias", { company_id: COMPANY_ID, ...data }),
+      update: (id: string, data: any) => client.put<any>(`/v1/fiscal/secuencias/${id}`, data),
+      delete: (id: string) => client.delete<void>(`/v1/fiscal/secuencias/${id}`),
+    },
   },
   distribuidora: {
     dashboard: (companyId: string) => client.get<DistribuidoraDashboard>(`/v1/distribuidora/dashboard/${companyId}`),
@@ -1391,7 +1802,7 @@ export const api = {
         },
       },
       performance: {
-        calculate: (sellerId: string, periodType?: string) => client.post<any>(`/v1/distribuidora/performance/${sellerId}/calculate`, null, { params: { period_type: periodType } }),
+        calculate: (sellerId: string, periodType?: string) => client.post<any>(`/v1/distribuidora/performance/${sellerId}/calculate?period_type=${periodType || 'monthly'}`),
         history: (sellerId: string, periodType?: string, limit?: number) => client.get<any[]>(`/v1/distribuidora/performance/${sellerId}/history`, { period_type: periodType, limit } as any),
         ranking: (companyId: string, periodType?: string) => client.get<any[]>(`/v1/distribuidora/performance/ranking/${companyId}`, { period_type: periodType } as any),
       },
@@ -1791,32 +2202,18 @@ export const api = {
     dashboard: () => client.get<any>("/v1/supermer/dsd/dashboard"),
   },
 
-  // ===== FASE 2 SUPERMER — Physical Inventory =====
-  inventory: {
-    sessions: {
-      list: (params?: { area?: string; estado?: string }) => client.get<any[]>("/v1/supermer/inventory/sessions", params),
-      get: (id: string) => client.get<any>(`/v1/supermer/inventory/sessions/${id}`),
-      create: (data: any) => client.post<any>("/v1/supermer/inventory/sessions", data),
-      update: (id: string, data: any) => client.put<any>(`/v1/supermer/inventory/sessions/${id}`, data),
-      complete: (id: string) => client.post<any>(`/v1/supermer/inventory/sessions/${id}/complete`),
-      items: {
-        list: (sessionId: string, params?: { requiere_ajuste?: boolean }) => client.get<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/items`, params),
-        create: (sessionId: string, data: any) => client.post<any>(`/v1/supermer/inventory/sessions/${sessionId}/items`, data),
-        batchCreate: (sessionId: string, data: any[]) => client.post<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/items/batch`, data),
+  // ===== PORTAL DE PROVEEDORES (ADMIN & AUTOSERVICIO) =====
+  supplierPortal: {
+    admin: {
+      users: {
+        list: () => client.get<any[]>("/v1/supplier-portal/admin/users"),
+        create: (data: any) => client.post<any>("/v1/supplier-portal/admin/users", data),
+        toggle: (userId: string) => client.put<any>(`/v1/supplier-portal/admin/users/${userId}/toggle`, {}),
       },
-      adjustments: {
-        list: (sessionId: string, params?: { estado?: string }) => client.get<any[]>(`/v1/supermer/inventory/sessions/${sessionId}/adjustments`, params),
-        create: (sessionId: string, data: any) => client.post<any>(`/v1/supermer/inventory/sessions/${sessionId}/adjustments`, data),
+      documents: {
+        list: (params?: { tipo?: string }) => client.get<any[]>("/v1/supplier-portal/admin/documents", params),
       },
     },
-    items: {
-      update: (itemId: string, data: any) => client.put<any>(`/v1/supermer/inventory/items/${itemId}`, data),
-    },
-    adjustments: {
-      approve: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/approve`),
-      reject: (adjId: string) => client.post<any>(`/v1/supermer/inventory/adjustments/${adjId}/reject`),
-    },
-    dashboard: () => client.get<any>("/v1/supermer/inventory/dashboard"),
   },
 
   // ===== FASE 2 SUPERMER — Auto Replenishment =====
@@ -1929,6 +2326,7 @@ export const api = {
   // ===== Customer 360 Analytics =====
   customer360: {
     getDashboard: (companyId: string) => client.get<any>("/v1/customer360/dashboard", { company_id: companyId }),
+    getProfile: (customerId: string) => client.get<any>(`/v1/customer360/profile/${customerId}`),
     computeBasket: (companyId: string, customerId: string) => client.post<any>(`/v1/customer360/basket/compute/${customerId}`, { company_id: companyId }),
     getBasket: (companyId: string, customerId: string) => client.get<any>(`/v1/customer360/basket/${customerId}`, { company_id: companyId }),
     computePenetration: (companyId: string, customerId: string) => client.post<any>(`/v1/customer360/penetration/compute/${customerId}`, { company_id: companyId }),
@@ -2205,7 +2603,7 @@ export const api = {
       create: (data: any) => client.post<any>("/v1/suscripciones/plans", data),
       get: (planId: string) => client.get<any>(`/v1/suscripciones/plans/${planId}`),
       update: (planId: string, data: any) => client.put<any>(`/v1/suscripciones/plans/${planId}`, data),
-      delete: (planId: string) => client.del<any>(`/v1/suscripciones/plans/${planId}`),
+      delete: (planId: string) => client.delete<any>(`/v1/suscripciones/plans/${planId}`),
       skip: (planId: string) => client.post<any>(`/v1/suscripciones/plans/${planId}/skip`),
       pause: (planId: string, reason?: string) => client.post<any>(`/v1/suscripciones/plans/${planId}/pause${reason ? `?reason=${reason}` : ""}`),
       resume: (planId: string) => client.post<any>(`/v1/suscripciones/plans/${planId}/resume`),
@@ -2265,5 +2663,27 @@ export const api = {
       update: (storefrontId: string, data: any) => client.patch<any>(`/v1/retail/storefront/${storefrontId}`, data),
       publicBySlug: (slug: string) => client.get<any>(`/v1/retail/public/storefront/${slug}`),
     },
+  },
+  supplierKpis: {
+    listPeriods: (supplierId: string) => client.get<any[]>(`/v1/supplier-kpis/periods?supplier_id=${supplierId}`),
+    createPeriod: (data: any) => client.post<any>("/v1/supplier-kpis/periods", data),
+    getSummary: (periodId: string) => client.get<any>(`/v1/supplier-kpis/periods/${periodId}/summary`),
+    getDashboard: (companyId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: companyId || COMPANY_ID }),
+    updateIndicator: (id: string, data: any) => client.put<any>(`/v1/supplier-kpis/indicators/${id}`, data),
+    deleteIndicator: (id: string) => client.delete<void>(`/v1/supplier-kpis/indicators/${id}`),
+    addIndicator: (periodId: string, data: any) => client.post<any>(`/v1/supplier-kpis/periods/${periodId}/indicators`, data),
+  },
+  posTerminals: {
+    list: () => client.get<any[]>(`/v1/pos-terminals`, { company_id: COMPANY_ID }),
+    getByHostname: (hostname: string) => client.get<any>(`/v1/pos-terminals/by-hostname/${encodeURIComponent(hostname)}`, { company_id: COMPANY_ID }),
+    create: (data: any) => client.post<any>("/v1/pos-terminals", { company_id: COMPANY_ID, ...data }),
+    update: (id: string, data: any) => client.put<any>(`/v1/pos-terminals/${id}`, data),
+    delete: (id: string) => client.delete<void>(`/v1/pos-terminals/${id}`),
+  },
+  supervisorRequests: {
+    list: (params?: any) => client.get<any[]>("/v1/supervisor-requests", { company_id: COMPANY_ID, ...params }),
+    get: (id: string) => client.get<any>(`/v1/supervisor-requests/${id}`),
+    create: (data: any) => client.post<any>("/v1/supervisor-requests", { company_id: COMPANY_ID, ...data }),
+    resolve: (id: string, data?: any) => client.post<any>(`/v1/supervisor-requests/${id}/resolve`, data),
   },
 }

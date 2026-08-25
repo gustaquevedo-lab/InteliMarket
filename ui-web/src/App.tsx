@@ -11,15 +11,17 @@ import ErrorBoundary from "./components/ErrorBoundary"
 const Login = lazy(() => import("./pages/Login"))
 const Dashboard = lazy(() => import("./pages/Dashboard"))
 const MarketingPage = lazy(() => import("./pages/marketing/MarketingPage"))
-const SifenPage = lazy(() => import("./pages/SifenPage"))
+const SifenPage = lazy(() => import("./pages/sifen/SifenPage"))
 const ProductsPage = lazy(() => import("./pages/products/ProductsPage"))
 const InventoryPage = lazy(() => import("./pages/inventory/InventoryPage"))
 const CustomersPage = lazy(() => import("./pages/customers/CustomersPage"))
 const SalesPage = lazy(() => import("./pages/sales/SalesPage"))
 const PurchasesPage = lazy(() => import("./pages/purchases/PurchasesPage"))
 const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"))
+const ExecutiveReportPage = lazy(() => import("./pages/gerencial/ExecutiveReportPage"))
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"))
 const POSPage = lazy(() => import("./pages/pos/POSPage"))
+const SupervisorPage = lazy(() => import("./pages/pos/SupervisorPage"))
 const CajaPage = lazy(() => import("./pages/caja/CajaPage"))
 const AdminPage = lazy(() => import("./pages/admin/AdminPage"))
 const VerticalsPage = lazy(() => import("./pages/admin/VerticalsPage"))
@@ -32,14 +34,14 @@ const LogisticsPage = lazy(() => import("./pages/logistics/LogisticsPage"))
 const AuditPage = lazy(() => import("./pages/audit/AuditPage"))
 const SueldokPage = lazy(() => import("./pages/sueldok/SueldokPage"))
 const ScalesPage = lazy(() => import("./pages/scales/ScalesPage"))
-const QuotesPage = lazy(() => import("./pages/quotes/QuotesPage"))
-const SalesOrdersPage = lazy(() => import("./pages/sales-orders/SalesOrdersPage"))
+const PedidosCotizacionesPage = lazy(() => import("./pages/sales-orders/PedidosCotizacionesPage"))
 const ReturnsPage = lazy(() => import("./pages/returns/ReturnsPage"))
 const DiscountsPage = lazy(() => import("./pages/discounts/DiscountsPage"))
 const CommissionsPage = lazy(() => import("./pages/commissions/CommissionsPage"))
 const AccountsReceivablePage = lazy(() => import("./pages/accounts-receivable/AccountsReceivablePage"))
 const FinanceAgentPage = lazy(() => import("./pages/finance-agent/FinanceAgentPage"))
 const SalesAgentPage = lazy(() => import("./pages/sales-agent/SalesAgentPage"))
+const MarketingAgentPage = lazy(() => import("./pages/marketing-agent/MarketingAgentPage"))
 const RbacPage = lazy(() => import("./pages/rbac/RbacPage"))
 const UsuariosPage = lazy(() => import("./pages/usuarios/UsuariosPage"))
 const CrmPage = lazy(() => import("./pages/crm/CrmPage"))
@@ -59,11 +61,21 @@ const ExpensesPage = lazy(() => import("./pages/expenses/ExpensesPage"))
 const FinancialPage = lazy(() => import("./pages/financial/FinancialPage"))
 const BancosPage = lazy(() => import("./pages/bancos/BancosPage"))
 const SupplierContractsPage = lazy(() => import("./pages/supplier-contracts/SupplierContractsPage"))
+const ChequesPage = lazy(() => import("./pages/cheques/ChequesPage"))
+const PaymentsPage = lazy(() => import("./pages/payments/PaymentsPage"))
 const SupplierLogin = lazy(() => import("./pages/supplier-portal/SupplierLogin"))
 const SupplierDashboard = lazy(() => import("./pages/supplier-portal/SupplierDashboard"))
 const CustomerAgreementsPage = lazy(() => import("./pages/customer-agreements/CustomerAgreementsPage"))
 const DistribuidoraPage = lazy(() => import("./pages/distribuidora/DistribuidoraPage"))
 const SupermerPage = lazy(() => import("./pages/supermer/SupermerPage"))
+const CarniceriaDespostePage = lazy(() => import("./pages/operations/CarniceriaDespostePage"))
+const VerduleriaFrescosPage = lazy(() => import("./pages/operations/VerduleriaFrescosPage"))
+const PanaderiaRotiseriaPage = lazy(() => import("./pages/operations/PanaderiaRotiseriaPage"))
+const HaccpPage = lazy(() => import("./pages/operations/HaccpPage"))
+const EquipmentPage = lazy(() => import("./pages/operations/EquipmentPage"))
+const DsdPage = lazy(() => import("./pages/operations/DsdPage"))
+const EslPage = lazy(() => import("./pages/operations/EslPage"))
+const PriceCheckerKioskPage = lazy(() => import("./pages/kiosk/PriceCheckerKioskPage"))
 const CajaRapidaPage = lazy(() => import("./pages/pos/CajaRapidaPage"))
 const SelfCheckoutPage = lazy(() => import("./pages/pos/SelfCheckoutPage"))
 const TransferenciasPage = lazy(() => import("./pages/inventory/TransferenciasPage"))
@@ -86,6 +98,7 @@ const AsistenteVirtualPage = lazy(() => import("./pages/asistente-virtual/Asiste
 const ClientesPage = lazy(() => import("./pages/clientes/ClientesPage"))
 const ScanAndGoPage = lazy(() => import("./pages/scanandgo/ScanAndGoPage"))
 const Customer360Page = lazy(() => import("./pages/customer360/Customer360Page"))
+const CreditScoringPage = lazy(() => import("./pages/credit-scoring/CreditScoringPage"))
 const SchedulePage = lazy(() => import("./pages/schedule/SchedulePage"))
 const ProductividadPage = lazy(() => import("./pages/productividad/ProductividadPage"))
 const CapacitacionPage = lazy(() => import("./pages/capacitacion/CapacitacionPage"))
@@ -116,6 +129,7 @@ const LoyaltyPage = lazy(() => import("./pages/loyalty/LoyaltyPage"))
 const PortalPage = lazy(() => import("./pages/portal/PortalPage"))
 const ClientAppPage = lazy(() => import("./pages/client-app/ClientAppPage"))
 const SifenAvanzadoPage = lazy(() => import("./pages/sifen-avanzado/SifenAvanzadoPage"))
+const SupplierPortalHubPage = lazy(() => import("./pages/supplier-portal/SupplierPortalHubPage"))
 
 function PageLoader() {
   return (
@@ -173,6 +187,10 @@ function AppRoutes() {
       <Route path="/tienda/pedidos" element={<Suspense fallback={<PageLoader />}><EcommerceOrders /></Suspense>} />
       <Route path="/tienda/pedido/:id" element={<Suspense fallback={<PageLoader />}><EcommerceOrderDetail /></Suspense>} />
       <Route path="/tienda/dashboard" element={<Suspense fallback={<PageLoader />}><EcommerceOrders /></Suspense>} />
+      <Route path="/verificador" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
+      <Route path="/consulta-precios" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
+      <Route path="/pos" element={<ProtectedRoute><Suspense fallback={<PageLoader />}><POSPage /></Suspense></ProtectedRoute>} />
+      <Route path="/supervisor" element={<Suspense fallback={<PageLoader />}><SupervisorPage /></Suspense>} />
       <Route
         path="/"
         element={
@@ -184,7 +202,6 @@ function AppRoutes() {
         <Route index element={<Navigate to={isElectron ? "/pos" : "/dashboard"} replace />} />
         {[
           ["dashboard", <Dashboard />],
-          ["pos", <CajaRapidaPage />],
           ["self-checkout", <SelfCheckoutPage />],
           ["transferencias", <TransferenciasPage />],
           ["boveda", <BovedaPage />],
@@ -195,29 +212,37 @@ function AppRoutes() {
           ["purchases", <PurchasesPage />],
           ["customers", <CustomersPage />],
           ["reports", <ReportsPage />],
+          ["gerencial", <ExecutiveReportPage />],
           ["settings", <SettingsPage />],
           ["sifen", <SifenPage />],
           ["caja", <CajaPage />],
           ["admin", <AdminPage />],
           ["admin/verticals", <VerticalsPage />],
           ["audit", <AuditPage />],
-          ["quotes", <QuotesPage />],
-          ["sales-orders", <SalesOrdersPage />],
+          ["quotes", <PedidosCotizacionesPage />],
+          ["sales-orders", <PedidosCotizacionesPage />],
           ["returns", <ReturnsPage />],
           ["discounts", <DiscountsPage />],
           ["commissions", <CommissionsPage />],
           ["accounts-receivable", <AccountsReceivablePage />],
           ["finance-agent", <FinanceAgentPage />],
           ["sales-agent", <SalesAgentPage />],
+          ["marketing-agent", <MarketingAgentPage />],
           ["notifications", <NotificationsPage />],
           ["intelicont", <InteliContPage />],
           ["integrations", <IntegrationsPage />],
           ["sueldok", <SueldokPage />],
           ["promociones", <PromotionsPage />],
+          ["crm", <CrmPage />],
+          ["intellizapp", <IntelliZappPage />],
+          ["whatsapp", <IntelliZappPage />],
           ["gastos", <ExpensesPage />],
           ["financiero", <FinancialPage />],
           ["bancos", <BancosPage />],
+          ["cheques", <ChequesPage />],
+          ["payments", <PaymentsPage />],
           ["contratos-proveedores", <SupplierContractsPage />],
+          ["portal/proveedores", <SupplierPortalHubPage />],
           ["acuerdos-clientes", <CustomerAgreementsPage />],
           ["distribuidora", <DistribuidoraPage />],
           ["sellers", <SellersPage />],
@@ -237,45 +262,49 @@ function AppRoutes() {
         <Route path="logistics" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="logistics"><LogisticsPage /></FeatureRoute></Suspense>} />
         <Route path="rbac" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="rbac"><RbacPage /></FeatureRoute></Suspense>} />
         <Route path="usuarios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="rbac"><UsuariosPage /></FeatureRoute></Suspense>} />
-        <Route path="crm" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="crm"><CrmPage /></FeatureRoute></Suspense>} />
-        <Route path="whatsapp" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="whatsapp"><WhatsAppPage /></FeatureRoute></Suspense>} />
-        <Route path="intellizapp" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intellizapp"><IntelliZappPage /></FeatureRoute></Suspense>} />
-        <Route path="marketing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="marketing_automation"><MarketingPage /></FeatureRoute></Suspense>} />
         <Route path="pharma" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pharma"><PharmaPage /></FeatureRoute></Suspense>} />
         <Route path="pharma-pos" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pharma"><PharmaPOSPage /></FeatureRoute></Suspense>} />
         <Route path="intelientregas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intelientregas"><InteliEntregasPage /></FeatureRoute></Suspense>} />
         <Route path="boutique" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="boutique_pedidos"><BoutiquePage /></FeatureRoute></Suspense>} />
         <Route path="servicios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="servicios"><ServiciosPage /></FeatureRoute></Suspense>} />
         <Route path="supermer" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SupermerPage /></FeatureRoute></Suspense>} />
-        <Route path="escalas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><ScalesPage /></FeatureRoute></Suspense>} />
+        <Route path="desposte" element={<Suspense fallback={<PageLoader />}><CarniceriaDespostePage /></Suspense>} />
+        <Route path="frescos" element={<Suspense fallback={<PageLoader />}><VerduleriaFrescosPage /></Suspense>} />
+        <Route path="panaderia-rotiseria" element={<Suspense fallback={<PageLoader />}><PanaderiaRotiseriaPage /></Suspense>} />
+        <Route path="haccp" element={<Suspense fallback={<PageLoader />}><HaccpPage /></Suspense>} />
+        <Route path="equipos-mantenimiento" element={<Suspense fallback={<PageLoader />}><EquipmentPage /></Suspense>} />
+        <Route path="dsd" element={<Suspense fallback={<PageLoader />}><DsdPage /></Suspense>} />
+        <Route path="esl" element={<Suspense fallback={<PageLoader />}><EslPage /></Suspense>} />
+        <Route path="escalas" element={<Suspense fallback={<PageLoader />}><ScalesPage /></Suspense>} />
         <Route path="distribuidora" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="distribuidora"><DistribuidoraPage /></FeatureRoute></Suspense>} />
         <Route path="advanced-inventory" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><InventoryAdvancedPage /></FeatureRoute></Suspense>} />
         <Route path="integrated-finance" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="integrated_finance"><IntegratedFinancePage /></FeatureRoute></Suspense>} />
-        <Route path="smart-pricing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="smart_pricing"><SmartPricingPage /></FeatureRoute></Suspense>} />
-        <Route path="demand-forecast" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="demand_forecast"><DemandForecastPage /></FeatureRoute></Suspense>} />
+        <Route path="smart-pricing" element={<Suspense fallback={<PageLoader />}><SmartPricingPage /></Suspense>} />
+        <Route path="demand-forecast" element={<Suspense fallback={<PageLoader />}><DemandForecastPage /></Suspense>} />
         <Route path="auto-replenish" element={<Navigate to="/demand-forecast" replace />} />
         <Route path="intelligent-routing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intelligent_routing"><IntelligentRoutingPage /></FeatureRoute></Suspense>} />
-        <Route path="oportunidades" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="comerciales"><OportunidadesPage /></FeatureRoute></Suspense>} />
+        <Route path="oportunidades" element={<Suspense fallback={<PageLoader />}><OportunidadesPage /></Suspense>} />
         <Route path="cold-chain" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="cold_chain"><ColdChainPage /></FeatureRoute></Suspense>} />
         <Route path="asistente-virtual" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="asistente_virtual"><AsistenteVirtualPage /></FeatureRoute></Suspense>} />
-        <Route path="clientes" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="clientes_fidelizacion"><ClientesPage /></FeatureRoute></Suspense>} />
+        <Route path="clientes" element={<Suspense fallback={<PageLoader />}><ClientesPage /></Suspense>} />
         <Route path="scanandgo" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="scanandgo"><ScanAndGoPage /></FeatureRoute></Suspense>} />
-        <Route path="customer360" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="customer360"><Customer360Page /></FeatureRoute></Suspense>} />
-        <Route path="schedule" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="schedule"><SchedulePage /></FeatureRoute></Suspense>} />
-        <Route path="productividad" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="productividad"><ProductividadPage /></FeatureRoute></Suspense>} />
+        <Route path="customer360" element={<Suspense fallback={<PageLoader />}><Customer360Page /></Suspense>} />
+        <Route path="credit-scoring" element={<Suspense fallback={<PageLoader />}><CreditScoringPage /></Suspense>} />
+        <Route path="schedule" element={<Suspense fallback={<PageLoader />}><SchedulePage /></Suspense>} />
+        <Route path="productividad" element={<Suspense fallback={<PageLoader />}><ProductividadPage /></Suspense>} />
         <Route path="capacitacion" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="capacitacion"><CapacitacionPage /></FeatureRoute></Suspense>} />
-        <Route path="pyg-diario" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pyg_diario"><PyGDiarioPage /></FeatureRoute></Suspense>} />
-        <Route path="shrinkage" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="shrinkage"><ShrinkagePage /></FeatureRoute></Suspense>} />
-        <Route path="forecast-avanzado" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="forecast_avanzado"><ForecastAvanzadoPage /></FeatureRoute></Suspense>} />
-        <Route path="benchmarking" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="benchmarking"><BenchmarkingPage /></FeatureRoute></Suspense>} />
-        <Route path="ecommerce-sm" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="ecommerce_sm"><EcommerceSmPage /></FeatureRoute></Suspense>} />
-        <Route path="delivery-integrations" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="delivery_integrations"><DeliveryIntegrationsPage /></FeatureRoute></Suspense>} />
+        <Route path="pyg-diario" element={<Suspense fallback={<PageLoader />}><PyGDiarioPage /></Suspense>} />
+        <Route path="shrinkage" element={<Suspense fallback={<PageLoader />}><ShrinkagePage /></Suspense>} />
+        <Route path="forecast-avanzado" element={<Suspense fallback={<PageLoader />}><ForecastAvanzadoPage /></Suspense>} />
+        <Route path="benchmarking" element={<Suspense fallback={<PageLoader />}><BenchmarkingPage /></Suspense>} />
+        <Route path="ecommerce-sm" element={<Suspense fallback={<PageLoader />}><EcommerceSmPage /></Suspense>} />
+        <Route path="delivery-integrations" element={<Suspense fallback={<PageLoader />}><DeliveryIntegrationsPage /></Suspense>} />
         <Route path="suscripciones" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="suscripciones"><SuscripcionesPage /></FeatureRoute></Suspense>} />
         <Route path="retail" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="retail"><RetailPage /></FeatureRoute></Suspense>} />
         <Route path="sifen-avanzado" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sifen_avanzado"><SifenAvanzadoPage /></FeatureRoute></Suspense>} />
-        <Route path="variants" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="variants"><VariantsPage /></FeatureRoute></Suspense>} />
-        <Route path="kits" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="kits"><KitsPage /></FeatureRoute></Suspense>} />
-        <Route path="price-lists" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="price_lists"><PriceListsPage /></FeatureRoute></Suspense>} />
+        <Route path="variants" element={<Suspense fallback={<PageLoader />}><VariantsPage /></Suspense>} />
+        <Route path="kits" element={<Suspense fallback={<PageLoader />}><KitsPage /></Suspense>} />
+        <Route path="price-lists" element={<Suspense fallback={<PageLoader />}><PriceListsPage /></Suspense>} />
         <Route path="imports" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="imports"><ImportsPage /></FeatureRoute></Suspense>} />
         <Route path="email" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="email"><EmailPage /></FeatureRoute></Suspense>} />
         <Route path="bancard" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="bancard"><BancardPage /></FeatureRoute></Suspense>} />

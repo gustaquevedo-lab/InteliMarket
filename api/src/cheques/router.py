@@ -18,6 +18,8 @@ router = APIRouter(prefix="/api/v1/cheques", tags=["cheques"])
 async def list_cheques(
     estado: str | None = Query(None),
     supplier_id: str | None = Query(None),
+    bank_account_id: str | None = Query(None),
+    search: str | None = Query(None),
     vencidos: bool | None = Query(None),
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
@@ -26,12 +28,17 @@ async def list_cheques(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_cheques(db, user["company_id"], estado, supplier_id, vencidos, fecha_desde, fecha_hasta, limit, offset)
+    return await service.list_cheques(
+        db, user["company_id"], estado, supplier_id, vencidos, fecha_desde, fecha_hasta,
+        bank_account_id, search, limit, offset,
+    )
 
 
 @router.get("/export/excel")
 async def export_cheques_excel(
     estado: str | None = Query(None),
+    bank_account_id: str | None = Query(None),
+    search: str | None = Query(None),
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -39,7 +46,10 @@ async def export_cheques_excel(
 ):
     from api.src.cheques.export_service import export_cheques_excel as build_excel
 
-    cheques = await service.list_cheques(db, user["company_id"], estado, None, None, fecha_desde, fecha_hasta, limit=10000, offset=0)
+    cheques = await service.list_cheques(
+        db, user["company_id"], estado, None, None, fecha_desde, fecha_hasta,
+        bank_account_id, search, limit=10000, offset=0,
+    )
     xlsx_bytes = build_excel(cheques, fecha_desde, fecha_hasta)
     return StreamingResponse(
         iter([xlsx_bytes]),
@@ -51,6 +61,8 @@ async def export_cheques_excel(
 @router.get("/export/pdf")
 async def export_cheques_pdf(
     estado: str | None = Query(None),
+    bank_account_id: str | None = Query(None),
+    search: str | None = Query(None),
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -59,7 +71,10 @@ async def export_cheques_pdf(
     from api.src.financial.ap_pdf_reports import generate_cheques_pdf
     from api.src.financial.router import _get_company_info
 
-    cheques = await service.list_cheques(db, user["company_id"], estado, None, None, fecha_desde, fecha_hasta, limit=10000, offset=0)
+    cheques = await service.list_cheques(
+        db, user["company_id"], estado, None, None, fecha_desde, fecha_hasta,
+        bank_account_id, search, limit=10000, offset=0,
+    )
     company = await _get_company_info(db, user["company_id"])
     generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
     pdf_bytes = generate_cheques_pdf(company, cheques, fecha_desde, fecha_hasta, generated_by)

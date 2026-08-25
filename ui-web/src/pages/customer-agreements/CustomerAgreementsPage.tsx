@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect, useMemo } from "react"
 import {
   BarChart3, Search, Plus, Loader2, CheckCircle, XCircle, AlertTriangle,
@@ -5,7 +6,7 @@ import {
   ChevronDown, Tag, Package, ArrowRight, Edit, Trash2, X, Building2,
   Users, Target, Percent, RefreshCw, Bell, Gauge, Eye, Download,
   Filter, LayoutGrid, ArrowUpDown, PieChart, Activity, BadgePercent,
-  CreditCard, History, ArrowUpRight, Layers, Save, Copy
+  CreditCard, History, ArrowUpRight, Layers, Save, Copy, FileText
 } from "lucide-react"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -233,7 +234,7 @@ export default function CustomerAgreementsPage() {
         <div className="flex gap-4">
           {Object.entries(analytics.byTipo).map(([tipo, count]) => (
             <div key={tipo} className="flex-1 bg-gray-50 dark:bg-slate-700 rounded-xl p-4 text-center">
-              <p className="text-2xl font-bold">{count as number}</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">{count as number}</p>
               <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mt-1">{tipo.replace(/_/g, " ")}</p>
             </div>
           ))}
@@ -485,9 +486,9 @@ export default function CustomerAgreementsPage() {
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-3 gap-4">
-          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-center"><p className="text-3xl font-bold text-red-600">{critical.length}</p><p className="text-xs font-black uppercase tracking-widest text-red-400 mt-1">Críticas</p></div>
-          <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4 text-center"><p className="text-3xl font-bold text-orange-600">{high.length}</p><p className="text-xs font-black uppercase tracking-widest text-orange-400 mt-1">Altas</p></div>
-          <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-4 text-center"><p className="text-3xl font-bold text-yellow-600">{medium.length}</p><p className="text-xs font-black uppercase tracking-widest text-yellow-400 mt-1">Medias</p></div>
+          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-center"><p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-red-600">{critical.length}</p><p className="text-xs font-black uppercase tracking-widest text-red-400 mt-1">Críticas</p></div>
+          <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4 text-center"><p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-orange-600">{high.length}</p><p className="text-xs font-black uppercase tracking-widest text-orange-400 mt-1">Altas</p></div>
+          <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-4 text-center"><p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-yellow-600">{medium.length}</p><p className="text-xs font-black uppercase tracking-widest text-yellow-400 mt-1">Medias</p></div>
         </div>
         {alerts.length === 0 ? (
           <div className="card p-12 text-center text-gray-400"><CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-20 text-emerald-500" />No hay alertas activas</div>
@@ -570,7 +571,7 @@ export default function CustomerAgreementsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Acuerdos con Clientes</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Acuerdos con Clientes</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">Precios especiales, descuentos, crédito y fidelización B2B</p>
         </div>
         <div className="flex gap-2">
@@ -617,9 +618,9 @@ export default function CustomerAgreementsPage() {
                 <div><label className="input-label">Moneda</label><select className="input-field" value={form.moneda} onChange={e => setForm(f => ({ ...f, moneda: e.target.value }))}><option value="PYG">PYG (Gs)</option><option value="USD">USD ($)</option></select></div>
                 <div><label className="input-label label-required">Inicio</label><input type="date" className="input-field" value={form.fecha_inicio} onChange={e => setForm(f => ({ ...f, fecha_inicio: e.target.value }))} /></div>
                 <div><label className="input-label label-required">Fin</label><input type="date" className="input-field" value={form.fecha_fin} onChange={e => setForm(f => ({ ...f, fecha_fin: e.target.value }))} /></div>
-                <div><label className="input-label">Descuento general (%)</label><input type="number" className="input-field" value={form.descuento_general_pct} onChange={e => setForm(f => ({ ...f, descuento_general_pct: e.target.value }))} min="0" max="100" step="0.5" /></div>
+                <div><label className="input-label">Descuento general (%)</label><input type="number" className="input-field" value={form.descuento_general_pct} onChange={e => setForm(f => ({ ...f, descuento_general_pct: Number(e.target.value) || 0 }))} min="0" max="100" step="0.5" /></div>
                 <div><label className="input-label">Plazo pago (días)</label><input type="number" className="input-field" value={form.plazo_pago_dias} onChange={e => setForm(f => ({ ...f, plazo_pago_dias: +e.target.value }))} /></div>
-                <div><label className="input-label">Límite crédito</label><input type="number" className="input-field" value={form.limite_credito} onChange={e => setForm(f => ({ ...f, limite_credito: e.target.value }))} /></div>
+                <div><label className="input-label">Límite crédito</label><input type="number" className="input-field" value={form.limite_credito} onChange={e => setForm(f => ({ ...f, limite_credito: Number(e.target.value) || 0 }))} /></div>
                 <div><label className="input-label">Archivo URL</label><input className="input-field" value={form.archivo_url} onChange={e => setForm(f => ({ ...f, archivo_url: e.target.value }))} placeholder="https://..." /></div>
               </div>
               <div>

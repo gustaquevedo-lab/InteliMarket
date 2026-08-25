@@ -9,16 +9,11 @@ type Tab = "dashboard" | "transacciones"
 
 interface Transaction {
   id: string
-  sale_id?: string
   monto?: number
   moneda?: string
-  estado: string
-  transaccion_id?: string
-  numero_tarjeta?: string
-  cuotas?: number
-  checkout_url?: string
-  fecha?: string
-  created_at: string
+  estado?: string
+  status?: string
+  [key: string]: any
 }
 
 export default function BancardPage() {
@@ -36,8 +31,8 @@ export default function BancardPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const data = await api.bancard.payments()
-      setTransactions(data)
+      const data = await api.bancard.payments("00000000-0000-0000-0000-000000000010")
+      setTransactions(data as any)
     } catch {
       toast.error("Error de conexión", "Configurá Bancard en las credenciales de la empresa")
     } finally {
@@ -53,8 +48,8 @@ export default function BancardPage() {
     (t.sale_id && t.sale_id.toLowerCase().includes(search.toLowerCase()))
   )
 
-  const totalApproved = transactions.filter(t => t.estado === "aprobado" || t.estado === "approved").reduce((a, b) => a + Number(b.monto || 0), 0)
-  const totalPending = transactions.filter(t => t.estado === "pendiente" || t.estado === "pending").reduce((a, b) => a + Number(b.monto || 0), 0)
+  const totalApproved = transactions.filter(t => t.status === "aprobado" || t.status === "approved").reduce((a, b) => a + Number(b.monto || 0), 0)
+  const totalPending = transactions.filter(t => t.status === "pendiente" || t.status === "pending").reduce((a, b) => a + Number(b.monto || 0), 0)
 
   const handleCheckout = async () => {
     if (!checkoutForm.monto || !checkoutForm.order_id) {
@@ -82,7 +77,7 @@ export default function BancardPage() {
     setVerifying(paymentId)
     try {
       const result = await api.bancard.verify(paymentId)
-      toast.success("Verificado", `Estado: ${result.estado}`)
+      toast.success("Verificado", `Estado: ${result.status}`)
       fetchData()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error verificando pago"
@@ -101,7 +96,7 @@ export default function BancardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <CreditCard className="w-6 h-6 text-primary" />
             Bancard
           </h1>
@@ -134,15 +129,15 @@ export default function BancardPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><CheckCircle className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Aprobados</span></div>
-              <p className="text-2xl font-bold text-green-500">{formatPYG(totalApproved)}</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-500">{formatPYG(totalApproved)}</p>
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><Clock className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Pendientes</span></div>
-              <p className="text-2xl font-bold text-amber-500">{formatPYG(totalPending)}</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-500">{formatPYG(totalPending)}</p>
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-3 mb-2"><CreditCard className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Transacciones</span></div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{transactions.length}</p>
+              <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{transactions.length}</p>
             </div>
           </div>
 
@@ -188,7 +183,7 @@ export default function BancardPage() {
                   </td>
                   <td className="table-td text-sm">{t.cuotas ? `${t.cuotas}x` : "—"}</td>
                   <td className="table-td">
-                    <StatusBadge status={t.estado} map={{
+                    <StatusBadge status={t.status ?? ""} map={{
                       approved: "badge-success",
                       aprobado: "badge-success",
                       pending: "badge-warning",

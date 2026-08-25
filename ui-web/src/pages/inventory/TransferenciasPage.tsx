@@ -124,7 +124,7 @@ export default function TransferenciasPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <ArrowLeftRight className="w-6 h-6 text-primary" />
             Transferencias entre Sucursales
           </h1>
@@ -146,7 +146,7 @@ export default function TransferenciasPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <ArrowLeftRight className="w-6 h-6 text-primary" />
             Transferencias entre Sucursales
           </h1>

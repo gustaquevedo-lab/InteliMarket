@@ -178,11 +178,11 @@ export default function EcommerceSmPage() {
             <div className="flex gap-3">
               <div className="bg-white/10 backdrop-blur-md border border-white/20 p-3 rounded-2xl text-center min-w-[100px]">
                 <p className="text-white text-xs font-semibold uppercase tracking-wider opacity-80">Hoy</p>
-                <p className="text-white text-2xl font-bold">{dashboard?.total_orders_today ?? 0}</p>
+                <p className="text-white text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">{dashboard?.total_orders_today ?? 0}</p>
               </div>
               <div className="bg-white/10 backdrop-blur-md border border-white/20 p-3 rounded-2xl text-center min-w-[100px]">
                 <p className="text-white text-xs font-semibold uppercase tracking-wider opacity-80">Semana</p>
-                <p className="text-white text-2xl font-bold">{dashboard?.total_orders_week ?? 0}</p>
+                <p className="text-white text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">{dashboard?.total_orders_week ?? 0}</p>
               </div>
               <div className="bg-white/10 backdrop-blur-md border border-white/20 p-3 rounded-2xl text-center min-w-[100px]">
                 <p className="text-white text-xs font-semibold uppercase tracking-wider opacity-80">Gs Prom.</p>

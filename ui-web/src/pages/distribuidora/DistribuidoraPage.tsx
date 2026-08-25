@@ -1,3 +1,4 @@
+import { useEntityLookup, getCustomerName } from "../../hooks/useEntityLookup"
 import { useState, useEffect } from "react"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -37,7 +38,19 @@ const StatusBadge = ({ status }: { status: string }) => {
   return <span className={"px-2 py-0.5 rounded-full text-[11px] font-bold " + (colors[status] || "bg-gray-100 text-gray-600")}>{status.replace(/_/g, " ")}</span>
 }
 
+
 export default function DistribuidoraPage() {
+  useEntityLookup()
+  const [custMap, setCustMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    api.customers.list({ limit: 500 }).then((res: any) => {
+      const list = Array.isArray(res) ? res : res?.data || []
+      const map: Record<string, string> = {}
+      list.forEach((c: any) => { if (c.id) map[c.id] = c.razon_social || c.nombre || c.ruc })
+      setCustMap(map)
+    }).catch(() => {})
+  }, [])
+
   const { user } = useAuth()
   const companyId = user?.tenant_id || user?.id || ""
   const toast = useToast()
@@ -379,7 +392,7 @@ export default function DistribuidoraPage() {
                       {routeCustomers.map((rc: any) => (
                         <tr key={rc.id} className="table-row">
                           <td className="table-td">{rc.orden_visita}</td>
-                          <td className="table-td font-mono text-xs">{rc.customer_id}</td>
+                          <td className="table-td font-mono text-xs">{getCustomerName(rc.customer_id)}</td>
                           <td className="table-td">{rc.dia_semana != null ? ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"][rc.dia_semana] : "-"}</td>
                         </tr>
                       ))}
@@ -398,7 +411,7 @@ export default function DistribuidoraPage() {
                         <tr><td colSpan={6} className="text-center py-8 text-gray-400">Sin visitas planificadas</td></tr>
                       ) : visits.filter(v => v.route_id === selectedRoute).slice(0, 20).map(v => (
                         <tr key={v.id} className="table-row">
-                          <td className="table-td font-mono text-xs">{v.customer_id?.slice(0, 8)}</td>
+                          <td className="table-td font-mono text-xs">{getCustomerName(v.customer_id)}</td>
                           <td className="table-td text-sm">{formatDate(v.fecha_planificada)}</td>
                           <td className="table-td"><StatusBadge status={v.estado} /></td>
                           <td className="table-td text-xs">{v.resultado || "-"}</td>
@@ -445,7 +458,7 @@ export default function DistribuidoraPage() {
                     <tr><td colSpan={5} className="text-center py-8 text-gray-400">Sin autorizaciones</td></tr>
                   ) : authorizations.map(a => (
                     <tr key={a.id} className="table-row">
-                      <td className="table-td font-mono text-xs">{a.customer_id?.slice(0, 8)}</td>
+                      <td className="table-td font-mono text-xs">{getCustomerName(a.customer_id)}</td>
                       <td className="table-td text-right font-mono">{formatPYG(a.monto_solicitado)}</td>
                       <td className="table-td text-right font-mono">{a.monto_autorizado ? formatPYG(a.monto_autorizado) : "-"}</td>
                       <td className="table-td"><StatusBadge status={a.estado} /></td>

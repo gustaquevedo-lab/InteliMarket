@@ -55,13 +55,25 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
-    allowedHosts: ['minisforum-ia', 'intelimarket-ia', 'localhost', '.ts.net'],
+    allowedHosts: true,
     watch: {
       usePolling: true,
     },
     proxy: {
       '/api': {
-        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+        target: process.env.VITE_API_PROXY_TARGET || 'http://100.83.91.76:8000',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://100.83.91.76:8000',
+        changeOrigin: true,
+      },
+      '/download': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://100.83.91.76:8000',
+        changeOrigin: true,
+      },
+      '/static': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://100.83.91.76:8000',
         changeOrigin: true,
       },
     },

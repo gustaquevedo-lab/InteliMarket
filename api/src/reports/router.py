@@ -45,8 +45,19 @@ async def sales_summary(fecha_desde: date | None = Query(None), fecha_hasta: dat
 
 
 @router.get("/sales/by-period")
-async def sales_by_period(agrupar_por: str = Query("dia", pattern="^(dia|semana|mes)$"), fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), branch_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def sales_by_period(agrupar_por: str = Query("dia", pattern="^(hora|dia|semana|mes)$"), fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), branch_id: str | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     return await service.get_sales_by_period(db, user["company_id"], agrupar_por, fecha_desde, fecha_hasta, branch_id)
+
+@router.get("/sales/chart-comparison")
+async def sales_chart_comparison(
+    agrupar_por: str = Query("dia", pattern="^(hora|dia|semana|mes)$"),
+    fecha_desde: date | None = Query(None),
+    fecha_hasta: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth)
+):
+    return await service.get_chart_comparison(db, user["company_id"], agrupar_por, fecha_desde, fecha_hasta)
+
 
 
 @router.get("/sales/by-category")
@@ -139,7 +150,7 @@ async def export_sales_summary(fecha_desde: date | None = Query(None), fecha_has
 
 
 @router.get("/export/sales-by-period")
-async def export_sales_by_period(agrupar_por: str = Query("dia", pattern="^(dia|semana|mes)$"), fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def export_sales_by_period(agrupar_por: str = Query("dia", pattern="^(hora|dia|semana|mes)$"), fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     data = await service.get_sales_by_period(db, user["company_id"], agrupar_por, fecha_desde, fecha_hasta)
     xlsx = export_service.export_sales_by_period(data, fecha_desde, fecha_hasta)
     return _excel_response(xlsx, "ventas_por_periodo.xlsx")

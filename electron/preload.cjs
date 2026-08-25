@@ -4,8 +4,11 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
   
-  // Impresión térmica 80mm
-  printReceipt: (html) => ipcRenderer.invoke('pos:print-receipt', html),
+  // Impresión térmica (silenciosa, sin diálogo de Windows)
+  printReceipt: (html, paperWidthMm) => ipcRenderer.invoke('pos:print-receipt', html, paperWidthMm),
+
+  // Impresión térmica ESC/POS cruda (bypassea el driver GDI de Windows)
+  printEscPos: (escposBase64, printerName) => ipcRenderer.invoke('pos:print-escpos', escposBase64, printerName),
   
   // Balanza Serial / USB (Balmak BCK30 & Toledo Prix)
   readScale: (comPort) => ipcRenderer.invoke('pos:read-scale-balmak', comPort),

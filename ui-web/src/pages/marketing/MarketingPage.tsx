@@ -1,3 +1,4 @@
+import { useEntityLookup, getCustomerName } from "../../hooks/useEntityLookup"
 import { useState, useEffect } from "react"
 import { useFeatures } from "../../context/FeatureContext"
 
@@ -33,7 +34,11 @@ function apiDelete(endpoint: string) {
   }).then((r) => { if (!r.ok) throw new Error(); return r.json() })
 }
 
+
+
+
 export default function MarketingPage() {
+  useEntityLookup()
   const [activeTab, setActiveTab] = useState("dashboard")
   const [loading, setLoading] = useState(true)
   const [dashboard, setDashboard] = useState<any>(null)
@@ -41,7 +46,7 @@ export default function MarketingPage() {
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Automatización de Marketing</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Automatización de Marketing</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Segmentación, campañas, alertas, ofertas y encuestas</p>
         </div>
       </div>
@@ -87,19 +92,19 @@ function DashboardTab() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card p-5">
           <p className="text-sm text-gray-500">Segmentos</p>
-          <p className="text-3xl font-bold text-blue-600 mt-1">{data?.segment_count || 0}</p>
+          <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-blue-600 mt-1">{data?.segment_count || 0}</p>
         </div>
         <div className="card p-5">
           <p className="text-sm text-gray-500">Campañas Totales</p>
-          <p className="text-3xl font-bold text-green-600 mt-1">{data?.campaign_count || 0}</p>
+          <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-green-600 mt-1">{data?.campaign_count || 0}</p>
         </div>
         <div className="card p-5">
           <p className="text-sm text-gray-500">Alertas Activas</p>
-          <p className="text-3xl font-bold text-purple-600 mt-1">{data?.alert_count || 0}</p>
+          <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-purple-600 mt-1">{data?.alert_count || 0}</p>
         </div>
         <div className="card p-5">
           <p className="text-sm text-gray-500">Ofertas Activas</p>
-          <p className="text-3xl font-bold text-amber-600 mt-1">{data?.offer_count || 0}</p>
+          <p className="text-lg sm:text-xl xl:text-xl 2xl:text-2xl font-black font-mono tracking-tight truncate text-amber-600 mt-1">{data?.offer_count || 0}</p>
         </div>
       </div>
 
@@ -628,7 +633,7 @@ function OffersTab() {
                 <td className="px-5 py-3"><span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">{o.tipo}</span></td>
                 <td className="px-5 py-3 text-right font-medium">{o.valor || "—"}</td>
                 <td className="px-5 py-3 font-mono text-xs">{o.codigo_cupon || "—"}</td>
-                <td className="px-5 py-3 font-mono text-xs">{o.customer_id?.slice(0, 8)}</td>
+                <td className="px-5 py-3 font-mono text-xs">{getCustomerName(o.customer_id)}</td>
                 <td className="px-5 py-3 text-gray-500">{o.valido_hasta ? new Date(o.valido_hasta).toLocaleDateString("es-PY") : "—"}</td>
                 <td className="px-5 py-3"><span className={`px-2 py-0.5 rounded-full text-xs ${o.usado ? "bg-gray-100 text-gray-500" : "bg-green-100 text-green-700"}`}>{o.usado ? "Usado" : "Disponible"}</span></td>
               </tr>
@@ -643,6 +648,7 @@ function OffersTab() {
 
 /* ── Surveys Tab ──────────────────────────────────────────────── */
 function SurveysTab() {
+  
   const [surveys, setSurveys] = useState<any[]>([])
   const [responses, setResponses] = useState<any[] | null>(null)
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null)
@@ -722,7 +728,7 @@ function SurveysTab() {
               <h3 className="font-semibold text-gray-900 dark:text-white">Respuestas ({responses.length})</h3>
               {responses.map((r: any, i: number) => (
                 <div key={i} className="bg-gray-50 dark:bg-gray-700/30 rounded-lg p-3 text-sm">
-                  <p className="text-xs text-gray-500 mb-1">Cliente: {r.customer_id?.slice(0, 8)} · {new Date(r.created_at).toLocaleDateString("es-PY")}</p>
+                  <p className="text-xs text-gray-500 mb-1">Cliente: {getCustomerName(r.customer_id)} · {new Date(r.created_at).toLocaleDateString("es-PY")}</p>
                   <pre className="text-xs font-mono whitespace-pre-wrap">{JSON.stringify(r.respuestas, null, 2)}</pre>
                 </div>
               ))}

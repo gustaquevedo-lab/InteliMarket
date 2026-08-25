@@ -1,13 +1,17 @@
 import { useState, useEffect } from "react"
-import { Search, ReceiptText, Clock, AlertTriangle, DollarSign, FileText, Loader2, Calendar, Eye, X, Package, Wallet, Sparkles, PhoneCall, CreditCard, Plus, TrendingUp } from "lucide-react"
+import {
+  Search, ReceiptText, Clock, AlertTriangle, DollarSign, FileText, Loader2,
+  Calendar, Eye, X, Package, Wallet, Sparkles, PhoneCall, CreditCard, Plus,
+  TrendingUp, FileSpreadsheet, FileDown, CheckCircle2, ChevronDown, ChevronRight,
+  User, Check, Phone, ArrowUpRight, ShieldCheck, RefreshCw, BarChart2
+} from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { StatusBadge } from "../../components/DataTable"
 import { formatPYG, formatDate, formatPercentage } from "../../utils/format"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
-type TabType = "documentos" | "aging" | "scoring"
+type TabType = "documentos" | "aging" | "scoring" | "recibos"
 
 interface CustomerScore {
   id: string
@@ -30,6 +34,8 @@ interface AgingData {
   por_clientes: {
     customer_id: string
     customer_name: string
+    customer_ruc?: string
+    customer_telefono?: string
     saldo_total: number
     current: number
     days_1_30: number
@@ -50,15 +56,40 @@ interface SummaryData {
   dso: number | null
 }
 
-interface PendingDoc { id: string; numero_documento: string; fecha_emision: string; fecha_vencimiento: string | null; moneda: string; monto_original: number; saldo_pendiente: number; dias_mora: number }
-interface CollectionAction { id: string; customer_id: string; receivable_id?: string | null; tipo: string; fecha: string; resultado?: string | null; notas?: string | null; contacto?: string | null; proximo_contacto?: string | null; compromiso_pago?: string | null; monto_comprometido?: number | null }
+interface PendingDoc {
+  id: string
+  numero_documento: string
+  fecha_emision: string
+  fecha_vencimiento: string | null
+  moneda: string
+  monto_original: number
+  saldo_pendiente: number
+  dias_mora: number
+}
+
+interface CollectionAction {
+  id: string
+  customer_id: string
+  receivable_id?: string | null
+  tipo: string
+  fecha: string
+  resultado?: string | null
+  notas?: string | null
+  contacto?: string | null
+  proximo_contacto?: string | null
+  compromiso_pago?: string | null
+  monto_comprometido?: number | null
+}
 
 export default function AccountsReceivablePage() {
   const [tab, setTab] = useState<TabType>("documentos")
   const [docs, setDocs] = useState<AccountsReceivable[]>([])
   const [aging, setAging] = useState<AgingData | null>(null)
   const [summary, setSummary] = useState<SummaryData | null>(null)
+  const [scores, setScores] = useState<CustomerScore[]>([])
+  const [scoresLoading, setScoresLoading] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState<string>("todos")
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null)
@@ -69,14 +100,20 @@ export default function AccountsReceivablePage() {
   const [docPayments, setDocPayments] = useState<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; monto: number }[]>([])
   const [customerDocs, setCustomerDocs] = useState<AccountsReceivable[]>([])
 
+  // Recibos e Historial de Cobros
+  const [recentPayments, setRecentPayments] = useState<any[]>([])
+  const [paymentsLoading, setPaymentsLoading] = useState(false)
+
   // Reportes exportables (Aging / Cobranzas)
   const [reportFechaDesde, setReportFechaDesde] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split("T")[0]
+    const d = new Date()
+    d.setDate(d.getDate() - 30)
+    return d.toISOString().split("T")[0]
   })
   const [reportFechaHasta, setReportFechaHasta] = useState(() => new Date().toISOString().split("T")[0])
 
   // Registrar pago
-  const [showPaymentModal, setShowPaymentModal] = useState<string | null>(null) // customer_id
+  const [showPaymentModal, setShowPaymentModal] = useState<string | null>(null)
   const [pendingDocs, setPendingDocs] = useState<PendingDoc[]>([])
   const [pendingLoading, setPendingLoading] = useState(false)
   const [allocations, setAllocations] = useState<Record<string, string>>({})
@@ -93,6 +130,54 @@ export default function AccountsReceivablePage() {
   const [collectionForm, setCollectionForm] = useState({ tipo: "llamada", resultado: "", notas: "", contacto: "", proximo_contacto: "", compromiso_pago: "", monto_comprometido: "" })
 
   const toast = useToast()
+
+  const PAGE_SIZE = 50
+  const [page, setPage] = useState(0)
+  const [docsTotal, setDocsTotal] = useState(0)
+
+  const fetchData = async () => {
+    setLoading(true)
+    try {
+      const estadoParam = filterStatus !== "todos" ? filterStatus : undefined
+      const [docsData, countData, agingData, summaryData] = await Promise.all([
+        api.accountsReceivable.list({ estado: estadoParam, search: search || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+        api.accountsReceivable.count({ estado: estadoParam }),
+        api.accountsReceivable.aging(),
+        api.accountsReceivable.summary(),
+      ])
+      setDocs(docsData)
+      setDocsTotal(countData.total)
+      setAging(agingData)
+      setSummary(summaryData)
+    } catch {
+      setDocs([])
+      setDocsTotal(0)
+      setAging(null)
+      setSummary(null)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }
+
+  useEffect(() => { fetchData() }, [filterStatus, page])
+  useEffect(() => { setPage(0) }, [filterStatus, search])
+
+  const fetchScoring = async () => {
+    setScoresLoading(true)
+    try {
+      const data = await api.integratedFinance.listCustomerScores(COMPANY_ID)
+      setScores(data)
+    } catch {
+      toast.error("Error", "No se pudieron cargar los scores de crédito")
+    } finally {
+      setScoresLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "scoring" && scores.length === 0) fetchScoring()
+  }, [tab])
 
   const openInvoice = async (doc: AccountsReceivable) => {
     setSelectedDoc(doc)
@@ -117,15 +202,16 @@ export default function AccountsReceivablePage() {
   }
 
   const openCustomer = async (customerId: string) => {
+    if (expandedCustomer === customerId) {
+      setExpandedCustomer(null)
+      return
+    }
     setExpandedCustomer(customerId)
     setCollectionActions([])
     setCreditAccount(null)
     setCustomerDocs([])
     api.integratedFinance.listCollectionActions(COMPANY_ID, customerId).then(setCollectionActions).catch(() => setCollectionActions([]))
     api.creditAccounts.getByCustomer(customerId).then(setCreditAccount).catch(() => setCreditAccount(null))
-    // Documentos reales de ESE cliente — antes esta tabla filtraba sobre la
-    // pagina de 50 documentos cargada en la pestana Documentos, que casi
-    // nunca contenia los documentos del cliente que se estaba mirando.
     api.accountsReceivable.list({ customer_id: customerId, limit: 500 }).then(setCustomerDocs).catch(() => setCustomerDocs([]))
   }
 
@@ -167,7 +253,7 @@ export default function AccountsReceivablePage() {
     if (allocs.length === 0) { toast.error("Error", "Asigná un monto a al menos un documento"); return }
     setSubmittingPayment(true)
     try {
-      await api.accountsReceivable.registerPayment({
+      const res = await api.accountsReceivable.registerPayment({
         customer_id: showPaymentModal, monto_total: montoTotalPago, forma_pago: payFormaPago,
         referencia: payReferencia || undefined, fecha: payFecha, observaciones: payObservaciones || undefined,
         allocations: allocs,
@@ -204,765 +290,754 @@ export default function AccountsReceivablePage() {
     }
   }
 
+  const handleRecalculateScoring = async () => {
+    try {
+      await api.integratedFinance.recalculateAllScores(COMPANY_ID)
+      toast.success("Scoring actualizado", "Los puntajes de todos los clientes han sido recalculados")
+      fetchScoring()
+    } catch (e: any) {
+      toast.error("Error", e.message || "No se pudo recalcular el scoring")
+    }
+  }
+
   const reportParams = { fecha_desde: reportFechaDesde, fecha_hasta: reportFechaHasta }
   const handleDownloadAgingExcel = () => api.accountsReceivable.downloadAgingExcel(reportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadAgingPdf = () => api.accountsReceivable.downloadAgingPdf(reportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadCobranzasExcel = () => api.accountsReceivable.downloadCobranzasExcel(reportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadCobranzasPdf = () => api.accountsReceivable.downloadCobranzasPdf(reportParams).catch((e: any) => toast.error("Error", e.message))
 
-  const PAGE_SIZE = 50
-  const [page, setPage] = useState(0)
-  const [docsTotal, setDocsTotal] = useState(0)
-
-  const fetchData = async () => {
-    setLoading(true)
-    try {
-      const estadoParam = filterStatus !== "todos" ? filterStatus : undefined
-      const [docsData, countData, agingData, summaryData] = await Promise.all([
-        api.accountsReceivable.list({ estado: estadoParam, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
-        api.accountsReceivable.count({ estado: estadoParam }),
-        api.accountsReceivable.aging(),
-        api.accountsReceivable.summary(),
-      ])
-      setDocs(docsData)
-      setDocsTotal(countData.total)
-      setAging(agingData)
-      setSummary(summaryData)
-    } catch {
-      setDocs([])
-      setDocsTotal(0)
-      setAging(null)
-      setSummary(null)
-    } finally { setLoading(false) }
-  }
-
-  useEffect(() => { fetchData() }, [filterStatus, page])
-  useEffect(() => { setPage(0) }, [filterStatus])
-
-  const filtered = docs.filter(d =>
-    !search || d.numero_documento?.toLowerCase().includes(search.toLowerCase()) ||
+  const filteredDocs = docs.filter(d =>
+    !search ||
+    d.numero_documento?.toLowerCase().includes(search.toLowerCase()) ||
     d.customer_name?.toLowerCase().includes(search.toLowerCase())
   )
 
-  const statusMap: Record<string, string> = {
-    pendiente: "badge-warning",
-    pagado: "badge-success",
-    vencido: "badge-danger",
+  const getScoreBadge = (score: number) => {
+    if (score >= 80) return { label: "Excelente", class: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border-emerald-200" }
+    if (score >= 60) return { label: "Bueno", class: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border-blue-200" }
+    if (score >= 40) return { label: "Regular", class: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border-amber-200" }
+    return { label: "Riesgoso", class: "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border-red-200" }
   }
 
-  const totalSaldo = docs.reduce((a, b) => a + Number(b.saldo_pendiente || 0), 0)
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><ReceiptText className="w-6 h-6 text-primary" />Cuentas por Cobrar</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{docsTotal.toLocaleString("es-PY")} documentos registrados</p>
+    <div className="space-y-6 min-w-0 animate-fade-in-up">
+      {/* ── BANNER HERO EJECUTIVO CUENTAS POR COBRAR ─────────────────────────── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-6 sm:p-8 text-white shadow-xl border border-slate-700/50">
+        <div className="absolute right-0 top-0 -mt-8 -mr-8 w-80 h-80 rounded-full bg-emerald-500/15 blur-3xl pointer-events-none" />
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-emerald-400 shadow-inner">
+                <ReceiptText className="w-7 h-7" />
+              </div>
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                  Créditos de Socios Extra Club & Cobranzas
+                </span>
+                <h1 className="text-2xl sm:text-lg sm:text-xl xl:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono tracking-tight truncate tracking-tight text-white">
+                  Cuentas por Cobrar & Matriz Aging
+                </h1>
+              </div>
+            </div>
+            <p className="text-xs sm:text-sm text-slate-300 max-w-xl font-medium">
+              Gestión de líneas de crédito a clientes, scoring crediticio, seguimiento de cuotas vencidas y planillas de cobranza.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="bg-black/30 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                Total Cartera por Cobrar
+              </span>
+              <div className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-emerald-400 leading-tight">
+                {formatPYG(summary?.total_pendiente || 0)}
+              </div>
+              <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
+                {summary?.pendientes || 0} cuentas activas · DSO: {summary?.dso != null ? `${summary.dso.toFixed(0)}d` : "—"}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => { setRefreshing(true); fetchData(); if (tab === "scoring") fetchScoring(); }}
+                disabled={refreshing}
+                className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 transition shadow-xs"
+                title="Actualizar datos en vivo"
+              >
+                <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+              </button>
+              <button onClick={handleDownloadAgingPdf} className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold transition flex items-center gap-2 shadow-xs">
+                <FileDown className="w-4 h-4 text-red-400" />
+                <span>Aging PDF</span>
+              </button>
+              <button onClick={handleDownloadAgingExcel} className="px-3.5 py-2.5 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-400/30 text-xs font-bold transition flex items-center gap-2 shadow-xs">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                <span>Aging Excel</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><DollarSign className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Pendiente</span></div>
-          <p className="text-2xl font-bold text-amber-500">{formatPYG(summary?.total_pendiente || 0)}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+        <div className="card p-4 border-amber-200/60 dark:border-amber-900/30">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Total Pendiente</span>
+            <DollarSign className="w-4 h-4 text-amber-500" />
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-amber-600 font-mono tracking-tight truncate">{formatPYG(summary?.total_pendiente || 0)}</p>
+          <span className="text-xs text-gray-400 mt-1 block">{summary?.pendientes || 0} facturas por cobrar</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><TrendingUp className="w-5 h-5 text-purple-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">DSO (días de cobro)</span></div>
-          <p className="text-2xl font-bold text-purple-500">{summary?.dso != null ? summary.dso.toFixed(1) : "—"}</p>
+
+        <div className="card p-4 border-purple-200/60 dark:border-purple-900/30">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">DSO (Plazo Medio)</span>
+            <TrendingUp className="w-4 h-4 text-purple-500" />
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-purple-600 font-mono tracking-tight truncate">{summary?.dso != null ? `${summary.dso.toFixed(0)} días` : "—"}</p>
+          <span className="text-xs text-gray-400 mt-1 block">Días venta pendientes</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><AlertTriangle className="w-5 h-5 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Documentos Vencidos</span></div>
-          <p className="text-2xl font-bold text-red-500">{summary?.vencidos || 0}</p>
+
+        <div className="card p-4 border-red-200/60 dark:border-red-900/30">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Documentos Vencidos</span>
+            <AlertTriangle className="w-4 h-4 text-red-500" />
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-red-600 font-mono tracking-tight truncate">{summary?.vencidos || 0}</p>
+          <span className="text-xs text-gray-400 mt-1 block">En mora activa</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><Clock className="w-5 h-5 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Monto Vencido</span></div>
-          <p className="text-2xl font-bold text-red-500">{formatPYG(summary?.monto_vencido || 0)}</p>
+
+        <div className="card p-4 border-red-200/60 dark:border-red-900/30">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Monto Vencido</span>
+            <Clock className="w-4 h-4 text-red-500" />
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-red-600 font-mono tracking-tight truncate">{formatPYG(summary?.monto_vencido || 0)}</p>
+          <span className="text-xs text-gray-400 mt-1 block">Cartera en riesgo</span>
         </div>
+
         <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><FileText className="w-5 h-5 text-blue-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Documentos Totales</span></div>
-          <p className="text-2xl font-bold text-blue-500">{summary?.total || 0}</p>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Documentos Totales</span>
+            <FileText className="w-4 h-4 text-primary" />
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-gray-900 dark:text-white font-mono tracking-tight truncate">{docsTotal.toLocaleString("es-PY")}</p>
+          <span className="text-xs text-gray-400 mt-1 block">{summary?.pagados || 0} ya cancelados</span>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
-        {(["documentos", "aging", "scoring"] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-5 py-2.5 text-sm font-bold uppercase tracking-wider transition-all border-b-2 -mb-px ${tab === t ? "text-primary border-primary" : "text-gray-400 border-transparent hover:text-gray-600 dark:hover:text-gray-300"}`}
-          >
-            {t === "documentos" ? "Documentos" : t === "aging" ? "Aging" : "Scoring"}
-          </button>
-        ))}
+      {/* Tabs de Navegación */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
+          {[
+            { key: "documentos", label: "Documentos por Cobrar", icon: ReceiptText, count: docsTotal },
+            { key: "aging", label: "Matriz de Aging (Antigüedad)", icon: BarChart2, count: aging?.por_clientes?.length },
+            { key: "scoring", label: "Scoring Crediticio & Riesgo", icon: ShieldCheck, count: scores.length },
+          ].map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as TabType)}
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
+                ${tab === t.key
+                  ? "border-primary text-primary font-semibold"
+                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                }`}
+            >
+              <t.icon className="w-4 h-4" />
+              {t.label}
+              {t.count !== undefined && t.count > 0 && (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                  tab === t.key ? "bg-primary/10 text-primary" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                }`}>
+                  {t.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Documentos Tab */}
-      {tab === "documentos" && (
+      {loading ? (
+        <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+      ) : (
         <>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input className="input-field pl-10" placeholder="Buscar por documento o cliente..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            </div>
-            <select className="input-field w-40" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-              <option value="todos">Todos</option>
-              <option value="pendiente">Pendiente</option>
-              <option value="pagado">Pagado</option>
-              <option value="vencido">Vencido</option>
-            </select>
-            <button onClick={fetchData} className="btn-primary">Actualizar</button>
-          </div>
+          {/* TAB 1: DOCUMENTOS POR COBRAR */}
+          {tab === "documentos" && (
+            <div className="space-y-5">
+              {/* Barra de Filtros */}
+              <div className="card p-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="w-48">
+                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Estado</label>
+                    <select className="input-field w-full text-xs" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                      <option value="todos">Todos los estados</option>
+                      <option value="pendiente">Solo Pendientes</option>
+                      <option value="pagado">Solo Pagados</option>
+                    </select>
+                  </div>
 
-          <div className="card overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="table-header">
-                  <th className="table-cell">Nro Documento</th>
-                  <th className="table-cell">Cliente</th>
-                  <th className="table-cell">Fecha Emisión</th>
-                  <th className="table-cell">Vencimiento</th>
-                  <th className="table-cell text-right">Monto Original</th>
-                  <th className="table-cell text-right">Saldo</th>
-                  <th className="table-cell text-right">Días Mora</th>
-                  <th className="table-cell">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={8} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-                ) : filtered.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center py-12 text-gray-400">No se encontraron documentos</td></tr>
-                ) : filtered.map(d => {
-                  const overdue = (d.dias_mora || 0) > 0
-                  return (
-                    <tr key={d.id} className={`table-row cursor-pointer ${overdue ? "bg-red-50 dark:bg-red-900/10" : ""}`} onClick={() => openInvoice(d)}>
-                      <td className="table-td font-mono text-xs font-bold text-primary">{d.numero_documento || "—"}</td>
-                      <td className="table-td"><span className={`text-sm font-medium ${overdue ? "text-red-700 dark:text-red-300" : ""}`}>{d.customer_name}</span></td>
-                      <td className="table-td text-sm text-gray-500">{formatDate(d.fecha_emision)}</td>
-                      <td className={`table-td text-sm ${overdue ? "text-red-600 font-bold" : "text-gray-500"}`}>{d.fecha_vencimiento ? formatDate(d.fecha_vencimiento) : "—"}</td>
-                      <td className="table-td text-right font-mono font-bold">{formatPYG(d.monto_original)}</td>
-                      <td className={`table-td text-right font-mono font-bold ${(d.saldo_pendiente || 0) > 0 ? "text-amber-500" : "text-green-500"}`}>{formatPYG(d.saldo_pendiente)}</td>
-                      <td className={`table-td text-right font-mono ${overdue ? "text-red-600 font-bold" : "text-gray-500"}`}>{(d.dias_mora || 0) > 0 ? `${d.dias_mora}d` : "—"}</td>
-                      <td className="table-td"><StatusBadge status={d.estado || "-"} map={statusMap} /></td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-400">
-              {docsTotal > 0 ? `Mostrando ${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, docsTotal)} de ${docsTotal.toLocaleString("es-PY")}` : "Sin documentos"}
-              {search && " — la búsqueda solo filtra dentro de esta página"}
-            </p>
-            <div className="flex gap-2">
-              <button className="btn-outline text-xs disabled:opacity-40" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>Anterior</button>
-              <button className="btn-outline text-xs disabled:opacity-40" disabled={(page + 1) * PAGE_SIZE >= docsTotal} onClick={() => setPage(p => p + 1)}>Siguiente</button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Aging Tab */}
-      {tab === "aging" && (
-        <div className="space-y-6">
-          {loading ? (
-            <div className="py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></div>
-          ) : aging ? (
-            <>
-              {/* Reportes exportables */}
-              <div className="card p-4 flex flex-wrap items-end gap-3">
-                <div>
-                  <label className="text-xs text-gray-400 font-medium">Desde</label>
-                  <input className="input-field w-fit" type="date" value={reportFechaDesde} onChange={e => setReportFechaDesde(e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 font-medium">Hasta</label>
-                  <input className="input-field w-fit" type="date" value={reportFechaHasta} onChange={e => setReportFechaHasta(e.target.value)} />
-                </div>
-                <div className="flex items-center gap-2 ml-auto flex-wrap">
-                  <span className="text-xs font-bold text-gray-400 uppercase mr-1">Aging:</span>
-                  <button onClick={handleDownloadAgingExcel} className="btn-outline text-xs flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Excel</button>
-                  <button onClick={handleDownloadAgingPdf} className="btn-outline text-xs flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> PDF</button>
-                  <span className="text-xs font-bold text-gray-400 uppercase mx-1">Cobranzas:</span>
-                  <button onClick={handleDownloadCobranzasExcel} className="btn-outline text-xs flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5" /> Excel</button>
-                  <button onClick={handleDownloadCobranzasPdf} className="btn-outline text-xs flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5" /> PDF</button>
-                </div>
-              </div>
-
-              {/* Aging Buckets */}
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-                {aging.buckets.map(b => {
-                  const barColor =
-                    b.rango === "Al día" ? "bg-green-500" :
-                    b.rango === "1-30" ? "bg-yellow-500" :
-                    b.rango === "31-60" ? "bg-orange-500" :
-                    b.rango === "61-90" ? "bg-red-500" : "bg-red-700"
-                  return (
-                    <div key={b.rango} className="card p-5 flex flex-col">
-                      <span className="text-xs font-black uppercase tracking-widest text-gray-400 mb-1">{b.rango}</span>
-                      <p className={`text-lg font-bold ${b.rango === "Al día" ? "text-green-500" : "text-red-500"}`}>{formatPYG(b.monto)}</p>
-                      <p className="text-xs text-gray-400 mb-3">{b.cantidad} docs · {formatPercentage(b.porcentaje)}</p>
-                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-auto">
-                        <div className={`h-2.5 rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${Math.min(b.porcentaje, 100)}%` }} />
-                      </div>
+                  <div className="flex-1 min-w-[240px]">
+                    <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Buscar</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        placeholder="N° factura, cliente, RUC..."
+                        className="input-field pl-9 w-full text-xs"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                      />
                     </div>
-                  )
-                })}
-              </div>
-
-              {/* Customer Breakdown */}
-              <div className="card overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-gray-500">Desglose por Cliente</h3>
-                </div>
-                <table className="w-full">
-                  <thead>
-                    <tr className="table-header">
-                      <th className="table-cell">Cliente</th>
-                      <th className="table-cell text-right">Documentos</th>
-                      <th className="table-cell text-right">Al día</th>
-                      <th className="table-cell text-right">1-30</th>
-                      <th className="table-cell text-right">31-60</th>
-                      <th className="table-cell text-right">61-90</th>
-                      <th className="table-cell text-right">+90</th>
-                      <th className="table-cell text-right">Saldo Total</th>
-                      <th className="table-cell"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {aging.por_clientes.length === 0 ? (
-                      <tr><td colSpan={9} className="text-center py-12 text-gray-400">Sin clientes con saldo pendiente</td></tr>
-                    ) : aging.por_clientes.map(c => {
-                      const overdueTotal = c.days_1_30 + c.days_31_60 + c.days_61_90 + c.days_91_plus
-                      const totalBuckets = c.saldo_total || 1
-                      return (
-                        <tr key={c.customer_id} className="table-row">
-                          <td className="table-td"><span className="text-sm font-medium">{c.customer_name}</span></td>
-                          <td className="table-td text-right font-mono">{c.total_documentos}</td>
-                          <td className="table-td text-right font-mono text-green-600">{formatPYG(c.current)}</td>
-                          <td className="table-td text-right font-mono" style={{ color: c.days_1_30 > 0 ? "#eab308" : undefined }}>{c.days_1_30 > 0 ? formatPYG(c.days_1_30) : "—"}</td>
-                          <td className="table-td text-right font-mono" style={{ color: c.days_31_60 > 0 ? "#f97316" : undefined }}>{c.days_31_60 > 0 ? formatPYG(c.days_31_60) : "—"}</td>
-                          <td className="table-td text-right font-mono" style={{ color: c.days_61_90 > 0 ? "#ef4444" : undefined }}>{c.days_61_90 > 0 ? formatPYG(c.days_61_90) : "—"}</td>
-                          <td className="table-td text-right font-mono" style={{ color: c.days_91_plus > 0 ? "#b91c1c" : undefined }}>{c.days_91_plus > 0 ? formatPYG(c.days_91_plus) : "—"}</td>
-                          <td className="table-td text-right font-mono font-bold">{formatPYG(c.saldo_total)}</td>
-                          <td className="table-td">
-                            <button
-                              className="btn-ghost"
-                              title="Ver detalle"
-                              onClick={() => expandedCustomer === c.customer_id ? setExpandedCustomer(null) : openCustomer(c.customer_id)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <div className="text-center py-12 text-gray-400">No hay datos de aging disponibles</div>
-          )}
-        </div>
-      )}
-
-      {tab === "scoring" && <ScoringTab />}
-
-      {/* Customer Detail Modal */}
-      {expandedCustomer && aging && (
-        <div className="modal-overlay" onClick={() => setExpandedCustomer(null)}>
-          <div className="modal-content max-w-3xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                {aging.por_clientes.find(c => c.customer_id === expandedCustomer)?.customer_name || "Cliente"}
-              </h3>
-              <div className="flex items-center gap-2">
-                <button onClick={() => openPaymentModal(expandedCustomer)} className="btn-primary flex items-center gap-2 text-xs"><Wallet className="w-3.5 h-3.5" /> Registrar pago</button>
-                <button onClick={() => api.accountsReceivable.downloadStatementPdf(expandedCustomer).catch((e: any) => toast.error("Error", e.message))} className="btn-outline flex items-center gap-2 text-xs"><FileText className="w-3.5 h-3.5" /> Estado de Cuenta (PDF)</button>
-                <button onClick={() => setExpandedCustomer(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
-              </div>
-            </div>
-            <div className="p-6 space-y-4">
-              {creditAccount && (
-                <div className="card p-4 flex items-center justify-between bg-blue-50/50 dark:bg-blue-500/5 border-blue-100 dark:border-blue-900/30">
-                  <div className="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-300"><CreditCard className="w-4 h-4 text-blue-500" /> Línea de crédito</div>
-                  <div className="flex gap-4 text-xs">
-                    <span>Límite: <strong>{formatPYG(creditAccount.limite_credito || 0)}</strong></span>
-                    <span>Utilizado: <strong className="text-amber-500">{formatPYG(creditAccount.saldo_utilizado || 0)}</strong></span>
-                    <span>Disponible: <strong className="text-green-500">{formatPYG(creditAccount.saldo_disponible || 0)}</strong></span>
                   </div>
                 </div>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {aging.buckets.map(b => {
-                  const matching = aging.por_clientes.find(c => c.customer_id === expandedCustomer)
-                  const bucketMap: Record<string, number> = {
-                    "Al día": matching?.current || 0,
-                    "1-30": matching?.days_1_30 || 0,
-                    "31-60": matching?.days_31_60 || 0,
-                    "61-90": matching?.days_61_90 || 0,
-                    "+90": matching?.days_91_plus || 0,
-                  }
-                  const val = bucketMap[b.rango] || 0
-                  return (
-                    <div key={b.rango} className="card p-4">
-                      <span className="text-xs font-black uppercase tracking-widest text-gray-400">{b.rango}</span>
-                      <p className="text-lg font-bold mt-1">{formatPYG(val)}</p>
-                    </div>
-                  )
-                })}
-                <div className="card p-4 border-amber-500/30">
-                  <span className="text-xs font-black uppercase tracking-widest text-gray-400">Saldo Total</span>
-                  <p className="text-lg font-bold mt-1 text-amber-500">{formatPYG(aging.por_clientes.find(c => c.customer_id === expandedCustomer)?.saldo_total || 0)}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mt-4">
-                {aging.buckets.map(b => {
-                  const matching = aging.por_clientes.find(c => c.customer_id === expandedCustomer)
-                  const bucketMap: Record<string, number> = {
-                    "Al día": matching?.current || 0,
-                    "1-30": matching?.days_1_30 || 0,
-                    "31-60": matching?.days_31_60 || 0,
-                    "61-90": matching?.days_61_90 || 0,
-                    "+90": matching?.days_91_plus || 0,
-                  }
-                  const val = bucketMap[b.rango] || 0
-                  const pct = matching?.saldo_total ? (val / matching.saldo_total) * 100 : 0
-                  const barColor =
-                    b.rango === "Al día" ? "bg-green-500" :
-                    b.rango === "1-30" ? "bg-yellow-500" :
-                    b.rango === "31-60" ? "bg-orange-500" :
-                    b.rango === "61-90" ? "bg-red-500" : "bg-red-700"
-                  return (
-                    <div key={b.rango}>
-                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
-                        <div className={`h-3 rounded-full ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1 text-center">{formatPercentage(pct)}</p>
-                    </div>
-                  )
-                })}
               </div>
 
-              <div>
-                <h4 className="text-sm font-bold uppercase tracking-wider text-gray-500 mb-2">Documentos de este cliente</h4>
-                <div className="border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden">
-                  <table className="w-full text-sm">
+              {/* Tabla de Documentos */}
+              <div className="card p-0 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
                     <thead>
-                      <tr className="table-header">
-                        <th className="table-cell">Nro Documento</th>
-                        <th className="table-cell">Vencimiento</th>
-                        <th className="table-cell text-right">Saldo</th>
-                        <th className="table-cell">Estado</th>
+                      <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                        <th className="p-3.5">Documento</th>
+                        <th className="p-3.5">Cliente</th>
+                        <th className="p-3.5">Emisión</th>
+                        <th className="p-3.5">Vencimiento</th>
+                        <th className="p-3.5">Monto Original</th>
+                        <th className="p-3.5">Saldo Pendiente</th>
+                        <th className="p-3.5">Mora</th>
+                        <th className="p-3.5">Estado</th>
+                        <th className="p-3.5 text-right">Acciones</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {customerDocs.length === 0 ? (
-                        <tr><td colSpan={4} className="text-center py-6 text-gray-400">Sin documentos</td></tr>
-                      ) : customerDocs.map(d => (
-                        <tr
-                          key={d.id}
-                          className="table-row cursor-pointer"
-                          onClick={() => { setExpandedCustomer(null); openInvoice(d) }}
-                        >
-                          <td className="table-td font-mono text-xs font-bold text-primary">{d.numero_documento || "—"}</td>
-                          <td className="table-td text-sm text-gray-500">{d.fecha_vencimiento ? formatDate(d.fecha_vencimiento) : "—"}</td>
-                          <td className="table-td text-right font-mono font-bold">{formatPYG(d.saldo_pendiente)}</td>
-                          <td className="table-td"><StatusBadge status={d.estado || "-"} map={statusMap} /></td>
-                        </tr>
-                      ))}
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
+                      {filteredDocs.map(d => {
+                        const isMora = (d.dias_mora || 0) > 0 && d.estado === "pendiente"
+                        return (
+                          <tr key={d.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
+                              {d.numero_documento || "—"}
+                            </td>
+                            <td className="p-3.5 font-medium text-gray-900 dark:text-white max-w-xs truncate" title={d.customer_name}>
+                              {d.customer_name || "Cliente general"}
+                            </td>
+                            <td className="p-3.5 text-xs text-gray-500 font-mono">
+                              {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : "—"}
+                            </td>
+                            <td className="p-3.5 text-xs font-mono">
+                              {d.fecha_vencimiento ? new Date(d.fecha_vencimiento).toLocaleDateString("es-PY") : "—"}
+                            </td>
+                            <td className="p-3.5 font-mono text-gray-600 dark:text-gray-300">
+                              {formatPYG(d.monto_original)}
+                            </td>
+                            <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
+                              {formatPYG(d.saldo_pendiente)}
+                            </td>
+                            <td className="p-3.5 text-xs font-mono font-semibold">
+                              {isMora ? (
+                                <span className="text-red-600">{d.dias_mora} días</span>
+                              ) : d.estado === "pendiente" ? (
+                                <span className="text-emerald-600">Al día</span>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="p-3.5">
+                              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                                d.estado === "pagado"
+                                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
+                                  : isMora
+                                  ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200"
+                                  : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
+                              }`}>
+                                {d.estado === "pagado" ? "Pagado" : isMora ? "Vencido" : "Pendiente"}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => openInvoice(d)}
+                                  className="btn-outline py-1 px-2.5 text-xs flex items-center gap-1"
+                                >
+                                  <Eye className="w-3.5 h-3.5" /> Detalle
+                                </button>
+                                {d.estado === "pendiente" && d.customer_id && (
+                                  <button
+                                    onClick={() => openPaymentModal(d.customer_id!)}
+                                    className="btn-primary py-1 px-2.5 text-xs"
+                                  >
+                                    Cobrar
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Paginación */}
+                <div className="p-4 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between text-xs text-gray-500">
+                  <span>Mostrando página {page + 1} de {Math.ceil(docsTotal / PAGE_SIZE) || 1}</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setPage(p => Math.max(0, p - 1))}
+                      disabled={page === 0}
+                      className="btn-outline py-1 px-3 disabled:opacity-50"
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      onClick={() => setPage(p => p + 1)}
+                      disabled={(page + 1) * PAGE_SIZE >= docsTotal}
+                      className="btn-outline py-1 px-3 disabled:opacity-50"
+                    >
+                      Siguiente
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: MATRIZ DE AGING */}
+          {tab === "aging" && (
+            <div className="space-y-6">
+              {/* Tarjetas de Buckets de Antigüedad */}
+              {aging && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                  {aging.buckets.map((b, i) => {
+                    const isMoraAlta = b.rango.includes("61-90") || b.rango.includes("+90")
+                    return (
+                      <div key={b.rango} className={`card p-5 ${isMoraAlta ? "border-red-200 dark:border-red-900/30 bg-red-50/10" : ""}`}>
+                        <div className="text-xs font-bold uppercase tracking-wider text-gray-500">{b.rango}</div>
+                        <div className={`text-xl font-extrabold mt-1 font-mono ${isMoraAlta ? "text-red-600" : "text-gray-900 dark:text-white"}`}>
+                          {formatPYG(b.monto)}
+                        </div>
+                        <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
+                          <span>{b.cantidad} facturas</span>
+                          <span className="font-semibold">{b.porcentaje}% del total</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Tabla de Clientes con Deuda */}
+              <div className="card p-0 overflow-hidden">
+                <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50/50 dark:bg-slate-800/50">
+                  <h3 className="font-bold text-sm text-gray-900 dark:text-white">
+                    Desglose de Deuda por Cliente ({aging?.por_clientes?.length || 0})
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Hacé clic en un cliente para ver sus documentos y registrar gestiones</span>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                        <th className="p-3.5">Cliente</th>
+                        <th className="p-3.5">Al Día</th>
+                        <th className="p-3.5">1-30d</th>
+                        <th className="p-3.5">31-60d</th>
+                        <th className="p-3.5">61-90d</th>
+                        <th className="p-3.5">+90d</th>
+                        <th className="p-3.5">Saldo Total</th>
+                        <th className="p-3.5 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
+                      {aging?.por_clientes.map(c => {
+                        const isExpanded = expandedCustomer === c.customer_id
+                        return (
+                          <>
+                            <tr
+                              key={c.customer_id}
+                              onClick={() => openCustomer(c.customer_id)}
+                              className={`cursor-pointer transition-colors ${isExpanded ? "bg-primary/5 dark:bg-primary/10" : "hover:bg-gray-50 dark:hover:bg-slate-800/50"}`}
+                            >
+                              <td className="p-3.5 font-bold text-gray-900 dark:text-white">
+                                <div className="flex items-center gap-2">
+                                  {isExpanded ? <ChevronDown className="w-4 h-4 text-primary" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+                                  <div>
+                                    <div>{c.customer_name}</div>
+                                    <div className="text-xs text-gray-400 font-mono font-normal">
+                                      {c.customer_ruc ? `RUC: ${c.customer_ruc}` : ""} {c.customer_telefono ? `· Tel: ${c.customer_telefono}` : ""}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-3.5 font-mono text-xs text-emerald-600 font-semibold">{c.current > 0 ? formatPYG(c.current) : "—"}</td>
+                              <td className="p-3.5 font-mono text-xs text-amber-600">{c.days_1_30 > 0 ? formatPYG(c.days_1_30) : "—"}</td>
+                              <td className="p-3.5 font-mono text-xs text-orange-600">{c.days_31_60 > 0 ? formatPYG(c.days_31_60) : "—"}</td>
+                              <td className="p-3.5 font-mono text-xs text-red-500 font-bold">{c.days_61_90 > 0 ? formatPYG(c.days_61_90) : "—"}</td>
+                              <td className="p-3.5 font-mono text-xs text-red-700 font-black">{c.days_91_plus > 0 ? formatPYG(c.days_91_plus) : "—"}</td>
+                              <td className="p-3.5 font-mono font-extrabold text-gray-900 dark:text-white">{formatPYG(c.saldo_total)}</td>
+                              <td className="p-3.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => api.accountsReceivable.downloadStatementPdf(c.customer_id)}
+                                    className="btn-outline py-1 px-2.5 text-xs flex items-center gap-1"
+                                    title="Descargar Estado de Cuenta en PDF"
+                                  >
+                                    <FileDown className="w-3.5 h-3.5 text-red-500" /> Estado de Cuenta
+                                  </button>
+                                  <button
+                                    onClick={() => openPaymentModal(c.customer_id)}
+                                    className="btn-primary py-1 px-2.5 text-xs"
+                                  >
+                                    Cobrar
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+
+                            {/* Detalle Desplegable del Cliente */}
+                            {isExpanded && (
+                              <tr className="bg-gray-50/70 dark:bg-slate-800/40">
+                                <td colSpan={8} className="p-5">
+                                  <div className="space-y-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-700 pb-3">
+                                      <div className="flex items-center gap-4 text-xs">
+                                        <span className="font-bold text-gray-700 dark:text-gray-300">Documentos del Cliente ({customerDocs.length})</span>
+                                        {creditAccount && (
+                                          <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-semibold">
+                                            Límite: {formatPYG(creditAccount.limite_credito)} (Disponible: {formatPYG(creditAccount.saldo_disponible)})
+                                          </span>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={() => setShowCollectionForm(true)}
+                                        className="btn-outline py-1 px-2.5 text-xs flex items-center gap-1"
+                                      >
+                                        <PhoneCall className="w-3.5 h-3.5 text-primary" /> Registrar Gestión de Cobro
+                                      </button>
+                                    </div>
+
+                                    {/* Lista de facturas de este cliente */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      {customerDocs.map(d => (
+                                        <div key={d.id} className="p-3 rounded-lg border bg-white dark:bg-slate-800 flex items-center justify-between text-xs">
+                                          <div>
+                                            <span className="font-mono font-bold text-gray-900 dark:text-white">{d.numero_documento}</span>
+                                            <div className="text-gray-400 text-[11px] mt-0.5">
+                                              Emisión: {d.fecha_emision} · Vence: {d.fecha_vencimiento}
+                                            </div>
+                                          </div>
+                                          <div className="text-right">
+                                            <div className="font-mono font-bold text-gray-900 dark:text-white">{formatPYG(d.saldo_pendiente)}</div>
+                                            <span className={`text-[10px] font-semibold ${d.estado === "pagado" ? "text-emerald-600" : "text-amber-600"}`}>
+                                              {d.estado === "pagado" ? "Pagado" : `${d.dias_mora || 0}d mora`}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+
+                                    {/* Gestiones de Cobranza Registradas */}
+                                    {collectionActions.length > 0 && (
+                                      <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+                                        <h5 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Historial de Gestiones de Cobro</h5>
+                                        <div className="space-y-1.5">
+                                          {collectionActions.map(act => (
+                                            <div key={act.id} className="p-2.5 rounded bg-white dark:bg-slate-800 text-xs flex items-center justify-between">
+                                              <div>
+                                                <span className="font-semibold capitalize text-primary">{act.tipo}</span>: {act.resultado || act.notas || "Sin detalle"}
+                                              </div>
+                                              <span className="text-[11px] text-gray-400 font-mono">{act.fecha}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
+            </div>
+          )}
 
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-bold uppercase tracking-wider text-gray-500 flex items-center gap-2"><PhoneCall className="w-4 h-4" /> Cobranzas</h4>
-                  <button onClick={() => setShowCollectionForm(!showCollectionForm)} className="btn-ghost text-xs flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Nueva gestión</button>
+          {/* TAB 3: SCORING & RIESGO */}
+          {tab === "scoring" && (
+            <div className="space-y-5">
+              <div className="card p-6 bg-gradient-to-br from-blue-50 to-indigo-50/40 dark:from-slate-800/90 dark:to-slate-900 border border-blue-100 dark:border-blue-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-black uppercase tracking-wider block">Evaluación Automatizada de Riesgo</span>
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white mt-1">Scoring Crediticio de Clientes</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xl">
+                    El puntaje se calcula analizando el porcentaje de pagos puntuales, promedio de días de atraso, volumen total comprado y frecuencia de pago.
+                  </p>
                 </div>
-                {showCollectionForm && (
-                  <div className="border border-gray-100 dark:border-gray-700 rounded-xl p-4 mb-3 space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <select className="input-field" value={collectionForm.tipo} onChange={e => setCollectionForm({ ...collectionForm, tipo: e.target.value })}>
-                        <option value="llamada">Llamada</option>
-                        <option value="whatsapp">WhatsApp</option>
-                        <option value="email">Email</option>
-                        <option value="visita">Visita</option>
-                      </select>
-                      <input className="input-field" placeholder="Contacto (persona)" value={collectionForm.contacto} onChange={e => setCollectionForm({ ...collectionForm, contacto: e.target.value })} />
-                    </div>
-                    <textarea className="input-field" placeholder="Notas de la gestión..." rows={2} value={collectionForm.notas} onChange={e => setCollectionForm({ ...collectionForm, notas: e.target.value })} />
-                    <div className="grid grid-cols-3 gap-3">
-                      <div><label className="text-xs text-gray-400">Próximo contacto</label><input className="input-field" type="date" value={collectionForm.proximo_contacto} onChange={e => setCollectionForm({ ...collectionForm, proximo_contacto: e.target.value })} /></div>
-                      <div><label className="text-xs text-gray-400">Compromiso de pago</label><input className="input-field" type="date" value={collectionForm.compromiso_pago} onChange={e => setCollectionForm({ ...collectionForm, compromiso_pago: e.target.value })} /></div>
-                      <div><label className="text-xs text-gray-400">Monto comprometido</label><input className="input-field" type="number" value={collectionForm.monto_comprometido} onChange={e => setCollectionForm({ ...collectionForm, monto_comprometido: e.target.value })} /></div>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <button className="btn-ghost text-xs" onClick={() => setShowCollectionForm(false)}>Cancelar</button>
-                      <button className="btn-primary text-xs" onClick={handleCreateCollectionAction}>Guardar gestión</button>
-                    </div>
+                <button
+                  onClick={handleRecalculateScoring}
+                  className="btn-primary text-xs flex items-center gap-2 shrink-0"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300" /> Recalcular Scores
+                </button>
+              </div>
+
+              <div className="card p-0 overflow-hidden">
+                {scoresLoading ? (
+                  <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                ) : scores.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400 text-sm">No hay scores calculados aún. Hacé clic en "Recalcular Scores".</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                          <th className="p-3.5">Cliente</th>
+                          <th className="p-3.5">Score (1-100)</th>
+                          <th className="p-3.5">Calificación</th>
+                          <th className="p-3.5">Pago Puntual</th>
+                          <th className="p-3.5">Mora Promedio</th>
+                          <th className="p-3.5">Total Compras</th>
+                          <th className="p-3.5">Total Pagos</th>
+                          <th className="p-3.5 text-right">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
+                        {scores.map(s => {
+                          const badge = getScoreBadge(s.score)
+                          return (
+                            <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
+                              <td className="p-3.5 font-bold text-gray-900 dark:text-white">
+                                {s.customer_nombre || "Cliente"}
+                              </td>
+                              <td className="p-3.5 font-mono font-extrabold text-base text-gray-900 dark:text-white">
+                                {s.score}
+                              </td>
+                              <td className="p-3.5">
+                                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${badge.class}`}>
+                                  {badge.label}
+                                </span>
+                              </td>
+                              <td className="p-3.5 font-mono text-xs">
+                                <span className="font-bold text-emerald-600">{(s.pago_puntual * 100).toFixed(0)}%</span>
+                              </td>
+                              <td className="p-3.5 font-mono text-xs text-gray-600 dark:text-gray-300">
+                                {s.dias_mora_promedio > 0 ? `${s.dias_mora_promedio} días` : "0 días"}
+                              </td>
+                              <td className="p-3.5 font-mono font-semibold text-gray-900 dark:text-white">
+                                {formatPYG(s.total_compras)}
+                              </td>
+                              <td className="p-3.5 font-mono text-gray-600 dark:text-gray-300">
+                                {formatPYG(s.total_pagos)}
+                              </td>
+                              <td className="p-3.5 text-right">
+                                <button
+                                  onClick={() => openPaymentModal(s.customer_id)}
+                                  className="btn-outline py-1 px-2.5 text-xs"
+                                >
+                                  Cobrar
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* MODAL: Registrar Cobro Multi-Factura */}
+      {showPaymentModal && (
+        <div className="modal-overlay" onClick={() => setShowPaymentModal(null)}>
+          <div className="modal-content max-w-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Wallet className="w-5 h-5 text-primary" />
+                Registrar Cobro de Cliente
+              </h3>
+              <p className="text-xs text-gray-500 mt-1">Imputá el monto recibido entre las facturas pendientes del cliente</p>
+            </div>
+
+            <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="label-field">Forma de Pago</label>
+                  <select className="input-field text-xs" value={payFormaPago} onChange={e => setPayFormaPago(e.target.value)}>
+                    <option value="efectivo">Efectivo</option>
+                    <option value="transferencia">Transferencia Bancaria</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="tarjeta_debito">Tarjeta Débito</option>
+                    <option value="tarjeta_credito">Tarjeta Crédito</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label-field">N° Referencia / Boleta</label>
+                  <input className="input-field text-xs" placeholder="Ej: Transf. 984124" value={payReferencia} onChange={e => setPayReferencia(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label-field">Fecha de Cobro</label>
+                  <input className="input-field text-xs" type="date" value={payFecha} onChange={e => setPayFecha(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Facturas Pendientes de Cobro</span>
+                <button onClick={handleAutoDistribuir} className="btn-outline py-1 px-2.5 text-xs text-primary font-semibold">
+                  Distribuir Automáticamente (FIFO)
+                </button>
+              </div>
+
+              {pendingLoading ? (
+                <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+              ) : pendingDocs.length === 0 ? (
+                <div className="text-center py-6 text-gray-400 text-xs">Este cliente no tiene facturas pendientes de cobro</div>
+              ) : (
                 <div className="space-y-2">
-                  {collectionActions.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-4">Sin gestiones de cobranza registradas.</p>
-                  ) : collectionActions.map(a => (
-                    <div key={a.id} className="border border-gray-100 dark:border-gray-700 rounded-lg p-3 text-sm">
-                      <div className="flex justify-between">
-                        <span className="font-bold capitalize">{a.tipo}{a.contacto ? ` — ${a.contacto}` : ""}</span>
-                        <span className="text-xs text-gray-400">{formatDate(a.fecha)}</span>
+                  {pendingDocs.map(doc => (
+                    <div key={doc.id} className="p-3 rounded-lg border bg-gray-50/50 dark:bg-slate-800/40 flex items-center justify-between gap-3 text-xs">
+                      <div>
+                        <div className="font-bold text-gray-900 dark:text-white font-mono">{doc.numero_documento}</div>
+                        <div className="text-gray-400 text-[11px]">
+                          Vence: {doc.fecha_vencimiento} · Saldo actual: <span className="font-bold text-gray-700 dark:text-gray-300">{formatPYG(doc.saldo_pendiente)}</span>
+                        </div>
                       </div>
-                      {a.notas && <p className="text-gray-500 text-xs mt-1">{a.notas}</p>}
-                      {a.compromiso_pago && <p className="text-xs text-amber-500 mt-1">Compromiso de pago: {formatDate(a.compromiso_pago)}{a.monto_comprometido ? ` — ${formatPYG(a.monto_comprometido)}` : ""}</p>}
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-400 text-[11px]">₲</span>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          className="input-field text-right w-32 font-mono font-bold text-xs"
+                          value={allocations[doc.id] || ""}
+                          onChange={e => setAllocations({ ...allocations, [doc.id]: e.target.value })}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
+              )}
+
+              <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Total a Imputar</span>
+                <span className="text-xl font-extrabold text-primary font-mono">{formatPYG(montoTotalPago)}</span>
               </div>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* Registrar Pago Modal */}
-      {showPaymentModal && (
-        <div className="modal-overlay" onClick={() => setShowPaymentModal(null)}>
-          <div className="modal-content max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2"><Wallet className="w-5 h-5 text-primary" /> Registrar pago</h3>
-              <button onClick={() => setShowPaymentModal(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              {pendingLoading ? (
-                <div className="py-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></div>
-              ) : pendingDocs.length === 0 ? (
-                <p className="text-center py-8 text-gray-400 text-sm">Este cliente no tiene documentos pendientes.</p>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-gray-500">Asigná cuánto del pago va a cada documento — un solo pago puede cubrir varias facturas.</p>
-                    <button onClick={handleAutoDistribuir} className="btn-outline text-xs flex items-center gap-1.5 flex-shrink-0"><Sparkles className="w-3.5 h-3.5" /> Auto-repartir</button>
-                  </div>
-                  <div className="border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="table-header">
-                          <th className="table-cell">Documento</th>
-                          <th className="table-cell text-right">Saldo</th>
-                          <th className="table-cell text-right">Mora</th>
-                          <th className="table-cell text-right w-36">Monto a aplicar</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pendingDocs.map(d => (
-                          <tr key={d.id} className="table-row">
-                            <td className="table-td font-mono text-xs font-bold text-primary">{d.numero_documento}</td>
-                            <td className="table-td text-right font-mono">{formatPYG(d.saldo_pendiente)}</td>
-                            <td className={`table-td text-right font-mono text-xs ${d.dias_mora > 0 ? "text-red-500 font-bold" : "text-gray-400"}`}>{d.dias_mora > 0 ? `${d.dias_mora}d` : "—"}</td>
-                            <td className="table-td">
-                              <input
-                                className="input-field text-right py-1"
-                                type="number"
-                                placeholder="0"
-                                max={d.saldo_pendiente}
-                                value={allocations[d.id] || ""}
-                                onChange={e => setAllocations({ ...allocations, [d.id]: e.target.value })}
-                              />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr className="border-t border-gray-200 dark:border-gray-700 font-bold">
-                          <td colSpan={3} className="table-td text-right">Total a registrar</td>
-                          <td className="table-td text-right font-mono text-primary">{formatPYG(montoTotalPago)}</td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="label">Forma de pago</label>
-                      <select className="input-field" value={payFormaPago} onChange={e => setPayFormaPago(e.target.value)}>
-                        <option value="efectivo">Efectivo</option>
-                        <option value="transferencia">Transferencia</option>
-                        <option value="cheque">Cheque</option>
-                        <option value="tarjeta">Tarjeta</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="label">Fecha</label>
-                      <input className="input-field" type="date" value={payFecha} onChange={e => setPayFecha(e.target.value)} />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="label">Referencia (Nro. cheque, transferencia...)</label>
-                    <input className="input-field" value={payReferencia} onChange={e => setPayReferencia(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">Observaciones</label>
-                    <textarea className="input-field" rows={2} value={payObservaciones} onChange={e => setPayObservaciones(e.target.value)} />
-                  </div>
-                  <div className="flex justify-end gap-3 pt-2">
-                    <button className="btn-ghost" onClick={() => setShowPaymentModal(null)}>Cancelar</button>
-                    <button className="btn-primary disabled:opacity-50" disabled={submittingPayment || montoTotalPago <= 0} onClick={handleSubmitPayment}>
-                      {submittingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : `Registrar ${formatPYG(montoTotalPago)}`}
-                    </button>
-                  </div>
-                </>
-              )}
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button onClick={() => setShowPaymentModal(null)} className="btn-ghost text-xs">Cancelar</button>
+              <button onClick={handleSubmitPayment} disabled={submittingPayment || montoTotalPago <= 0} className="btn-primary text-xs disabled:opacity-50 flex items-center gap-2">
+                {submittingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar Cobro"}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Invoice Detail Modal */}
+      {/* MODAL: Detalle de Factura */}
       {selectedDoc && (
         <div className="modal-overlay" onClick={() => setSelectedDoc(null)}>
-          <div className="modal-content max-w-2xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700">
+          <div className="modal-content max-w-xl" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b flex items-start justify-between">
               <div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-primary" />
-                  {selectedDoc.numero_documento || "Documento"}
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{selectedDoc.customer_name}</p>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Documento N° {selectedDoc.numero_documento}</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{selectedDoc.customer_name}</p>
               </div>
-              <button onClick={() => setSelectedDoc(null)} className="btn-ghost"><X className="w-4 h-4" /></button>
+              <button onClick={() => setSelectedDoc(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded">
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="card p-3">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Emisión</span>
-                  <p className="text-sm font-bold mt-1">{formatDate(selectedDoc.fecha_emision)}</p>
-                </div>
-                <div className="card p-3">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Vencimiento</span>
-                  <p className="text-sm font-bold mt-1">{selectedDoc.fecha_vencimiento ? formatDate(selectedDoc.fecha_vencimiento) : "—"}</p>
-                </div>
-                <div className="card p-3">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Monto Original</span>
-                  <p className="text-sm font-bold mt-1">{formatPYG(selectedDoc.monto_original)}</p>
-                </div>
-                <div className="card p-3">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Saldo</span>
-                  <p className="text-sm font-bold mt-1 text-amber-500">{formatPYG(selectedDoc.saldo_pendiente)}</p>
-                </div>
+
+            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto text-xs">
+              <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-gray-50 dark:bg-slate-800">
+                <div><span className="text-gray-400 block text-[11px]">Monto Original</span><span className="font-mono font-bold text-sm text-gray-900 dark:text-white">{formatPYG(selectedDoc.monto_original)}</span></div>
+                <div><span className="text-gray-400 block text-[11px]">Saldo Pendiente</span><span className="font-mono font-bold text-sm text-primary">{formatPYG(selectedDoc.saldo_pendiente)}</span></div>
+                <div><span className="text-gray-400 block text-[11px]">Fecha Emisión</span><span className="font-mono text-gray-700 dark:text-gray-300">{selectedDoc.fecha_emision}</span></div>
+                <div><span className="text-gray-400 block text-[11px]">Fecha Vencimiento</span><span className="font-mono text-gray-700 dark:text-gray-300">{selectedDoc.fecha_vencimiento || "—"}</span></div>
               </div>
 
-              <div>
-                <h4 className="text-sm font-bold uppercase tracking-wider text-gray-500 mb-2 flex items-center gap-2">
-                  <Wallet className="w-4 h-4" /> Historial de pagos
-                </h4>
-                {docPayments.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-4 border border-gray-100 dark:border-gray-700 rounded-xl">Sin pagos registrados en este documento todavía.</p>
-                ) : (
-                  <div className="border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="table-header">
-                          <th className="table-cell">Fecha</th>
-                          <th className="table-cell">Forma de pago</th>
-                          <th className="table-cell">Referencia</th>
-                          <th className="table-cell text-right">Monto</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {docPayments.map(p => (
-                          <tr key={p.id} className="table-row">
-                            <td className="table-td text-sm">{formatDate(p.fecha)}</td>
-                            <td className="table-td text-sm capitalize">{p.forma_pago || "—"}</td>
-                            <td className="table-td text-sm text-gray-500">{p.referencia || "—"}</td>
-                            <td className="table-td text-right font-mono font-bold text-green-600">{formatPYG(p.monto)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+              {invoiceItems.length > 0 && (
+                <div>
+                  <h5 className="font-bold text-gray-500 uppercase tracking-wider mb-2 text-[11px]">Ítems Facturados</h5>
+                  <div className="space-y-1">
+                    {invoiceItems.map(item => (
+                      <div key={item.id} className="p-2 rounded border flex items-center justify-between">
+                        <span>{item.descripcion || item.producto?.nombre || "Producto"} (x{item.cantidad || 1})</span>
+                        <span className="font-mono font-semibold">{formatPYG(item.total || 0)}</span>
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
-              <div>
-                <h4 className="text-sm font-bold uppercase tracking-wider text-gray-500 mb-2 flex items-center gap-2">
-                  <Package className="w-4 h-4" /> Contenido de la factura
-                </h4>
-                {invoiceLoading ? (
-                  <div className="py-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></div>
-                ) : !selectedDoc.sale_id ? (
-                  <div className="text-center py-6 text-gray-400 text-sm">
-                    Este documento no tiene una venta vinculada — no se puede mostrar el detalle de productos.
+              {docPayments.length > 0 && (
+                <div>
+                  <h5 className="font-bold text-gray-500 uppercase tracking-wider mb-2 text-[11px]">Historial de Pagos Aplicados</h5>
+                  <div className="space-y-1">
+                    {docPayments.map(p => (
+                      <div key={p.id} className="p-2 rounded bg-emerald-50/50 text-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300 flex items-center justify-between">
+                        <span>{p.fecha} · {p.forma_pago || "Pago"} {p.referencia ? `(${p.referencia})` : ""}</span>
+                        <span className="font-mono font-bold">{formatPYG(p.monto)}</span>
+                      </div>
+                    ))}
                   </div>
-                ) : invoiceItems.length === 0 ? (
-                  <div className="text-center py-6 text-gray-400 text-sm">Sin items registrados</div>
-                ) : (
-                  <div className="border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="table-header">
-                          <th className="table-cell">Producto</th>
-                          <th className="table-cell text-right">Cant.</th>
-                          <th className="table-cell text-right">P. Unit.</th>
-                          <th className="table-cell text-right">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {invoiceItems.map((it, i) => (
-                          <tr key={it.id || i} className="table-row">
-                            <td className="table-td text-sm">{it.descripcion || it.producto?.nombre || it.product?.nombre || "—"}</td>
-                            <td className="table-td text-right font-mono">{it.cantidad}</td>
-                            <td className="table-td text-right font-mono">{formatPYG(it.precio_unitario)}</td>
-                            <td className="table-td text-right font-mono font-bold">{formatPYG(it.total)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      {invoiceSale && (
-                        <tfoot>
-                          <tr className="border-t border-gray-200 dark:border-gray-700 font-bold">
-                            <td colSpan={3} className="table-td text-right">Total factura</td>
-                            <td className="table-td text-right font-mono">{formatPYG(invoiceSale.total)}</td>
-                          </tr>
-                        </tfoot>
-                      )}
-                    </table>
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t flex justify-end">
+              <button onClick={() => setSelectedDoc(null)} className="btn-outline text-xs">Cerrar</button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  )
-}
 
-// ═══════════════════════ SCORING ═══════════════════════
-//
-// Calcula el score de riesgo de crédito 100% sobre datos reales de
-// accounts_receivable (mora, pago puntual, antigüedad) — vivía escondido
-// como pestaña muerta dentro de Contabilidad Integrada (nunca se montaba
-// en el nav) y conceptualmente no correspondía ahí: es evidencia de
-// comportamiento de cobro, pertenece a Cuentas por Cobrar.
-
-function ScoringTab() {
-  const [scores, setScores] = useState<CustomerScore[]>([])
-  const [loading, setLoading] = useState(true)
-  const [recalculatingAll, setRecalculatingAll] = useState(false)
-  const [recalculatingId, setRecalculatingId] = useState<string | null>(null)
-  const [search, setSearch] = useState("")
-  const toast = useToast()
-
-  const load = () => {
-    setLoading(true)
-    api.integratedFinance.listCustomerScores(COMPANY_ID).then(setScores).catch(() => setScores([])).finally(() => setLoading(false))
-  }
-  useEffect(() => { load() }, [])
-
-  const recalc = async (customerId: string) => {
-    setRecalculatingId(customerId)
-    try {
-      await api.integratedFinance.recalculateScore(COMPANY_ID, customerId)
-      load()
-    } catch {
-      toast.error("Error", "No se pudo recalcular el score")
-    } finally {
-      setRecalculatingId(null)
-    }
-  }
-
-  const recalcAll = async () => {
-    setRecalculatingAll(true)
-    try {
-      const result = await api.integratedFinance.recalculateAllScores(COMPANY_ID)
-      toast.success("Scoring actualizado", `${result.clientes_recalculados} clientes recalculados`)
-      load()
-    } catch {
-      toast.error("Error", "No se pudo recalcular el scoring masivo")
-    } finally {
-      setRecalculatingAll(false)
-    }
-  }
-
-  const filtered = scores.filter(s => !search || (s.customer_nombre || "").toLowerCase().includes(search.toLowerCase()))
-  const avgScore = scores.length > 0 ? Math.round(scores.reduce((a, s) => a + s.score, 0) / scores.length) : 0
-  const riesgoAlto = scores.filter(s => s.score < 50).length
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><TrendingUp className="w-5 h-5 text-blue-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Score Promedio</span></div>
-          <p className="text-2xl font-bold text-blue-500">{scores.length > 0 ? avgScore : "—"}</p>
+      {/* MODAL: Registrar Gestión de Cobranza */}
+      {showCollectionForm && (
+        <div className="modal-overlay" onClick={() => setShowCollectionForm(false)}>
+          <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Registrar Gestión de Cobranza</h3>
+            </div>
+            <div className="p-6 space-y-3 text-xs">
+              <div>
+                <label className="label-field">Tipo de Contacto</label>
+                <select className="input-field" value={collectionForm.tipo} onChange={e => setCollectionForm({ ...collectionForm, tipo: e.target.value })}>
+                  <option value="llamada">Llamada Telefónica</option>
+                  <option value="whatsapp">Mensaje de WhatsApp</option>
+                  <option value="visita">Visita Presencial</option>
+                  <option value="correo">Correo Electrónico</option>
+                </select>
+              </div>
+              <div>
+                <label className="label-field">Resultado / Acuerdo</label>
+                <input className="input-field" placeholder="Ej: Prometió pagar el viernes" value={collectionForm.resultado} onChange={e => setCollectionForm({ ...collectionForm, resultado: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">Fecha Compromiso de Pago</label>
+                <input className="input-field" type="date" value={collectionForm.compromiso_pago} onChange={e => setCollectionForm({ ...collectionForm, compromiso_pago: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">Monto Comprometido (₲)</label>
+                <input className="input-field font-mono" type="number" value={collectionForm.monto_comprometido} onChange={e => setCollectionForm({ ...collectionForm, monto_comprometido: e.target.value })} />
+              </div>
+            </div>
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button onClick={() => setShowCollectionForm(false)} className="btn-ghost text-xs">Cancelar</button>
+              <button onClick={handleCreateCollectionAction} className="btn-primary text-xs">Guardar Gestión</button>
+            </div>
+          </div>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><ReceiptText className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Clientes Evaluados</span></div>
-          <p className="text-2xl font-bold text-green-500">{scores.length}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><AlertTriangle className="w-5 h-5 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Riesgo Alto (&lt; 50)</span></div>
-          <p className="text-2xl font-bold text-red-500">{riesgoAlto}</p>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input-field pl-10" placeholder="Buscar cliente..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <button onClick={recalcAll} disabled={recalculatingAll} className="btn-primary text-sm flex items-center gap-2 disabled:opacity-50">
-          {recalculatingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
-          Recalcular todos
-        </button>
-      </div>
-
-      <div className="card overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="table-header">
-              <th className="table-cell">Cliente</th>
-              <th className="table-cell text-center">Score</th>
-              <th className="table-cell text-right">Pago Puntual</th>
-              <th className="table-cell text-right">Días Mora Prom.</th>
-              <th className="table-cell text-right">Veces Mora</th>
-              <th className="table-cell text-right">Total Compras</th>
-              <th className="table-cell"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={7} className="text-center py-12 text-gray-400">
-                {scores.length === 0 ? "Sin datos de scoring — usá \"Recalcular todos\" para generar los scores iniciales" : "Sin resultados"}
-              </td></tr>
-            ) : (
-              filtered.map((s) => {
-                const scoreColor = s.score >= 80 ? "bg-green-100 text-green-700" : s.score >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"
-                return (
-                  <tr key={s.id} className="table-row">
-                    <td className="table-td font-bold text-gray-900 dark:text-white">{s.customer_nombre || s.customer_id.slice(0, 8) + "..."}</td>
-                    <td className="table-td text-center"><span className={`px-2 py-1 rounded text-xs font-bold ${scoreColor}`}>{s.score}</span></td>
-                    <td className="table-td text-right">{s.pago_puntual}%</td>
-                    <td className="table-td text-right">{s.dias_mora_promedio}</td>
-                    <td className="table-td text-right">{s.veces_mora}</td>
-                    <td className="table-td text-right font-mono">{formatPYG(s.total_compras)}</td>
-                    <td className="table-td text-right">
-                      <button onClick={() => recalc(s.customer_id)} disabled={recalculatingId === s.customer_id} className="btn-ghost text-xs disabled:opacity-50">
-                        {recalculatingId === s.customer_id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Recalcular"}
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+      )}
     </div>
   )
 }

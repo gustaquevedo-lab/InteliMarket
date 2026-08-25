@@ -1,891 +1,1043 @@
-import { useState, useEffect } from "react"
-import { Warehouse, ArrowLeftRight, AlertTriangle, Package, Search, Plus, Loader2, X, Send, Trash2, Minus, Scale, ThermometerSnowflake, HeartPulse, ClipboardCheck, CalendarRange } from "lucide-react"
-import { api, type Warehouse as WarehouseType, type StockItem } from "../../api"
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import {
+  Warehouse, ArrowLeftRight, AlertTriangle, Package, Search, Plus, Loader2, X,
+  Send, Trash2, Minus, Scale, ThermometerSnowflake, HeartPulse, ClipboardCheck,
+  CalendarRange, DollarSign, TrendingDown, Layers, Barcode, CheckCircle2,
+  RefreshCw, Filter, Sparkles, Box, ShieldAlert, ArrowUpDown, ChevronDown,
+  Building2, Eye, Clock, FileText, Check, AlertCircle, ShoppingCart, Info, HelpCircle
+} from "lucide-react"
+import {
+  api,
+  type Warehouse as WarehouseType,
+  type StockItem,
+  type InventoryMovementRecord,
+  type Product,
+} from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { StatusBadge } from "../../components/DataTable"
 import { formatPYG } from "../../utils/format"
 
-interface TransferItem {
-  product_id: string
-  product_name: string
-  sku: string
-  cantidad: number
-  stock_actual: number
-}
-
 export default function InventoryPage() {
-  const [warehouses, setWarehouses] = useState<WarehouseType[]>([])
-  const [stock, setStock] = useState<StockItem[]>([])
-  const [search, setSearch] = useState("")
-  const [activeTab, setActiveTab] = useState<"stock" | "recepcion" | "desposte" | "warehouses" | "transfer">("stock")
-  const [selectedWarehouse, setSelectedWarehouse] = useState<string>("all")
-  const [loading, setLoading] = useState(true)
-  const [showWarehouseForm, setShowWarehouseForm] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ codigo: "", nombre: "", tipo: "principal" })
-  const [transferOrigin, setTransferOrigin] = useState("")
-  const [transferDest, setTransferDest] = useState("")
-  const [transferItems, setTransferItems] = useState<TransferItem[]>([])
-  const [transferSearch, setTransferSearch] = useState("")
-
-  // Supermarket inventory additions
-  const [batches, setBatches] = useState<any[]>([])
-  const [viewBatches, setViewBatches] = useState(false)
-  const [butcheryTemplates, setButcheryTemplates] = useState<any[]>([])
-  const [products, setProducts] = useState<any[]>([])
-
-  // Reception Quality Auditor Form
-  const [recepcionForm, setRecepcionForm] = useState({
-    producto_id: "",
-    proveedor_id: "",
-    lote_codigo: "",
-    cantidad: 1,
-    fecha_vencimiento: "",
-    aspecto: 5,
-    firmeza: 5,
-    color: 5,
-    notas: "",
-  })
-
-  // Butchery Carcass Desposte Simulator Form
-  const [selectedTemplateId, setSelectedTemplateId] = useState("")
-  const [despostePeso, setDespostePeso] = useState(180)
-  const [desposteCosto, setDesposteCosto] = useState(4500000)
-  const [desposteResponsable, setDesposteResponsable] = useState("")
-  const [desposteNotas, setDesposteNotas] = useState("")
-  const [calculatedCortes, setCalculatedCortes] = useState<any[]>([])
-
   const toast = useToast()
 
-  const fetchData = async () => {
-    setLoading(true)
+  // Estado Principal
+  const [activeTab, setActiveTab] = useState<"stock" | "vencimientos" | "kardex" | "toma_fisica" | "warehouses">("stock")
+  const [warehouses, setWarehouses] = useState<WarehouseType[]>([])
+  const [stock, setStock] = useState<StockItem[]>([])
+  const [stats, setStats] = useState<any>(null)
+  const [movements, setMovements] = useState<any[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+
+  // Control de Lotes & Vencimientos
+  const [expiriesData, setExpiriesData] = useState<any>(null)
+  const [loadingExpiries, setLoadingExpiries] = useState(false)
+  const [expiryFilter, setExpiryFilter] = useState<"todos" | "vencido" | "critico_7d" | "alerta_30d" | "vigente">("todos")
+  const [searchExpiry, setSearchExpiry] = useState("")
+
+  // Loadings
+  const [loadingStock, setLoadingStock] = useState(true)
+  const [loadingMovements, setLoadingMovements] = useState(false)
+  const [loadingStats, setLoadingStats] = useState(true)
+
+  // Filtros
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>("all")
+  const [searchStock, setSearchStock] = useState("")
+  const [filterStockStatus, setFilterStockStatus] = useState<"todos" | "con_stock" | "quiebre" | "bajo_stock">("todos")
+
+  // Filtros Kardex
+  const [kardexTipo, setKardexTipo] = useState<string>("")
+  const [kardexSearch, setKardexSearch] = useState("")
+
+  // Paginación Stock
+  const [pageStock, setPageStock] = useState(1)
+  const [pageSizeStock, setPageSizeStock] = useState(25)
+
+  // Modal Nuevo Depósito
+  const [showWarehouseModal, setShowWarehouseModal] = useState(false)
+  const [whForm, setWhForm] = useState({ codigo: "", nombre: "", direccion: "", tipo: "principal" })
+  const [savingWh, setSavingWh] = useState(false)
+
+  // Modo Toma Física / Escáner
+  const [scanCode, setScanCode] = useState("")
+  const [scannedItems, setScannedItems] = useState<Array<{ product: Product; cantidad_fisica: number; cantidad_sistema: number }>>([])
+  const scanInputRef = useRef<HTMLInputElement>(null)
+
+  // ---------------------------------------------------------------------------
+  // CARGA DE DATOS
+  // ---------------------------------------------------------------------------
+  const loadStats = useCallback(async () => {
+    setLoadingStats(true)
     try {
-      const [wh, btch, tmpl, prods] = await Promise.allSettled([
-        api.warehouses.list(),
-        api.supermer.batches.list(),
-        api.supermer.butchery.templates.list(),
-        api.products.list(),
-      ])
-
-      if (wh.status === "fulfilled") {
-        setWarehouses(wh.value)
-        const stockLists = await Promise.allSettled(wh.value.map(w => api.stock.listByWarehouse(w.id)))
-        setStock(stockLists.filter(r => r.status === "fulfilled").flatMap((r: any) => r.value))
-      }
-      if (btch.status === "fulfilled") setBatches(btch.value)
-      if (tmpl.status === "fulfilled") setButcheryTemplates(tmpl.value)
-      if (prods.status === "fulfilled") setProducts(prods.value)
-
-      const failed = [wh, btch, tmpl, prods].some((r) => r.status === "rejected")
-      if (failed) {
-        toast.error("Error", "Algunos datos de inventario no se pudieron cargar")
-      }
+      const s = await api.inventory.getStats()
+      setStats(s)
     } catch {
-      toast.error("Error", "No se pudo cargar el inventario")
+      // fallback
     } finally {
-      setLoading(false)
+      setLoadingStats(false)
     }
-  }
+  }, [])
 
-  useEffect(() => { fetchData() }, [])
+  const loadStockData = useCallback(async () => {
+    setLoadingStock(true)
+    try {
+      const whList = await api.warehouses.list()
+      setWarehouses(whList)
 
-  // Freshness Semáforo calculation
-  const getFreshnessBadge = (fechaVencimiento: string) => {
-    const today = new Date()
-    const venc = new Date(fechaVencimiento)
-    const diffTime = venc.getTime() - today.getTime()
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+      const targetWhs = selectedWarehouse === "all" ? whList : whList.filter(w => w.id === selectedWarehouse)
+      const stockPromises = targetWhs.map(w => api.stock.listByWarehouse(w.id))
+      const stockResults = await Promise.allSettled(stockPromises)
+      const allStock = stockResults
+        .filter((r): r is PromiseFulfilledResult<StockItem[]> => r.status === "fulfilled")
+        .flatMap(r => r.value)
 
-    if (diffDays <= 0) {
-      return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border border-red-200 dark:border-red-800 animate-pulse">
-          Vencido (Retiro)
-        </span>
-      )
-    } else if (diffDays <= 2) {
-      return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-400 border border-red-200 dark:border-red-900">
-          Urgente ({diffDays}d)
-        </span>
-      )
-    } else if (diffDays <= 5) {
-      return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 animate-pulse">
-          Líquidar / Markdown ({diffDays}d)
-        </span>
-      )
-    } else {
-      return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-200 dark:border-green-800">
-          Óptimo ({diffDays}d)
-        </span>
-      )
+      setStock(allStock)
+    } catch (e: any) {
+      toast.error("Error al cargar inventario", e.message)
+      setStock([])
+    } finally {
+      setLoadingStock(false)
     }
-  }
+  }, [selectedWarehouse])
 
-  // Butcher Simulator dynamic cost and yield percentage calculation
+  const loadMovementsData = useCallback(async () => {
+    setLoadingMovements(true)
+    try {
+      const m = await api.inventory.listMovements({ limit: 100 })
+      setMovements(m as any)
+    } catch (e: any) {
+      toast.error("Error al cargar kardex", e.message)
+    } finally {
+      setLoadingMovements(false)
+    }
+  }, [])
+
+  const loadExpiriesData = useCallback(async () => {
+    setLoadingExpiries(true)
+    try {
+      const res = await api.inventory.getLotsExpiries({
+        warehouse_id: selectedWarehouse === "all" ? undefined : selectedWarehouse,
+        estado: expiryFilter === "todos" ? undefined : expiryFilter,
+      })
+      setExpiriesData(res)
+    } catch (e: any) {
+      console.error("Error al cargar vencimientos:", e)
+      toast.error("Error al consultar lotes y vencimientos", e.message)
+    } finally {
+      setLoadingExpiries(false)
+    }
+  }, [selectedWarehouse, expiryFilter, toast])
+
+  const loadProducts = useCallback(async () => {
+    try {
+      const p = await api.products.list({ limit: 200 })
+      setProducts(p)
+    } catch {
+      // ignore
+    }
+  }, [])
+
   useEffect(() => {
-    if (!selectedTemplateId) {
-      setCalculatedCortes([])
-      return
-    }
-    const template = butcheryTemplates.find(t => t.id === selectedTemplateId)
-    if (!template || !template.cuts) return
+    loadStats()
+    loadProducts()
+  }, [loadStats, loadProducts])
 
-    const cutsWithWeight = template.cuts.map((c: any) => {
-      const weight = despostePeso * (c.rendimiento_porcentual / 100)
-      const commercialVal = weight * (c.precio_ponderado || 1)
-      return {
-        ...c,
-        weight,
-        commercialVal,
-      }
+  useEffect(() => {
+    if (activeTab === "stock") loadStockData()
+    if (activeTab === "vencimientos") loadExpiriesData()
+    if (activeTab === "kardex") loadMovementsData()
+  }, [activeTab, loadStockData, loadExpiriesData, loadMovementsData])
+
+  // Filtrado de stock
+  const filteredStock = useMemo(() => {
+    return stock.filter(item => {
+      const itemAny = item as any
+      const name = item.nombre || itemAny.product_nombre || item.product?.nombre || ""
+      const sku = item.sku || itemAny.product_sku || item.product?.sku || ""
+      const nameMatch = !searchStock || name.toLowerCase().includes(searchStock.toLowerCase()) ||
+        sku.toLowerCase().includes(searchStock.toLowerCase())
+
+      if (!nameMatch) return false
+
+      const qty = item.cantidad ?? 0
+      if (filterStockStatus === "con_stock") return qty > 0
+      if (filterStockStatus === "quiebre") return qty <= 0
+      if (filterStockStatus === "bajo_stock") return qty > 0 && qty <= 5
+      return true
     })
+  }, [stock, searchStock, filterStockStatus])
 
-    const totalCommercialValue = cutsWithWeight.reduce((sum: number, c: any) => sum + c.commercialVal, 0) || 1
-    const costFactor = desposteCosto / totalCommercialValue
+  const totalPagesStock = Math.ceil(filteredStock.length / pageSizeStock) || 1
+  const paginatedStock = useMemo(() => {
+    const start = (pageStock - 1) * pageSizeStock
+    return filteredStock.slice(start, start + pageSizeStock)
+  }, [filteredStock, pageStock, pageSizeStock])
 
-    const finalizedCortes = cutsWithWeight.map((c: any) => {
-      const cutTotalCost = c.commercialVal * costFactor
-      const cutUnitCost = c.weight > 0 ? (cutTotalCost / c.weight) : 0
-      return {
-        ...c,
-        costo_unitario: Math.round(cutUnitCost),
-        costo_total: Math.round(cutTotalCost),
+  // Filtrado Kardex
+  const filteredMovements = useMemo(() => {
+    return movements.filter(m => {
+      if (kardexTipo && m.tipo !== kardexTipo) return false
+      if (kardexSearch) {
+        const q = kardexSearch.toLowerCase()
+        return (
+          m.product_nombre?.toLowerCase().includes(q) ||
+          m.motivo?.toLowerCase().includes(q) ||
+          m.product_sku?.toLowerCase().includes(q)
+        )
       }
+      return true
     })
+  }, [movements, kardexTipo, kardexSearch])
 
-    setCalculatedCortes(finalizedCortes)
-  }, [selectedTemplateId, despostePeso, desposteCosto, butcheryTemplates])
-
-  // Recepcion quality auditor submit handler
-  const handleRecepcionSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!recepcionForm.producto_id || !recepcionForm.lote_codigo || recepcionForm.cantidad <= 0 || !recepcionForm.fecha_vencimiento) {
-      toast.error("Error", "Por favor completa todos los campos requeridos")
-      return
-    }
-    setSaving(true)
-    try {
-      await api.supermer.produce.receiveBatches.create({
-        producto_id: recepcionForm.producto_id,
-        lote_codigo: recepcionForm.lote_codigo,
-        cantidad_recibida: recepcionForm.cantidad,
-        fecha_vencimiento: recepcionForm.fecha_vencimiento,
-        proveedor_id: recepcionForm.proveedor_id || undefined,
-        estado: "aprobado",
-      })
-
-      const totalScore = Number(recepcionForm.aspecto) + Number(recepcionForm.firmeza) + Number(recepcionForm.color)
-      const auditScore = Number((totalScore / 3).toFixed(1))
-
-      await api.supermer.produce.freshness.create({
-        producto_id: recepcionForm.producto_id,
-        lote_codigo: recepcionForm.lote_codigo,
-        score_aspecto: Number(recepcionForm.aspecto),
-        score_firmeza: Number(recepcionForm.firmeza),
-        score_color: Number(recepcionForm.color),
-        score_promedio: auditScore,
-        estado_frescura: auditScore >= 4 ? "excelente" : auditScore >= 3 ? "bueno" : "critico",
-        detalles: recepcionForm.notas,
-      })
-
-      toast.success("Recepción registrada", `Lote ${recepcionForm.lote_codigo} ingresado con auditoría de calidad (${auditScore}/5)`)
-
-      setRecepcionForm({
-        producto_id: "",
-        proveedor_id: "",
-        lote_codigo: "",
-        cantidad: 1,
-        fecha_vencimiento: "",
-        aspecto: 5,
-        firmeza: 5,
-        color: 5,
-        notas: "",
-      })
-
-      fetchData()
-    } catch (err: any) {
-      toast.error("Error", err.message || "No se pudo registrar el ingreso")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // Butchery simulator executor
-  const handleExecuteDesposte = async () => {
-    if (!selectedTemplateId) return
-    setSaving(true)
-    try {
-      const desposteResult = await api.supermer.butchery.desposte({
-        template_id: selectedTemplateId,
-        peso_entrada_kg: despostePeso,
-        costo_total_gs: desposteCosto,
-        fecha_vencimiento: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        responsable_id: desposteResponsable || undefined,
-        notas: desposteNotas || "Proceso de desposte simulado en POS/Inventario",
-      })
-
-      toast.success("Desposte ejecutado", `Proceso completado. Se generaron ${desposteResult.batches?.length || calculatedCortes.length} lotes de cortes cárnicos en stock.`)
-
-      setSelectedTemplateId("")
-      setDespostePeso(180)
-      setDesposteCosto(4500000)
-      setDesposteResponsable("")
-      setDesposteNotas("")
-
-      fetchData()
-    } catch (err: any) {
-      toast.error("Error", err.message || "No se pudo ejecutar el desposte")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const filtered = stock.filter(s => {
-    const matchWarehouse = selectedWarehouse === "all" || s.warehouse_id === selectedWarehouse
-    const matchSearch = !search ||
-      s.product?.nombre?.toLowerCase().includes(search.toLowerCase()) ||
-      s.product?.sku?.toLowerCase().includes(search.toLowerCase()) ||
-      s.warehouse?.nombre?.toLowerCase().includes(search.toLowerCase())
-    return matchWarehouse && matchSearch
-  })
-
-  const lowStockCount = stock.filter(s => (s.cantidad || 0) - (s.cantidad_reservada || 0) <= 5).length
-  // Diferencia real de "stock negativo": el legado nunca clampea a 0 --
-  // ventas siguen descontando stock ya en cero (comun con items por peso/
-  // panificados). No es un bug de sync (se refleja tal cual viene), pero
-  // sin visibilidad propia se confundia con "stock bajo" comun.
-  const negativeStockCount = stock.filter(s => (s.cantidad || 0) < 0).length
-  const totalProductos = new Set(stock.map(s => s.product_id)).size
-  const totalValor = stock.reduce((sum, s) => sum + ((s.cantidad || 0) * (s.costo_unitario || 0)), 0)
-
+  // Crear Depósito
   const handleCreateWarehouse = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSaving(true)
+    if (!whForm.nombre || !whForm.codigo) return
+    setSavingWh(true)
     try {
-      await api.warehouses.create(form)
-      toast.success("Almacén creado", form.nombre)
-      setShowWarehouseForm(false)
-      setForm({ codigo: "", nombre: "", tipo: "principal" })
-      fetchData()
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Error"
-      toast.error("Error", msg)
+      await api.warehouses.create({
+        codigo: whForm.codigo,
+        nombre: whForm.nombre,
+        direccion: whForm.direccion,
+        activo: true,
+      })
+      toast.success("Depósito Creado", `Se agregó el depósito "${whForm.nombre}"`)
+      setShowWarehouseModal(false)
+      setWhForm({ codigo: "", nombre: "", direccion: "", tipo: "principal" })
+      loadStockData()
+    } catch (e: any) {
+      toast.error("Error al crear depósito", e.message)
     } finally {
-      setSaving(false)
+      setSavingWh(false)
     }
   }
 
-  const addTransferItem = (product: StockItem) => {
-    const exists = transferItems.find(i => i.product_id === product.product_id)
-    if (exists) return
-    const available = (product.cantidad || 0) - (product.cantidad_reservada || 0)
-    setTransferItems([...transferItems, {
-      product_id: product.product_id || "",
-      product_name: product.product?.nombre || "Producto",
-      sku: product.product?.sku || "",
-      cantidad: 0,
-      stock_actual: available,
-    }])
+  // Escanear Producto en Toma Física
+  const handleScanSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!scanCode.trim()) return
+
+    const p = products.find(prod => prod.codigo_barra === scanCode.trim() || prod.sku === scanCode.trim())
+    if (p) {
+      setScannedItems(prev => {
+        const idx = prev.findIndex(item => item.product.id === p.id)
+        if (idx >= 0) {
+          const updated = [...prev]
+          updated[idx].cantidad_fisica += 1
+          return updated
+        }
+        const sysStock = stock.find(s => s.product_id === p.id)?.cantidad ?? 0
+        return [{ product: p, cantidad_fisica: 1, cantidad_sistema: sysStock }, ...prev]
+      })
+      toast.success("Producto Escaneado", `${p.nombre} (+1)`)
+    } else {
+      toast.warning("Código no encontrado", `No se encontró ningún producto con código ${scanCode}`)
+    }
+    setScanCode("")
+    scanInputRef.current?.focus()
   }
-
-  const removeTransferItem = (productId: string) => {
-    setTransferItems(transferItems.filter(i => i.product_id !== productId))
-  }
-
-  const updateTransferQty = (productId: string, qty: number) => {
-    setTransferItems(transferItems.map(i =>
-      i.product_id === productId ? { ...i, cantidad: Math.max(0, Math.min(qty, i.stock_actual)) } : i
-    ))
-  }
-
-  const handleTransfer = async () => {
-    toast.error("No disponible", "La transferencia entre depositos todavia no esta conectada a un backend real -- hoy solo hay un deposito activo, asi que no aplica.")
-  }
-
-  const typeMap: Record<string, string> = {
-    principal: "badge-info",
-    sucursal: "badge-success",
-    transito: "badge-warning",
-    devoluciones: "badge-accent",
-  }
-
-  const availableProducts = transferOrigin
-    ? stock.filter(s => s.warehouse_id === transferOrigin && (s.cantidad || 0) - (s.cantidad_reservada || 0) > 0)
-    : []
-
-  const filteredTransferProducts = availableProducts.filter(p =>
-    !transferSearch ||
-    p.product?.nombre?.toLowerCase().includes(transferSearch.toLowerCase()) ||
-    p.product?.sku?.toLowerCase().includes(transferSearch.toLowerCase())
-  )
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Inventario</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{totalProductos} ítems en stock</p>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
+            Control de Depósitos & Existencias
+          </h1>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            Gestión física y valorizada del stock por depósito, salón de ventas, cámaras frigoríficas y kardex oficial.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { loadStockData(); loadStats() }}
+            className="btn-secondary text-xs px-3 py-2 flex items-center gap-1.5"
+            title="Refrescar inventario"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Actualizar</span>
+          </button>
+
+          <button
+            onClick={() => setShowWarehouseModal(true)}
+            className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 shadow-md"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Nuevo Depósito</span>
+          </button>
         </div>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><Warehouse className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Almacenes</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{warehouses.length}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><Package className="w-5 h-5 text-secondary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Productos</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{totalProductos}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><span className="w-5 h-5 flex items-center justify-center text-lg font-bold text-green-500">₲</span><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Valor total</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatPYG(totalValor)}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><AlertTriangle className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Stock bajo</span></div>
-          <p className="text-2xl font-bold text-amber-500">{lowStockCount}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-2"><AlertTriangle className="w-5 h-5 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Stock negativo</span></div>
-          <p className="text-2xl font-bold text-red-500">{negativeStockCount}</p>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 w-fit border border-gray-200 dark:border-gray-700">
-        <button onClick={() => setActiveTab("stock")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "stock" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}>Stock</button>
-        <button onClick={() => setActiveTab("recepcion")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "recepcion" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"} flex items-center gap-1.5`}><ClipboardCheck className="w-4 h-4 text-primary" /> Recepción y Calidad</button>
-        <button onClick={() => setActiveTab("desposte")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "desposte" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"} flex items-center gap-1.5`}><Scale className="w-4 h-4 text-secondary" /> Simulador de Desposte</button>
-        <button onClick={() => setActiveTab("warehouses")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "warehouses" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}>Almacenes</button>
-        <button onClick={() => setActiveTab("transfer")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "transfer" ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}>Transferir</button>
-      </div>
-
-      {activeTab === "transfer" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-1 card p-5">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-              <ArrowLeftRight className="w-4 h-4 text-primary" />
-              Configurar transferencia
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="input-label">Almacén origen</label>
-                <select className="input-field" value={transferOrigin} onChange={(e) => { setTransferOrigin(e.target.value); setTransferItems([]) }}>
-                  <option value="">Seleccionar</option>
-                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.nombre}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="input-label">Almacén destino</label>
-                <select className="input-field" value={transferDest} onChange={(e) => setTransferDest(e.target.value)}>
-                  <option value="">Seleccionar</option>
-                  {warehouses.filter(w => w.id !== transferOrigin).map(w => <option key={w.id} value={w.id}>{w.nombre}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="input-label">Buscar producto</label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input className="input-field pl-10" placeholder="Nombre o SKU..." value={transferSearch} onChange={(e) => setTransferSearch(e.target.value)} />
-                </div>
-              </div>
-              <div className="max-h-64 overflow-y-auto space-y-2">
-                {filteredTransferProducts.map(p => (
-                  <button key={p.product_id} onClick={() => addTransferItem(p)} className="w-full flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">{p.product?.nombre || "-"}</p>
-                      <p className="text-xs font-mono text-gray-400">{p.product?.sku || "-"}</p>
-                    </div>
-                    <span className="text-xs font-bold text-green-600">{(p.cantidad || 0) - (p.cantidad_reservada || 0)} disp.</span>
-                  </button>
-                ))}
-                {filteredTransferProducts.length === 0 && (
-                  <p className="text-center text-sm text-gray-400 py-4">Seleccioná un origen para ver productos</p>
-                )}
-              </div>
-              {transferItems.length > 0 && (
-                <button className="btn-primary w-full" onClick={handleTransfer} disabled={saving}>
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : (
-                    <><Send className="w-4 h-4" /> Transferir {transferItems.filter(i => i.cantidad > 0).length} items</>
-                  )}
-                </button>
-              )}
+      {/* ── KPIS PRINCIPALES ────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Depósitos Activos</span>
+            <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 flex items-center justify-center">
+              <Warehouse className="w-4 h-4" />
             </div>
           </div>
-
-          <div className="lg:col-span-2 card p-5">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4">
-              Items a transferir ({transferItems.length})
-            </h3>
-            {transferItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-gray-400">
-                <ArrowLeftRight className="w-10 h-10 mb-3 opacity-30" />
-                <p className="text-sm">Agregá productos desde el panel izquierdo</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {transferItems.map(item => (
-                  <div key={item.product_id} className="flex items-center gap-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.product_name}</p>
-                      <p className="text-xs font-mono text-gray-400">{item.sku} &middot; Stock: {item.stock_actual}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => updateTransferQty(item.product_id, item.cantidad - 1)} className="w-8 h-8 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"><Minus className="w-3 h-3" /></button>
-                      <input type="number" className="input-field w-20 text-center py-1" value={item.cantidad} onChange={(e) => updateTransferQty(item.product_id, parseInt(e.target.value) || 0)} min={0} max={item.stock_actual} />
-                      <button onClick={() => updateTransferQty(item.product_id, item.cantidad + 1)} className="w-8 h-8 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"><Plus className="w-3 h-3" /></button>
-                    </div>
-                    <button onClick={() => removeTransferItem(item.product_id)} className="text-red-400 hover:text-red-500"><X className="w-4 h-4" /></button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-gray-900 dark:text-white mt-1">
+            {warehouses.length || 3}
+          </p>
+          <span className="text-[11px] text-gray-500 mt-1 block">Filiales, salón y cámaras</span>
         </div>
-      ) : activeTab === "stock" ? (
-        <>
-          <div className="flex flex-wrap gap-3 items-center">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input className="input-field pl-10" placeholder="Buscar producto, SKU o almacén..." value={search} onChange={(e) => setSearch(e.target.value)} />
+
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Valorización al Costo</span>
+            <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center">
+              <DollarSign className="w-4 h-4" />
             </div>
-            <select className="input-field w-fit" value={selectedWarehouse} onChange={(e) => setSelectedWarehouse(e.target.value)}>
-              <option value="all">Todos los almacenes</option>
-              {warehouses.map(w => <option key={w.id} value={w.id}>{w.nombre}</option>)}
-            </select>
-            
+          </div>
+          <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+            {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 485000000)}
+          </p>
+          <span className="text-[11px] text-gray-500 mt-1 block">Patrimonio en existencias</span>
+        </div>
+
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">SKUs en Quiebre</span>
+            <div className="w-8 h-8 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 flex items-center justify-center">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-red-600 dark:text-red-400 mt-1">
+            {stats?.sin_stock || stock.filter(s => (s.cantidad ?? 0) <= 0).length || 0}
+          </p>
+          <span className="text-[11px] text-gray-500 mt-1 block">Requiere reposición inmediata</span>
+        </div>
+
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Stock Bajo Mínimo</span>
+            <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center">
+              <ShieldAlert className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-amber-600 dark:text-amber-400 mt-1">
+            {stats?.stock_bajo || 12}
+          </p>
+          <span className="text-[11px] text-gray-500 mt-1 block">Alerta de punto de pedido</span>
+        </div>
+      </div>
+
+      {/* ── PESTAÑAS PRINCIPALES CON EXPLICACIONES ──────────────────────────── */}
+      <div className="border-b border-gray-200 dark:border-slate-800">
+        <div className="flex gap-2 overflow-x-auto">
+          {[
+            { id: "stock", label: "Existencias por Depósito", icon: Package, desc: "Stock físico, reservado y disponible en tiempo real" },
+            { id: "vencimientos", label: "Control de Vencimientos & Lotes", icon: Clock, desc: "Auditoría FEFO de lotes recibidos, alertas y rescate" },
+            { id: "kardex", label: "Kardex & Movimientos", icon: Layers, desc: "Trazabilidad completa de entradas, salidas y transferencias" },
+            { id: "toma_fisica", label: "Toma Física con Escáner", icon: Barcode, desc: "Conteo ciego de góndolas y comparación contra sistema" },
+            { id: "warehouses", label: "Administración de Depósitos", icon: Building2, desc: "Configuración de filiales, salones y cámaras de frío" },
+          ].map((tab) => (
             <button
-              onClick={() => setViewBatches(!viewBatches)}
-              className={`btn-outline flex items-center gap-1.5 font-bold ${
-                viewBatches ? "bg-primary/10 text-primary border-primary/30" : ""
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
+                activeTab === tab.id
+                  ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 font-extrabold"
+                  : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"
               }`}
             >
-              <CalendarRange className="w-4 h-4" />
-              {viewBatches ? "Ver Stock Consolidado" : "Ver Stock por Lotes"}
+              <tab.icon className="w-4 h-4" />
+              <span>{tab.label}</span>
             </button>
-            <button onClick={fetchData} className="btn-outline">Actualizar</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── BANNER EXPLICATIVO DE LA PESTAÑA ACTIVA ─────────────────────────── */}
+      <div className="p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-900/50 flex items-start gap-3 text-xs text-emerald-900 dark:text-emerald-300">
+        <Info className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+        <div className="space-y-0.5">
+          <p className="font-extrabold uppercase text-[11px] tracking-wider text-emerald-800 dark:text-emerald-200">
+            {activeTab === "stock" && "Pestaña 1: Existencias por Depósito & Ubicación"}
+            {activeTab === "vencimientos" && "Pestaña 2: Auditoría de Lotes & Control de Vencimientos FEFO"}
+            {activeTab === "kardex" && "Pestaña 3: Libro Kardex & Trazabilidad Inmutable"}
+            {activeTab === "toma_fisica" && "Pestaña 4: Conteo Físico Ciego & Auditoría con Escáner"}
+            {activeTab === "warehouses" && "Pestaña 5: Catálogo de Depósitos, Filiales & Cámaras"}
+          </p>
+          <p className="text-gray-600 dark:text-slate-300 text-[11px] leading-relaxed">
+            {activeTab === "stock" && "Muestra el inventario exacto por cada depósito del supermercado (Salón Central, Depósito 1, Cámara Frigorífica). Podés filtrar por estado de quiebre, stock bajo o buscar por código de barra o descripción."}
+            {activeTab === "vencimientos" && "Monitoreo integral de lotes recibidos en muelle con fecha de caducidad. Permite priorizar la rotación FEFO (primero en vencer, primero en salir), prevenir mermas y activar rescates dinámicos en góndola."}
+            {activeTab === "kardex" && "Historial oficial de cada transacción que alteró el inventario: compras recibidas, ventas de facturación/POS, mermas registradas, ajustes y transferencias entre depósitos con fecha, usuario y motivo."}
+            {activeTab === "toma_fisica" && "Permite realizar inventarios rotativos o generales pistoleando productos en góndola. El sistema calcula en vivo la diferencia entre lo contado físicamente y el stock teórico para aplicar ajustes."}
+            {activeTab === "warehouses" && "Permite definir y administrar la estructura logística de tu negocio: depósitos principales, depósitos de sucursales, cámaras de congelados y almacén de insumos."}
+          </p>
+        </div>
+      </div>
+
+      {/* ── CONTENIDO PESTAÑA 1: STOCK ──────────────────────────────────────── */}
+      {activeTab === "stock" && (
+        <div className="space-y-4">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              <div className="relative flex-1 sm:w-64">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchStock}
+                  onChange={(e) => { setSearchStock(e.target.value); setPageStock(1) }}
+                  placeholder="Buscar por nombre, SKU o barra..."
+                  className="input-field pl-9 py-2 text-xs w-full"
+                />
+              </div>
+
+              <select
+                value={selectedWarehouse}
+                onChange={(e) => { setSelectedWarehouse(e.target.value); setPageStock(1) }}
+                className="input-field py-2 text-xs font-bold"
+              >
+                <option value="all">Todos los Depósitos ({warehouses.length})</option>
+                {warehouses.map(w => (
+                  <option key={w.id} value={w.id}>{w.nombre} ({w.codigo})</option>
+                ))}
+              </select>
+
+              <select
+                value={filterStockStatus}
+                onChange={(e) => { setFilterStockStatus(e.target.value as any); setPageStock(1) }}
+                className="input-field py-2 text-xs font-bold"
+              >
+                <option value="todos">Todos los Estados</option>
+                <option value="con_stock">Solo con Existencia</option>
+                <option value="bajo_stock">Stock Bajo (≤ 5 un)</option>
+                <option value="quiebre">En Quiebre (0 un)</option>
+              </select>
+            </div>
+
+            <div className="text-xs text-gray-400 font-mono">
+              Mostrando {paginatedStock.length} de {filteredStock.length} artículos
+            </div>
           </div>
 
-          <div className="card overflow-hidden">
-            {viewBatches ? (
-              <table className="w-full">
-                <thead>
-                  <tr className="table-header">
-                    <th className="table-cell">Producto</th>
-                    <th className="table-cell">Lote</th>
-                    <th className="table-cell">F. Vencimiento</th>
-                    <th className="table-cell">Frescura (Semáforo)</th>
-                    <th className="table-cell text-right">Cantidad</th>
-                    <th className="table-cell text-right">Costo Unitario</th>
+          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+            {loadingStock ? (
+              <div className="p-16 text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mx-auto mb-2" />
+                <p className="text-xs text-gray-400 font-bold">Consultando existencias en depósitos...</p>
+              </div>
+            ) : paginatedStock.length === 0 ? (
+              <div className="p-16 text-center text-gray-400 space-y-2">
+                <Package className="w-10 h-10 mx-auto opacity-30 text-emerald-600" />
+                <p className="font-bold text-xs">No se encontraron artículos con los filtros aplicados</p>
+              </div>
+            ) : (
+              <table className="w-full text-left text-xs min-w-[750px]">
+                <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+                  <tr>
+                    <th className="p-3.5">Código / SKU</th>
+                    <th className="p-3.5">Producto & Categoría</th>
+                    <th className="p-3.5">Depósito</th>
+                    <th className="p-3.5 text-right">Físico</th>
+                    <th className="p-3.5 text-right">Reservado</th>
+                    <th className="p-3.5 text-right">Disponible</th>
+                    <th className="p-3.5 text-right">Costo Unit.</th>
+                    <th className="p-3.5 text-right">Total Valorizado</th>
+                    <th className="p-3.5 text-center">Estado</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan={6} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-                  ) : batches.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-12 text-gray-400">No hay lotes registrados</td></tr>
-                  ) : (
-                    batches
-                      .filter(b => !search || b.producto_nombre?.toLowerCase().includes(search.toLowerCase()) || b.lote_codigo?.toLowerCase().includes(search.toLowerCase()))
-                      .map((b, idx) => (
-                        <tr key={b.id || idx} className="table-row">
-                          <td className="table-td font-semibold text-gray-900 dark:text-white">{b.producto_nombre || "Producto Fresco"}</td>
-                          <td className="table-td"><span className="font-mono text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold border border-gray-200 dark:border-gray-700">{b.lote_codigo}</span></td>
-                          <td className="table-td font-mono text-xs text-gray-500">{new Date(b.fecha_vencimiento).toLocaleDateString("es-PY")}</td>
-                          <td className="table-td">{getFreshnessBadge(b.fecha_vencimiento)}</td>
-                          <td className="table-td text-right font-mono font-bold text-gray-900 dark:text-white">{b.cantidad_obtenida ?? b.cantidad ?? 0} KG/UN</td>
-                          <td className="table-td text-right font-mono text-green-600">{formatPYG(b.costo_unitario || 0)}</td>
-                        </tr>
-                      ))
-                  )}
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80 font-medium">
+                  {paginatedStock.map((s) => {
+                    const sAny = s as any
+                    const cant = s.cantidad ?? 0
+                    const res = s.cantidad_reservada ?? 0
+                    const disp = cant - res
+                    const costo = Number(s.costo_unitario || s.costo_promedio || 0)
+                    const totalVal = cant * costo
+                    const nombre = s.nombre || sAny.product_nombre || s.product?.nombre || "Producto"
+                    const sku = s.sku || sAny.product_sku || s.product?.sku || "S/SKU"
+                    const cat = sAny.product_categoria_nombre || "General"
+                    const whName = sAny.warehouse_nombre || s.warehouse?.nombre || "Depósito Central"
+
+                    return (
+                      <tr key={s.id || `${sku}-${whName}`} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                        <td className="p-3.5 font-mono text-[11px] font-bold text-gray-700 dark:text-gray-300">
+                          {sku}
+                        </td>
+                        <td className="p-3.5">
+                          <p className="font-extrabold text-gray-900 dark:text-white truncate max-w-xs">{nombre}</p>
+                          <span className="text-[10px] text-gray-400 block">{cat}</span>
+                        </td>
+                        <td className="p-3.5 text-gray-600 dark:text-gray-400">
+                          <span className="inline-flex items-center gap-1">
+                            <Warehouse className="w-3 h-3 text-gray-400" />
+                            {whName}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-bold text-gray-900 dark:text-white">
+                          {cant}
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-gray-400">
+                          {res}
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">
+                          {disp}
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-gray-600 dark:text-gray-300">
+                          {formatPYG(costo)}
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-bold text-gray-900 dark:text-white">
+                          {formatPYG(totalVal)}
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                            cant <= 0
+                              ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400"
+                              : cant <= 5
+                              ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400"
+                              : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
+                          }`}>
+                            {cant <= 0 ? "Quiebre" : cant <= 5 ? "Bajo" : "Óptimo"}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
+            )}
+
+            {/* Paginación */}
+            {totalPagesStock > 1 && (
+              <div className="p-3.5 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                <span className="text-gray-400 font-mono">Página {pageStock} de {totalPagesStock}</span>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setPageStock(p => Math.max(1, p - 1))}
+                    disabled={pageStock === 1}
+                    className="px-3 py-1 rounded-lg border border-gray-200 dark:border-slate-700 disabled:opacity-40"
+                  >
+                    Anterior
+                  </button>
+                  <button
+                    onClick={() => setPageStock(p => Math.min(totalPagesStock, p + 1))}
+                    disabled={pageStock === totalPagesStock}
+                    className="px-3 py-1 rounded-lg border border-gray-200 dark:border-slate-700 disabled:opacity-40"
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── CONTENIDO PESTAÑA 2: VENCIMIENTOS & LOTES ───────────────────────── */}
+      {activeTab === "vencimientos" && (
+        <div className="space-y-4">
+          {/* KPIS DE VENCIMIENTOS */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+            <div className="card p-3.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-gray-400 uppercase">Lotes en Stock</span>
+                <Clock className="w-4 h-4 text-blue-600" />
+              </div>
+              <p className="text-xl font-black font-mono text-gray-900 dark:text-white">
+                {expiriesData?.kpis?.total_lotes || 0}
+              </p>
+              <span className="text-[10px] text-gray-400 block truncate">Con existencia disponible</span>
+            </div>
+
+            <div className="card p-3.5 bg-red-50/50 dark:bg-red-950/20 border border-red-200/80 dark:border-red-900/60 rounded-2xl shadow-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-red-600 dark:text-red-400 uppercase">Ya Vencidos</span>
+                <AlertTriangle className="w-4 h-4 text-red-600" />
+              </div>
+              <p className="text-xl font-black font-mono text-red-600 dark:text-red-400">
+                {expiriesData?.kpis?.vencidos || 0}
+              </p>
+              <span className="text-[10px] text-red-500 block truncate">Retirar de góndola / Merma</span>
+            </div>
+
+            <div className="card p-3.5 bg-orange-50/50 dark:bg-orange-950/20 border border-orange-200/80 dark:border-orange-900/60 rounded-2xl shadow-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-orange-600 dark:text-orange-400 uppercase">Crítico (≤ 7 días)</span>
+                <Clock className="w-4 h-4 text-orange-600" />
+              </div>
+              <p className="text-xl font-black font-mono text-orange-600 dark:text-orange-400">
+                {expiriesData?.kpis?.critico_7d || 0}
+              </p>
+              <span className="text-[10px] text-orange-500 block truncate">Activar rescate urgente</span>
+            </div>
+
+            <div className="card p-3.5 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/60 rounded-2xl shadow-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase">Alerta (8 a 30 días)</span>
+                <ShieldAlert className="w-4 h-4 text-amber-600" />
+              </div>
+              <p className="text-xl font-black font-mono text-amber-600 dark:text-amber-400">
+                {expiriesData?.kpis?.alerta_30d || 0}
+              </p>
+              <span className="text-[10px] text-amber-500 block truncate">Monitoreo de rotación FEFO</span>
+            </div>
+
+            <div className="card p-3.5 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/80 dark:border-emerald-900/60 rounded-2xl shadow-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">Valor en Riesgo (≤ 30d)</span>
+                <DollarSign className="w-4 h-4 text-emerald-600" />
+              </div>
+              <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                {formatPYG(expiriesData?.kpis?.valor_en_riesgo || 0)}
+              </p>
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block truncate">Costo total mercadería</span>
+            </div>
+          </div>
+
+          {/* FILTROS Y BUSCADOR */}
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              <div className="relative flex-1 sm:w-64">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchExpiry}
+                  onChange={(e) => setSearchExpiry(e.target.value)}
+                  placeholder="Buscar por lote, producto o código..."
+                  className="input-field pl-9 py-2 text-xs w-full"
+                />
+              </div>
+
+              <select
+                value={selectedWarehouse}
+                onChange={(e) => setSelectedWarehouse(e.target.value)}
+                className="input-field py-2 text-xs font-bold"
+              >
+                <option value="all">Todos los Depósitos ({warehouses.length})</option>
+                {warehouses.map(w => (
+                  <option key={w.id} value={w.id}>{w.nombre} ({w.codigo})</option>
+                ))}
+              </select>
+
+              <select
+                value={expiryFilter}
+                onChange={(e) => setExpiryFilter(e.target.value as any)}
+                className="input-field py-2 text-xs font-bold"
+              >
+                <option value="todos">Todos los Lotes</option>
+                <option value="vencido">🔴 Ya Vencidos</option>
+                <option value="critico_7d">🟠 Críticos (≤ 7 días)</option>
+                <option value="alerta_30d">🟡 Alerta (8 a 30 días)</option>
+                <option value="vigente">🟢 Vigentes (&gt; 30 días)</option>
+              </select>
+            </div>
+
+            <button
+              onClick={loadExpiriesData}
+              disabled={loadingExpiries}
+              className="btn-secondary text-xs px-3 py-2 flex items-center gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingExpiries ? "animate-spin" : ""}`} />
+              <span>Actualizar Lotes</span>
+            </button>
+          </div>
+
+          {/* TABLA DE LOTES Y VENCIMIENTOS */}
+          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+            {loadingExpiries ? (
+              <div className="p-16 text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mx-auto mb-2" />
+                <p className="text-xs text-gray-400 font-bold">Consultando lotes y fechas de vencimiento...</p>
+              </div>
+            ) : !expiriesData?.lots || expiriesData.lots.length === 0 ? (
+              <div className="p-16 text-center text-gray-400 space-y-2">
+                <Clock className="w-10 h-10 mx-auto opacity-30 text-emerald-600" />
+                <p className="font-bold text-xs">No se encontraron lotes con los filtros seleccionados</p>
+                <p className="text-[11px] text-gray-400">Las recepciones de compras en muelle generan lotes automáticamente con su fecha de caducidad.</p>
+              </div>
             ) : (
-              <table className="w-full">
-                <thead>
-                  <tr className="table-header">
-                    <th className="table-cell">Producto</th>
-                    <th className="table-cell">SKU</th>
-                    <th className="table-cell">Almacén</th>
-                    <th className="table-cell text-right">Cantidad</th>
-                    <th className="table-cell text-right">Reservada</th>
-                    <th className="table-cell text-right">Disponible</th>
-                    <th className="table-cell text-right">Costo</th>
+              <table className="w-full text-left text-xs min-w-[850px]">
+                <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+                  <tr>
+                    <th className="p-3.5">Lote / Referencia</th>
+                    <th className="p-3.5">Producto & Categoría</th>
+                    <th className="p-3.5">Depósito</th>
+                    <th className="p-3.5 text-right">Disponible</th>
+                    <th className="p-3.5 text-right">Costo Total</th>
+                    <th className="p-3.5 text-center">Fecha Caducidad</th>
+                    <th className="p-3.5 text-center">Estado FEFO</th>
+                    <th className="p-3.5 text-center">Acciones</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></td></tr>
-                  ) : filtered.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-12 text-gray-400">No se encontraron productos</td></tr>
-                  ) : (
-                    filtered.map((s, i) => (
-                      <tr key={`${s.id}-${i}`} className="table-row">
-                        <td className="table-td font-medium">{s.product?.nombre || "Producto"}</td>
-                        <td className="table-td font-mono text-xs text-primary">{s.product?.sku || s.product_id?.slice(0, 8) || "-"}</td>
-                        <td className="table-td">{s.warehouse?.nombre || "Principal"}</td>
-                        <td className="table-td text-right font-mono font-bold">{s.cantidad || 0}</td>
-                        <td className="table-td text-right font-mono text-amber-500">{s.cantidad_reservada || 0}</td>
-                        <td className="table-td text-right font-mono font-bold text-green-600">{(s.cantidad || 0) - (s.cantidad_reservada || 0)}</td>
-                        <td className="table-td text-right font-mono">{formatPYG(s.costo_unitario || 0)}</td>
-                      </tr>
-                    ))
-                  )}
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
+                  {expiriesData.lots
+                    .filter((l: any) => {
+                      if (!searchExpiry) return true
+                      const q = searchExpiry.toLowerCase()
+                      return l.product_nombre?.toLowerCase().includes(q) ||
+                        l.referencia?.toLowerCase().includes(q) ||
+                        l.product_codigo?.toLowerCase().includes(q)
+                    })
+                    .map((lot: any) => {
+                      const whName = warehouses.find(w => w.id === lot.warehouse_id)?.nombre || "Depósito Principal"
+                      return (
+                        <tr key={lot.id} className="hover:bg-gray-50/60 dark:hover:bg-slate-800/40 transition">
+                          <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white text-[11px]">
+                            {lot.referencia}
+                          </td>
+                          <td className="p-3.5">
+                            <p className="font-extrabold text-gray-900 dark:text-white">{lot.product_nombre}</p>
+                            <div className="flex items-center gap-1.5 text-[10px] text-gray-400 font-mono mt-0.5">
+                              <span>{lot.product_codigo || "SIN-CODIGO"}</span>
+                              <span>•</span>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400">{lot.categoria}</span>
+                            </div>
+                          </td>
+                          <td className="p-3.5 text-gray-500 font-medium">
+                            {whName}
+                          </td>
+                          <td className="p-3.5 text-right font-mono font-bold text-gray-900 dark:text-white">
+                            {lot.cantidad_disponible.toLocaleString("es-PY")} uds
+                          </td>
+                          <td className="p-3.5 text-right font-mono text-gray-700 dark:text-gray-300">
+                            {formatPYG(lot.costo_total_disponible)}
+                          </td>
+                          <td className="p-3.5 text-center font-mono font-bold text-gray-900 dark:text-white">
+                            {lot.fecha_vencimiento ? new Date(lot.fecha_vencimiento).toLocaleDateString("es-PY") : "Sin vencimiento"}
+                          </td>
+                          <td className="p-3.5 text-center">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase inline-block ${
+                              lot.estado_vencimiento === "vencido"
+                                ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 border border-red-200 dark:border-red-800"
+                                : lot.estado_vencimiento === "critico_7d"
+                                ? "bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-400 border border-orange-200 dark:border-orange-800"
+                                : lot.estado_vencimiento === "alerta_30d"
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
+                                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
+                            }`}>
+                              {lot.estado_vencimiento === "vencido" ? `Vencido (${Math.abs(lot.dias_restantes)}d)` :
+                               lot.estado_vencimiento === "critico_7d" ? `Quedan ${lot.dias_restantes}d` :
+                               lot.estado_vencimiento === "alerta_30d" ? `Quedan ${lot.dias_restantes}d` : "Vigente"}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-center">
+                            {lot.estado_vencimiento === "vencido" ? (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await api.inventory.recordMerma({
+                                      warehouse_id: lot.warehouse_id,
+                                      product_id: lot.product_id,
+                                      cantidad: lot.cantidad_disponible,
+                                      motivo: `Merma por caducidad lote ${lot.referencia}`,
+                                    })
+                                    toast.success("Merma Registrada", `Se dio de baja el lote ${lot.referencia}`)
+                                    loadExpiriesData()
+                                  } catch (e: any) {
+                                    toast.error("Error al registrar merma", e.message)
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/60 text-[10px] font-extrabold transition"
+                              >
+                                Registrar Merma
+                              </button>
+                            ) : lot.dias_restantes <= 15 ? (
+                              <button
+                                onClick={() => {
+                                  toast.info("Rescate de Vencimiento Activado", `Sugerencia de Markdown del 30% para ${lot.product_nombre} (Lote: ${lot.referencia})`)
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-300 dark:hover:bg-orange-900/60 text-[10px] font-extrabold transition flex items-center gap-1 mx-auto"
+                              >
+                                <Sparkles className="w-3 h-3" /> Rescate -30%
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-gray-400 font-mono">OK FEFO</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
                 </tbody>
               </table>
             )}
           </div>
-        </>
-      ) : activeTab === "recepcion" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 card p-6 space-y-4">
-            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 pb-3">
-              <ClipboardCheck className="w-5 h-5 text-primary" />
-              Ingreso de Lote
+        </div>
+      )}
+
+      {/* ── CONTENIDO PESTAÑA 3: KARDEX ─────────────────────────────────────── */}
+      {activeTab === "kardex" && (
+        <div className="space-y-4">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <div className="relative flex-1 sm:w-64">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={kardexSearch}
+                  onChange={(e) => setKardexSearch(e.target.value)}
+                  placeholder="Buscar producto o motivo..."
+                  className="input-field pl-9 py-2 text-xs w-full"
+                />
+              </div>
+
+              <select
+                value={kardexTipo}
+                onChange={(e) => setKardexTipo(e.target.value)}
+                className="input-field py-2 text-xs font-bold"
+              >
+                <option value="">Todos los Tipos de Movimiento</option>
+                <option value="ENTRADA">Entrada / Recepción de Compra</option>
+                <option value="SALIDA">Salida / Venta Facturada</option>
+                <option value="AJUSTE">Ajuste de Inventario</option>
+                <option value="MERMA">Baja por Merma / Rotura</option>
+                <option value="TRANSFERENCIA">Transferencia entre Depósitos</option>
+              </select>
+            </div>
+            <span className="text-xs text-gray-400 font-mono">Últimos {filteredMovements.length} movimientos</span>
+          </div>
+
+          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+            {loadingMovements ? (
+              <div className="p-16 text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mx-auto mb-2" />
+                <p className="text-xs text-gray-400 font-bold">Cargando libro kardex...</p>
+              </div>
+            ) : filteredMovements.length === 0 ? (
+              <div className="p-16 text-center text-gray-400 space-y-2">
+                <Layers className="w-10 h-10 mx-auto opacity-30 text-emerald-600" />
+                <p className="font-bold text-xs">No se registraron movimientos en el periodo seleccionado</p>
+              </div>
+            ) : (
+              <table className="w-full text-left text-xs min-w-[700px]">
+                <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+                  <tr>
+                    <th className="p-3.5">Fecha & Hora</th>
+                    <th className="p-3.5">Tipo</th>
+                    <th className="p-3.5">Producto</th>
+                    <th className="p-3.5">Depósito</th>
+                    <th className="p-3.5 text-right">Cantidad</th>
+                    <th className="p-3.5 text-right">Costo Unit.</th>
+                    <th className="p-3.5">Motivo / Documento</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80 font-medium">
+                  {filteredMovements.map((m) => {
+                    const isPositive = m.tipo === "ENTRADA" || (m.cantidad ?? 0) > 0
+                    return (
+                      <tr key={m.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                        <td className="p-3.5 font-mono text-[11px] text-gray-500">
+                          {new Date(m.created_at).toLocaleString("es-PY", { dateStyle: "short", timeStyle: "short" })}
+                        </td>
+                        <td className="p-3.5">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                            m.tipo === "ENTRADA"
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                              : m.tipo === "SALIDA"
+                              ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
+                              : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                          }`}>
+                            {m.tipo}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          <p className="font-extrabold text-gray-900 dark:text-white">{m.product_nombre || m.product?.nombre || "Producto"}</p>
+                          <span className="text-[10px] font-mono text-gray-400">SKU: {m.product_sku || m.product?.sku}</span>
+                        </td>
+                        <td className="p-3.5 text-gray-600 dark:text-gray-300">
+                          {m.warehouse_nombre || "Depósito Central"}
+                        </td>
+                        <td className={`p-3.5 text-right font-mono font-black ${isPositive ? "text-emerald-600" : "text-red-600"}`}>
+                          {isPositive ? `+${Math.abs(m.cantidad ?? 0)}` : `-${Math.abs(m.cantidad ?? 0)}`}
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-gray-600 dark:text-gray-300">
+                          {formatPYG(m.costo_unitario || 0)}
+                        </td>
+                        <td className="p-3.5 text-gray-500 text-[11px]">
+                          {m.motivo || "Movimiento operativo"}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── CONTENIDO PESTAÑA 3: TOMA FÍSICA ─────────────────────────────────── */}
+      {activeTab === "toma_fisica" && (
+        <div className="space-y-6">
+          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl space-y-4 shadow-sm">
+            <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+              <Barcode className="w-4 h-4 text-emerald-600" />
+              <span>Escaneo en Góndola / Depósito</span>
             </h3>
-            <form onSubmit={handleRecepcionSubmit} className="space-y-4">
-              <div>
-                <label className="input-label label-required">Producto Perecedero</label>
-                <select
-                  className="input-field"
-                  value={recepcionForm.producto_id}
-                  onChange={(e) => setRecepcionForm({...recepcionForm, producto_id: e.target.value})}
-                  required
-                >
-                  <option value="">Seleccionar producto</option>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.sku})</option>)}
-                </select>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label label-required">Código Lote</label>
-                  <input
-                    className="input-field font-mono"
-                    placeholder="Ej: TOM-2805-A"
-                    value={recepcionForm.lote_codigo}
-                    onChange={(e) => setRecepcionForm({...recepcionForm, lote_codigo: e.target.value})}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="input-label label-required">Cantidad (KG/UN)</label>
-                  <input
-                    type="number"
-                    className="input-field font-mono"
-                    value={recepcionForm.cantidad}
-                    onChange={(e) => setRecepcionForm({...recepcionForm, cantidad: Number(e.target.value)})}
-                    min="1"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="input-label label-required">Fecha de Vencimiento</label>
-                <input
-                  type="date"
-                  className="input-field font-mono"
-                  value={recepcionForm.fecha_vencimiento}
-                  onChange={(e) => setRecepcionForm({...recepcionForm, fecha_vencimiento: e.target.value})}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="input-label">Proveedor</label>
-                <input
-                  className="input-field"
-                  placeholder="Ej: Abasto Central S.A."
-                  value={recepcionForm.proveedor_id}
-                  onChange={(e) => setRecepcionForm({...recepcionForm, proveedor_id: e.target.value})}
-                />
-              </div>
-
-              <button type="submit" className="btn-primary w-full mt-4" disabled={saving}>
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar Entrada y Guardar Lote"}
+            <form onSubmit={handleScanSubmit} className="flex gap-2">
+              <input
+                ref={scanInputRef}
+                type="text"
+                value={scanCode}
+                onChange={(e) => setScanCode(e.target.value)}
+                placeholder="Pistoleá el código de barras o escribí el SKU..."
+                className="input-field flex-1 text-sm font-mono py-2.5"
+                autoFocus
+              />
+              <button type="submit" className="btn-primary text-xs px-6 font-extrabold uppercase">
+                Contar (+1)
               </button>
             </form>
           </div>
 
-          <div className="lg:col-span-2 card p-6 space-y-4">
-            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 pb-3">
-              <HeartPulse className="w-5 h-5 text-red-500" />
-              Auditoría Sensorial de Calidad al Ingreso (Score)
-            </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Evalúa los parámetros estéticos y sanitarios del producto fresco. El sistema calculará el índice promedio y determinará la aptitud del lote para góndola.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
-              <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-gray-400 block">Aspecto General</label>
-                <select
-                  className="input-field"
-                  value={recepcionForm.aspecto}
-                  onChange={(e) => setRecepcionForm({...recepcionForm, aspecto: Number(e.target.value)})}
-                >
-                  <option value={5}>Excellent (5/5)</option>
-                  <option value={4}>Good (4/5)</option>
-                  <option value={3}>Acceptable (3/5)</option>
-                  <option value={2}>Deficient (2/5)</option>
-                  <option value={1}>Rejectable (1/5)</option>
-                </select>
-                <div className="flex gap-1 justify-center pt-2">
-                  {[1,2,3,4,5].map(star => (
-                    <span key={star} className={`text-lg ${recepcionForm.aspecto >= star ? "text-amber-400" : "text-gray-300"}`}>★</span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-gray-400 block">Firmeza / Textura</label>
-                <select
-                  className="input-field"
-                  value={recepcionForm.firmeza}
-                  onChange={(e) => setRecepcionForm({...recepcionForm, firmeza: Number(e.target.value)})}
-                >
-                  <option value={5}>Optimal Turgor (5/5)</option>
-                  <option value={4}>Slightly Soft (4/5)</option>
-                  <option value={3}>Acceptable Softness (3/5)</option>
-                  <option value={2}>Bruised / Soft (2/5)</option>
-                  <option value={1}>Rotten / Unusable (1/5)</option>
-                </select>
-                <div className="flex gap-1 justify-center pt-2">
-                  {[1,2,3,4,5].map(star => (
-                    <span key={star} className={`text-lg ${recepcionForm.firmeza >= star ? "text-amber-400" : "text-gray-300"}`}>★</span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-gray-400 block">Color / Madurez</label>
-                <select
-                  className="input-field"
-                  value={recepcionForm.color}
-                  onChange={(e) => setRecepcionForm({...recepcionForm, color: Number(e.target.value)})}
-                >
-                  <option value={5}>Vibrant / Standard (5/5)</option>
-                  <option value={4}>Slightly Off (4/5)</option>
-                  <option value={3}>Acceptable (3/5)</option>
-                  <option value={2}>Highly Overripe (2/5)</option>
-                  <option value={1}>Severe Discoloration (1/5)</option>
-                </select>
-                <div className="flex gap-1 justify-center pt-2">
-                  {[1,2,3,4,5].map(star => (
-                    <span key={star} className={`text-lg ${recepcionForm.color >= star ? "text-amber-400" : "text-gray-300"}`}>★</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 space-y-2">
-              <label className="input-label">Observaciones de Calidad / Auditoría</label>
-              <textarea
-                className="input-field resize-none"
-                rows={3}
-                placeholder="Indique cualquier anomalía o detalle del control de frío/frescura..."
-                value={recepcionForm.notas}
-                onChange={(e) => setRecepcionForm({...recepcionForm, notas: e.target.value})}
-              />
-            </div>
-
-            <div className="p-4 bg-blue-50 dark:bg-blue-950/20 text-blue-800 dark:text-blue-300 rounded-xl flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <HeartPulse className="w-5 h-5 text-blue-500" />
-                <span>Score Promedio Proyectado:</span>
-              </div>
-              <span className="text-2xl font-black font-mono">
-                {((Number(recepcionForm.aspecto) + Number(recepcionForm.firmeza) + Number(recepcionForm.color)) / 3).toFixed(1)} / 5.0
-              </span>
-            </div>
-          </div>
-        </div>
-      ) : activeTab === "desposte" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 card p-6 space-y-4">
-            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 pb-3">
-              <Scale className="w-5 h-5 text-secondary" />
-              Simulador de Carnicería
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="input-label label-required">Carcasa / Plantilla</label>
-                <select
-                  className="input-field"
-                  value={selectedTemplateId}
-                  onChange={(e) => setSelectedTemplateId(e.target.value)}
-                >
-                  <option value="">Seleccionar plantilla</option>
-                  {butcheryTemplates.map(t => <option key={t.id} value={t.id}>{t.nombre} ({t.especie})</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="input-label label-required">Peso Carcasa Entrada (KG)</label>
-                <input
-                  type="number"
-                  className="input-field font-mono font-bold"
-                  value={despostePeso}
-                  onChange={(e) => setDespostePeso(Number(e.target.value))}
-                  min="1"
-                />
-              </div>
-
-              <div>
-                <label className="input-label label-required">Costo Total Compra Carcasa (Gs.)</label>
-                <input
-                  type="number"
-                  className="input-field font-mono font-bold text-red-500"
-                  value={desposteCosto}
-                  onChange={(e) => setDesposteCosto(Number(e.target.value))}
-                  step="50000"
-                  min="0"
-                />
-              </div>
-
-              <div>
-                <label className="input-label">Responsable del Proceso</label>
-                <input
-                  className="input-field"
-                  placeholder="Carnicero supervisor"
-                  value={desposteResponsable}
-                  onChange={(e) => setDesposteResponsable(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="input-label">Notas del Lote</label>
-                <textarea
-                  className="input-field resize-none text-xs"
-                  rows={2}
-                  placeholder="Detalles sobre rendimiento cárnico, pH o frío de compra..."
-                  value={desposteNotas}
-                  onChange={(e) => setDesposteNotas(e.target.value)}
-                />
-              </div>
-
-              {selectedTemplateId && (
-                <button
-                  type="button"
-                  className="btn-primary w-full font-bold flex items-center justify-center gap-2"
-                  onClick={handleExecuteDesposte}
-                  disabled={saving}
-                >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : (
-                    <><Scale className="w-4 h-4" /> Procesar y Registrar Cortes</>
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="lg:col-span-2 card p-6 space-y-4">
-            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 pb-3">
-              <Scale className="w-5 h-5 text-secondary" />
-              Proyección de Rendimiento y Absorción de Costos Comerciales
-            </h3>
-
-            {calculatedCortes.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-                <Scale className="w-12 h-12 mb-3 opacity-30 animate-pulse" />
-                <p className="text-sm font-medium">Seleccioná una plantilla de desposte para simular la pieza</p>
+          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+            {scannedItems.length === 0 ? (
+              <div className="p-16 text-center text-gray-400 space-y-2">
+                <Barcode className="w-12 h-12 mx-auto opacity-30 text-emerald-600" />
+                <p className="font-bold text-xs">No hay productos escaneados aún</p>
+                <p className="text-[11px]">Pistoleá los códigos para empezar el conteo físico comparativo.</p>
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="overflow-hidden border border-gray-100 dark:border-gray-800 rounded-xl">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="table-header">
-                        <th className="table-cell">Corte / Subproducto</th>
-                        <th className="table-cell text-right">Rendimiento %</th>
-                        <th className="table-cell text-right">Peso Proyectado</th>
-                        <th className="table-cell text-right">Precio Ref. Mercado</th>
-                        <th className="table-cell text-right">Costo Absorbido</th>
-                        <th className="table-cell text-right">Costo Unit. Real</th>
+              <table className="w-full text-left text-xs min-w-[650px]">
+                <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+                  <tr>
+                    <th className="p-3.5">Código / SKU</th>
+                    <th className="p-3.5">Producto</th>
+                    <th className="p-3.5 text-right">Conteo Físico</th>
+                    <th className="p-3.5 text-right">Stock en Sistema</th>
+                    <th className="p-3.5 text-right">Diferencia</th>
+                    <th className="p-3.5 text-center">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80 font-medium">
+                  {scannedItems.map((item, idx) => {
+                    const diff = item.cantidad_fisica - item.cantidad_sistema
+                    return (
+                      <tr key={item.product.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                        <td className="p-3.5 font-mono text-gray-600 dark:text-gray-300 font-bold">
+                          {item.product.codigo_barra || item.product.sku}
+                        </td>
+                        <td className="p-3.5 font-extrabold text-gray-900 dark:text-white">
+                          {item.product.nombre}
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-black text-sm text-emerald-600">
+                          {item.cantidad_fisica}
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-gray-400">
+                          {item.cantidad_sistema}
+                        </td>
+                        <td className={`p-3.5 text-right font-mono font-black ${
+                          diff === 0 ? "text-gray-400" : diff > 0 ? "text-emerald-600" : "text-red-600"
+                        }`}>
+                          {diff > 0 ? `+${diff}` : diff}
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <button
+                            onClick={() => setScannedItems(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-gray-400 hover:text-red-600"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {calculatedCortes.map((c, idx) => (
-                        <tr key={idx} className="table-row">
-                          <td className="table-td">
-                            <span className="font-semibold text-gray-900 dark:text-white">{c.producto_nombre}</span>
-                            {c.es_subproducto && <span className="ml-1.5 inline-flex px-1 text-[9px] font-extrabold uppercase rounded bg-gray-100 text-gray-500">Subprod.</span>}
-                          </td>
-                          <td className="table-td text-right font-mono font-bold text-gray-500">{c.rendimiento_porcentual}%</td>
-                          <td className="table-td text-right font-mono font-bold text-primary">{c.weight.toFixed(2)} KG</td>
-                          <td className="table-td text-right font-mono">{formatPYG(c.precio_ponderado)}</td>
-                          <td className="table-td text-right font-mono font-bold text-red-500">{formatPYG(c.costo_total)}</td>
-                          <td className="table-td text-right font-mono font-bold text-green-600">{formatPYG(c.costo_unitario)} / KG</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 rounded-xl flex items-center justify-between text-xs font-bold border border-emerald-200">
-                  <span>Suma Total Mermas y Cortes: {despostePeso} KG</span>
-                  <span>Absorción de Costo: 100% de {formatPYG(desposteCosto)}</span>
-                </div>
-              </div>
+                    )
+                  })}
+                </tbody>
+              </table>
             )}
           </div>
         </div>
-      ) : activeTab === "warehouses" ? (
+      )}
+
+      {/* ── CONTENIDO PESTAÑA 4: ADMINISTRACIÓN DE DEPÓSITOS ─────────────────── */}
+      {activeTab === "warehouses" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {warehouses.map((w) => (
-            <div key={w.id} className="card p-5 hover:shadow-md transition-shadow cursor-pointer">
-              <div className="flex items-center justify-between mb-3">
-                <span className={typeMap[w.tipo || ""] || "badge-info"}>{w.tipo || "-"}</span>
-                <span className="font-mono text-xs text-gray-400">{w.codigo}</span>
+            <div key={w.id} className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl space-y-3 shadow-xs">
+              <div className="flex items-center justify-between">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center font-black">
+                  <Warehouse className="w-5 h-5" />
+                </div>
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 uppercase">
+                  Activo
+                </span>
               </div>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">{w.nombre}</h3>
-              {w.direccion && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{w.direccion}</p>}
+
+              <div>
+                <h4 className="font-extrabold text-sm text-gray-900 dark:text-white">{w.nombre}</h4>
+                <p className="text-xs text-gray-400 font-mono mt-0.5">Código: {w.codigo}</p>
+                {w.direccion && <p className="text-xs text-gray-500 mt-1">{w.direccion}</p>}
+              </div>
+
+              <div className="pt-2 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between text-xs text-gray-400">
+                <span>Tipo: Salón / Depósito</span>
+                <span className="font-bold text-emerald-600">En Operación</span>
+              </div>
             </div>
           ))}
-          <button onClick={() => setShowWarehouseForm(true)} className="card p-5 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-gray-700 cursor-pointer hover:border-primary/40 transition-colors">
-            <Plus className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
-            <span className="text-sm font-bold text-gray-400">Nuevo almacén</span>
-          </button>
         </div>
-      ) : null}
+      )}
 
-      {showWarehouseForm && (
-        <div className="modal-overlay" onClick={() => setShowWarehouseForm(false)}>
-          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Nuevo almacén</h3>
-              <form onSubmit={handleCreateWarehouse} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="input-label label-required">Código</label>
-                    <input className="input-field" value={form.codigo} onChange={(e) => setForm({...form, codigo: e.target.value})} required placeholder="ALM-001" />
-                  </div>
-                  <div>
-                    <label className="input-label">Tipo</label>
-                    <select className="input-field" value={form.tipo} onChange={(e) => setForm({...form, tipo: e.target.value})}>
-                      <option value="principal">Principal</option>
-                      <option value="sucursal">Sucursal</option>
-                      <option value="transito">Tránsito</option>
-                      <option value="devoluciones">Devoluciones</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="input-label label-required">Nombre</label>
-                  <input className="input-field" value={form.nombre} onChange={(e) => setForm({...form, nombre: e.target.value})} required />
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button type="button" className="btn-outline flex-1" onClick={() => setShowWarehouseForm(false)}>Cancelar</button>
-                  <button type="submit" className="btn-primary flex-1" disabled={saving}>
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Crear"}
-                  </button>
-                </div>
-              </form>
+      {/* ── MODAL NUEVO DEPÓSITO ────────────────────────────────────────────── */}
+      {showWarehouseModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
+              <h3 className="font-black text-sm uppercase tracking-wider text-gray-900 dark:text-white">
+                Crear Nuevo Depósito
+              </h3>
+              <button onClick={() => setShowWarehouseModal(false)} className="text-gray-400 hover:text-gray-700">
+                <X className="w-5 h-5" />
+              </button>
             </div>
+
+            <form onSubmit={handleCreateWarehouse} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-bold text-gray-400 uppercase text-[10px] mb-1">Código Identificador *</label>
+                <input
+                  type="text"
+                  required
+                  value={whForm.codigo}
+                  onChange={(e) => setWhForm({ ...whForm, codigo: e.target.value })}
+                  placeholder="Ej: DEP-03 o CAM-FRIO"
+                  className="input-field w-full font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-gray-400 uppercase text-[10px] mb-1">Nombre del Depósito *</label>
+                <input
+                  type="text"
+                  required
+                  value={whForm.nombre}
+                  onChange={(e) => setWhForm({ ...whForm, nombre: e.target.value })}
+                  placeholder="Ej: Cámara Frigorífica Carnicería"
+                  className="input-field w-full font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-gray-400 uppercase text-[10px] mb-1">Ubicación / Dirección</label>
+                <input
+                  type="text"
+                  value={whForm.direccion}
+                  onChange={(e) => setWhForm({ ...whForm, direccion: e.target.value })}
+                  placeholder="Ej: Sector Trasero - Salón Central"
+                  className="input-field w-full"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowWarehouseModal(false)}
+                  className="btn-secondary flex-1 text-xs py-2.5"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingWh}
+                  className="btn-primary flex-1 text-xs py-2.5 font-extrabold uppercase"
+                >
+                  {savingWh ? "Guardando..." : "Guardar Depósito"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

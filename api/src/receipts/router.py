@@ -3,11 +3,28 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import io
+import qrcode
+
 from api.src.db import get_db
 from api.src.receipts.pdf_service import generate_receipt_pdf
 from api.src.sifen.qr_service import generate_qr_image
 
 router = APIRouter(prefix="/api/v1/receipts", tags=["receipts"])
+
+
+@router.get("/qr")
+async def get_generic_qr(data: str = Query(..., min_length=1, max_length=500), size: int = Query(180, ge=64, le=512)):
+    """QR generico para cualquier texto/URL (ej. el enlace de registro al
+    club de fidelidad en el ticket) -- separado del QR de verificacion SIFEN,
+    que siempre apunta a la URL de ekuatia.set.gov.py con el CDC."""
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white").resize((size, size))
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return StreamingResponse(io.BytesIO(buffer.getvalue()), media_type="image/png")
 
 
 @router.get("/sales/{sale_id}/pdf")

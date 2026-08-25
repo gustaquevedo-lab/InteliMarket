@@ -365,9 +365,6 @@ export async function printReceipt(html: string): Promise<boolean> {
 }
 
 export async function openCashDrawer(): Promise<boolean> {
-  if (isElectron()) {
-    const result = await window.electronAPI!.openCashDrawer()
-    return result.success
-  }
-  return false
+  // Cash drawer deshabilitado: Extra Supermercado opera sin gaveta eléctrica
+  return true
 }

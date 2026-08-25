@@ -81,7 +81,7 @@ export default function PagoparPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <CreditCard className="w-6 h-6 text-primary" />
             Pagopar
           </h1>
@@ -96,15 +96,15 @@ export default function PagoparPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2"><CheckCircle className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Aprobados</span></div>
-          <p className="text-2xl font-bold text-green-500">{formatPYG(totalApproved)}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-500">{formatPYG(totalApproved)}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2"><Clock className="w-5 h-5 text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Pendientes</span></div>
-          <p className="text-2xl font-bold text-amber-500">{formatPYG(totalPending)}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-500">{formatPYG(totalPending)}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2"><CreditCard className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Transacciones</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{transactions.length}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{transactions.length}</p>
         </div>
       </div>
 

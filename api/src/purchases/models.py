@@ -459,3 +459,23 @@ class PurchaseRfqResponseItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     response = relationship("PurchaseRfqResponse", back_populates="items")
+
+
+class CustomerLostDemand(Base):
+    __tablename__ = "customer_lost_demands"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    producto_nombre = Column(String(255), nullable=False)
+    categoria = Column(String(100))
+    marca = Column(String(100))
+    notas = Column(Text)
+    cliente_nombre = Column(String(255))
+    cliente_contacto = Column(String(100))
+    cajero_id = Column(UUID(as_uuid=True))
+    cajero_nombre = Column(String(255))
+    caja_id = Column(String(50))
+    estado = Column(String(30), nullable=False, default="PENDIENTE")  # PENDIENTE, EN_EVALUACION, COMPRADO, DESCARTADO
+    orden_compra_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

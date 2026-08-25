@@ -242,6 +242,8 @@ class ReceiptItemInput(BaseModel):
     cantidad_recibida: Decimal = Field(ge=Decimal("0.001"))
     costo_unitario: Decimal = Field(ge=0)
     batch_id: Optional[UUID] = None
+    lote: Optional[str] = None
+    fecha_vencimiento: Optional[datetime] = None
     cantidad_rechazada: Optional[Decimal] = None
     motivo_rechazo: Optional[str] = None
 
@@ -851,4 +853,107 @@ class RfqAwardRequest(BaseModel):
     supplier_id: UUID
     user_id: Optional[UUID] = None
     user_name: Optional[str] = None
- 
+
+
+# ── Smart Replenishment & Demand Forecast (AI) ────────────────────────────────
+
+class SmartReplenishmentRequest(BaseModel):
+    company_id: UUID
+    supplier_id: Optional[UUID] = None
+    categoria_id: Optional[UUID] = None
+    dias_cobertura: int = 30
+    lead_time_dias: int = 3
+    dias_historial_ventas: int = 30
+    factor_fin_semana: bool = False
+    factor_fin_mes: bool = False
+    factor_clima: str = "normal"  # normal, calor, frio, lluvia
+    factor_evento: str = "normal"  # normal, feriado, semana_santa, fin_de_ano
+    solo_quiebre_o_bajo: bool = False
+    search: Optional[str] = None
+    limit: int = 100
+
+
+class SmartReplenishmentItem(BaseModel):
+    product_id: UUID
+    nombre: str
+    sku: Optional[str] = None
+    codigo_barra: Optional[str] = None
+    unidad_medida: str = "UN"
+    stock_actual: float
+    stock_en_transito: float
+    ventas_periodo: float
+    demanda_diaria_base: float
+    multiplicador_estacional: float
+    demanda_diaria_ajustada: float
+    dias_stock_restantes: float
+    autonomia_estado: str  # critico, bajo, optimo, sobrestock
+    stock_seguridad: Optional[float] = None
+    punto_reorden: Optional[float] = None
+    target_stock: Optional[float] = None
+    cantidad_sugerida: float
+    costo_unitario_estimado: float
+    subtotal_estimado: float
+    iva_tasa: float
+    explicacion_ia: str
+    generada_automaticamente: Optional[bool] = True
+
+
+class SmartReplenishmentResponse(BaseModel):
+    total_evaluados: int
+    total_quiebres: int
+    total_bajos: int
+    total_sugeridos: int
+    monto_total_estimado: float
+    items: list[SmartReplenishmentItem]
+
+
+class CreatePOFromReplenishmentRequest(BaseModel):
+    company_id: UUID
+    supplier_id: UUID
+    fecha_entrega_estimada: Optional[date] = None
+    moneda: str = "PYG"
+    prioridad: str = "normal"
+    condiciones_pago: Optional[str] = None
+    observaciones: Optional[str] = None
+    user_id: Optional[UUID] = None
+    user_name: Optional[str] = None
+    items: list[POItemInput]
+
+class LostDemandCreate(BaseModel):
+    company_id: UUID
+    producto_nombre: str
+    categoria: Optional[str] = None
+    marca: Optional[str] = None
+    notas: Optional[str] = None
+    cliente_nombre: Optional[str] = None
+    cliente_contacto: Optional[str] = None
+    cajero_id: Optional[UUID] = None
+    cajero_nombre: Optional[str] = None
+    caja_id: Optional[str] = None
+
+
+class LostDemandUpdate(BaseModel):
+    estado: Optional[str] = None
+    notas: Optional[str] = None
+    orden_compra_id: Optional[UUID] = None
+
+
+class LostDemandResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    producto_nombre: str
+    categoria: Optional[str] = None
+    marca: Optional[str] = None
+    notas: Optional[str] = None
+    cliente_nombre: Optional[str] = None
+    cliente_contacto: Optional[str] = None
+    cajero_id: Optional[UUID] = None
+    cajero_nombre: Optional[str] = None
+    caja_id: Optional[str] = None
+    estado: str
+    orden_compra_id: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

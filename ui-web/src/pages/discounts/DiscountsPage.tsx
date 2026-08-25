@@ -152,7 +152,7 @@ export default function DiscountsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
             <Tag className="w-6 h-6 text-primary" />
             Descuentos
           </h1>
@@ -167,15 +167,15 @@ export default function DiscountsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2"><Tag className="w-5 h-5 text-primary" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total</span></div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{total}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{total}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2"><ToggleRight className="w-5 h-5 text-green-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Activos</span></div>
-          <p className="text-2xl font-bold text-green-500">{activos}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-500">{activos}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2"><ToggleLeft className="w-5 h-5 text-red-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Inactivos</span></div>
-          <p className="text-2xl font-bold text-red-500">{inactivos}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-red-500">{inactivos}</p>
         </div>
       </div>
 

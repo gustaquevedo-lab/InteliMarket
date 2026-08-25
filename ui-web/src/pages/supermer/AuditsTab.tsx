@@ -694,12 +694,12 @@ function DashboardTab({ data }: { data: AuditDashboard | null }) {
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 font-medium">Tasa de aprobación global</p>
               <div className="mt-4 flex items-center justify-center gap-6 text-sm">
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-green-600">{totalAprobadas}</div>
+                  <div className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-600">{totalAprobadas}</div>
                   <div className="text-gray-400 text-xs font-medium">Aprobadas</div>
                 </div>
                 <div className="text-gray-300 dark:text-gray-600 text-2xl">/</div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-gray-700 dark:text-gray-300">{totalGlobal}</div>
+                  <div className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-700 dark:text-gray-300">{totalGlobal}</div>
                   <div className="text-gray-400 text-xs font-medium">Totales</div>
                 </div>
               </div>

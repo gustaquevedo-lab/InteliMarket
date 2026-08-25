@@ -124,6 +124,21 @@ async def consolidated_dashboard(
     return await service.get_consolidated_dashboard(db, user["company_id"])
 
 
+@router.get("/commercial-targets/matrix")
+async def get_commercial_targets_matrix(
+    branch_id: Optional[str] = None,
+    periodo: str = "2026-08",
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_commercial_targets_matrix(
+        db=db,
+        company_id=user["company_id"],
+        branch_id=branch_id,
+        periodo=periodo,
+    )
+
+
 # ── Branch CRUD (with /{branch_id} param) ────────────────────
 
 @router.post("", response_model=BranchResponse)

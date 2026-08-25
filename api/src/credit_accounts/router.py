@@ -310,7 +310,7 @@ async def reject_writeoff_request(
 async def list_approval_requests(
     estado: str | None = Query("pendiente"),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission("credit:approve_exception")),
+    user=Depends(require_auth),
 ):
     requests = await service.list_approval_requests(db, user["company_id"], estado=estado)
     return [

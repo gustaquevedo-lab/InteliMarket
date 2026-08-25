@@ -43,6 +43,7 @@ class UserResponse(BaseModel):
     telefono: Optional[str] = None
     rol: str
     activo: bool
+    foto_url: Optional[str] = None
     tenant_id: Optional[str] = None
     tenant_slug: Optional[str] = None
     created_at: datetime
@@ -71,6 +72,7 @@ class AdminCreateUserRequest(BaseModel):
     nombre: str = Field(min_length=2, max_length=100)
     telefono: Optional[str] = None
     rol: str = "operador"
+    foto_url: Optional[str] = None
     role_id: Optional[UUID] = None
 
 
@@ -87,6 +89,7 @@ class UpdateUserRequest(BaseModel):
     telefono: Optional[str] = None
     rol: Optional[str] = None
     activo: Optional[bool] = None
+    foto_url: Optional[str] = None
 
 
 class TenantUserResponse(BaseModel):
@@ -96,8 +99,27 @@ class TenantUserResponse(BaseModel):
     telefono: Optional[str] = None
     rol: str
     activo: bool
+    foto_url: Optional[str] = None
     is_superadmin: bool
     last_login: Optional[datetime] = None
     created_at: datetime
     tenant_rol: str
     role_names: list[str] = []
+
+
+class PosStaffItem(BaseModel):
+    id: str
+    email: str
+    nombre: str
+    rol: str
+    foto_url: Optional[str] = None
+    en_turno: bool
+
+
+class PosStaffListResponse(BaseModel):
+    staff: list[PosStaffItem]
+
+
+class ActiveSupervisorResponse(BaseModel):
+    has_supervisor: bool
+    nombre: Optional[str] = None

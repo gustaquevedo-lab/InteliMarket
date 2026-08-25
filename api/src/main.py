@@ -1,3 +1,11 @@
+import os
+import time
+os.environ['TZ'] = 'America/Asuncion'
+try:
+    time.tzset()
+except Exception:
+    pass
+
 """InteliMarket API — FastAPI Application Entry Point"""
 
 from fastapi import FastAPI
@@ -31,6 +39,8 @@ from api.src.payments.router import router as payments_router
 from api.src.currency.router import router as currency_router
 from api.src.reports.router import router as reports_router
 from api.src.integrations.router import router as integrations_router
+from api.src.pos_terminals.router import router as pos_terminals_router
+from api.src.supervisor_requests.router import router as supervisor_requests_router
 from api.src.integrations.scales.router import router as scales_router
 from api.src.caja.router import router as caja_router
 from api.src.intelicont.router import router as intelicont_router
@@ -183,16 +193,65 @@ app.add_middleware(
 )
 
 
+from fastapi.responses import FileResponse
+
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "version": "0.3.0"}
+
+
+@app.get("/download/sandbox")
+@app.get("/download/pos-sandbox")
+@app.get("/download/InteliMarket-POS-Sandbox.zip")
+async def download_pos_sandbox():
+    candidate_paths = [
+        Path("/home/intellihouse/intelimarket/InteliMarket-POS-Sandbox.zip"),
+        Path("/home/intellihouse/intelimarket/api/static/InteliMarket-POS-Sandbox.zip"),
+        Path("/home/intellihouse/intelimarket/ui-web/public/InteliMarket-POS-Sandbox.zip"),
+    ]
+    for cp in candidate_paths:
+        if cp.exists():
+            return FileResponse(
+                path=str(cp),
+                filename="InteliMarket-POS-Sandbox.zip",
+                media_type="application/zip",
+                headers={"Content-Disposition": "attachment; filename=InteliMarket-POS-Sandbox.zip"}
+            )
+    return {"error": "Archivo no encontrado"}
+
+
+@app.get("/download/windows")
+@app.get("/download/pos")
+@app.get("/download/InteliMarket-POS-Windows.zip")
+async def download_pos_windows():
+    candidate_paths = [
+        Path("/home/intellihouse/intelimarket/InteliMarket-POS-Windows.zip"),
+        Path("/home/intellihouse/intelimarket/api/static/InteliMarket-POS-Windows.zip"),
+        Path("/home/intellihouse/intelimarket/ui-web/public/InteliMarket-POS-Windows.zip"),
+    ]
+    for cp in candidate_paths:
+        if cp.exists():
+            return FileResponse(
+                path=str(cp),
+                filename="InteliMarket-POS-Windows.zip",
+                media_type="application/zip",
+                headers={"Content-Disposition": "attachment; filename=InteliMarket-POS-Windows.zip"}
+            )
+    return {"error": "Archivo no encontrado"}
+
 
 _UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
 _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")
 
+_STATIC_DIR = Path(__file__).resolve().parents[2] / "api" / "static"
+_STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
 
 app.include_router(auth_router)
+app.include_router(pos_terminals_router)
+app.include_router(supervisor_requests_router)
 app.include_router(tenants_router)
 app.include_router(companies_router)
 app.include_router(products_router)

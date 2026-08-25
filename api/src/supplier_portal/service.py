@@ -362,3 +362,62 @@ async def get_supplier_whatsapp_url(db: AsyncSession, supplier_id: str) -> str:
         phone = supplier.telefono.replace("+", "").replace(" ", "").replace("-", "")
     message = "Hola! Tengo consultas sobre pedidos"
     return f"https://wa.me/{phone}?text={message.replace(' ', '%20')}"
+
+
+# ── Admin (Internal Supermarket Management) ──────────────────────────
+
+async def list_supplier_users_for_company(db: AsyncSession, company_id: str) -> list[dict]:
+    r = await db.execute(
+        select(SupplierUser)
+        .where(SupplierUser.company_id == UUID(company_id))
+        .order_by(SupplierUser.created_at.desc())
+    )
+    users = r.scalars().all()
+    results = []
+    for u in users:
+        sup_r = await db.execute(select(Supplier.razon_social).where(Supplier.id == u.supplier_id))
+        supplier_nombre = sup_r.scalar_one_or_none() or "Proveedor"
+        results.append({
+            "id": str(u.id),
+            "supplier_id": str(u.supplier_id),
+            "supplier_nombre": supplier_nombre,
+            "email": u.email,
+            "nombre": u.nombre,
+            "telefono": u.telefono,
+            "cargo": u.cargo,
+            "activo": u.activo,
+            "last_login": u.last_login.isoformat() if u.last_login else None,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        })
+    return results
+
+
+async def list_all_documents_for_company(db: AsyncSession, company_id: str, tipo: str = "") -> list[dict]:
+    q = select(SupplierDocument).where(SupplierDocument.company_id == UUID(company_id))
+    if tipo:
+        q = q.where(SupplierDocument.tipo == tipo)
+    q = q.order_by(SupplierDocument.created_at.desc()).limit(100)
+    r = await db.execute(q)
+    docs = r.scalars().all()
+    results = []
+    for d in docs:
+        sup_r = await db.execute(select(Supplier.razon_social).where(Supplier.id == d.supplier_id))
+        supplier_nombre = sup_r.scalar_one_or_none() or "Proveedor"
+        res = doc_to_response(d)
+        res["supplier_nombre"] = supplier_nombre
+        results.append(res)
+    return results
+
+
+async def toggle_supplier_user(db: AsyncSession, user_id: UUID, company_id: str) -> dict:
+    r = await db.execute(
+        select(SupplierUser).where(SupplierUser.id == user_id, SupplierUser.company_id == UUID(company_id))
+    )
+    user = r.scalar_one_or_none()
+    if not user:
+        raise ValueError("Usuario no encontrado")
+    user.activo = not user.activo
+    await db.commit()
+    await db.refresh(user)
+    return {"id": str(user.id), "activo": user.activo}
+

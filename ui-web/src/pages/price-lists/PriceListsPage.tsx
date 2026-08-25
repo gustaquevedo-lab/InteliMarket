@@ -23,7 +23,7 @@ export default function PriceListsPage() {
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Listas de Precios</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Listas de Precios</h1>
           <p className="text-sm text-gray-500 mt-1">Gestión de listas de precios, descuentos y asignaciones</p>
         </div>
       </div>

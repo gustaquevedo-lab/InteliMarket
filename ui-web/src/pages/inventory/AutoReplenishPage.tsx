@@ -226,7 +226,7 @@ export default function AutoReplenishPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+        <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-2">
           <ClipboardList className="w-6 h-6 text-primary" />
           Reabastecimiento Predictivo
         </h1>
@@ -241,28 +241,28 @@ export default function AutoReplenishPage() {
             <Settings className="w-5 h-5 text-primary" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Reglas Activas</span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">{dashboard?.reglas_activas ?? "—"}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">{dashboard?.reglas_activas ?? "—"}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2">
             <AlertTriangle className="w-5 h-5 text-amber-500" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Sugerencias Pendientes</span>
           </div>
-          <p className="text-2xl font-bold text-amber-500">{dashboard?.sugerencias_pendientes ?? "—"}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-500">{dashboard?.sugerencias_pendientes ?? "—"}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2">
             <TrendingUp className="w-5 h-5 text-green-500" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Aprobadas</span>
           </div>
-          <p className="text-2xl font-bold text-green-500">{dashboard?.sugerencias_aprobadas ?? "—"}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-green-500">{dashboard?.sugerencias_aprobadas ?? "—"}</p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-2">
             <Zap className="w-5 h-5 text-primary" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Cross-Dock Hoy</span>
           </div>
-          <p className="text-2xl font-bold text-primary">{dashboard?.crossdock_hoy ?? "—"}</p>
+          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-primary">{dashboard?.crossdock_hoy ?? "—"}</p>
         </div>
       </div>
 

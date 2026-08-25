@@ -21,6 +21,7 @@ win:
   target:
     - dir
   icon: ../electron/assets/icon.ico
+  signAndEditExecutable: false
 
 extraMetadata:
   main: electron/main.cjs

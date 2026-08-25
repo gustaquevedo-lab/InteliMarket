@@ -13,6 +13,10 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://intelimarket:password@localhost:5432/intelimarket"
+    # Search path opcional (ej. "sandbox,public") para levantar un entorno
+    # sandbox contra el mismo Postgres sin tocar el DATABASE_URL -- asyncpg
+    # exige server_settings como dict, no como query param de la URL.
+    db_search_path: str | None = None
     db_pool_size: int = 20
     db_max_overflow: int = 10
 

@@ -355,7 +355,7 @@ export default function SupermerPage() {
             </div>
             <div>
               <p className="text-white text-xs font-semibold uppercase tracking-wider opacity-80">Rendimiento</p>
-              <p className="text-white text-2xl font-bold">98.5%</p>
+              <p className="text-white text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">98.5%</p>
             </div>
           </div>
         </div>
@@ -2339,7 +2339,7 @@ function ButcheryTab({ templates, orders, yieldReport, desposteResult, setDespos
                     <span className="text-xs font-bold uppercase tracking-wider opacity-85 text-gray-500 dark:text-gray-400">{w.label}</span>
                     <w.icon className="w-5 h-5 opacity-90" />
                   </div>
-                  <div className="text-3xl font-black tracking-tight">{w.value}</div>
+                  <div className="text-lg sm:text-xl xl:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono tracking-tight truncate tracking-tight">{w.value}</div>
                 </div>
               ))}
             </div>
@@ -2878,7 +2878,7 @@ function ProduceTab({ batches, audits, scorecards, dashboard, markdownResult, se
                 <span className="text-sm text-gray-500 font-medium">{c.label}</span>
                 <c.icon className={`w-5 h-5 ${c.color}`} />
               </div>
-              <div className={`text-2xl font-bold ${c.color}`}>{c.value}</div>
+              <div className={`text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate ${c.color}`}>{c.value}</div>
             </div>
           ))}
         </div>
@@ -3135,7 +3135,7 @@ function UnlockPromo({ title, desc, featureKey, competitors }: {
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-bold tracking-wider uppercase">
               <Sparkles className="w-3.5 h-3.5" /> Módulo Opcional Enterprise Tier-1
             </span>
-            <h2 className="text-3xl font-black tracking-tight">{title}</h2>
+            <h2 className="text-lg sm:text-xl xl:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono tracking-tight truncate tracking-tight">{title}</h2>
             <p className="text-slate-400 text-base leading-relaxed max-w-2xl">{desc}</p>
           </div>
           

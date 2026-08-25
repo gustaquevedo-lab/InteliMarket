@@ -16,6 +16,11 @@ async def create_variant(data: VariantCreate, db: AsyncSession = Depends(get_db)
     return await service.create_variant(db, data)
 
 
+@router.get("")
+async def list_all_variants(product_id: str | None = None, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.list_all_company_variants(db, user["company_id"], product_id)
+
+
 @router.get("/product/{product_id}", response_model=list[VariantResponse])
 async def list_variants(product_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     return await service.list_variants(db, product_id)

@@ -1,3 +1,4 @@
+import { useEntityLookup, getProductName, getSupplierName } from "../../hooks/useEntityLookup"
 import { useState, useEffect } from "react"
 import { MapPin, ClipboardList, RotateCcw, Layers, Truck, Bell, PackageSearch } from "lucide-react"
 import { advInvApi } from "../../api/advancedInventory"
@@ -27,14 +28,16 @@ function apiPut(e: string, d: any) {
   }).then(r => { if (!r.ok) throw new Error(); return r.json() })
 }
 
+
 export default function InventoryAdvancedPage() {
+  useEntityLookup()
   const [tab, setTab] = useState("dashboard")
 
   return (
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Control de Inventario Avanzado</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Control de Inventario Avanzado</h1>
           <p className="text-sm text-gray-500 mt-1">Ubicaciones, Picking, Conteo Cíclico, FIFO, Consignación</p>
         </div>
       </div>
@@ -89,7 +92,7 @@ function DashboardTab() {
         ].map((kpi) => (
           <div key={kpi.label} className="card p-4">
             <p className="text-xs text-gray-500">{kpi.label}</p>
-            <p className={`text-2xl font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
+            <p className={`text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate mt-1 ${kpi.color}`}>{kpi.value}</p>
           </div>
         ))}
       </div>
@@ -122,7 +125,7 @@ function DashboardTab() {
               <div key={l.id} className="px-5 py-3 text-sm flex justify-between">
                 <div>
                   <span className="font-medium">{l.referencia || "—"}</span>
-                  <span className="text-gray-400 ml-2">{l.product_id?.slice(0, 8)}</span>
+                  <span className="text-gray-400 ml-2">{getProductName(l.product_id)}</span>
                 </div>
                 <span className="text-red-500 font-medium">{l.cantidad_disponible} uds · {l.fecha_vencimiento ? new Date(l.fecha_vencimiento).toLocaleDateString("es-PY") : "—"}</span>
               </div>
@@ -448,7 +451,7 @@ function LotsTab() {
             <tbody>
               {lots.map((l) => (
                 <tr key={l.id} className="border-t border-gray-100 dark:border-gray-700">
-                  <td className="px-4 py-2 font-mono text-xs">{l.product_id?.slice(0, 8)}</td>
+                  <td className="px-4 py-2 font-mono text-xs">{getProductName(l.product_id)}</td>
                   <td className="px-4 py-2">{l.referencia || "—"}</td>
                   <td className="px-4 py-2 text-right font-medium">{l.cantidad_disponible}</td>
                   <td className="px-4 py-2 text-right">{l.cantidad}</td>
@@ -532,8 +535,8 @@ function ConsignmentTab() {
           <tbody>
             {items.map((cs) => (
               <tr key={cs.id} className="border-t border-gray-100 dark:border-gray-700">
-                <td className="px-5 py-3">{cs.supplier_nombre || cs.supplier_id?.slice(0, 8)}</td>
-                <td className="px-5 py-3 font-mono text-xs">{cs.product_id?.slice(0, 8)}</td>
+                <td className="px-5 py-3">{cs.supplier_nombre || getSupplierName(cs.supplier_id)}</td>
+                <td className="px-5 py-3 font-mono text-xs">{getProductName(cs.product_id)}</td>
                 <td className="px-5 py-3 text-right font-medium">{cs.cantidad}</td>
                 <td className="px-5 py-3 text-right">{cs.costo_acordado ? `Gs. ${cs.costo_acordado.toLocaleString()}` : "—"}</td>
                 <td className="px-5 py-3">{cs.fecha_vencimiento ? new Date(cs.fecha_vencimiento).toLocaleDateString("es-PY") : "—"}</td>
@@ -579,7 +582,7 @@ function ReplenishTab() {
           <h3 className="font-semibold text-red-700 dark:text-red-400 mb-2">⚠️ {alerts.length} alerta(s) de stock bajo</h3>
           <div className="space-y-1">
             {alerts.map((a: any, i: number) => (
-              <p key={i} className="text-sm text-red-600 dark:text-red-300">Producto {a.product_id?.slice(0, 8)}: stock actual {a.current_stock} (mínimo: {a.stock_minimo}) · Sugerido: {a.cantidad_reorden} uds</p>
+              <p key={i} className="text-sm text-red-600 dark:text-red-300">Producto {getProductName(a.product_id)}: stock actual {a.current_stock} (mínimo: {a.stock_minimo}) · Sugerido: {a.cantidad_reorden} uds</p>
             ))}
           </div>
         </div>
@@ -614,7 +617,7 @@ function ReplenishTab() {
           <tbody>
             {rules.map((r) => (
               <tr key={r.id} className="border-t border-gray-100 dark:border-gray-700">
-                <td className="px-5 py-3 font-mono text-xs">{r.product_id?.slice(0, 8)}</td>
+                <td className="px-5 py-3 font-mono text-xs">{getProductName(r.product_id)}</td>
                 <td className="px-5 py-3 text-right font-medium">{r.stock_minimo}</td>
                 <td className="px-5 py-3 text-right">{r.stock_seguridad}</td>
                 <td className="px-5 py-3 text-right">{r.cantidad_reorden || "—"}</td>

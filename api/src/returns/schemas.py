@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
 from uuid import UUID
 from decimal import Decimal
@@ -24,6 +24,8 @@ class ReturnItemResponse(BaseModel):
     product_id: UUID
     variant_id: Optional[UUID] = None
     descripcion: Optional[str] = None
+    product_name: Optional[str] = None
+    product_sku: Optional[str] = None
     cantidad: Decimal
     precio_unitario: Decimal
     iva_tasa: Decimal
@@ -59,6 +61,9 @@ class ReturnResponse(BaseModel):
     branch_id: Optional[UUID] = None
     sale_id: Optional[UUID] = None
     customer_id: Optional[UUID] = None
+    customer_name: Optional[str] = None
+    customer_ruc: Optional[str] = None
+    sale_numero: Optional[str] = None
     numero: str
     fecha: datetime
     tipo: str
@@ -72,6 +77,8 @@ class ReturnResponse(BaseModel):
     iva_5: Optional[Decimal] = None
     total: Optional[Decimal] = None
     nota_credito_id: Optional[UUID] = None
+    nota_credito_numero: Optional[str] = None
+    nota_credito_error: Optional[str] = None
     warehouse_id: Optional[UUID] = None
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None

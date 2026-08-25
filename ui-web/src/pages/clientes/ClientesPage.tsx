@@ -1,3 +1,4 @@
+import { useEntityLookup, getCustomerName } from "../../hooks/useEntityLookup"
 import { useState, useEffect } from "react"
 import {
   BarChart3, Users, TrendingUp, Gift, Tag, Ticket, Plus, Search, Loader2,
@@ -8,14 +9,26 @@ import { api } from "../../api/index"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
+
 export default function ClientesPage() {
+  useEntityLookup()
+  const [custMap, setCustMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    api.customers.list({ limit: 500 }).then((res: any) => {
+      const list = Array.isArray(res) ? res : res?.data || []
+      const map: Record<string, string> = {}
+      list.forEach((c: any) => { if (c.id) map[c.id] = c.razon_social || c.nombre || c.ruc })
+      setCustMap(map)
+    }).catch(() => {})
+  }, [])
+
   const [tab, setTab] = useState("dashboard")
 
   return (
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Clientes — Fidelización & Segmentación</h1>
+          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Clientes — Fidelización & Segmentación</h1>
           <p className="text-sm text-gray-500 mt-1">RFM scoring, segmentación conductual, programa de lealtad, ofertas personalizadas, cupones</p>
         </div>
       </div>
@@ -209,7 +222,7 @@ function RfmTab() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {scores.map((s: any) => (
                 <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                  <td className="px-4 py-2">{s.customer_id?.slice(0, 8)}...</td>
+                  <td className="px-4 py-2">{getCustomerName(s.customer_id)}</td>
                   <td className="px-4 py-2">{s.recency_score}</td>
                   <td className="px-4 py-2">{s.frequency_score}</td>
                   <td className="px-4 py-2">{s.monetary_score}</td>
@@ -439,7 +452,7 @@ function LealtadTab() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {txns.map((t: any) => (
                 <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                  <td className="px-4 py-2">{t.customer_id?.slice(0, 8)}...</td>
+                  <td className="px-4 py-2">{getCustomerName(t.customer_id)}</td>
                   <td className="px-4 py-2">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${t.tipo === "acumulacion" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"}`}>
                       {t.tipo === "acumulacion" ? "+" : "-"}

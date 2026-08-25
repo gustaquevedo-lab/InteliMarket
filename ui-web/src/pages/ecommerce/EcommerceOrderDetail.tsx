@@ -40,7 +40,7 @@ export default function EcommerceOrderDetail() {
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Pedido #{order.numero}</h1>
+            <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white">Pedido #{order.numero}</h1>
             <p className="text-sm text-gray-500">{new Date(order.created_at).toLocaleString("es-PY")}</p>
           </div>
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[order.estado] || "bg-gray-100"}`}>

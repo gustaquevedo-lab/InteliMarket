@@ -90,7 +90,7 @@ export default function EquipmentTab() {
             </div>
             <div>
               <p className="text-white text-xs font-semibold uppercase tracking-wider opacity-80">Uptime</p>
-              <p className="text-white text-2xl font-bold">{dashboard.uptime_promedio ?? "—"}%</p>
+              <p className="text-white text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">{dashboard.uptime_promedio ?? "—"}%</p>
             </div>
           </div>
         </div>
