@@ -128,9 +128,14 @@ async def list_sessions_summary(
     estado: str | None = Query(None),
     limit: int = Query(50, le=5000),
     offset: int = Query(0, ge=0),
+    fecha_desde: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_sessions_with_totals(db, company_id, register_id, estado, limit=limit, offset=offset)
+    parsed_fecha = None
+    if fecha_desde:
+        from datetime import datetime as _dt
+        parsed_fecha = _dt.fromisoformat(fecha_desde)
+    return await service.list_sessions_with_totals(db, company_id, register_id, estado, limit=limit, offset=offset, fecha_desde=parsed_fecha)
 
 
 @router.get("/cash-sessions/{session_id}/payment-breakdown")

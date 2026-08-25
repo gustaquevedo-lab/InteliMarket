@@ -145,6 +145,9 @@ export interface StockItem { id?: string; product_id?: string; producto?: Produc
 export interface Company { id: string; nombre?: string; nombre_fantasia?: string; ruc?: string; razon_social?: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; logo_url?: string; activo?: boolean; config?: Record<string, unknown>; iva_condition?: string; regimen_tributario?: string; created_at?: string; updated_at?: string }
 export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; cash_drop_threshold?: number | null; diferencia_maxima_tolerada?: number | null; created_at?: string }
 export interface CashHandoff { id: string; session_id: string; register_nombre: string | null; entregado_por_nombre: string | null; recibido_por_nombre?: string | null; monto_pyg: number; monto_usd: number; monto_brl: number; monto_confirmado_pyg?: number | null; monto_confirmado_usd?: number | null; monto_confirmado_brl?: number | null; discrepancia_confirmacion?: boolean; requiere_revision: boolean; estado: string; created_at: string; fecha_confirmacion?: string | null }
+export interface KioskPriceTier { min_qty: number; max_qty: number | null; precio_unitario: number; moneda: string }
+export interface KioskProductLookup { id: string; nombre: string; sku?: string | null; codigo_barra?: string | null; precio_venta: number; imagen_url?: string | null; categoria_nombre?: string | null; tipo_venta?: string | null; escalas: KioskPriceTier[] }
+export interface KioskBanner { id: string; company_id: string; titulo: string; subtitulo?: string | null; etiqueta?: string | null; descuento_texto?: string | null; color?: string | null; imagen_url?: string | null; orden: number; activo: boolean; fecha_inicio?: string | null; fecha_fin?: string | null; created_at: string; updated_at?: string | null }
 export interface VaultEntry { id: string; origen: string; monto_pyg: number; monto_usd: number; monto_brl: number; estado: string; bank_transaction_id?: string | null; created_at: string; fecha_deposito?: string | null }
 export interface VaultDashboard { saldo_en_boveda_pyg: number; saldo_en_boveda_usd: number; saldo_en_boveda_brl: number; entradas_en_boveda: number; entregas_pendientes: number; entregas_pendientes_detalle: CashHandoff[]; movimientos_recientes: VaultEntry[] }
 export interface CashSession { id: string; caja_id?: string; caja?: CashRegister; cash_register?: CashRegister; usuario_id?: string; fecha_apertura?: string; fecha_cierre?: string; monto_apertura?: number; monto_cierre?: number; total_ventas?: number; total_retiros?: number; total_ingresos?: number; estado?: string; observaciones?: string; created_at?: string }
@@ -775,8 +778,8 @@ export const api = {
       create: (data: { cash_register_id?: string; caja_id?: string; user_id?: string; cajero_nombre?: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions", data),
       close: (id: string, data: { monto_cierre_real: number; monto_cierre_usd?: number; monto_cierre_brl?: number; observaciones?: string }) => client.post<{ session: CashSession; monto_cierre_esperado: number; diferencia: number; diferencia_usd: number; diferencia_brl: number; requiere_revision: boolean }>(`/v1/cash-sessions/${id}/close`, data),
     },
-    sessionsSummary: (params?: { estado?: string; register_id?: string; limit?: number; offset?: number }) =>
-      client.get<{ id: string; register_id: string; user_id: string; cajero_nombre: string | null; fecha_apertura: string; fecha_cierre: string | null; monto_apertura: number; monto_cierre: number | null; monto_cierre_esperado: number | null; diferencia: number | null; diferencia_usd: number | null; diferencia_brl: number | null; monto_cobrado: number; estado: string; cash_drop_alert: boolean; efectivo_acumulado: number; efectivo_usd_acumulado: number; efectivo_brl_acumulado: number; ultimo_cash_drop_at: string | null }[]>(
+    sessionsSummary: (params?: { estado?: string; register_id?: string; limit?: number; offset?: number; fecha_desde?: string }) =>
+      client.get<{ id: string; register_id: string; user_id: string; cajero_nombre: string | null; fecha_apertura: string; fecha_cierre: string | null; monto_apertura: number; monto_cierre: number | null; monto_cierre_esperado: number | null; diferencia: number | null; diferencia_usd: number | null; diferencia_brl: number | null; monto_cobrado: number; estado: string; cash_drop_alert: boolean; cash_drop_warning: boolean; cash_drop_threshold: number | null; efectivo_acumulado: number; efectivo_usd_acumulado: number; efectivo_brl_acumulado: number; ultimo_cash_drop_at: string | null }[]>(
         "/v1/cash-sessions-summary", { company_id: COMPANY_ID, ...params } as any
       ),
     paymentBreakdown: (sessionId: string) => client.get<{ pyg: { forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]; otras_monedas: { forma_pago: string; moneda: string; cantidad: number; monto: number }[] }>(`/v1/cash-sessions/${sessionId}/payment-breakdown`),
@@ -2691,5 +2694,20 @@ export const api = {
     get: (id: string) => client.get<any>(`/v1/supervisor-requests/${id}`),
     create: (data: any) => client.post<any>("/v1/supervisor-requests", { company_id: COMPANY_ID, ...data }),
     resolve: (id: string, data?: any) => client.post<any>(`/v1/supervisor-requests/${id}/resolve`, data),
+  },
+  kiosk: {
+    lookup: (code: string) => client.get<KioskProductLookup>("/v1/kiosk/lookup", { code, company_id: COMPANY_ID }),
+    banners: {
+      active: () => client.get<KioskBanner[]>("/v1/kiosk/banners/active", { company_id: COMPANY_ID }),
+      list: () => client.get<KioskBanner[]>("/v1/kiosk/banners"),
+      create: (data: Partial<KioskBanner>) => client.post<KioskBanner>("/v1/kiosk/banners", data),
+      update: (id: string, data: Partial<KioskBanner>) => client.patch<KioskBanner>(`/v1/kiosk/banners/${id}`, data),
+      delete: (id: string) => client.delete<void>(`/v1/kiosk/banners/${id}`),
+      uploadImage: (id: string, file: File) => {
+        const fd = new FormData()
+        fd.append("file", file)
+        return requestMultipart<KioskBanner>(`/v1/kiosk/banners/${id}/image`, fd)
+      },
+    },
   },
 }

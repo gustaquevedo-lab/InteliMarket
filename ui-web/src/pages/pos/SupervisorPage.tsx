@@ -30,6 +30,8 @@ interface SessionSummary {
   monto_cobrado: number
   estado: string
   cash_drop_alert: boolean
+  cash_drop_warning: boolean
+  cash_drop_threshold: number | null
   efectivo_acumulado: number
   efectivo_usd_acumulado: number
   efectivo_brl_acumulado: number
@@ -258,8 +260,13 @@ export default function SupervisorPage() {
 
   const fetchData = useCallback(async () => {
     try {
+      // Solo cajas abiertas HOY -- una caja que quedo abierta de un dia
+      // anterior es un problema de arqueo/turno colgado, otra cosa distinta
+      // que ya no le corresponde resolver a la supervisora desde aca.
+      const hoyMedianoche = new Date()
+      hoyMedianoche.setHours(0, 0, 0, 0)
       const [sess, ho] = await Promise.all([
-        api.caja.sessionsSummary({ estado: "abierta" }),
+        api.caja.sessionsSummary({ estado: "abierta", fecha_desde: hoyMedianoche.toISOString() }),
         api.caja.handoffs.list({ estado: "pendiente" }),
       ])
       setSessions(sess || [])
@@ -489,6 +496,11 @@ export default function SupervisorPage() {
 
   const cashDropAlerts = sessions.filter((s) => s.cash_drop_alert)
   const totalHandoffPyg = handoffs.reduce((sum, h) => sum + h.monto_pyg, 0)
+
+  const ORIGEN_LABEL: Record<string, string> = {
+    cash_drop: "Retiro de caja",
+    entrega_cajero: "Entrega de cajero",
+  }
 
   const tipoLabel: Record<string, string> = {
     remove_item: "Anular ítem",
@@ -758,7 +770,7 @@ export default function SupervisorPage() {
               ) : (
                 <div className="space-y-2.5">
                   {sessions.map((s) => (
-                    <div key={s.id} className={`rounded-2xl border p-3.5 ${s.cash_drop_alert ? "border-rose-300 dark:border-rose-500/50 bg-rose-50 dark:bg-rose-500/5" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"}`}>
+                    <div key={s.id} className={`rounded-2xl border p-3.5 ${s.cash_drop_alert ? "border-rose-300 dark:border-rose-500/50 bg-rose-50 dark:bg-rose-500/5" : s.cash_drop_warning ? "border-amber-300 dark:border-amber-500/50 bg-amber-50 dark:bg-amber-500/5" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"}`}>
                       <div className="flex items-center justify-between mb-2">
                         <div className="font-bold text-sm">{s.cajero_nombre || "Cajero"}</div>
                         <div className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
@@ -772,14 +784,22 @@ export default function SupervisorPage() {
                         </div>
                         <div className="text-right">
                           <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Efectivo acumulado</div>
-                          <div className={`font-bold text-sm ${s.cash_drop_alert ? "text-rose-600 dark:text-rose-400" : ""}`} style={monoFont}>
+                          <div className={`font-bold text-sm ${s.cash_drop_alert ? "text-rose-600 dark:text-rose-400" : s.cash_drop_warning ? "text-amber-600 dark:text-amber-400" : ""}`} style={monoFont}>
                             {formatPYG(s.efectivo_acumulado)}
                           </div>
+                          {s.cash_drop_threshold && (
+                            <div className="text-[9px] text-slate-400 dark:text-slate-500" style={monoFont}>de {formatPYG(s.cash_drop_threshold)}</div>
+                          )}
                         </div>
                       </div>
                       {s.cash_drop_alert && (
                         <div className="mt-2 pt-2 border-t border-rose-200 dark:border-rose-500/20 flex items-center gap-1.5 text-[11px] text-rose-600 dark:text-rose-400 font-bold">
                           <AlertTriangle className="w-3.5 h-3.5" /> Supera el umbral de retiro
+                        </div>
+                      )}
+                      {!s.cash_drop_alert && s.cash_drop_warning && (
+                        <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-500/20 flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-bold">
+                          <AlertTriangle className="w-3.5 h-3.5" /> Se acerca al umbral de retiro
                         </div>
                       )}
                     </div>
@@ -825,7 +845,7 @@ export default function SupervisorPage() {
                             <ArrowDownToLine className="w-3.5 h-3.5" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs font-bold capitalize truncate">{m.origen} · {m.estado === "depositado" ? "Depositado" : "En bóveda"}</div>
+                            <div className="text-xs font-bold truncate">{ORIGEN_LABEL[m.origen] || m.origen} · {m.estado === "depositado" ? "Depositado" : "En bóveda"}</div>
                             <div className="text-[10px] text-slate-500 dark:text-slate-400">{timeSince(m.created_at)}</div>
                           </div>
                           <div className="text-xs font-black shrink-0" style={monoFont}>{formatPYG(m.monto_pyg)}</div>

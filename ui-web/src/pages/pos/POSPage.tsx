@@ -351,6 +351,8 @@ export default function POSPage() {
   const [cashDropMonto, setCashDropMonto] = useState<string>("")
   const [cashDropObs, setCashDropObs] = useState<string>("")
   const [submittingCashDrop, setSubmittingCashDrop] = useState(false)
+  const [cashDropStatus, setCashDropStatus] = useState<{ efectivo_acumulado: number; cash_drop_threshold: number | null; cash_drop_alert: boolean; cash_drop_warning: boolean } | null>(null)
+  const cashDropStatusNotifiedRef = useRef<"none" | "warning" | "alert">("none")
 
   useEffect(() => {
     api.caja.registers.list()
@@ -1172,6 +1174,42 @@ export default function POSPage() {
       setSubmittingCierre(false)
     }
   }
+
+  // ── Aviso de umbral de retiro -- antes esto solo se veia en el modulo
+  // administrativo de Caja, que la cajera nunca abre mientras vende. Sin
+  // esto, nadie se entera de que hay que hacer un retiro hasta que alguien
+  // lo nota por otro lado (o nunca). Se sondea cada 60s y avisa una sola vez
+  // por transicion de nivel (no en cada poll) para no ser repetitivo.
+  useEffect(() => {
+    if (!cashSessionId || !cashRegisterId) { setCashDropStatus(null); return }
+    let cancelled = false
+    const check = async () => {
+      try {
+        const sessions = await api.caja.sessionsSummary({ register_id: cashRegisterId, estado: "abierta" } as any)
+        const mine = (sessions || []).find((s: any) => s.id === cashSessionId)
+        if (cancelled || !mine) return
+        const status = {
+          efectivo_acumulado: mine.efectivo_acumulado,
+          cash_drop_threshold: mine.cash_drop_threshold,
+          cash_drop_alert: mine.cash_drop_alert,
+          cash_drop_warning: mine.cash_drop_warning,
+        }
+        setCashDropStatus(status)
+        const level: "none" | "warning" | "alert" = status.cash_drop_alert ? "alert" : status.cash_drop_warning ? "warning" : "none"
+        if (level !== "none" && level !== cashDropStatusNotifiedRef.current) {
+          if (level === "alert") {
+            toast.error("Umbral de retiro superado", `Efectivo acumulado: ${formatPYG(status.efectivo_acumulado)}. Haga un retiro antes de seguir cobrando.`)
+          } else {
+            toast.warning("Se acerca al umbral de retiro", `Efectivo acumulado: ${formatPYG(status.efectivo_acumulado)}.`)
+          }
+        }
+        cashDropStatusNotifiedRef.current = level
+      } catch { /* silencioso -- no bloquea la venta si esto falla */ }
+    }
+    check()
+    const interval = setInterval(check, 60000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [cashSessionId, cashRegisterId])
 
   const handleConfirmCashDrop = async () => {
     if (!cashSessionId) {
@@ -3252,14 +3290,24 @@ export default function POSPage() {
             <span className="text-[11px] hidden sm:inline">Devolución</span>
           </button>
 
-          {/* Retiro de Efectivo (Cash Drop) */}
+          {/* Retiro de Efectivo (Cash Drop) -- se resalta solo cuando el
+              efectivo acumulado se acerca o supera el umbral configurado */}
           <button
             onClick={() => setShowCashDropModal(true)}
-            title="Registrar Retiro de Efectivo de la Caja"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-orange-600/10 text-orange-600 border border-orange-500/30 hover:bg-orange-600/20 cursor-pointer"
+            title={cashDropStatus?.cash_drop_alert ? "Superó el umbral de retiro -- haga un retiro" : cashDropStatus?.cash_drop_warning ? "Se acerca al umbral de retiro" : "Registrar Retiro de Efectivo de la Caja"}
+            className={`relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-colors ${
+              cashDropStatus?.cash_drop_alert
+                ? "bg-rose-600/15 text-rose-600 border-rose-500/50 animate-pulse"
+                : cashDropStatus?.cash_drop_warning
+                ? "bg-amber-500/15 text-amber-600 border-amber-500/50"
+                : "bg-orange-600/10 text-orange-600 border-orange-500/30 hover:bg-orange-600/20"
+            }`}
           >
             <Banknote className="w-3.5 h-3.5" />
             <span className="text-[11px] hidden sm:inline">Retiro</span>
+            {(cashDropStatus?.cash_drop_alert || cashDropStatus?.cash_drop_warning) && (
+              <span className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${cashDropStatus?.cash_drop_alert ? "bg-rose-500" : "bg-amber-500"}`} />
+            )}
           </button>
 
           {/* Cierre de Caja */}

@@ -290,9 +290,15 @@ async def list_sessions_with_totals(
     estado: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    fecha_desde=None,
 ) -> list[dict]:
     """Sesiones con el monto realmente cobrado (ventas confirmadas vinculadas
-    a la sesion real, no una aproximacion por sucursal) y alerta de cash drop."""
+    a la sesion real, no una aproximacion por sucursal) y alerta de cash drop.
+
+    fecha_desde filtra por fecha_apertura -- lo usa la PWA de supervisora para
+    listar solo cajas de HOY. Una caja abierta que quedo sin cerrar de un dia
+    anterior es un problema distinto (arqueo/turno colgado), no algo que la
+    supervisora deba seguir viendo en su cola de "cajas activas" del dia."""
     query = select(CashSession).join(CashRegister, CashRegister.id == CashSession.register_id).where(
         CashRegister.company_id == uuid.UUID(company_id)
     )
@@ -300,6 +306,8 @@ async def list_sessions_with_totals(
         query = query.where(CashSession.register_id == uuid.UUID(register_id))
     if estado:
         query = query.where(CashSession.estado == estado)
+    if fecha_desde:
+        query = query.where(CashSession.fecha_apertura >= fecha_desde)
     query = query.order_by(CashSession.fecha_apertura.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     sessions = list(result.scalars().all())
@@ -315,6 +323,8 @@ async def list_sessions_with_totals(
         monto_cobrado = float(cobrado_result.scalar() or 0)
 
         cash_drop_alert = False
+        cash_drop_warning = False
+        cash_drop_threshold_val = None
         efectivo_acumulado = 0.0
         efectivo_usd_acumulado = 0.0
         efectivo_brl_acumulado = 0.0
@@ -346,7 +356,12 @@ async def list_sessions_with_totals(
                 efectivo_usd_acumulado = por_moneda.get("USD", 0.0)
                 efectivo_brl_acumulado = por_moneda.get("BRL", 0.0)
                 if register.cash_drop_threshold:
-                    cash_drop_alert = efectivo_acumulado >= float(register.cash_drop_threshold)
+                    cash_drop_threshold_val = float(register.cash_drop_threshold)
+                    cash_drop_alert = efectivo_acumulado >= cash_drop_threshold_val
+                    # Aviso temprano al 80% del umbral -- antes era todo o nada
+                    # (recien avisaba al superarlo), sin margen para que el
+                    # cajero se organice antes de que sea urgente.
+                    cash_drop_warning = (not cash_drop_alert) and efectivo_acumulado >= cash_drop_threshold_val * 0.8
 
         # Arqueo real (CashCount) — antes el historial calculaba una
         # "diferencia" en el frontend como monto_cierre - monto_apertura (eso
@@ -383,6 +398,8 @@ async def list_sessions_with_totals(
             "monto_cobrado": monto_cobrado,
             "estado": s.estado,
             "cash_drop_alert": cash_drop_alert,
+            "cash_drop_warning": cash_drop_warning,
+            "cash_drop_threshold": cash_drop_threshold_val,
             "efectivo_acumulado": efectivo_acumulado,
             "efectivo_usd_acumulado": efectivo_usd_acumulado,
             "efectivo_brl_acumulado": efectivo_brl_acumulado,
