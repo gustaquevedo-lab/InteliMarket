@@ -41,6 +41,7 @@ from api.src.reports.router import router as reports_router
 from api.src.integrations.router import router as integrations_router
 from api.src.pos_terminals.router import router as pos_terminals_router
 from api.src.supervisor_requests.router import router as supervisor_requests_router
+from api.src.kiosk.router import router as kiosk_router
 from api.src.integrations.scales.router import router as scales_router
 from api.src.caja.router import router as caja_router
 from api.src.intelicont.router import router as intelicont_router
@@ -252,6 +253,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 app.include_router(auth_router)
 app.include_router(pos_terminals_router)
 app.include_router(supervisor_requests_router)
+app.include_router(kiosk_router)
 app.include_router(tenants_router)
 app.include_router(companies_router)
 app.include_router(products_router)

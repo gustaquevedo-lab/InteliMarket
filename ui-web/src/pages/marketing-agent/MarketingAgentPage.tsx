@@ -4,15 +4,25 @@ import {
   AlertTriangle, CheckCircle2, ArrowUpRight, ArrowDownRight,
   RefreshCw, Send, Calendar, Clock, DollarSign, Target, ShieldCheck,
   Zap, HeartHandshake, Eye, MessageCircle, BarChart3, Filter,
-  Layers, Check, X, ChevronRight, ThumbsUp, ShoppingCart, Percent
+  Layers, Check, X, ChevronRight, ThumbsUp, ShoppingCart, Percent,
+  Monitor, ImagePlus, Pencil, Trash2, ArrowUp, ArrowDown, Loader2,
 } from "lucide-react"
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
-import { api } from "../../api"
+import { api, type KioskBanner } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
 import { formatPYG, formatDate } from "../../utils/format"
 
-type Tab = "torre" | "campanas_ia" | "anti_abandono" | "chat" | "sincronizacion"
+type Tab = "torre" | "campanas_ia" | "anti_abandono" | "chat" | "sincronizacion" | "kiosco"
+
+const KIOSK_COLORS = [
+  { id: "orange", label: "Naranja" },
+  { id: "emerald", label: "Verde" },
+  { id: "amber", label: "Ámbar" },
+  { id: "purple", label: "Violeta" },
+  { id: "blue", label: "Azul" },
+  { id: "rose", label: "Rosa" },
+]
 
 export default function MarketingAgentPage() {
   const [tab, setTab] = useState<Tab>("torre")
@@ -25,6 +35,122 @@ export default function MarketingAgentPage() {
   const [customers, setCustomers] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
   const [salesStats, setSalesStats] = useState<any>(null)
+
+  // Banners del Verificador de Precios (kiosco de salón) -- creativos reales,
+  // marketing los carga y aparecen rotando en las 3 terminales del salón.
+  const [kioskBanners, setKioskBanners] = useState<KioskBanner[]>([])
+  const [kioskLoading, setKioskLoading] = useState(false)
+  const [editingBanner, setEditingBanner] = useState<KioskBanner | null>(null)
+  const [showBannerForm, setShowBannerForm] = useState(false)
+  const [bannerForm, setBannerForm] = useState({
+    titulo: "", subtitulo: "", etiqueta: "", descuento_texto: "", color: "orange", activo: true,
+  })
+  const [bannerImageFile, setBannerImageFile] = useState<File | null>(null)
+  const [bannerImagePreview, setBannerImagePreview] = useState<string | null>(null)
+  const [savingBanner, setSavingBanner] = useState(false)
+
+  const fetchKioskBanners = useCallback(async () => {
+    setKioskLoading(true)
+    try {
+      const list = await api.kiosk.banners.list()
+      setKioskBanners(list || [])
+    } catch (e: any) {
+      toast.error("No se pudo cargar", e?.message || "Intente de nuevo.")
+    } finally {
+      setKioskLoading(false)
+    }
+  }, [toast])
+
+  useEffect(() => {
+    if (tab === "kiosco") fetchKioskBanners()
+  }, [tab, fetchKioskBanners])
+
+  const openNewBannerForm = () => {
+    setEditingBanner(null)
+    setBannerForm({ titulo: "", subtitulo: "", etiqueta: "", descuento_texto: "", color: "orange", activo: true })
+    setBannerImageFile(null)
+    setBannerImagePreview(null)
+    setShowBannerForm(true)
+  }
+
+  const openEditBannerForm = (b: KioskBanner) => {
+    setEditingBanner(b)
+    setBannerForm({
+      titulo: b.titulo, subtitulo: b.subtitulo || "", etiqueta: b.etiqueta || "",
+      descuento_texto: b.descuento_texto || "", color: b.color || "orange", activo: b.activo,
+    })
+    setBannerImageFile(null)
+    setBannerImagePreview(b.imagen_url || null)
+    setShowBannerForm(true)
+  }
+
+  const handleBannerImageChange = (file: File | null) => {
+    setBannerImageFile(file)
+    if (file) setBannerImagePreview(URL.createObjectURL(file))
+  }
+
+  const submitBannerForm = async () => {
+    if (!bannerForm.titulo.trim()) {
+      toast.error("Falta el título", "El banner necesita al menos un título.")
+      return
+    }
+    setSavingBanner(true)
+    try {
+      let banner: KioskBanner
+      if (editingBanner) {
+        banner = await api.kiosk.banners.update(editingBanner.id, bannerForm)
+      } else {
+        banner = await api.kiosk.banners.create({ ...bannerForm, orden: kioskBanners.length })
+      }
+      if (bannerImageFile) {
+        banner = await api.kiosk.banners.uploadImage(banner.id, bannerImageFile)
+      }
+      toast.success(editingBanner ? "Banner actualizado" : "Banner creado", "Ya se refleja en las terminales del salón.")
+      setShowBannerForm(false)
+      fetchKioskBanners()
+    } catch (e: any) {
+      toast.error("No se pudo guardar", e?.message || "Intente de nuevo.")
+    } finally {
+      setSavingBanner(false)
+    }
+  }
+
+  const toggleBannerActivo = async (b: KioskBanner) => {
+    try {
+      await api.kiosk.banners.update(b.id, { activo: !b.activo })
+      fetchKioskBanners()
+    } catch (e: any) {
+      toast.error("No se pudo actualizar", e?.message || "Intente de nuevo.")
+    }
+  }
+
+  const deleteBanner = async (b: KioskBanner) => {
+    if (!confirm(`¿Eliminar el banner "${b.titulo}"? Esta acción no se puede deshacer.`)) return
+    try {
+      await api.kiosk.banners.delete(b.id)
+      toast.success("Banner eliminado", "")
+      fetchKioskBanners()
+    } catch (e: any) {
+      toast.error("No se pudo eliminar", e?.message || "Intente de nuevo.")
+    }
+  }
+
+  const moveBanner = async (b: KioskBanner, direction: -1 | 1) => {
+    const sorted = [...kioskBanners].sort((a, c) => a.orden - c.orden)
+    const idx = sorted.findIndex((x) => x.id === b.id)
+    const swapIdx = idx + direction
+    if (swapIdx < 0 || swapIdx >= sorted.length) return
+    const other = sorted[swapIdx]
+    try {
+      await Promise.all([
+        api.kiosk.banners.update(b.id, { orden: other.orden }),
+        api.kiosk.banners.update(other.id, { orden: b.orden }),
+      ])
+      fetchKioskBanners()
+    } catch (e: any) {
+      toast.error("No se pudo reordenar", e?.message || "Intente de nuevo.")
+    }
+  }
 
   // Chat State
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; suggestions?: string[] }>>([
@@ -210,6 +336,7 @@ export default function MarketingAgentPage() {
             { id: "anti_abandono", label: "Anti-Abandono VIP (42)" },
             { id: "chat", label: "Chat con el Gerente IA" },
             { id: "sincronizacion", label: "Sincronización Tripartita" },
+            { id: "kiosco", label: `Verificador de Precios (${kioskBanners.length})` },
           ].map((t) => (
             <button key={t.id} onClick={() => setTab(t.id as Tab)}
               className={`pb-3 px-4 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${tab === t.id ? "border-pink-600 text-pink-600 dark:text-pink-400" : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"}`}>
@@ -549,6 +676,174 @@ export default function MarketingAgentPage() {
               <div className="pt-2 border-t border-purple-200 dark:border-purple-900 font-bold text-purple-600">🎯 Impulso en Salón Activo</div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TAB VERIFICADOR DE PRECIOS -- banners reales de los 3 kioscos del salón */}
+      {tab === "kiosco" && (
+        <div className="space-y-4">
+          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+                <Monitor className="w-4 h-4 text-pink-600" /> Ofertas en los Verificadores de Precio
+              </h3>
+              <button
+                onClick={openNewBannerForm}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold cursor-pointer"
+              >
+                <ImagePlus className="w-3.5 h-3.5" /> Nuevo Banner
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Estos creativos rotan en las 3 terminales de consulta de precios del salón de ventas. Subí una imagen horizontal para el mejor resultado.
+            </p>
+          </div>
+
+          {kioskLoading ? (
+            <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-pink-600" /></div>
+          ) : kioskBanners.length === 0 ? (
+            <div className="card p-8 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl text-center text-sm text-gray-500 dark:text-gray-400">
+              Todavía no hay banners cargados. Creá el primero para que empiece a rotar en salón.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[...kioskBanners].sort((a, b) => a.orden - b.orden).map((b, idx, arr) => (
+                <div key={b.id} className={`rounded-2xl border overflow-hidden bg-white dark:bg-slate-900 ${b.activo ? "border-gray-200 dark:border-slate-800" : "border-dashed border-gray-300 dark:border-slate-700 opacity-60"}`}>
+                  <div className="aspect-[16/9] bg-gray-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden">
+                    {b.imagen_url ? (
+                      <img src={b.imagen_url} alt={b.titulo} className="w-full h-full object-cover" />
+                    ) : (
+                      <ImagePlus className="w-8 h-8 text-gray-300 dark:text-slate-700" />
+                    )}
+                  </div>
+                  <div className="p-3.5 space-y-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {b.etiqueta && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300">{b.etiqueta}</span>}
+                      {b.descuento_texto && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">{b.descuento_texto}</span>}
+                      {!b.activo && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-gray-100 dark:bg-slate-800 text-gray-500">Inactivo</span>}
+                    </div>
+                    <p className="text-sm font-bold text-gray-900 dark:text-white leading-snug line-clamp-2">{b.titulo}</p>
+                    <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-slate-800">
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => moveBanner(b, -1)} disabled={idx === 0} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer" title="Subir">
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => moveBanner(b, 1)} disabled={idx === arr.length - 1} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer" title="Bajar">
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => toggleBannerActivo(b)} className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer ${b.activo ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" : "bg-gray-100 dark:bg-slate-800 text-gray-500"}`}>
+                          {b.activo ? "Activo" : "Pausado"}
+                        </button>
+                        <button onClick={() => openEditBannerForm(b)} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer" title="Editar">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => deleteBanner(b)} className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer" title="Eliminar">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* MODAL DE CREAR/EDITAR BANNER */}
+          {showBannerForm && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-extrabold text-base text-gray-900 dark:text-white">{editingBanner ? "Editar Banner" : "Nuevo Banner"}</h3>
+                  <button onClick={() => setShowBannerForm(false)} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer"><X className="w-5 h-5" /></button>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Imagen del banner</span>
+                    <div className="aspect-[16/9] rounded-2xl bg-gray-100 dark:bg-slate-800 border-2 border-dashed border-gray-300 dark:border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer relative group">
+                      {bannerImagePreview ? (
+                        <img src={bannerImagePreview} alt="preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="flex flex-col items-center text-gray-400">
+                          <ImagePlus className="w-8 h-8 mb-1" />
+                          <span className="text-xs font-bold">Subir imagen (horizontal)</span>
+                        </div>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleBannerImageChange(e.target.files?.[0] || null)}
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                      />
+                    </div>
+                  </label>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Título</label>
+                    <input
+                      value={bannerForm.titulo}
+                      onChange={(e) => setBannerForm((f) => ({ ...f, titulo: e.target.value }))}
+                      placeholder="Ej: Carnicería Premium · Cortes al Vacío"
+                      className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Subtítulo (opcional)</label>
+                    <input
+                      value={bannerForm.subtitulo}
+                      onChange={(e) => setBannerForm((f) => ({ ...f, subtitulo: e.target.value }))}
+                      className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Etiqueta</label>
+                      <input
+                        value={bannerForm.etiqueta}
+                        onChange={(e) => setBannerForm((f) => ({ ...f, etiqueta: e.target.value }))}
+                        placeholder="OFERTA DEL DÍA"
+                        className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Texto de descuento</label>
+                      <input
+                        value={bannerForm.descuento_texto}
+                        onChange={(e) => setBannerForm((f) => ({ ...f, descuento_texto: e.target.value }))}
+                        placeholder="-20% OFF"
+                        className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Color de acento (si no hay imagen)</label>
+                    <select
+                      value={bannerForm.color}
+                      onChange={(e) => setBannerForm((f) => ({ ...f, color: e.target.value }))}
+                      className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                    >
+                      {KIOSK_COLORS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={bannerForm.activo} onChange={(e) => setBannerForm((f) => ({ ...f, activo: e.target.checked }))} className="w-4 h-4" />
+                    <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Activo (se muestra ya en las terminales)</span>
+                  </label>
+
+                  <button
+                    onClick={submitBannerForm}
+                    disabled={savingBanner}
+                    className="w-full py-3 rounded-xl bg-pink-600 hover:bg-pink-700 text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer mt-2"
+                  >
+                    {savingBanner ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {editingBanner ? "Guardar Cambios" : "Crear Banner"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
