@@ -9,6 +9,7 @@ interface User {
   is_superadmin?: boolean
   tenant_id?: string
   tenant_slug?: string
+  foto_url?: string | null
 }
 
 interface AuthContextType {
@@ -44,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           id: u.id, email: u.email, nombre: u.nombre, rol: u.rol,
           is_superadmin: claims.is_superadmin === true,
           tenant_id: u.tenant_id, tenant_slug: u.tenant_slug,
+          foto_url: (u as any).foto_url,
         })
       }).catch(() => {
         localStorage.removeItem("access_token")
@@ -73,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       id: me.id, email: me.email, nombre: me.nombre, rol: me.rol,
       is_superadmin: claims.is_superadmin === true,
       tenant_id: me.tenant_id, tenant_slug: me.tenant_slug,
+      foto_url: (me as any).foto_url,
     })
   }
 

@@ -332,6 +332,7 @@ async def get_me(
         telefono=user.telefono,
         rol=user.rol,
         activo=user.activo,
+        foto_url=user.foto_url,
         tenant_id=token_data.get("tenant_id"),
         tenant_slug=token_data.get("tenant_slug"),
         created_at=user.created_at,

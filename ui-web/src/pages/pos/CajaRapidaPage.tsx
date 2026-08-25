@@ -351,6 +351,9 @@ export default function POSPage() {
     return null
   })
   const [cashRegisterId, setCashRegisterId] = useState<string | null>(null)
+  // Logo real del supermercado para el header -- mismo cache que ya usa el
+  // ticket (pos_logo_data_url), asi no se vuelve a bajar por red.
+  const [headerLogoUrl, setHeaderLogoUrl] = useState<string>(() => localStorage.getItem("pos_logo_data_url") || "")
   const [submittingApertura, setSubmittingApertura] = useState(false)
   const [montoCierreReal, setMontoCierreReal] = useState<string>("")
   const [submittingCierre, setSubmittingCierre] = useState(false)
@@ -994,8 +997,10 @@ export default function POSPage() {
                 reader.onerror = () => resolve("")
                 reader.readAsDataURL(blob)
               })
-              if (dataUrl) localStorage.setItem("pos_logo_data_url", dataUrl)
+              if (dataUrl) { localStorage.setItem("pos_logo_data_url", dataUrl); setHeaderLogoUrl(dataUrl) }
             } catch (e) {}
+          } else if (logoUrl) {
+            setHeaderLogoUrl(localStorage.getItem("pos_logo_data_url") || logoUrl)
           }
 
           // Igual que el logo: precachear el QR del club como data URL una
@@ -3351,24 +3356,45 @@ export default function POSPage() {
           agrupadas por funcion, con scroll horizontal como ultimo recurso
           en vez de un salto de linea desprolijo. ── */}
       <header className={`shrink-0 border-b shadow-sm z-20 ${bgPanel}`}>
-        {/* Fila 1: identidad, balanza, cotizaciones, tema */}
-        <div className="h-10 px-3 flex items-center justify-between gap-2 border-b border-black/5 dark:border-white/5">
+        {/* Fila 1: identidad (logo real + avatar + cerrar sesion), a la
+            izquierda -- balanza/cotizaciones/tema a la derecha. */}
+        <div className="h-11 px-3 flex items-center justify-between gap-2 border-b border-black/5 dark:border-white/5">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-black text-[10px] shadow-sm shrink-0">
-              EM
+            <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-800 border border-black/5 dark:border-white/10 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+              {headerLogoUrl ? (
+                <img src={headerLogoUrl} alt="Logo" className="w-full h-full object-contain p-0.5" />
+              ) : (
+                <span className="text-white bg-emerald-600 w-full h-full flex items-center justify-center font-black text-[10px]">EM</span>
+              )}
             </div>
+
+            <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-800 border border-black/5 dark:border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+              {user?.foto_url ? (
+                <img src={user.foto_url} alt={user?.nombre || "Cajero"} className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              )}
+            </div>
+
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 leading-none">
-                <span className={`font-black text-xs tracking-tight ${textHeading}`}>EXTRA SUPERMERCADO</span>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-600 font-extrabold px-1.5 py-0.5 rounded shrink-0">
-                  {PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre.split('·')[0] || puntoEmision}
-                </span>
+                <span className={`font-black text-xs tracking-tight ${textHeading}`}>{user?.nombre || "Cajero"}</span>
+                {isSupervisorUser && <span className="text-[9px] bg-purple-500/20 text-purple-600 font-bold px-1 rounded shrink-0">SUPERVISOR</span>}
               </div>
               <div className={`text-[10px] font-posMono tabular-nums leading-none mt-0.5 ${textMuted}`}>
-                Cajero: <strong className={textHeading}>{user?.nombre || "Cajero"}</strong>
-                {isSupervisorUser && <span className="ml-1 text-[9px] bg-purple-500/20 text-purple-600 font-bold px-1 rounded">SUPERVISOR</span>}
+                {PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre.split('·')[0] || puntoEmision}
               </div>
             </div>
+
+            <button
+              onClick={() => { api.auth.endPosShift().catch(() => {}); logout() }}
+              title="Cerrar Sesión"
+              className={`flex items-center justify-center w-7 h-7 rounded-lg border text-xs font-bold transition-colors cursor-pointer shrink-0 ml-1 ${
+                dark ? "bg-slate-800 text-rose-400 border-slate-700 hover:bg-rose-900/40" : "bg-slate-200 text-rose-600 border-slate-300 hover:bg-rose-100"
+              }`}
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -3523,15 +3549,6 @@ export default function POSPage() {
             <span className="text-[11px] hidden sm:inline">Cierre</span>
           </button>
 
-          <button
-            onClick={() => { api.auth.endPosShift().catch(() => {}); logout() }}
-            title="Cerrar Sesión"
-            className={`p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer shrink-0 ${
-              dark ? "bg-slate-800 text-rose-400 border-slate-700 hover:bg-rose-900/40" : "bg-slate-200 text-rose-600 border-slate-300 hover:bg-rose-100"
-            }`}
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
         </div>
       </header>
 
