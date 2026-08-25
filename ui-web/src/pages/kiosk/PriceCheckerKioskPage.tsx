@@ -516,9 +516,9 @@ export default function PriceCheckerKioskPage() {
                         </div>
                         <div className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase mb-1.5">precio por unidad</div>
                         {activeCurrencies.length > 0 && (
-                          <div className="flex items-center justify-center gap-3 pt-1.5 border-t border-amber-200 dark:border-amber-500/20">
+                          <div className="flex items-center justify-center gap-4 pt-2 mt-0.5 border-t border-amber-200 dark:border-amber-500/20">
                             {activeCurrencies.map((c) => (
-                              <span key={c.code} className={`text-xs font-mono font-bold ${colorText[c.color]}`}>{c.symbol} {convert(t.precio_unitario, c.rate).toFixed(2)}</span>
+                              <span key={c.code} className={`text-base sm:text-lg font-mono font-black ${colorText[c.color]}`}>{c.symbol} {convert(t.precio_unitario, c.rate).toFixed(2)}</span>
                             ))}
                           </div>
                         )}
