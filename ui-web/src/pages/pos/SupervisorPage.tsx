@@ -3,6 +3,7 @@ import {
   ShieldCheck, LogOut, RefreshCcw, Wallet, AlertTriangle, Clock, Loader2,
   CheckCircle2, ChevronRight, X, Banknote, ShieldAlert, Check, Eye, EyeOff,
   Sun, Moon, Home, Users, Landmark, TrendingDown, Inbox, ArrowDownToLine,
+  User as UserIcon, ArrowLeft,
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -10,6 +11,15 @@ import { useTheme } from "../../context/ThemeContext"
 import { api } from "../../api"
 
 const SUPERVISOR_ROLES = ["supervisor", "admin"]
+
+interface PosStaffMember {
+  id: string
+  email: string
+  nombre: string
+  rol: string
+  foto_url?: string | null
+  en_turno: boolean
+}
 
 interface SessionSummary {
   id: string
@@ -99,20 +109,38 @@ export default function SupervisorPage() {
   const { dark, toggle: toggleTheme } = useTheme()
 
   // ── LOGIN PROPIO, SIN NAVEGAR A NINGÚN LADO ──────────────────────────────
-  const [loginEmail, setLoginEmail] = useState("")
+  // Selector de supervisora/admin en vez de tipear el email -- mismo criterio
+  // que el picker de cajeros de Electron: un nombre largo y con puntos es
+  // fácil de escribir mal en un celular, elegir de una lista no.
+  const [staffList, setStaffList] = useState<PosStaffMember[]>([])
+  const [staffLoading, setStaffLoading] = useState(true)
+  const [staffError, setStaffError] = useState("")
+  const [selectedStaff, setSelectedStaff] = useState<PosStaffMember | null>(null)
   const [loginPassword, setLoginPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [loginError, setLoginError] = useState("")
   const [loggingIn, setLoggingIn] = useState(false)
 
+  useEffect(() => {
+    if (user) return
+    let cancelled = false
+    setStaffLoading(true)
+    api.auth.posSupervisors()
+      .then((res) => { if (!cancelled) setStaffList(res.staff || []) })
+      .catch(() => { if (!cancelled) setStaffError("No se pudo cargar la lista. Verifique la conexión.") })
+      .finally(() => { if (!cancelled) setStaffLoading(false) })
+    return () => { cancelled = true }
+  }, [user])
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!selectedStaff) return
     setLoginError("")
     setLoggingIn(true)
     try {
-      await login(loginEmail, loginPassword)
+      await login(selectedStaff.email, loginPassword)
     } catch (err: any) {
-      setLoginError(err?.message || "Credenciales incorrectas")
+      setLoginError(err?.message || "Contraseña incorrecta")
     } finally {
       setLoggingIn(false)
     }
@@ -289,7 +317,7 @@ export default function SupervisorPage() {
   const handleLogout = async () => {
     try { await api.auth.endPosShift() } catch {}
     logout()
-    setLoginEmail("")
+    setSelectedStaff(null)
     setLoginPassword("")
   }
 
@@ -330,58 +358,111 @@ export default function SupervisorPage() {
   // ── ESTADO: SIN SESIÓN -- LOGIN PROPIO, NUNCA NAVEGA A OTRO LADO ─────────
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col items-center justify-center p-6 relative">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col items-center p-6 relative">
         <button
           onClick={toggleTheme}
           className="absolute top-5 right-5 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 cursor-pointer"
         >
           {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
-        <div className="w-16 h-16 rounded-2xl bg-brand-orange flex items-center justify-center text-[#1C1710] shadow-lg shadow-orange-500/30 mb-5">
-          <ShieldCheck className="w-8 h-8" />
-        </div>
-        <h1 className="font-black text-xl mb-1" style={displayFont}>Panel de Supervisora</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-7 text-center max-w-xs">Cajas, bóveda, equipo y pedidos de autorización — todo desde acá.</p>
 
-        <form onSubmit={handleLoginSubmit} className="w-full max-w-sm space-y-3">
-          {loginError && (
-            <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/30 rounded-xl px-3 py-2.5 text-xs text-rose-600 dark:text-rose-300 font-bold">{loginError}</div>
-          )}
-          <div>
-            <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Email</label>
-            <input
-              type="email"
-              autoFocus
-              value={loginEmail}
-              onChange={(e) => setLoginEmail(e.target.value)}
-              placeholder="supervisor@empresa.com"
-              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-brand-orange text-slate-900 dark:text-white"
-            />
+        <div className="w-full max-w-sm flex flex-col items-center mt-10 mb-2">
+          <div className="w-16 h-16 rounded-2xl bg-brand-orange flex items-center justify-center text-[#1C1710] shadow-lg shadow-orange-500/30 mb-5">
+            <ShieldCheck className="w-8 h-8" />
           </div>
-          <div>
-            <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Contraseña</label>
-            <div className="relative">
-              <input
-                type={showPassword ? "text" : "password"}
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 pr-11 text-sm outline-none focus:border-brand-orange text-slate-900 dark:text-white"
-              />
-              <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer">
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
+          <h1 className="font-black text-xl mb-1" style={displayFont}>Panel de Supervisora</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-7 text-center max-w-xs">Cajas, bóveda, equipo y pedidos de autorización — todo desde acá.</p>
+        </div>
+
+        {!selectedStaff ? (
+          <div className="w-full max-w-sm">
+            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">¿Quién sos?</p>
+            {staffLoading && (
+              <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-brand-orange" /></div>
+            )}
+            {!staffLoading && staffError && (
+              <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/30 rounded-xl px-3 py-2.5 text-xs text-rose-600 dark:text-rose-300 font-bold">{staffError}</div>
+            )}
+            {!staffLoading && !staffError && staffList.length === 0 && (
+              <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-10">
+                No hay supervisores ni administradores cargados todavía.
+              </div>
+            )}
+            {!staffLoading && staffList.length > 0 && (
+              <div className="grid grid-cols-2 gap-3">
+                {staffList.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => { setSelectedStaff(s); setLoginPassword(""); setLoginError("") }}
+                    className="flex flex-col items-center gap-2 p-4 rounded-2xl border-2 border-slate-200 dark:border-slate-800 hover:border-brand-orange bg-white dark:bg-slate-900 transition-colors cursor-pointer"
+                  >
+                    <div className="w-14 h-14 rounded-full bg-brand-orange/10 flex items-center justify-center overflow-hidden">
+                      {s.foto_url ? (
+                        <img src={s.foto_url} alt={s.nombre} className="w-full h-full object-cover" />
+                      ) : (
+                        <UserIcon className="w-7 h-7 text-brand-orange" />
+                      )}
+                    </div>
+                    <span className="text-sm font-bold text-center leading-tight">{s.nombre}</span>
+                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase bg-primary-100 dark:bg-primary/20 text-primary dark:text-primary-300">{s.rol}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="w-full max-w-sm">
+            <button
+              onClick={() => { setSelectedStaff(null); setLoginPassword(""); setLoginError("") }}
+              className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400 mb-4 cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4" /> Cambiar
+            </button>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 rounded-full bg-brand-orange/10 flex items-center justify-center overflow-hidden shrink-0">
+                {selectedStaff.foto_url ? (
+                  <img src={selectedStaff.foto_url} alt={selectedStaff.nombre} className="w-full h-full object-cover" />
+                ) : (
+                  <UserIcon className="w-6 h-6 text-brand-orange" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="font-black text-base truncate" style={displayFont}>{selectedStaff.nombre}</div>
+                <span className="text-xs text-slate-500 dark:text-slate-400 capitalize">{selectedStaff.rol}</span>
+              </div>
             </div>
+
+            <form onSubmit={handleLoginSubmit} className="space-y-3">
+              {loginError && (
+                <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/30 rounded-xl px-3 py-2.5 text-xs text-rose-600 dark:text-rose-300 font-bold">{loginError}</div>
+              )}
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Contraseña</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    autoFocus
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 pr-11 text-sm outline-none focus:border-brand-orange text-slate-900 dark:text-white"
+                  />
+                  <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer">
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={loggingIn}
+                className="w-full py-3.5 rounded-xl bg-brand-orange hover:brightness-95 text-[#1C1710] font-black text-sm flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer mt-2 shadow-lg shadow-orange-500/30 transition-all"
+              >
+                {loggingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                Entrar
+              </button>
+            </form>
           </div>
-          <button
-            type="submit"
-            disabled={loggingIn}
-            className="w-full py-3.5 rounded-xl bg-brand-orange hover:brightness-95 text-[#1C1710] font-black text-sm flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer mt-2 shadow-lg shadow-orange-500/30 transition-all"
-          >
-            {loggingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-            Entrar
-          </button>
-        </form>
+        )}
       </div>
     )
   }

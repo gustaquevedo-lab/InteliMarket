@@ -632,6 +632,7 @@ export const api = {
       },
     },
     posStaff: () => client.get<any>("/v1/auth/pos-staff"),
+    posSupervisors: () => client.get<any>("/v1/auth/pos-supervisors"),
     startPosShift: (data?: any) => client.post<any>("/v1/auth/pos-shift/start", data),
     posAuthorizers: () => client.get<any>("/v1/auth/pos-authorizers"),
     activeSupervisor: () => client.get<any>("/v1/auth/pos-active-supervisor"),

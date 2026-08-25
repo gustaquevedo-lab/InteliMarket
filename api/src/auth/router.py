@@ -210,6 +210,29 @@ async def list_pos_staff(db: AsyncSession = Depends(get_db)):
     ])
 
 
+@router.get("/pos-supervisors", response_model=PosStaffListResponse)
+async def list_pos_supervisors(db: AsyncSession = Depends(get_db)):
+    """Lista publica (sin login previo) de supervisores/admins activos, para
+    el selector de la pantalla de login de la PWA de supervisora -- mismo
+    espiritu que /pos-staff pero sin cajeros, para que la supervisora elija
+    su nombre en vez de tipear un email largo. Incluye admin porque en
+    varias empresas quien autoriza en la practica es un admin, no un
+    supervisor dedicado (mismo criterio que /pos-authorizers)."""
+    result = await db.execute(
+        select(User)
+        .where(
+            (User.rol.in_(["supervisor", "admin"])) | (User.is_superadmin == True),
+            User.activo == True,
+        )
+        .order_by(User.nombre)
+    )
+    users = result.scalars().all()
+    return PosStaffListResponse(staff=[
+        PosStaffItem(id=str(u.id), email=u.email, nombre=u.nombre, rol=u.rol, foto_url=u.foto_url, en_turno=False)
+        for u in users
+    ])
+
+
 @router.get("/pos-authorizers", response_model=PosStaffListResponse)
 async def list_pos_authorizers(
     db: AsyncSession = Depends(get_db),
