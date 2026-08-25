@@ -3,7 +3,7 @@ import {
   Barcode, Sparkles, ShoppingBag, ArrowDown, Clock, CheckCircle2, DollarSign,
   Star, Layers, Maximize2, Sun, Moon, WifiOff, XCircle,
 } from "lucide-react"
-import { api, type KioskProductLookup, type KioskBanner } from "../../api"
+import { api, type KioskProductLookup, type KioskBanner, type Company } from "../../api"
 import { useTheme } from "../../context/ThemeContext"
 
 // Banderas SVG en alta definición
@@ -70,6 +70,7 @@ export default function PriceCheckerKioskPage() {
   const { dark, toggle: toggleTheme } = useTheme()
 
   const [cotizaciones] = useState({ BRL: 1420, USD: 7850, ARS: 5.8 })
+  const [company, setCompany] = useState<Company | null>(null)
   const [banners, setBanners] = useState<KioskBanner[]>([])
   const [currentBannerIdx, setCurrentBannerIdx] = useState(0)
 
@@ -83,6 +84,13 @@ export default function PriceCheckerKioskPage() {
   const lastKeyTime = useRef(0)
   const timerRef = useRef<any>(null)
   const countdownIntervalRef = useRef<any>(null)
+
+  // Logo real de la empresa -- el mismo que ya esta cargado en
+  // Configuracion. Si todavia no cargaron uno, se ve el emblema de
+  // reemplazo en vez de dejar un hueco vacio.
+  useEffect(() => {
+    api.companies.list().then((list) => { if (list?.[0]) setCompany(list[0]) }).catch(() => {})
+  }, [])
 
   // Banners reales, cargados desde el panel de marketing -- sin fallback
   // inventado: si no hay ninguno cargado, simplemente no se muestra nada ahí.
@@ -267,11 +275,15 @@ export default function PriceCheckerKioskPage() {
             <div className="relative flex flex-col items-center">
               <div className="absolute -inset-6 rounded-full bg-gradient-to-r from-orange-500 via-blue-600 to-amber-400 opacity-30 dark:opacity-40 blur-2xl animate-pulse-glow pointer-events-none" />
               <div className="relative w-44 h-44 sm:w-56 sm:h-56 rounded-full bg-white p-3 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
-                <div className="w-full h-full rounded-full bg-gradient-to-tr from-slate-900 via-blue-950 to-slate-900 flex flex-col items-center justify-center text-center p-4">
-                  <span className="text-3xl sm:text-4xl font-black text-orange-500 tracking-tighter">EXTRA</span>
-                  <span className="text-xs sm:text-sm font-black text-blue-400 tracking-widest">PARAGUAY</span>
-                  <span className="text-[9px] text-slate-300 tracking-widest uppercase font-bold mt-1">Supermercado Mayorista</span>
-                </div>
+                {company?.logo_url ? (
+                  <img src={company.logo_url} alt={company.nombre || "Logo"} className="w-full h-full object-contain" />
+                ) : (
+                  <div className="w-full h-full rounded-full bg-gradient-to-tr from-slate-900 via-blue-950 to-slate-900 flex flex-col items-center justify-center text-center p-4">
+                    <span className="text-3xl sm:text-4xl font-black text-orange-500 tracking-tighter">EXTRA</span>
+                    <span className="text-xs sm:text-sm font-black text-blue-400 tracking-widest">PARAGUAY</span>
+                    <span className="text-[9px] text-slate-300 tracking-widest uppercase font-bold mt-1">Supermercado Mayorista</span>
+                  </div>
+                )}
               </div>
             </div>
 
