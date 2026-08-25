@@ -105,6 +105,23 @@ export default function PriceCheckerKioskPage() {
     return () => clearInterval(clock)
   }, [])
 
+  // Auto-recarga de madrugada -- estas terminales quedan encendidas dias
+  // enteros sin que nadie las toque. Recargar solo una vez, a una hora sin
+  // clientes y solo si no hay nadie mirando un precio en pantalla, asegura
+  // que cualquier cambio que se publique llegue solo, sin depender de que
+  // un repositor reinicie el equipo a mano.
+  const reloadedRef = useRef(false)
+  useEffect(() => {
+    const hour = currentTime.getHours()
+    const minute = currentTime.getMinutes()
+    const idle = !scannedProduct && !notFoundCode && !connError
+    if (hour === 4 && minute === 0 && idle && !reloadedRef.current) {
+      reloadedRef.current = true
+      window.location.reload()
+    }
+    if (hour !== 4) reloadedRef.current = false
+  }, [currentTime, scannedProduct, notFoundCode, connError])
+
   const resetToStandby = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
