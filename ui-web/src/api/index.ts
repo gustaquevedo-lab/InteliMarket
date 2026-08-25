@@ -689,8 +689,8 @@ export const api = {
     },
   },
   inventory: {
-    getStockMap: () => client.get<Record<string, number>>(`/v1/companies/${COMPANY_ID}/inventory/stock-map`),
-    getProductStock: (productId: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/products/${productId}/stock`),
+    getStockMap: () => client.get<Record<string, number>>(`/v1/companies/${COMPANY_ID}/stock-map`),
+    getProductStock: (productId: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/products/${productId}/stock`),
     getStats: () => client.get<InventoryStatsResponse>(`/v1/companies/${COMPANY_ID}/inventory/stats`),
     getLotsExpiries: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
       client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/lots/expiries`, params),

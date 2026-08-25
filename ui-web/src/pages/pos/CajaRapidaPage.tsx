@@ -6070,14 +6070,14 @@ export default function POSPage() {
                       </div>
                     )}
                     {(rates.BRL > 0 || rates.USD > 0) && (
-                      <div className="flex items-center gap-3 mt-1.5">
+                      <div className="flex items-center gap-3 mt-2">
                         {rates.BRL > 0 && (
-                          <span className="text-xs font-bold text-amber-600 dark:text-amber-400 font-posMono tabular-nums flex items-center gap-1">
+                          <span className="text-lg font-black text-amber-600 dark:text-amber-400 font-posMono tabular-nums flex items-center gap-1.5 bg-amber-50 dark:bg-amber-500/10 px-2.5 py-1 rounded-lg">
                             <FlagBR /> R$ {((priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) / rates.BRL).toFixed(2)}
                           </span>
                         )}
                         {rates.USD > 0 && (
-                          <span className="text-xs font-bold text-blue-600 dark:text-blue-400 font-posMono tabular-nums flex items-center gap-1">
+                          <span className="text-lg font-black text-blue-600 dark:text-blue-400 font-posMono tabular-nums flex items-center gap-1.5 bg-blue-50 dark:bg-blue-500/10 px-2.5 py-1 rounded-lg">
                             <FlagUS /> US$ {((priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) / rates.USD).toFixed(2)}
                           </span>
                         )}
@@ -6135,9 +6135,9 @@ export default function POSPage() {
                         <div className="text-right">
                           <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums">{formatPYG(Number(t.precio_unitario) || 0)}</div>
                           {(rates.BRL > 0 || rates.USD > 0) && (
-                            <div className="flex items-center gap-2 justify-end mt-0.5">
-                              {rates.BRL > 0 && <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 font-posMono tabular-nums">R$ {(Number(t.precio_unitario) / rates.BRL).toFixed(2)}</span>}
-                              {rates.USD > 0 && <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 font-posMono tabular-nums">US$ {(Number(t.precio_unitario) / rates.USD).toFixed(2)}</span>}
+                            <div className="flex items-center gap-2 justify-end mt-1">
+                              {rates.BRL > 0 && <span className="text-sm font-black text-amber-600 dark:text-amber-400 font-posMono tabular-nums">R$ {(Number(t.precio_unitario) / rates.BRL).toFixed(2)}</span>}
+                              {rates.USD > 0 && <span className="text-sm font-black text-blue-600 dark:text-blue-400 font-posMono tabular-nums">US$ {(Number(t.precio_unitario) / rates.USD).toFixed(2)}</span>}
                             </div>
                           )}
                         </div>
