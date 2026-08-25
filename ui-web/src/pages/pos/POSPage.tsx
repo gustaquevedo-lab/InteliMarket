@@ -3265,10 +3265,10 @@ export default function POSPage() {
         // Chromium). No bloquea el ticket actual -- se adjunta en paralelo.
         const escposB64ForStorage = escposToBase64(t)
         if (createdSaleId) {
-          api.sales.attachTicket(createdSaleId, escposB64ForStorage).catch(() => {})
+          api.sales.attachTicket(createdSaleId, escposB64ForStorage).catch((e) => console.error("No se pudo guardar el ticket para reimprimir:", e))
         } else if (saleCreatePromise) {
           saleCreatePromise.then((created) => {
-            if (created?.id) api.sales.attachTicket(created.id, escposB64ForStorage).catch(() => {})
+            if (created?.id) api.sales.attachTicket(created.id, escposB64ForStorage).catch((e) => console.error("No se pudo guardar el ticket para reimprimir:", e))
           })
         }
 

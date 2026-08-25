@@ -746,7 +746,7 @@ export const api = {
     addPayment: (id: string, data: { monto: number; metodo_pago_id?: string; payment_method_id?: string; referencia?: string }) => client.post<any>(`/v1/sales/${id}/payments`, data),
     linkQuote: (id: string, quoteId: string) => client.post<any>(`/v1/sales/${id}/link-quote`, { quote_id: quoteId }),
     linkOrder: (id: string, orderId: string) => client.post<any>(`/v1/sales/${id}/link-order`, { order_id: orderId }),
-    attachTicket: (id: string, ticketB64: string) => client.post<any>(`/v1/sales/${id}/attach-ticket`, { ticket_b64: ticketB64 }),
+    attachTicket: (id: string, ticketB64: string) => client.patch<any>(`/v1/sales/${id}/ticket`, { recibo_escpos_b64: ticketB64 }),
     downloadReceipt: (id: string) => client.get<Blob>(`/v1/receipts/${id}`),
   },
   payments: {
