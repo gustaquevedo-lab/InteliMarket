@@ -176,7 +176,12 @@ async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol
         return existing
 
     rows = await _fetch(
-        "SELECT ID_PESSOA, NOME, RUC, TELEFONE, EMAIL, ENDERECO, HEX(UUID_FIDELIZACAO) AS UUID_FIDELIZACAO FROM bs_pessoa WHERE ID_PESSOA = %s",
+        """SELECT p.ID_PESSOA, p.NOME, p.RUC, p.TELEFONE, p.EMAIL, p.ENDERECO,
+                  HEX(p.UUID_FIDELIZACAO) AS UUID_FIDELIZACAO,
+                  e.NOME AS EMPLEADOR_NOME, e.RUC AS EMPLEADOR_RUC
+           FROM bs_pessoa p
+           LEFT JOIN bs_pessoa e ON e.ID_PESSOA = p.ID_EMPLEADOR
+           WHERE p.ID_PESSOA = %s""",
         (id_pessoa,),
     )
     if not rows:
@@ -196,6 +201,8 @@ async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol
             razon_social=p["NOME"] or f"Cliente legacy #{id_pessoa}",
             ruc=p["RUC"], telefono=p["TELEFONE"], email=p["EMAIL"], direccion=p["ENDERECO"],
             extra_club_numero=_format_uuid_hex(p.get("UUID_FIDELIZACAO")),
+            empresa_vinculada_nombre=p.get("EMPLEADOR_NOME"),
+            empresa_vinculada_ruc=p.get("EMPLEADOR_RUC"),
         )
         target_table = "customers"
 
@@ -1468,8 +1475,16 @@ async def sync_credit_accounts(db: AsyncSession, company_id: str, since: date | 
 # antes de que este campo existiera.
 
 async def sync_extra_club_numeros(db: AsyncSession, company_id: str, since: date | None) -> int:
+    # ID_EMPLEADOR -- empresa a la que esta afiliado el socio (bs_pessoa se
+    # auto-referencia: la empresa tambien es una fila de bs_pessoa). Se usa
+    # para la factura credito Extra Club impresa (firma + empresa vinculada,
+    # vacio si el socio no tiene empleador cargado -- 475 de 488 lo tienen).
     rows = await _fetch(
-        "SELECT ID_PESSOA, HEX(UUID_FIDELIZACAO) AS UUID_FIDELIZACAO FROM bs_pessoa WHERE UUID_FIDELIZACAO IS NOT NULL"
+        """SELECT p.ID_PESSOA, HEX(p.UUID_FIDELIZACAO) AS UUID_FIDELIZACAO,
+                  e.NOME AS EMPLEADOR_NOME, e.RUC AS EMPLEADOR_RUC
+           FROM bs_pessoa p
+           LEFT JOIN bs_pessoa e ON e.ID_PESSOA = p.ID_EMPLEADOR
+           WHERE p.UUID_FIDELIZACAO IS NOT NULL"""
     )
     count = 0
     for r in rows:
@@ -1479,8 +1494,19 @@ async def sync_extra_club_numeros(db: AsyncSession, company_id: str, since: date
         customer_id = await _resolve_pessoa(db, company_id, r["ID_PESSOA"], "customer")
         result = await db.execute(select(Customer).where(Customer.id == customer_id))
         customer = result.scalar_one_or_none()
-        if customer and customer.extra_club_numero != numero:
+        if not customer:
+            continue
+        changed = False
+        if customer.extra_club_numero != numero:
             customer.extra_club_numero = numero
+            changed = True
+        if customer.empresa_vinculada_nombre != r.get("EMPLEADOR_NOME"):
+            customer.empresa_vinculada_nombre = r.get("EMPLEADOR_NOME")
+            changed = True
+        if customer.empresa_vinculada_ruc != r.get("EMPLEADOR_RUC"):
+            customer.empresa_vinculada_ruc = r.get("EMPLEADOR_RUC")
+            changed = True
+        if changed:
             count += 1
     await db.flush()
     return count

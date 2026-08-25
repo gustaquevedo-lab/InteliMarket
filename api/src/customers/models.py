@@ -16,6 +16,8 @@ class Customer(Base):
     tipo = Column(String(50), default="cliente")
     ruc = Column(String(15), index=True)
     extra_club_numero = Column(String(40), index=True)
+    empresa_vinculada_nombre = Column(String(255))
+    empresa_vinculada_ruc = Column(String(20))
     ci = Column(String(20))
     razon_social = Column(String(255), nullable=False)
     nombre_fantasia = Column(String(255))

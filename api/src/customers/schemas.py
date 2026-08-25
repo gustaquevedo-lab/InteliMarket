@@ -13,6 +13,8 @@ class CustomerCreate(BaseModel):
     tipo: Optional[str] = "cliente"
     ruc: Optional[str] = Field(default=None, max_length=15)
     extra_club_numero: Optional[str] = Field(default=None, max_length=40)
+    empresa_vinculada_nombre: Optional[str] = Field(default=None, max_length=255)
+    empresa_vinculada_ruc: Optional[str] = Field(default=None, max_length=20)
     ci: Optional[str] = Field(default=None, max_length=20)
     razon_social: str = Field(min_length=2, max_length=255)
     nombre_fantasia: Optional[str] = None
@@ -51,6 +53,8 @@ class CustomerResponse(BaseModel):
     tipo: Optional[str] = "cliente"
     ruc: Optional[str] = None
     extra_club_numero: Optional[str] = None
+    empresa_vinculada_nombre: Optional[str] = None
+    empresa_vinculada_ruc: Optional[str] = None
     ci: Optional[str] = None
     razon_social: str
     nombre_fantasia: Optional[str] = None

@@ -1644,11 +1644,29 @@ export default function POSPage() {
   // ── ESCANEO DIRECTO Y DECODIFICACIÓN DE BALANZAS DE GÓNDOLA (EAN-13 PREFIJO 2) ─
   const handleBarcodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const code = search.trim()
+    let code = search.trim()
     if (!code) return
 
+    // 0. Cantidad rapida: "3*<codigo>" o "3x<codigo>" -- convencion estandar
+    //    de caja (escribir la cantidad, *, escanear/tipear el codigo) en vez
+    //    de escanear el mismo producto varias veces. Si no hay codigo despues
+    //    del separador (ej. tipeo "3*" y recien va a escanear), no hace nada
+    //    todavia -- se espera el codigo real.
+    let qtyPrefix: number | null = null
+    const qtyMatch = code.match(/^(\d{1,4})\s*[*x]\s*(.*)$/i)
+    if (qtyMatch) {
+      const n = parseInt(qtyMatch[1], 10)
+      const rest = qtyMatch[2].trim()
+      if (n > 0 && rest) {
+        qtyPrefix = n
+        code = rest
+      } else if (n > 0 && !rest) {
+        return // "3*" solo, todavia esperando el codigo
+      }
+    }
+
     // 1. DECODIFICACIÓN AUTOMÁTICA DE CÓDIGOS DE BALANZA DE GÓNDOLA (EAN-13 PREFIJO 2)
-    if (code.length === 13 && code.startsWith("2")) {
+    if (!qtyPrefix && code.length === 13 && code.startsWith("2")) {
       const pluCandidate = code.substring(0, 7)
       const weightGrams = parseInt(code.substring(7, 12), 10)
       if (weightGrams > 0) {
@@ -1670,7 +1688,7 @@ export default function POSPage() {
     )
 
     if (localMatch) {
-      addToCart(localMatch)
+      addToCart(localMatch, qtyPrefix ?? undefined)
       setSearch("")
       searchInputRef.current?.focus()
       return
@@ -1681,7 +1699,7 @@ export default function POSPage() {
       const serverRes = await api.products.list({ search: code, limit: 10 })
       if (serverRes && serverRes.length > 0) {
         const best = serverRes.find((p) => p.codigo_barra === code || p.sku === code) || serverRes[0]
-        addToCart(best)
+        addToCart(best, qtyPrefix ?? undefined)
         setSearch("")
         searchInputRef.current?.focus()
         return
@@ -1690,7 +1708,7 @@ export default function POSPage() {
 
     // 4. Si hay un único resultado en la lista filtrada
     if (filteredProducts.length === 1) {
-      addToCart(filteredProducts[0])
+      addToCart(filteredProducts[0], qtyPrefix ?? undefined)
       setSearch("")
       searchInputRef.current?.focus()
       return
@@ -2397,6 +2415,28 @@ export default function POSPage() {
     setPriceCheckPromo(null)
   }
 
+  // Temporizador de auto-cierre -- igual criterio que el kiosco de precios
+  // (PriceCheckerKioskPage): si nadie toca la consulta se cierra sola, no
+  // se queda abierta indefinidamente tapando la pantalla de cobro. Se
+  // reinicia cada vez que se elige un producto nuevo.
+  const PRICE_CHECK_AUTOCLOSE_SECONDS = 25
+  const [priceCheckCountdown, setPriceCheckCountdown] = useState(PRICE_CHECK_AUTOCLOSE_SECONDS)
+  useEffect(() => {
+    if (!showPriceCheckModal || !priceCheckSelected) return
+    setPriceCheckCountdown(PRICE_CHECK_AUTOCLOSE_SECONDS)
+    const interval = setInterval(() => {
+      setPriceCheckCountdown((s) => {
+        if (s <= 1) {
+          clearInterval(interval)
+          closePriceCheckModal()
+          return 0
+        }
+        return s - 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [showPriceCheckModal, priceCheckSelected])
+
   // ── GUARDADO DE ASIGNACIONES DE TERMINALES POS (BANCARD & DINELCO) ────────
   const handleSavePosAssignments = (e: React.FormEvent) => {
     e.preventDefault()
@@ -2993,6 +3033,7 @@ export default function POSPage() {
             <div style="border-top: 1px dashed #000; margin-top: 6px; padding-top: 4px; font-size: 9px;">
               <div>Cliente: ${(customer.razon_social || customer.nombre || "").toUpperCase()}</div>
               <div>C.I./RUC: ${customer.ci || customer.ruc || "-"}</div>
+              <div>Empresa: ${customer.empresa_vinculada_nombre ? `${customer.empresa_vinculada_nombre.trim()}${customer.empresa_vinculada_ruc ? ` (${customer.empresa_vinculada_ruc})` : ""}` : "-"}</div>
               <div style="text-align: center; margin-top: 14px; border-top: 1px solid #000; padding-top: 2px; width: 70%; margin-left: auto; margin-right: auto;">Firma del cliente</div>
               <div style="text-align: center; font-size: 8px; margin-top: 3px;">Factura a crédito Extra Club -- documento con valor para cobro</div>
             </div>
@@ -3200,6 +3241,7 @@ export default function POSPage() {
           t += escposDashes(W) + '\n'
           t += `Cliente: ${escposStripAccents((customer.razon_social || customer.nombre || "").toUpperCase())}\n`
           t += `C.I./RUC: ${customer.ci || customer.ruc || "-"}\n`
+          t += `Empresa: ${customer.empresa_vinculada_nombre ? escposStripAccents(customer.empresa_vinculada_nombre.trim()) + (customer.empresa_vinculada_ruc ? ` (${customer.empresa_vinculada_ruc})` : "") : "-"}\n`
           t += '\n\n'
           t += ESCPOS_ALIGN_CENTER
           t += escposDashes(28) + '\n'
@@ -3822,7 +3864,7 @@ export default function POSPage() {
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Escanear código de barras o buscar por nombre (F2)..."
+                  placeholder="Escanear o buscar (F2) -- ej: 3*codigo para cantidad"
                   className={`w-full py-2.5 pl-9 pr-24 rounded-xl border text-xs font-bold outline-none transition-all shadow-xs ${
                     dark 
                       ? "bg-slate-950 border-slate-700 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
@@ -5909,9 +5951,16 @@ export default function POSPage() {
                   <p className="text-xs text-slate-500 dark:text-slate-400">Precio, stock y promoción · no modifica el carrito de la venta actual.</p>
                 </div>
               </div>
-              <button onClick={closePriceCheckModal} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {priceCheckSelected && (
+                  <span className="w-8 h-8 rounded-full bg-gradient-to-tr from-orange-500 to-amber-400 text-white font-posMono tabular-nums font-black text-xs flex items-center justify-center shadow-sm" title="Se cierra sola si no se toca">
+                    {priceCheckCountdown}s
+                  </span>
+                )}
+                <button onClick={closePriceCheckModal} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             <div className="relative mb-3 shrink-0">
@@ -5998,6 +6047,20 @@ export default function POSPage() {
                         {formatPYG(Number(priceCheckSelected.precio_venta) || 0)}
                       </div>
                     )}
+                    {(rates.BRL > 0 || rates.USD > 0) && (
+                      <div className="flex items-center gap-3 mt-1.5">
+                        {rates.BRL > 0 && (
+                          <span className="text-xs font-bold text-amber-600 dark:text-amber-400 font-posMono tabular-nums flex items-center gap-1">
+                            <FlagBR /> R$ {((priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) / rates.BRL).toFixed(2)}
+                          </span>
+                        )}
+                        {rates.USD > 0 && (
+                          <span className="text-xs font-bold text-blue-600 dark:text-blue-400 font-posMono tabular-nums flex items-center gap-1">
+                            <FlagUS /> US$ {((priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) / rates.USD).toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="text-[10px] text-slate-500 mt-1">
                       {priceCheckLoadingPromo ? "Verificando promociones…" : priceCheckPromo ? "Precio unitario con promoción aplicada" : "Precio unitario"}
                     </div>
@@ -6047,7 +6110,15 @@ export default function POSPage() {
                         <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
                           {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} unidades` : `${t.min_qty}+ unidades`}
                         </div>
-                        <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums">{formatPYG(Number(t.precio_unitario) || 0)}</div>
+                        <div className="text-right">
+                          <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums">{formatPYG(Number(t.precio_unitario) || 0)}</div>
+                          {(rates.BRL > 0 || rates.USD > 0) && (
+                            <div className="flex items-center gap-2 justify-end mt-0.5">
+                              {rates.BRL > 0 && <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 font-posMono tabular-nums">R$ {(Number(t.precio_unitario) / rates.BRL).toFixed(2)}</span>}
+                              {rates.USD > 0 && <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 font-posMono tabular-nums">US$ {(Number(t.precio_unitario) / rates.USD).toFixed(2)}</span>}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
