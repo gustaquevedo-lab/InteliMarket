@@ -224,10 +224,16 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
     if existing:
         return existing
 
-    rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO, UNIDADE_MEDIDA, QTD_MINIMA_EM_ESTOQUE FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
+    # VL_PRECO_VENDA_VAREJO es el precio de venta minorista real en Ñemuha --
+    # antes no se traia nunca aca, asi que todo producto descubierto por
+    # primera vez via una venta/compra (en vez de por el import de catalogo)
+    # quedaba con precio_venta=0 para siempre (11.4% del catalogo activo,
+    # verificado 2026-08-25 -- ver MOLTO DURAZNO ENLATADO, ID_PRODUTO 126020).
+    rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO, UNIDADE_MEDIDA, QTD_MINIMA_EM_ESTOQUE, VL_PRECO_VENDA_VAREJO FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
     nombre = rows[0]["DS_PRODUTO"] if rows else f"Producto legacy #{id_produto}"
     unidad_medida = UNIDAD_MEDIDA_MAP.get(rows[0]["UNIDADE_MEDIDA"], "UN") if rows else "UN"
     stock_minimo = int(rows[0]["QTD_MINIMA_EM_ESTOQUE"] or 0) if rows else 0
+    precio_venta = Decimal(str(rows[0]["VL_PRECO_VENDA_VAREJO"] or 0)) if rows else Decimal(0)
 
     product = Product(
         company_id=company_id,
@@ -237,6 +243,7 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
         iva_tasa=iva_tasa,
         unidad_medida=unidad_medida,
         stock_minimo=stock_minimo,
+        precio_venta=precio_venta,
     )
     db.add(product)
     await db.flush()
