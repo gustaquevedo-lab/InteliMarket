@@ -471,7 +471,7 @@ export default function PriceCheckerKioskPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6 items-center">
               <div className="md:col-span-5 flex flex-col items-center justify-center">
-                <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-2xl bg-white p-3 shadow-2xl border-4 border-slate-100 dark:border-white/30 flex items-center justify-center overflow-hidden">
+                <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-2xl bg-white dark:bg-slate-800 p-3 shadow-2xl border-4 border-slate-100 dark:border-white/30 flex items-center justify-center overflow-hidden">
                   {scannedProduct.imagen_url ? (
                     <img src={scannedProduct.imagen_url} alt={scannedProduct.nombre} className="w-full h-full object-contain" />
                   ) : (
@@ -498,7 +498,7 @@ export default function PriceCheckerKioskPage() {
 
                 <div className="p-3 sm:p-4 rounded-2xl bg-orange-50 dark:bg-orange-500/10 border-2 border-orange-300 dark:border-orange-500/40 shadow-xl">
                   <span className="text-xs font-black uppercase tracking-widest text-orange-600 dark:text-orange-400 block mb-1">PRECIO UNITARIO AL CONTADO:</span>
-                  <div className="text-2xl sm:text-4xl font-black font-mono tracking-tight text-slate-900 dark:text-white">
+                  <div className="text-4xl sm:text-6xl font-black font-mono tracking-tight text-slate-900 dark:text-white">
                     Gs. {precioUnitarioGs.toLocaleString("es-PY")}
                   </div>
                 </div>
@@ -506,9 +506,9 @@ export default function PriceCheckerKioskPage() {
                 {activeCurrencies.length > 0 && (
                   <div className={`grid gap-3 ${activeCurrencies.length === 1 ? "grid-cols-1" : activeCurrencies.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
                     {activeCurrencies.map((c) => (
-                      <div key={c.code} className={`p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border ${colorBorder[c.color]} text-center shadow-md`}>
-                        <div className="flex items-center justify-center gap-1 mb-1">{c.flag}<span className="text-[10px] font-black text-slate-500 dark:text-slate-300 uppercase">{c.label}</span></div>
-                        <span className={`text-sm sm:text-base font-black font-mono ${colorText[c.color]}`}>{c.symbol} {convert(precioUnitarioGs, c.rate).toFixed(2)}</span>
+                      <div key={c.code} className={`p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border ${colorBorder[c.color]} text-center shadow-md`}>
+                        <div className="flex items-center justify-center gap-1.5 mb-1">{c.flag}<span className="text-xs font-black text-slate-500 dark:text-slate-300 uppercase">{c.label}</span></div>
+                        <span className={`text-xl sm:text-2xl font-black font-mono ${colorText[c.color]}`}>{c.symbol} {convert(precioUnitarioGs, c.rate).toFixed(2)}</span>
                       </div>
                     ))}
                   </div>
@@ -519,24 +519,24 @@ export default function PriceCheckerKioskPage() {
             {/* ESCALA DE PRECIOS REAL -- de sp_tiered_prices, nunca calculada */}
             {scannedProduct.escalas.length > 0 && (
               <div className="pt-2.5 border-t border-slate-100 dark:border-white/10">
-                <div className="flex items-center gap-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-2">
+                <div className="flex items-center gap-2 text-sm font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-2">
                   <Layers className="w-4 h-4" /><span>Escala de Precios por Cantidad</span>
                 </div>
                 <div className={`grid grid-cols-1 gap-2 ${scannedProduct.escalas.length >= 3 ? "sm:grid-cols-3" : scannedProduct.escalas.length === 2 ? "sm:grid-cols-2" : ""}`}>
                   {scannedProduct.escalas.map((t, i) => (
                     <div key={i} className="rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-500/10 dark:to-orange-500/5 border-2 border-amber-300 dark:border-amber-500/30 shadow-lg overflow-hidden">
-                      <div className="px-2.5 py-1 bg-amber-400 dark:bg-amber-500/80 text-amber-950 text-[9px] font-black uppercase tracking-wide text-center">
+                      <div className="px-3 py-1.5 bg-amber-400 dark:bg-amber-500/80 text-amber-950 text-xs font-black uppercase tracking-wide text-center">
                         {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} unidades` : `Llevando ${t.min_qty}+ unidades`}
                       </div>
-                      <div className="p-2 sm:p-2.5 text-center">
-                        <div className="font-mono text-slate-900 dark:text-white text-base sm:text-xl font-black" style={monoFont}>
+                      <div className="p-3 sm:p-4 text-center">
+                        <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black" style={monoFont}>
                           Gs. {t.precio_unitario.toLocaleString("es-PY")}
                         </div>
-                        <div className="text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase mb-1">precio por unidad</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase mb-1.5">precio por unidad</div>
                         {activeCurrencies.length > 0 && (
-                          <div className="flex items-center justify-center gap-3 pt-1.5 border-t border-amber-200 dark:border-amber-500/20">
+                          <div className="flex items-center justify-center gap-4 pt-2 border-t border-amber-200 dark:border-amber-500/20">
                             {activeCurrencies.map((c) => (
-                              <span key={c.code} className={`text-sm sm:text-base font-mono font-black ${colorText[c.color]}`}>{c.symbol} {convert(t.precio_unitario, c.rate).toFixed(2)}</span>
+                              <span key={c.code} className={`text-xl sm:text-2xl font-mono font-black ${colorText[c.color]}`}>{c.symbol} {convert(t.precio_unitario, c.rate).toFixed(2)}</span>
                             ))}
                           </div>
                         )}
