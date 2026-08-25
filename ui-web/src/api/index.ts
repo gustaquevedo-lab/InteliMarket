@@ -33,6 +33,11 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
   let response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
 
+  // Si el refresh falla, recargar la pagina actual en vez de mandar a
+  // /login -- ese es el login general del ERP, distinto al de paginas con
+  // login propio como /supervisor. Un redirect duro sacaba a la supervisora
+  // de su panel a una pantalla que no reconocia, sin ningun aviso, cada vez
+  // que su token expiraba en medio de un sondeo de fondo.
   if (response.status === 401 && !cleanEndpoint.includes("/auth/")) {
     const refreshToken = localStorage.getItem("refresh_token")
     if (refreshToken) {
@@ -53,7 +58,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
           localStorage.removeItem("refresh_token")
           localStorage.removeItem("user_email")
           if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
-            window.location.href = "/login"
+            window.location.reload()
           }
         }
       } catch {
@@ -64,7 +69,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       localStorage.removeItem("refresh_token")
       localStorage.removeItem("user_email")
       if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
-        window.location.href = "/login"
+        window.location.reload()
       }
     }
   }
