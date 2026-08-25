@@ -356,8 +356,10 @@ export default function POSPage() {
   const [headerLogoUrl, setHeaderLogoUrl] = useState<string>(() => localStorage.getItem("pos_logo_data_url") || "")
   const [submittingApertura, setSubmittingApertura] = useState(false)
   const [montoCierreReal, setMontoCierreReal] = useState<string>("")
+  const [montoCierreUsd, setMontoCierreUsd] = useState<string>("")
+  const [montoCierreBrl, setMontoCierreBrl] = useState<string>("")
   const [submittingCierre, setSubmittingCierre] = useState(false)
-  const [cierreResult, setCierreResult] = useState<{ monto_cierre_esperado: number; diferencia: number; requiere_revision: boolean } | null>(null)
+  const [cierreResult, setCierreResult] = useState<{ monto_cierre_esperado: number; diferencia: number; requiere_revision: boolean; diferencia_usd: number; diferencia_brl: number; desglose_formas_pago: { forma_pago: string; moneda: string; monto: number }[]; contado: number; contado_usd: number; contado_brl: number } | null>(null)
   const [showCashDropModal, setShowCashDropModal] = useState(false)
   const [cashDropMonto, setCashDropMonto] = useState<string>("")
   const [cashDropMontoUsd, setCashDropMontoUsd] = useState<string>("")
@@ -1277,13 +1279,25 @@ export default function POSPage() {
       return
     }
     const contado = parseInt(montoCierreReal.replace(/\D/g, "") || "0", 10)
+    const contadoUsd = parseFloat(montoCierreUsd.replace(/,/g, ".") || "0") || 0
+    const contadoBrl = parseFloat(montoCierreBrl.replace(/,/g, ".") || "0") || 0
     setSubmittingCierre(true)
     try {
-      const result = await api.caja.sessions.close(cashSessionId, { monto_cierre_real: contado })
+      const result = await api.caja.sessions.close(cashSessionId, {
+        monto_cierre_real: contado,
+        monto_cierre_usd: contadoUsd,
+        monto_cierre_brl: contadoBrl,
+      })
       setCierreResult({
         monto_cierre_esperado: result.monto_cierre_esperado,
         diferencia: result.diferencia,
+        diferencia_usd: result.diferencia_usd,
+        diferencia_brl: result.diferencia_brl,
         requiere_revision: result.requiere_revision,
+        desglose_formas_pago: result.desglose_formas_pago || [],
+        contado,
+        contado_usd: contadoUsd,
+        contado_brl: contadoBrl,
       })
 
       const diferencia = result.diferencia || 0
@@ -1295,10 +1309,17 @@ export default function POSPage() {
         </div>
         <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
           <tr><td>Fondo de apertura:</td><td style="text-align:right;">${formatPYG(parseInt(montoAperturaPyg.replace(/\D/g,"")||"0",10))}</td></tr>
-          <tr><td>Efectivo esperado (sistema):</td><td style="text-align:right;">${formatPYG(result.monto_cierre_esperado)}</td></tr>
-          <tr><td>Efectivo contado (real):</td><td style="text-align:right;">${formatPYG(contado)}</td></tr>
-          <tr style="font-weight:900; border-top:1px dashed #000;"><td>Diferencia:</td><td style="text-align:right;">${diferencia >= 0 ? "+" : ""}${formatPYG(diferencia)}</td></tr>
+          <tr><td>Efectivo esperado (Gs.):</td><td style="text-align:right;">${formatPYG(result.monto_cierre_esperado)}</td></tr>
+          <tr><td>Efectivo contado (Gs.):</td><td style="text-align:right;">${formatPYG(contado)}</td></tr>
+          <tr style="font-weight:900; border-top:1px dashed #000;"><td>Diferencia (Gs.):</td><td style="text-align:right;">${diferencia >= 0 ? "+" : ""}${formatPYG(diferencia)}</td></tr>
+          ${(contadoUsd > 0 || result.diferencia_usd) ? `<tr><td>Diferencia US$:</td><td style="text-align:right;">${result.diferencia_usd >= 0 ? "+" : ""}${result.diferencia_usd.toFixed(2)}</td></tr>` : ""}
+          ${(contadoBrl > 0 || result.diferencia_brl) ? `<tr><td>Diferencia R$:</td><td style="text-align:right;">${result.diferencia_brl >= 0 ? "+" : ""}${result.diferencia_brl.toFixed(2)}</td></tr>` : ""}
         </table>
+        ${(result.desglose_formas_pago || []).length > 0 ? `
+        <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
+          <tr><td colspan="2" style="font-weight:900;">Ventas del turno por forma de pago:</td></tr>
+          ${result.desglose_formas_pago.map((p: any) => `<tr><td>${FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}${p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}:</td><td style="text-align:right;">${p.moneda === "PYG" ? formatPYG(p.monto) : Number(p.monto).toFixed(2)}</td></tr>`).join("")}
+        </table>` : ""}
         ${result.requiere_revision ? `<div style="text-align:center; font-weight:900; margin-top:6px; border:1px dashed #000; padding:4px;">⚠ DIFERENCIA FUERA DE TOLERANCIA -- REQUIERE REVISIÓN</div>` : ""}
         <div style="text-align:center; margin-top:10px; font-size:9px;">Firma cajero: ______________________</div>
         <br/><br/>
@@ -1308,10 +1329,14 @@ export default function POSPage() {
       localStorage.removeItem(userCajaKey)
       setCashSessionId(null)
       setCajaAbierta(false)
-      setShowCierreTurnoModal(false)
       setMontoCierreReal("")
+      setMontoCierreUsd("")
+      setMontoCierreBrl("")
       toast.info("Turno de Caja Cerrado", result.requiere_revision ? "Cierre registrado con diferencia fuera de tolerancia." : "Cierre registrado sin novedades.")
-      setShowAperturaModal(true)
+      // El modal se queda abierto mostrando el resumen (esperado vs contado,
+      // desglose por forma de pago) -- antes se cerraba solo en este mismo
+      // instante, asi que la cajera nunca llegaba a ver esa pantalla. Ahora
+      // solo se cierra y se reabre la apertura cuando ella confirma "Cerrar".
     } catch (err) {
       toast.error("No se pudo cerrar la caja", "Verifique la conexión con el servidor e intente de nuevo.")
     } finally {
@@ -3587,7 +3612,16 @@ export default function POSPage() {
           </button>
 
           <button
-            onClick={() => setShowCashDropModal(true)}
+            onClick={() => {
+              // Sugerir el monto a retirar usando el umbral configurado como
+              // referencia -- solo cuando ya se supero o esta cerca del
+              // umbral, para no sugerir un retiro que deje la caja sin
+              // sencillo apenas arranca el turno.
+              if (cashDropStatus?.cash_drop_threshold && (cashDropStatus.cash_drop_alert || cashDropStatus.cash_drop_warning)) {
+                setCashDropMonto(Math.round(cashDropStatus.cash_drop_threshold).toLocaleString("es-PY"))
+              }
+              setShowCashDropModal(true)
+            }}
             title={cashDropStatus?.cash_drop_alert ? "Superó el umbral de retiro -- haga un retiro" : cashDropStatus?.cash_drop_warning ? "Se acerca al umbral de retiro" : "Registrar Retiro de Efectivo de la Caja"}
             className={`relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-colors shrink-0 ${
               cashDropStatus?.cash_drop_alert
@@ -6407,6 +6441,31 @@ export default function POSPage() {
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-xl font-posMono tabular-nums font-black text-emerald-600 dark:text-emerald-400 outline-none focus:border-amber-500"
                   />
                 </div>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado US$</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={montoCierreUsd}
+                      onChange={(e) => setMontoCierreUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
+                      placeholder="0.00"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado R$</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={montoCierreBrl}
+                      onChange={(e) => setMontoCierreBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                      placeholder="0.00"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">Solo se cuenta el efectivo físico. Tarjeta, QR y Extra Club ya quedaron registrados electrónicamente y se muestran en el resumen al confirmar.</p>
                 <div className="flex items-center gap-2 pt-4">
                   <button
                     onClick={() => setShowCierreTurnoModal(false)}
@@ -6427,12 +6486,33 @@ export default function POSPage() {
             ) : (
               <div className="space-y-3">
                 <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-1 text-sm font-posMono tabular-nums">
-                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Esperado (sistema):</span><span>{formatPYG(cierreResult.monto_cierre_esperado)}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Contado (real):</span><span>{formatPYG(parseInt(montoCierreReal.replace(/\D/g, "") || "0", 10))}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Esperado (Gs.):</span><span>{formatPYG(cierreResult.monto_cierre_esperado)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Contado (Gs.):</span><span>{formatPYG(cierreResult.contado)}</span></div>
                   <div className={`flex justify-between font-black pt-1 border-t border-slate-200 dark:border-slate-800 ${cierreResult.diferencia < 0 ? "text-red-600 dark:text-red-400" : cierreResult.diferencia > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                    <span>Diferencia:</span><span>{cierreResult.diferencia >= 0 ? "+" : ""}{formatPYG(cierreResult.diferencia)}</span>
+                    <span>Diferencia Gs.:</span><span>{cierreResult.diferencia >= 0 ? "+" : ""}{formatPYG(cierreResult.diferencia)}</span>
                   </div>
+                  {(cierreResult.contado_usd || cierreResult.diferencia_usd) && (
+                    <div className={`flex justify-between font-bold pt-1 ${cierreResult.diferencia_usd < 0 ? "text-red-600 dark:text-red-400" : cierreResult.diferencia_usd > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      <span>Diferencia US$:</span><span>{cierreResult.diferencia_usd >= 0 ? "+" : ""}{cierreResult.diferencia_usd.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {(cierreResult.contado_brl || cierreResult.diferencia_brl) && (
+                    <div className={`flex justify-between font-bold ${cierreResult.diferencia_brl < 0 ? "text-red-600 dark:text-red-400" : cierreResult.diferencia_brl > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      <span>Diferencia R$:</span><span>{cierreResult.diferencia_brl >= 0 ? "+" : ""}{cierreResult.diferencia_brl.toFixed(2)}</span>
+                    </div>
+                  )}
                 </div>
+                {cierreResult.desglose_formas_pago.length > 0 && (
+                  <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-1 text-xs font-posMono tabular-nums">
+                    <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas del turno por forma de pago</div>
+                    {cierreResult.desglose_formas_pago.map((p, i) => (
+                      <div key={i} className="flex justify-between text-slate-700 dark:text-slate-300">
+                        <span>{FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}{p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}</span>
+                        <span>{p.moneda === "PYG" ? formatPYG(p.monto) : Number(p.monto).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {cierreResult.requiere_revision && (
                   <div className="text-center text-xs font-bold text-red-400 border border-red-500/40 rounded-xl p-2">
                     ⚠ Diferencia fuera de tolerancia — quedó marcada para revisión de supervisor.
@@ -6440,7 +6520,7 @@ export default function POSPage() {
                 )}
                 <p className="text-center text-xs text-slate-500 dark:text-slate-400">Se imprimió el ticket de cierre. La caja fue cerrada.</p>
                 <button
-                  onClick={() => { setCierreResult(null); setShowCierreTurnoModal(false) }}
+                  onClick={() => { setCierreResult(null); setShowCierreTurnoModal(false); setShowAperturaModal(true) }}
                   className="w-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white py-2.5 rounded-xl font-bold text-xs"
                 >
                   Cerrar
@@ -6479,6 +6559,11 @@ export default function POSPage() {
                   autoFocus
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-xl font-posMono tabular-nums font-black text-orange-600 dark:text-orange-400 outline-none focus:border-orange-500"
                 />
+                {cashDropStatus?.cash_drop_threshold ? (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                    Sugerido = umbral de retiro configurado (₲ {Math.round(cashDropStatus.cash_drop_threshold).toLocaleString("es-PY")}) · Acumulado actual: ₲ {Math.round(cashDropStatus.efectivo_acumulado || 0).toLocaleString("es-PY")} · editable
+                  </p>
+                ) : null}
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>

@@ -179,13 +179,36 @@ async def close_session(
     )
     total_cobrado = sales_result.scalar() or 0
 
-    monto_cierre_esperado = Decimal(str(session_obj.monto_apertura)) + Decimal(str(total_cobrado))
+    # El efectivo esperado en caja es solo lo que entro como EFECTIVO en
+    # guaranies -- antes se sumaba Sale.total de TODAS las ventas del turno
+    # sin importar la forma de pago, asi que una venta con tarjeta/QR/Extra
+    # Club inflaba el "esperado" en efectivo aunque esa plata nunca entro
+    # fisicamente a la caja, generando una diferencia negativa falsa contra
+    # la cajera. USD/BRL ya se calculaban bien con este mismo filtro.
+    efectivo_pyg_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "PYG")
+    monto_cierre_esperado = Decimal(str(session_obj.monto_apertura)) + efectivo_pyg_esperado
     diferencia = Decimal(str(monto_cierre_real)) - monto_cierre_esperado
 
     efectivo_usd_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "USD")
     efectivo_brl_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "BRL")
     diferencia_usd = monto_cierre_usd - efectivo_usd_esperado
     diferencia_brl = monto_cierre_brl - efectivo_brl_esperado
+
+    # Desglose de TODAS las formas de pago del turno (no solo efectivo) --
+    # antes el cierre no mostraba nada de esto, asi que la cajera/supervisora
+    # no tenia forma de ver de un vistazo cuanto se cobro por tarjeta, QR o
+    # Extra Club durante el turno.
+    payments_result = await db.execute(
+        select(SalePayment.forma_pago, SalePayment.moneda, func.coalesce(func.sum(SalePayment.monto), 0))
+        .select_from(SalePayment)
+        .join(Sale, Sale.id == SalePayment.sale_id)
+        .where(Sale.session_id == session_obj.id, Sale.estado == "confirmado")
+        .group_by(SalePayment.forma_pago, SalePayment.moneda)
+    )
+    desglose_formas_pago = [
+        {"forma_pago": fp, "moneda": mon, "monto": Decimal(str(monto))}
+        for fp, mon, monto in payments_result.all()
+    ]
 
     register_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
     register = register_result.scalar_one_or_none()
@@ -259,6 +282,8 @@ async def close_session(
         "diferencia_brl": diferencia_brl,
         "requiere_revision": requiere_revision,
         "handoff_id": handoff.id,
+        "total_cobrado": Decimal(str(total_cobrado)),
+        "desglose_formas_pago": desglose_formas_pago,
     }
 
 
