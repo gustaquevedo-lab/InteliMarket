@@ -376,7 +376,21 @@ export default function POSPage() {
           r.codigo === puntoEmision ||
           r.codigo?.replace(/[^0-9]/g, "").replace(/^0+/, "") === normalizado
         )
-        setCashRegisterId((match || regs[0]).id)
+        // Los puntos de emision fiscales (001-012..020, PUNTOS_EMISION) y las
+        // cash_registers fisicas (POS-01..05) son dos numeraciones que nunca
+        // coinciden por texto -- antes esto siempre caia en regs[0] sin
+        // importar que "Caja" se eligiera en la apertura, asi que CUALQUIER
+        // seleccion terminaba pisando la misma caja fisica (y fallaba si esa
+        // ya tenia sesion abierta). Mientras no haya una asignacion real
+        // punto_emision -> caja fisica, se reparte por indice para que cada
+        // opcion del desplegable use una caja fisica distinta.
+        if (match) {
+          setCashRegisterId(match.id)
+        } else {
+          const idx = PUNTOS_EMISION.findIndex((p) => p.id === puntoEmision)
+          const fallback = idx >= 0 ? regs[idx % regs.length] : regs[0]
+          setCashRegisterId((fallback || regs[0]).id)
+        }
       })
       .catch(() => {})
   }, [puntoEmision])
