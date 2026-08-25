@@ -948,7 +948,7 @@ export const api = {
     lostDemand: {
       list: (params?: { estado?: string; company_id?: string }) =>
         client.get<CustomerLostDemand[]>("/v1/purchases/lost-demand", { company_id: COMPANY_ID, ...params } as any),
-      create: (data: { producto_nombre: string; categoria?: string; marca?: string; notas?: string; cliente_nombre?: string; cliente_contacto?: string; cajero_id?: string; cajero_nombre?: string; caja_id?: string }) =>
+      create: (data: { producto_nombre: string; categoria?: string; marca?: string; notas?: string; cliente_nombre?: string; cliente_contacto?: string; customer_id?: string; urgencia?: string; cajero_id?: string; cajero_nombre?: string; caja_id?: string }) =>
         client.post<CustomerLostDemand>("/v1/purchases/lost-demand", { company_id: COMPANY_ID, ...data }),
       update: (id: string, data: { estado?: string; notas?: string; orden_compra_id?: string }) =>
         client.patch<CustomerLostDemand>("/v1/purchases/lost-demand/" + id, data),

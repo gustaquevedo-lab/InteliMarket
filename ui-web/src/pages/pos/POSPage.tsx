@@ -669,6 +669,19 @@ export default function POSPage() {
   const [lostDemandCliente, setLostDemandCliente] = useState("")
   const [lostDemandTelefono, setLostDemandTelefono] = useState("")
   const [lostDemandRows, setLostDemandRows] = useState<{ producto: string; motivo: string }[]>([{ producto: "", motivo: "sin_stock" }])
+  // Busqueda de cliente real (contra la base) para el modal de Producto No
+  // Encontrado -- antes era un campo de texto libre que no quedaba
+  // vinculado a ningun cliente real. Mismo patron de debounce + auto-select
+  // en unico resultado que ya se usa en Extra Club / Consulta de Productos.
+  const [lostDemandCustomer, setLostDemandCustomer] = useState<Customer | null>(null)
+  const [lostDemandSearchResults, setLostDemandSearchResults] = useState<Customer[]>([])
+  const [lostDemandSearching, setLostDemandSearching] = useState(false)
+  const [showLostDemandRegisterForm, setShowLostDemandRegisterForm] = useState(false)
+  const [newLostDemandNombre, setNewLostDemandNombre] = useState("")
+  const [newLostDemandPhoneCountry, setNewLostDemandPhoneCountry] = useState<"+595" | "+55">("+595")
+  const [newLostDemandPhoneNumber, setNewLostDemandPhoneNumber] = useState("")
+  const [creatingLostDemandCustomer, setCreatingLostDemandCustomer] = useState(false)
+  const [lostDemandUrgencia, setLostDemandUrgencia] = useState<"normal" | "urgente">("normal")
 
   const [submitting, setSubmitting] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -840,6 +853,66 @@ export default function POSPage() {
 
     return () => clearTimeout(timer)
   }, [customerSearch, showCustomerModal])
+
+  // Busqueda de cliente para el modal de Producto No Encontrado -- mismo
+  // criterio que el buscador F9: debounce + auto-seleccion si hay una unica
+  // coincidencia, para no obligar a la cajera a tocar un resultado obvio.
+  useEffect(() => {
+    if (!showLostDemandModal) return
+    const query = lostDemandCliente.trim()
+    if (!query) {
+      setLostDemandSearchResults([])
+      setLostDemandSearching(false)
+      return
+    }
+    const timer = setTimeout(async () => {
+      setLostDemandSearching(true)
+      try {
+        const res = await api.customers.list({ search: query, limit: 10 })
+        const normalized = (res || []).map(normalizeCustomer)
+        setLostDemandSearchResults(normalized)
+        if (normalized.length === 1) {
+          setLostDemandCustomer(normalized[0])
+        }
+      } catch (e) {
+      } finally {
+        setLostDemandSearching(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [lostDemandCliente, showLostDemandModal])
+
+  const handleCreateLostDemandCustomer = async () => {
+    if (!newLostDemandNombre.trim()) {
+      toast.warning("Falta el nombre", "Ingrese el nombre del cliente.")
+      return
+    }
+    setCreatingLostDemandCustomer(true)
+    try {
+      const telefono = newLostDemandPhoneNumber.trim()
+        ? `${newLostDemandPhoneCountry}${newLostDemandPhoneNumber.replace(/\D/g, "")}`
+        : undefined
+      const createdRaw = await api.customers.create({
+        nombre: newLostDemandNombre.trim(),
+        razon_social: newLostDemandNombre.trim(),
+        telefono,
+        activo: true,
+      } as any)
+      const created = createdRaw ? normalizeCustomer(createdRaw) : null
+      if (created) {
+        setLostDemandCustomer(created)
+        setLostDemandCliente(created.nombre || "")
+        setShowLostDemandRegisterForm(false)
+        setNewLostDemandNombre("")
+        setNewLostDemandPhoneNumber("")
+        toast.success("Cliente registrado", `${created.nombre} guardado en la base.`)
+      }
+    } catch (e: any) {
+      toast.error("No se pudo registrar", e?.message || "Intente nuevamente.")
+    } finally {
+      setCreatingLostDemandCustomer(false)
+    }
+  }
 
   // Busqueda de socio Extra Club por numero/RUC/cedula/nombre -- mismo
   // criterio de fallback pedido explicitamente ("estandar, con fallback a
@@ -1555,8 +1628,10 @@ export default function POSPage() {
         api.purchases.lostDemand.create({
           producto_nombre: fila.producto.trim(),
           notas: `Motivo: ${fila.motivo}`,
-          cliente_nombre: lostDemandCliente.trim() || undefined,
-          cliente_contacto: lostDemandTelefono.trim() || undefined,
+          cliente_nombre: lostDemandCustomer?.nombre || lostDemandCliente.trim() || undefined,
+          cliente_contacto: lostDemandCustomer?.telefono || lostDemandTelefono.trim() || undefined,
+          customer_id: lostDemandCustomer && !String(lostDemandCustomer.id).startsWith("lookup-") ? String(lostDemandCustomer.id) : undefined,
+          urgencia: lostDemandUrgencia,
           cajero_nombre: user?.nombre,
           caja_id: puntoEmision,
         })
@@ -1566,6 +1641,12 @@ export default function POSPage() {
       setLostDemandCliente("")
       setLostDemandTelefono("")
       setLostDemandRows([{ producto: "", motivo: "sin_stock" }])
+      setLostDemandCustomer(null)
+      setLostDemandSearchResults([])
+      setShowLostDemandRegisterForm(false)
+      setNewLostDemandNombre("")
+      setNewLostDemandPhoneNumber("")
+      setLostDemandUrgencia("normal")
     } catch (e) {
       toast.error("No se pudo registrar", "Intente nuevamente en unos segundos.")
     } finally {
@@ -6331,26 +6412,130 @@ export default function POSPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Cliente (opcional)</label>
-                <input
-                  type="text"
-                  value={lostDemandCliente}
-                  onChange={(e) => setLostDemandCliente(e.target.value)}
-                  placeholder="Nombre del cliente"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-amber-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Teléfono (opcional, para avisarle)</label>
-                <input
-                  type="text"
-                  value={lostDemandTelefono}
-                  onChange={(e) => setLostDemandTelefono(e.target.value)}
-                  placeholder="0981 123456"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-amber-500"
-                />
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Cliente (opcional, buscar en la base)</label>
+              {lostDemandCustomer ? (
+                <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-500/40 rounded-xl p-2.5">
+                  <div>
+                    <div className="text-sm font-bold text-emerald-700 dark:text-emerald-400">{lostDemandCustomer.nombre}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">{lostDemandCustomer.telefono || "Sin teléfono registrado"}</div>
+                  </div>
+                  <button
+                    onClick={() => { setLostDemandCustomer(null); setLostDemandCliente(""); setLostDemandSearchResults([]) }}
+                    className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-red-400 px-2"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={lostDemandCliente}
+                    onChange={(e) => { setLostDemandCliente(e.target.value); setShowLostDemandRegisterForm(false) }}
+                    placeholder="Nombre, CI o RUC del cliente..."
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                  />
+                  {lostDemandCliente.trim() && !showLostDemandRegisterForm && (
+                    <div className="mt-1.5 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                      {lostDemandSearching ? (
+                        <div className="p-2.5 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando...</div>
+                      ) : lostDemandSearchResults.length > 0 ? (
+                        lostDemandSearchResults.slice(0, 5).map((c) => (
+                          <button
+                            key={String(c.id)}
+                            onClick={() => setLostDemandCustomer(c)}
+                            className="w-full text-left p-2.5 text-sm hover:bg-amber-50 dark:hover:bg-amber-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0"
+                          >
+                            <div className="font-bold text-slate-800 dark:text-slate-200">{c.nombre}</div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400">{c.telefono || c.ruc || c.ci || "—"}</div>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="p-2.5 flex items-center justify-between">
+                          <span className="text-xs text-slate-500 dark:text-slate-400">No se encontró ningún cliente.</span>
+                          <button
+                            onClick={() => { setShowLostDemandRegisterForm(true); setNewLostDemandNombre(lostDemandCliente) }}
+                            className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline shrink-0 ml-2"
+                          >
+                            + Registrar nuevo
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showLostDemandRegisterForm && (
+                <div className="mt-2 border border-amber-500/40 rounded-xl p-3 space-y-2 bg-amber-50/50 dark:bg-amber-500/5">
+                  <input
+                    type="text"
+                    value={newLostDemandNombre}
+                    onChange={(e) => setNewLostDemandNombre(e.target.value)}
+                    placeholder="Nombre del cliente"
+                    className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                  />
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Teléfono (WhatsApp)</label>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setNewLostDemandPhoneCountry("+595")}
+                        className={`flex items-center gap-1 px-2 py-2 rounded-lg border text-xs font-bold shrink-0 ${newLostDemandPhoneCountry === "+595" ? "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400" : "border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400"}`}
+                      >
+                        <FlagPY /> +595
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewLostDemandPhoneCountry("+55")}
+                        className={`flex items-center gap-1 px-2 py-2 rounded-lg border text-xs font-bold shrink-0 ${newLostDemandPhoneCountry === "+55" ? "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400" : "border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400"}`}
+                      >
+                        <FlagBR /> +55
+                      </button>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={newLostDemandPhoneNumber}
+                        onChange={(e) => setNewLostDemandPhoneNumber(e.target.value.replace(/\D/g, ""))}
+                        placeholder="981123456"
+                        className="flex-1 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowLostDemandRegisterForm(false)}
+                      className="flex-1 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleCreateLostDemandCustomer}
+                      disabled={creatingLostDemandCustomer || !newLostDemandNombre.trim()}
+                      className="flex-1 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                    >
+                      {creatingLostDemandCustomer ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                      Guardar cliente
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 mt-3">
+                <span className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">Urgencia:</span>
+                <button
+                  onClick={() => setLostDemandUrgencia("normal")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${lostDemandUrgencia === "normal" ? "border-slate-500 bg-slate-500/10 text-slate-700 dark:text-slate-200" : "border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400"}`}
+                >
+                  Normal
+                </button>
+                <button
+                  onClick={() => setLostDemandUrgencia("urgente")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${lostDemandUrgencia === "urgente" ? "border-red-500 bg-red-500/10 text-red-600 dark:text-red-400" : "border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400"}`}
+                >
+                  🔥 Urgente
+                </button>
               </div>
             </div>
 
@@ -6394,7 +6579,15 @@ export default function POSPage() {
 
             <div className="flex items-center gap-2 pt-4">
               <button
-                onClick={() => setShowLostDemandModal(false)}
+                onClick={() => {
+                  setShowLostDemandModal(false)
+                  setLostDemandCustomer(null)
+                  setLostDemandSearchResults([])
+                  setShowLostDemandRegisterForm(false)
+                  setNewLostDemandNombre("")
+                  setNewLostDemandPhoneNumber("")
+                  setLostDemandUrgencia("normal")
+                }}
                 className="w-1/3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300"
               >
                 Cancelar

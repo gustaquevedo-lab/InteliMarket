@@ -472,6 +472,12 @@ class CustomerLostDemand(Base):
     notas = Column(Text)
     cliente_nombre = Column(String(255))
     cliente_contacto = Column(String(100))
+    # Cliente real de la base (si se lo encontro/registro desde el buscador
+    # del modal) -- antes solo se guardaba texto libre, asi que no habia
+    # forma de asociar el aviso a la ficha real del cliente ni de avisarle
+    # por su telefono guardado.
+    customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id"), nullable=True)
+    urgencia = Column(String(20), nullable=False, default="normal")  # normal, urgente
     cajero_id = Column(UUID(as_uuid=True))
     cajero_nombre = Column(String(255))
     caja_id = Column(String(50))

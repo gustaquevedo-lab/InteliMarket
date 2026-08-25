@@ -2449,6 +2449,8 @@ async def create_lost_demand(
         notas=data.notas,
         cliente_nombre=data.cliente_nombre,
         cliente_contacto=data.cliente_contacto,
+        customer_id=data.customer_id,
+        urgencia=data.urgencia or "normal",
         cajero_id=data.cajero_id,
         cajero_nombre=data.cajero_nombre,
         caja_id=data.caja_id,

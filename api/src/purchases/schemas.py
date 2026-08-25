@@ -927,6 +927,8 @@ class LostDemandCreate(BaseModel):
     notas: Optional[str] = None
     cliente_nombre: Optional[str] = None
     cliente_contacto: Optional[str] = None
+    customer_id: Optional[UUID] = None
+    urgencia: str = "normal"
     cajero_id: Optional[UUID] = None
     cajero_nombre: Optional[str] = None
     caja_id: Optional[str] = None
@@ -947,6 +949,8 @@ class LostDemandResponse(BaseModel):
     notas: Optional[str] = None
     cliente_nombre: Optional[str] = None
     cliente_contacto: Optional[str] = None
+    customer_id: Optional[UUID] = None
+    urgencia: str = "normal"
     cajero_id: Optional[UUID] = None
     cajero_nombre: Optional[str] = None
     caja_id: Optional[str] = None
