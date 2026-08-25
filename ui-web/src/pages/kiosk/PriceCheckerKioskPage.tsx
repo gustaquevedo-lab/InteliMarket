@@ -307,7 +307,7 @@ export default function PriceCheckerKioskPage() {
       </header>
 
       {/* ── CONTENIDO PRINCIPAL ── */}
-      <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 z-10 w-full max-w-6xl mx-auto">
+      <main className="flex-1 flex flex-col items-center justify-center p-6 sm:p-8 lg:p-10 z-10 w-full max-w-6xl mx-auto">
 
         {/* A) STANDBY -- layout de 2 columnas para aprovechar el ancho real
             de las terminales (1366x768, apaisada). Apilar todo en una sola
@@ -321,7 +321,7 @@ export default function PriceCheckerKioskPage() {
             <div className="lg:col-span-5 flex flex-col items-center space-y-4">
               <div className="relative flex flex-col items-center">
                 <div className="absolute -inset-8 rounded-full bg-gradient-to-r from-orange-500 via-blue-600 to-amber-400 opacity-30 dark:opacity-40 blur-2xl animate-pulse-glow pointer-events-none" />
-                <div className="relative w-40 h-40 sm:w-48 sm:h-48 rounded-full bg-white p-3 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
+                <div className="relative w-48 h-48 sm:w-56 sm:h-56 rounded-full bg-white p-3.5 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
                   {company?.logo_url ? (
                     <img src={company.logo_url} alt={company.nombre || "Logo"} className="w-full h-full object-contain" />
                   ) : (
@@ -342,11 +342,11 @@ export default function PriceCheckerKioskPage() {
                 <Sparkles className="w-4 h-4 text-orange-500 dark:text-orange-400 animate-spin" />
               </div>
 
-              <h1 className="text-3xl sm:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-slate-700 to-orange-600 dark:from-white dark:via-slate-100 dark:to-orange-200 tracking-tight text-center">
+              <h1 className="text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-slate-700 to-orange-600 dark:from-white dark:via-slate-100 dark:to-orange-200 tracking-tight text-center">
                 ESCANEE AQUÍ SU PRODUCTO
               </h1>
 
-              <div className="relative w-full max-w-md h-24 rounded-3xl bg-white dark:bg-slate-900/80 border-2 border-dashed border-blue-400/50 dark:border-blue-500/50 backdrop-blur-2xl p-3 flex flex-col items-center justify-center overflow-hidden shadow-2xl">
+              <div className="relative w-full max-w-md h-28 rounded-3xl bg-white dark:bg-slate-900/80 border-2 border-dashed border-blue-400/50 dark:border-blue-500/50 backdrop-blur-2xl p-4 flex flex-col items-center justify-center overflow-hidden shadow-2xl">
                 <div className="absolute left-4 right-4 h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent rounded-full shadow-[0_0_15px_#ff0033] animate-laser pointer-events-none" />
                 <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300">
                   <Barcode className="w-12 h-12 sm:w-14 sm:h-14 text-blue-500 dark:text-blue-400 opacity-90" />
@@ -433,7 +433,7 @@ export default function PriceCheckerKioskPage() {
                 </span>
                 <div className={`grid grid-cols-1 gap-3 ${activeCurrencies.length === 1 ? "" : "sm:grid-cols-2"}`}>
                   {activeCurrencies.map((c) => (
-                    <div key={c.code} className={`p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900/90 border-2 ${colorBorder[c.color]} shadow-xl flex items-center justify-between`}>
+                    <div key={c.code} className={`p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900/90 border-2 ${colorBorder[c.color]} shadow-xl flex items-center justify-between`}>
                       <div className="flex items-center gap-3">
                         {c.flag}
                         <div><span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase block leading-none">{c.labelBoard}</span><span className="text-sm font-mono font-bold text-slate-600 dark:text-slate-300">{c.prefix}</span></div>
