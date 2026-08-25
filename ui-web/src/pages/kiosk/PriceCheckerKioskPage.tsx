@@ -263,42 +263,43 @@ export default function PriceCheckerKioskPage() {
         .animate-pulse-glow { animation: pulseGlow 3s ease-in-out infinite; }
       `}</style>
 
-      <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
-        <button
-          onClick={toggleTheme}
-          title="Cambiar tema"
-          className="p-2.5 rounded-2xl bg-slate-900/5 dark:bg-white/10 hover:bg-slate-900/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white backdrop-blur-xl transition cursor-pointer shadow-lg"
-        >
-          {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-        </button>
-        <button
-          onClick={toggleFullScreen}
-          title="Pantalla Completa (F11)"
-          className="p-2.5 rounded-2xl bg-slate-900/5 dark:bg-white/10 hover:bg-slate-900/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white backdrop-blur-xl transition cursor-pointer shadow-lg"
-        >
-          <Maximize2 className="w-5 h-5" />
-        </button>
-      </div>
-
       {/* ── FONDOS AMBIENTALES LUMINOSOS ── */}
       <div className="absolute w-[600px] h-[600px] rounded-full bg-blue-600/10 dark:bg-blue-600/15 filter blur-[140px] pointer-events-none -top-40 -left-40" />
       <div className="absolute w-[600px] h-[600px] rounded-full bg-orange-600/10 dark:bg-orange-600/15 filter blur-[140px] pointer-events-none -bottom-40 -right-40" />
 
-      {/* ── ENCABEZADO ── */}
-      <header className="px-6 sm:px-10 py-3.5 flex items-center justify-between border-b border-slate-200 dark:border-white/10 bg-white/80 dark:bg-slate-950/70 backdrop-blur-xl z-20">
-        <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse shadow-lg shadow-emerald-400/50" />
-          <span className="text-xs sm:text-sm font-black tracking-wider text-slate-500 dark:text-slate-300 uppercase">
+      {/* ── ENCABEZADO -- botones de tema/pantalla completa DENTRO del flujo,
+          nunca flotando encima del reloj (se superponian en pantallas de
+          1366x768, resolucion real de las terminales del salon). ── */}
+      <header className="px-4 sm:px-8 py-2.5 flex items-center justify-between border-b border-slate-200 dark:border-white/10 bg-white/80 dark:bg-slate-950/70 backdrop-blur-xl z-20 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-lg shadow-emerald-400/50 shrink-0" />
+          <span className="text-[11px] sm:text-sm font-black tracking-wider text-slate-500 dark:text-slate-300 uppercase truncate">
             Terminal de Consulta de Precios · Salón de Ventas
           </span>
         </div>
-        <div className="text-right">
-          <span className="text-base sm:text-xl font-black font-mono text-slate-900 dark:text-white tracking-widest leading-none block">
-            {currentTime.toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-          </span>
-          <span className="text-xs text-orange-500 dark:text-orange-400 font-bold capitalize">
-            {currentTime.toLocaleDateString("es-PY", { weekday: "long", day: "numeric", month: "long" })}
-          </span>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right">
+            <span className="text-sm sm:text-lg font-black font-mono text-slate-900 dark:text-white tracking-widest leading-none block">
+              {currentTime.toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            </span>
+            <span className="text-[10px] text-orange-500 dark:text-orange-400 font-bold capitalize">
+              {currentTime.toLocaleDateString("es-PY", { weekday: "long", day: "numeric", month: "long" })}
+            </span>
+          </div>
+          <button
+            onClick={toggleTheme}
+            title="Cambiar tema"
+            className="p-2 rounded-xl bg-slate-900/5 dark:bg-white/10 hover:bg-slate-900/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
+          >
+            {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+          <button
+            onClick={toggleFullScreen}
+            title="Pantalla Completa (F11)"
+            className="p-2 rounded-xl bg-slate-900/5 dark:bg-white/10 hover:bg-slate-900/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
         </div>
       </header>
 
@@ -307,10 +308,10 @@ export default function PriceCheckerKioskPage() {
 
         {/* A) STANDBY */}
         {!scannedProduct && !notFoundCode && !connError && (
-          <div className="w-full flex flex-col items-center space-y-6 animate-in fade-in zoom-in-95 duration-300">
+          <div className="w-full flex flex-col items-center space-y-3 sm:space-y-4 animate-in fade-in zoom-in-95 duration-300">
             <div className="relative flex flex-col items-center">
               <div className="absolute -inset-6 rounded-full bg-gradient-to-r from-orange-500 via-blue-600 to-amber-400 opacity-30 dark:opacity-40 blur-2xl animate-pulse-glow pointer-events-none" />
-              <div className="relative w-44 h-44 sm:w-56 sm:h-56 rounded-full bg-white p-3 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
+              <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-white p-2.5 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
                 {company?.logo_url ? (
                   <img src={company.logo_url} alt={company.nombre || "Logo"} className="w-full h-full object-contain" />
                 ) : (
@@ -336,7 +337,7 @@ export default function PriceCheckerKioskPage() {
                 ESCANEE AQUÍ SU PRODUCTO
               </h1>
 
-              <div className="relative w-full max-w-md h-28 sm:h-32 rounded-3xl bg-white dark:bg-slate-900/80 border-2 border-dashed border-blue-400/50 dark:border-blue-500/50 backdrop-blur-2xl p-4 flex flex-col items-center justify-center overflow-hidden shadow-2xl">
+              <div className="relative w-full max-w-md h-20 sm:h-24 rounded-3xl bg-white dark:bg-slate-900/80 border-2 border-dashed border-blue-400/50 dark:border-blue-500/50 backdrop-blur-2xl p-3 flex flex-col items-center justify-center overflow-hidden shadow-2xl">
                 <div className="absolute left-4 right-4 h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent rounded-full shadow-[0_0_15px_#ff0033] animate-laser pointer-events-none" />
                 <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300">
                   <Barcode className="w-12 h-12 sm:w-16 sm:h-16 text-blue-500 dark:text-blue-400 opacity-90" />
