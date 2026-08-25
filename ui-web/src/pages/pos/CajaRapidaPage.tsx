@@ -1729,6 +1729,13 @@ export default function POSPage() {
         const nombre = customer.razon_social || customer.nombre || "Cliente"
         const numero = customer.extra_club_numero ? ` · Socio ${customer.extra_club_numero}` : ""
         const saldoTxt = extraClubCredit && extraClubCredit !== "loading" ? ` · Disponible ${formatPYG(extraClubCredit.saldo_disponible)}` : ""
+        // En pago mixto solo la porcion Extra Club va a credito -- mostrar
+        // el total de la venta ahi seria enganoso para la supervisora, que
+        // necesita saber cuanto de esto es realmente fiado.
+        if (paymentTab === "mixed") {
+          const montoCredito = parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)
+          return `Pago mixto con Extra Club: ${nombre}${numero} · ${formatPYG(montoCredito)} a crédito de ${formatPYG(totalPyg)} total${saldoTxt}`
+        }
         return `Pago Extra Club: ${nombre}${numero} · ${formatPYG(totalPyg)}${saldoTxt}`
       }
       default:
@@ -5583,6 +5590,33 @@ export default function POSPage() {
                       </div>
                       {parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0 && (!customer || customer.id === DEFAULT_CUSTOMER.id) && (
                         <div className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1">Elija un cliente (F9) para la porción a crédito.</div>
+                      )}
+                      {/* Mismo estado de credito que el tab Extra Club puro --
+                          antes en "mixed" no se veia nada de esto, el cajero
+                          recien se enteraba si habia limite al confirmar. */}
+                      {parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0 && customer && customer.id !== DEFAULT_CUSTOMER.id && (
+                        <div className="mt-1.5">
+                          {extraClubCredit === "loading" && (
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Consultando línea de crédito…</div>
+                          )}
+                          {extraClubCredit && extraClubCredit !== "loading" && (
+                            <div className={`text-[10px] font-bold flex items-center gap-1 ${extraClubCredit.activo && extraClubCredit.saldo_disponible >= parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                              Disponible: {formatPYG(extraClubCredit.saldo_disponible)} de {formatPYG(extraClubCredit.limite_credito)}
+                              {!extraClubCredit.activo && " · Cuenta inactiva"}
+                            </div>
+                          )}
+                          {extraClubCredit === null && (
+                            <div className="text-[10px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" /> Sin línea de crédito habilitada.
+                              {(user?.rol === "admin" || user?.is_superadmin) && (
+                                <label className="flex items-center gap-1 cursor-pointer ml-1">
+                                  <input type="checkbox" checked={extraClubAdminOverride} onChange={(e) => setExtraClubAdminOverride(e.target.checked)} className="w-3 h-3 accent-rose-500 cursor-pointer" />
+                                  Autorizar igual
+                                </label>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
