@@ -149,7 +149,7 @@ export interface KioskPriceTier { min_qty: number; max_qty: number | null; preci
 export interface KioskProductLookup { id: string; nombre: string; sku?: string | null; codigo_barra?: string | null; precio_venta: number; imagen_url?: string | null; categoria_nombre?: string | null; tipo_venta?: string | null; escalas: KioskPriceTier[] }
 export interface KioskBanner { id: string; company_id: string; titulo: string; subtitulo?: string | null; etiqueta?: string | null; descuento_texto?: string | null; color?: string | null; imagen_url?: string | null; orden: number; activo: boolean; fecha_inicio?: string | null; fecha_fin?: string | null; created_at: string; updated_at?: string | null }
 export interface VaultEntry { id: string; origen: string; monto_pyg: number; monto_usd: number; monto_brl: number; estado: string; bank_transaction_id?: string | null; created_at: string; fecha_deposito?: string | null }
-export interface VaultDashboard { saldo_en_boveda_pyg: number; saldo_en_boveda_usd: number; saldo_en_boveda_brl: number; entradas_en_boveda: number; entregas_pendientes: number; entregas_pendientes_detalle: CashHandoff[]; movimientos_recientes: VaultEntry[] }
+export interface VaultDashboard { saldo_en_boveda_pyg: number; saldo_en_boveda_usd: number; saldo_en_boveda_brl: number; entradas_en_boveda: number; entregas_pendientes: number; entregas_pendientes_detalle: CashHandoff[]; retiros_pendientes: number; retiros_pendientes_detalle: any[]; movimientos_recientes: VaultEntry[] }
 export interface CashSession { id: string; caja_id?: string; caja?: CashRegister; cash_register?: CashRegister; usuario_id?: string; fecha_apertura?: string; fecha_cierre?: string; monto_apertura?: number; monto_cierre?: number; total_ventas?: number; total_retiros?: number; total_ingresos?: number; estado?: string; observaciones?: string; created_at?: string }
 export interface Branch { id: string; nombre: string; codigo: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; ruc?: string; punto_emision?: string | number; activo?: boolean; company_id?: string; created_at?: string; updated_at?: string }
 export interface CreditAccount { id: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_ruc?: string; saldo?: number; limite_credito?: number; saldo_utilizado?: number; saldo_disponible?: number; porcentaje_uso?: number; estado?: string; activo?: boolean; dias_mora_max?: number; en_mora?: boolean; created_at?: string; updated_at?: string }
@@ -783,7 +783,12 @@ export const api = {
         "/v1/cash-sessions-summary", { company_id: COMPANY_ID, ...params } as any
       ),
     paymentBreakdown: (sessionId: string) => client.get<{ pyg: { forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]; otras_monedas: { forma_pago: string; moneda: string; cantidad: number; monto: number }[] }>(`/v1/cash-sessions/${sessionId}/payment-breakdown`),
-    cashDrop: (sessionId: string, data: { monto: number; observaciones?: string }) => client.post<any>(`/v1/cash-sessions/${sessionId}/cash-drop`, data),
+    cashDrop: (sessionId: string, data: { monto: number; monto_usd?: number; monto_brl?: number; observaciones?: string }) => client.post<any>(`/v1/cash-sessions/${sessionId}/cash-drop`, data),
+    cashDropRequests: {
+      list: (estado?: string) => client.get<any[]>("/v1/cash-drop-requests", { company_id: COMPANY_ID, estado } as any),
+      confirm: (id: string, data: { confirmado_por: string; confirmado_por_nombre: string; monto_confirmado_pyg?: number; monto_confirmado_usd?: number; monto_confirmado_brl?: number }) => client.post<any>(`/v1/cash-drop-requests/${id}/confirm`, data),
+      reject: (id: string, motivo: string) => client.post<any>(`/v1/cash-drop-requests/${id}/reject`, { motivo }),
+    },
     openSession: (data: { caja_id: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions/open", data),
     closeSession: (id: string, data: { monto_cierre: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
     summary: (id: string) => client.get<CashSessionSummary>(`/v1/cash-sessions/${id}/summary`),

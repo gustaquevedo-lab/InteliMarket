@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 
-from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff, VaultEntry, VaultDepositApprovalRequest
+from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff, VaultEntry, VaultDepositApprovalRequest, CashDropRequest
 from api.src.sales.models import Sale, SalePayment
 from api.src.auth.models import User
 
@@ -451,7 +451,15 @@ async def get_session_payment_breakdown(db: AsyncSession, session_id: str) -> di
     }
 
 
-async def register_cash_drop(db: AsyncSession, session_id: str, monto: Decimal, observaciones: str | None = None, registrado_por: str | None = None) -> CashRegisterMovement | None:
+async def register_cash_drop(
+    db: AsyncSession, session_id: str, monto: Decimal, monto_usd: Decimal = Decimal("0"),
+    monto_brl: Decimal = Decimal("0"), observaciones: str | None = None, registrado_por: str | None = None,
+) -> CashDropRequest | None:
+    """Registra el retiro DECLARADO por la cajera -- ya no entra a boveda de
+    forma automatica. Queda pendiente hasta que un supervisor lo confirma con
+    su propio recuento (mismo control de doble conteo que ya existe en la
+    entrega de cierre de turno via CashHandoff) -- antes el retiro mid-turno
+    era el unico movimiento de efectivo sin ningun control de supervisor."""
     result = await db.execute(select(CashSession).where(CashSession.id == uuid.UUID(session_id)))
     session_obj = result.scalar_one_or_none()
     if not session_obj or session_obj.estado != "abierta":
@@ -460,34 +468,131 @@ async def register_cash_drop(db: AsyncSession, session_id: str, monto: Decimal, 
     register_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
     register = register_result.scalar_one_or_none()
 
-    movement = CashRegisterMovement(
-        company_id=register.company_id,
+    request = CashDropRequest(
+        company_id=register.company_id if register else None,
+        session_id=session_obj.id,
         register_id=session_obj.register_id,
-        tipo="retiro",
-        monto=monto,
-        moneda="PYG",
-        fecha=datetime.now(timezone.utc),
-        observaciones=f"Cash drop sesión {session_id}" + (f" — {observaciones}" if observaciones else ""),
+        solicitado_por=uuid.UUID(registrado_por) if registrado_por else session_obj.user_id,
+        solicitado_por_nombre=session_obj.cajero_nombre,
+        monto_pyg=monto,
+        monto_usd=monto_usd,
+        monto_brl=monto_brl,
+        observaciones=observaciones,
+        estado="pendiente",
     )
-    db.add(movement)
+    db.add(request)
     session_obj.ultimo_cash_drop_at = datetime.now(timezone.utc)
     await db.flush()
-    await db.refresh(movement)
+    await db.refresh(request)
+    return request
 
-    # El cash drop es efectivo que fisicamente ya salio de la caja hacia la
-    # boveda a mitad de turno — antes no quedaba ningun rastro en boveda hasta
-    # el cierre de sesion, subestimando el saldo real ahi guardado.
+
+async def list_cash_drop_requests(db: AsyncSession, company_id: str, estado: str | None = "pendiente") -> list[dict]:
+    query = select(CashDropRequest).where(CashDropRequest.company_id == uuid.UUID(company_id))
+    if estado:
+        query = query.where(CashDropRequest.estado == estado)
+    query = query.order_by(CashDropRequest.created_at.desc())
+    result = await db.execute(query)
+    requests = list(result.scalars().all())
+
+    register_ids = {r.register_id for r in requests if r.register_id}
+    register_nombre_by_id: dict = {}
+    if register_ids:
+        rows = await db.execute(select(CashRegister.id, CashRegister.nombre).where(CashRegister.id.in_(register_ids)))
+        register_nombre_by_id = {rid: nombre for rid, nombre in rows.all()}
+
+    return [
+        {
+            "id": str(r.id),
+            "session_id": str(r.session_id),
+            "register_nombre": register_nombre_by_id.get(r.register_id),
+            "solicitado_por_nombre": r.solicitado_por_nombre,
+            "monto_pyg": float(r.monto_pyg or 0),
+            "monto_usd": float(r.monto_usd or 0),
+            "monto_brl": float(r.monto_brl or 0),
+            "observaciones": r.observaciones,
+            "estado": r.estado,
+            "confirmado_por_nombre": r.confirmado_por_nombre,
+            "created_at": r.created_at.isoformat(),
+            "fecha_confirmacion": r.fecha_confirmacion.isoformat() if r.fecha_confirmacion else None,
+        }
+        for r in requests
+    ]
+
+
+async def confirm_cash_drop_request(
+    db: AsyncSession, request_id: str, company_id: str, confirmado_por: str, confirmado_por_nombre: str,
+    monto_confirmado_pyg: Decimal | None = None, monto_confirmado_usd: Decimal | None = None,
+    monto_confirmado_brl: Decimal | None = None,
+) -> CashDropRequest | str | None:
+    user_result = await db.execute(select(User).where(User.id == uuid.UUID(confirmado_por)))
+    supervisor = user_result.scalar_one_or_none()
+    if not supervisor or not supervisor.activo or (supervisor.rol not in ("admin", "supervisor") and not supervisor.is_superadmin):
+        return "forbidden"
+
+    result = await db.execute(
+        select(CashDropRequest).where(CashDropRequest.id == uuid.UUID(request_id), CashDropRequest.company_id == uuid.UUID(company_id))
+    )
+    req = result.scalar_one_or_none()
+    if not req or req.estado != "pendiente":
+        return None
+
+    register_result = await db.execute(select(CashRegister).where(CashRegister.id == req.register_id))
+    register = register_result.scalar_one_or_none()
+
+    m_pyg = monto_confirmado_pyg if monto_confirmado_pyg is not None else req.monto_pyg
+    m_usd = monto_confirmado_usd if monto_confirmado_usd is not None else (req.monto_usd or Decimal("0"))
+    m_brl = monto_confirmado_brl if monto_confirmado_brl is not None else (req.monto_brl or Decimal("0"))
+    discrepancia = bool(m_pyg != (req.monto_pyg or Decimal("0")) or m_usd != (req.monto_usd or Decimal("0")) or m_brl != (req.monto_brl or Decimal("0")))
+
+    req.estado = "confirmado"
+    req.confirmado_por = uuid.UUID(confirmado_por)
+    req.confirmado_por_nombre = confirmado_por_nombre
+    req.monto_confirmado_pyg = m_pyg
+    req.monto_confirmado_usd = m_usd
+    req.monto_confirmado_brl = m_brl
+    req.discrepancia_confirmacion = discrepancia
+    req.fecha_confirmacion = datetime.now(timezone.utc)
+    await db.flush()
+
+    db.add(CashRegisterMovement(
+        company_id=req.company_id,
+        register_id=req.register_id,
+        tipo="retiro",
+        monto=m_pyg,
+        moneda="PYG",
+        fecha=datetime.now(timezone.utc),
+        observaciones=f"Retiro confirmado, sesión {req.session_id}" + (f" — {req.observaciones}" if req.observaciones else ""),
+    ))
     db.add(VaultEntry(
-        company_id=register.company_id if register else None,
+        company_id=req.company_id,
         branch_id=register.branch_id if register else None,
         origen="cash_drop",
-        monto_pyg=monto,
+        monto_pyg=m_pyg,
+        monto_usd=m_usd,
+        monto_brl=m_brl,
         estado="en_boveda",
-        registrado_por=uuid.UUID(registrado_por) if registrado_por else None,
-        observaciones=f"Cash drop sesión {session_id}",
+        registrado_por=uuid.UUID(confirmado_por),
+        observaciones="Discrepancia con lo declarado por la cajera en el retiro" if discrepancia else None,
     ))
     await db.flush()
-    return movement
+    await db.refresh(req)
+    return req
+
+
+async def reject_cash_drop_request(db: AsyncSession, request_id: str, company_id: str, motivo: str) -> CashDropRequest | None:
+    result = await db.execute(
+        select(CashDropRequest).where(CashDropRequest.id == uuid.UUID(request_id), CashDropRequest.company_id == uuid.UUID(company_id))
+    )
+    req = result.scalar_one_or_none()
+    if not req or req.estado != "pendiente":
+        return None
+    req.estado = "rechazado"
+    req.motivo_rechazo = motivo
+    req.fecha_confirmacion = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(req)
+    return req
 
 
 # ── Entregas de efectivo (custodia cajera -> supervisor) ────────────────
@@ -628,6 +733,7 @@ async def get_vault_dashboard(db: AsyncSession, company_id: str) -> dict:
     pyg, usd, brl, cantidad = en_boveda.first()
 
     pendientes = await list_pending_handoffs(db, company_id, estado="pendiente")
+    retiros_pendientes = await list_cash_drop_requests(db, company_id, estado="pendiente")
 
     ultimos_result = await db.execute(
         select(VaultEntry).where(VaultEntry.company_id == cid).order_by(VaultEntry.created_at.desc()).limit(20)
@@ -647,6 +753,8 @@ async def get_vault_dashboard(db: AsyncSession, company_id: str) -> dict:
         "entradas_en_boveda": int(cantidad),
         "entregas_pendientes": len(pendientes),
         "entregas_pendientes_detalle": pendientes,
+        "retiros_pendientes": len(retiros_pendientes),
+        "retiros_pendientes_detalle": retiros_pendientes,
         "movimientos_recientes": ultimos,
     }
 

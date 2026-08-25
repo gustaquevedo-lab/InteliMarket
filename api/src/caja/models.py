@@ -95,6 +95,39 @@ class CashHandoff(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class CashDropRequest(Base):
+    """Retiro de efectivo a mitad de turno (cash drop), pendiente de que un
+    supervisor lo confirme -- antes esto entraba a boveda de forma automatica
+    apenas la cajera lo declaraba, sin ningun control de doble conteo (a
+    diferencia de la entrega de cierre de turno, que si tenia ese control via
+    CashHandoff). Se pidio expresamente que los retiros pasen por el mismo
+    tipo de confirmacion."""
+    __tablename__ = "cash_drop_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id"), nullable=False)
+    register_id = Column(UUID(as_uuid=True))
+    solicitado_por = Column(UUID(as_uuid=True), nullable=False)  # cajero
+    solicitado_por_nombre = Column(String(100))
+    monto_pyg = Column(Numeric(15, 0), default=0)
+    monto_usd = Column(Numeric(12, 2), default=0)
+    monto_brl = Column(Numeric(12, 2), default=0)
+    observaciones = Column(Text)
+    estado = Column(String(20), nullable=False, default="pendiente")  # pendiente | confirmado | rechazado
+    confirmado_por = Column(UUID(as_uuid=True))  # supervisor
+    confirmado_por_nombre = Column(String(100))
+    # Mismo control de doble conteo que CashHandoff -- lo que el supervisor
+    # cuenta al recibir, no lo que declaro la cajera.
+    monto_confirmado_pyg = Column(Numeric(15, 0))
+    monto_confirmado_usd = Column(Numeric(12, 2))
+    monto_confirmado_brl = Column(Numeric(12, 2))
+    discrepancia_confirmacion = Column(Boolean, default=False)
+    motivo_rechazo = Column(Text)
+    fecha_confirmacion = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class VaultEntry(Base):
     """Bóveda central real: cada entrada es efectivo que un supervisor recibió
     de una cajera (origen='entrega_cajero', vía CashHandoff) o un ajuste manual.

@@ -349,6 +349,8 @@ export default function POSPage() {
   const [cierreResult, setCierreResult] = useState<{ monto_cierre_esperado: number; diferencia: number; requiere_revision: boolean } | null>(null)
   const [showCashDropModal, setShowCashDropModal] = useState(false)
   const [cashDropMonto, setCashDropMonto] = useState<string>("")
+  const [cashDropMontoUsd, setCashDropMontoUsd] = useState<string>("")
+  const [cashDropMontoBrl, setCashDropMontoBrl] = useState<string>("")
   const [cashDropObs, setCashDropObs] = useState<string>("")
   const [submittingCashDrop, setSubmittingCashDrop] = useState(false)
   const [cashDropStatus, setCashDropStatus] = useState<{ efectivo_acumulado: number; cash_drop_threshold: number | null; cash_drop_alert: boolean; cash_drop_warning: boolean } | null>(null)
@@ -1217,27 +1219,37 @@ export default function POSPage() {
       return
     }
     const monto = parseInt(cashDropMonto.replace(/\D/g, "") || "0", 10)
-    if (monto <= 0) {
-      toast.warning("Monto inválido", "Ingrese un monto mayor a 0.")
+    const montoUsd = parseFloat(cashDropMontoUsd.replace(/,/g, ".")) || 0
+    const montoBrl = parseFloat(cashDropMontoBrl.replace(/,/g, ".")) || 0
+    if (monto <= 0 && montoUsd <= 0 && montoBrl <= 0) {
+      toast.warning("Monto inválido", "Ingrese al menos un monto mayor a 0 en alguna moneda.")
       return
     }
     setSubmittingCashDrop(true)
     try {
-      await api.caja.cashDrop(cashSessionId, { monto, observaciones: cashDropObs.trim() || undefined })
+      await api.caja.cashDrop(cashSessionId, { monto, monto_usd: montoUsd, monto_brl: montoBrl, observaciones: cashDropObs.trim() || undefined })
+      const montosTexto = [
+        monto > 0 ? formatPYG(monto) : null,
+        montoUsd > 0 ? `US$ ${montoUsd.toFixed(2)}` : null,
+        montoBrl > 0 ? `R$ ${montoBrl.toFixed(2)}` : null,
+      ].filter(Boolean).join(" + ")
       const body = buildTicketPrelude("RETIRO DE EFECTIVO (CASH DROP)") + `
         <div style="padding: 4px 0; font-size: 10px;">
           <div>Cajero: ${user?.nombre || "-"}</div>
           <div>Fecha/Hora: ${new Date().toLocaleString("es-PY")}</div>
-          <div style="font-weight:900; font-size:13px; margin-top:6px;">Monto retirado: ${formatPYG(monto)}</div>
+          <div style="font-weight:900; font-size:13px; margin-top:6px;">Monto retirado: ${montosTexto}</div>
+          <div style="margin-top:4px;">Pendiente de confirmación por supervisora</div>
           ${cashDropObs.trim() ? `<div style="margin-top:4px;">Obs: ${cashDropObs.trim()}</div>` : ""}
         </div>
         <div style="text-align:center; margin-top:10px; font-size:9px;">Firma cajero: ______________________</div>
         <br/><br/>
       </div>`
       await printTicketHtml(body)
-      toast.success("Retiro registrado", `${formatPYG(monto)} retirados de la caja.`)
+      toast.success("Retiro registrado", `${montosTexto} -- pendiente de que la supervisora lo confirme.`)
       setShowCashDropModal(false)
       setCashDropMonto("")
+      setCashDropMontoUsd("")
+      setCashDropMontoBrl("")
       setCashDropObs("")
     } catch (err) {
       toast.error("No se pudo registrar el retiro", "Verifique que la sesión de caja siga abierta.")
@@ -5955,6 +5967,30 @@ export default function POSPage() {
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-xl font-posMono tabular-nums font-black text-orange-600 dark:text-orange-400 outline-none focus:border-orange-500"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Monto US$</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={cashDropMontoUsd}
+                    onChange={(e) => setCashDropMontoUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Monto R$</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={cashDropMontoBrl}
+                    onChange={(e) => setCashDropMontoBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-orange-500"
+                  />
+                </div>
+              </div>
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Motivo (opcional)</label>
                 <input
@@ -5964,6 +6000,9 @@ export default function POSPage() {
                   placeholder="Ej: envío a bóveda"
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-orange-500"
                 />
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5">
+                Este retiro queda pendiente hasta que una supervisora lo confirme con su propio recuento.
               </div>
             </div>
 
@@ -5976,11 +6015,11 @@ export default function POSPage() {
               </button>
               <button
                 onClick={handleConfirmCashDrop}
-                disabled={submittingCashDrop || !cashDropMonto}
+                disabled={submittingCashDrop || (!cashDropMonto && !cashDropMontoUsd && !cashDropMontoBrl)}
                 className="w-2/3 bg-orange-600 hover:bg-orange-700 text-white py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 {submittingCashDrop ? <Loader2 className="w-4 h-4 animate-spin" /> : <Banknote className="w-4 h-4" />}
-                Confirmar Retiro
+                Registrar Retiro
               </button>
             </div>
           </div>

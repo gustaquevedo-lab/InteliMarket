@@ -49,6 +49,19 @@ interface Handoff {
   created_at: string
 }
 
+interface RetiroPendiente {
+  id: string
+  session_id: string
+  register_nombre: string | null
+  solicitado_por_nombre: string | null
+  monto_pyg: number
+  monto_usd: number
+  monto_brl: number
+  observaciones: string | null
+  estado: string
+  created_at: string
+}
+
 interface AuthRequest {
   id: string
   tipo: string
@@ -166,9 +179,15 @@ export default function SupervisorPage() {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [resolvingId, setResolvingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const [retiros, setRetiros] = useState<RetiroPendiente[]>([])
+  const [confirmingItem, setConfirmingItem] = useState<{ kind: "handoff" | "retiro"; id: string } | null>(null)
   const [confirmAmount, setConfirmAmount] = useState("")
+  const [confirmAmountUsd, setConfirmAmountUsd] = useState("")
+  const [confirmAmountBrl, setConfirmAmountBrl] = useState("")
   const [submittingConfirm, setSubmittingConfirm] = useState(false)
+  const [rejectingRetiro, setRejectingRetiro] = useState<RetiroPendiente | null>(null)
+  const [rejectRetiroMotivo, setRejectRetiroMotivo] = useState("")
+  const [submittingRejectRetiro, setSubmittingRejectRetiro] = useState(false)
   const [rejectingVault, setRejectingVault] = useState<VaultApproval | null>(null)
   const [rejectMotivo, setRejectMotivo] = useState("")
   const [submittingReject, setSubmittingReject] = useState(false)
@@ -265,12 +284,14 @@ export default function SupervisorPage() {
       // que ya no le corresponde resolver a la supervisora desde aca.
       const hoyMedianoche = new Date()
       hoyMedianoche.setHours(0, 0, 0, 0)
-      const [sess, ho] = await Promise.all([
+      const [sess, ho, ret] = await Promise.all([
         api.caja.sessionsSummary({ estado: "abierta", fecha_desde: hoyMedianoche.toISOString() }),
         api.caja.handoffs.list({ estado: "pendiente" }),
+        api.caja.cashDropRequests.list("pendiente"),
       ])
       setSessions(sess || [])
       setHandoffs(ho || [])
+      setRetiros(ret || [])
       setLastSync(new Date())
       setSyncError(null)
     } catch (e: any) {
@@ -328,28 +349,68 @@ export default function SupervisorPage() {
     setLoginPassword("")
   }
 
-  const openConfirm = (h: Handoff) => {
-    setConfirmingId(h.id)
+  const openConfirmHandoff = (h: Handoff) => {
+    setConfirmingItem({ kind: "handoff", id: h.id })
     setConfirmAmount(String(Math.round(h.monto_pyg)))
+    setConfirmAmountUsd(h.monto_usd ? String(h.monto_usd) : "")
+    setConfirmAmountBrl(h.monto_brl ? String(h.monto_brl) : "")
+  }
+
+  const openConfirmRetiro = (r: RetiroPendiente) => {
+    setConfirmingItem({ kind: "retiro", id: r.id })
+    setConfirmAmount(r.monto_pyg ? String(Math.round(r.monto_pyg)) : "")
+    setConfirmAmountUsd(r.monto_usd ? String(r.monto_usd) : "")
+    setConfirmAmountBrl(r.monto_brl ? String(r.monto_brl) : "")
   }
 
   const submitConfirm = async () => {
-    if (!confirmingId || !user) return
+    if (!confirmingItem || !user) return
     setSubmittingConfirm(true)
+    const pyg = parseInt(confirmAmount.replace(/\D/g, ""), 10) || 0
+    const usd = parseFloat(confirmAmountUsd.replace(/,/g, ".")) || 0
+    const brl = parseFloat(confirmAmountBrl.replace(/,/g, ".")) || 0
     try {
-      await api.caja.handoffs.confirm(confirmingId, {
-        recibido_por: user.id,
-        recibido_por_nombre: user.nombre,
-        monto_confirmado_pyg: parseInt(confirmAmount.replace(/\D/g, ""), 10) || 0,
-      })
-      toast.success("Entrega Confirmada", "El efectivo ya está registrado en bóveda.")
-      setConfirmingId(null)
+      if (confirmingItem.kind === "handoff") {
+        await api.caja.handoffs.confirm(confirmingItem.id, {
+          recibido_por: user.id,
+          recibido_por_nombre: user.nombre,
+          monto_confirmado_pyg: pyg,
+          monto_confirmado_usd: usd,
+          monto_confirmado_brl: brl,
+        })
+        toast.success("Entrega Confirmada", "El efectivo ya está registrado en bóveda.")
+      } else {
+        await api.caja.cashDropRequests.confirm(confirmingItem.id, {
+          confirmado_por: user.id,
+          confirmado_por_nombre: user.nombre,
+          monto_confirmado_pyg: pyg,
+          monto_confirmado_usd: usd,
+          monto_confirmado_brl: brl,
+        })
+        toast.success("Retiro Confirmado", "El efectivo ya está registrado en bóveda.")
+      }
+      setConfirmingItem(null)
       fetchData()
       fetchVaultAndTeam()
     } catch (e: any) {
       toast.error("No se pudo confirmar", e?.message || "Intente de nuevo.")
     } finally {
       setSubmittingConfirm(false)
+    }
+  }
+
+  const submitRejectRetiro = async () => {
+    if (!rejectingRetiro) return
+    setSubmittingRejectRetiro(true)
+    try {
+      await api.caja.cashDropRequests.reject(rejectingRetiro.id, rejectRetiroMotivo.trim() || "Rechazado por supervisor")
+      toast.success("Retiro rechazado", "Se avisó que el retiro no fue confirmado.")
+      setRejectingRetiro(null)
+      fetchData()
+    } catch (e: any) {
+      toast.error("No se pudo rechazar", e?.message || "Intente de nuevo.")
+    } finally {
+      setSubmittingRejectRetiro(false)
     }
   }
 
@@ -730,7 +791,7 @@ export default function SupervisorPage() {
                   {handoffs.map((h) => (
                     <button
                       key={h.id}
-                      onClick={() => openConfirm(h)}
+                      onClick={() => openConfirmHandoff(h)}
                       className="w-full text-left rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 flex items-center gap-3 active:scale-[0.99] transition-transform cursor-pointer"
                     >
                       <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0">
@@ -745,6 +806,63 @@ export default function SupervisorPage() {
                       </div>
                       <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
                     </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── RETIROS PENDIENTES -- cash drops de mitad de turno, ahora
+                requieren la misma confirmacion con recuento que la entrega
+                de cierre de turno. Antes entraban a boveda solos, sin que
+                la supervisora se enterara siquiera. ── */}
+            <div>
+              <div className="flex items-center justify-between mb-2.5">
+                <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400" style={displayFont}>
+                  Retiros Pendientes
+                </h2>
+                {retiros.length > 0 && (
+                  <span className="text-[10px] font-black bg-rose-500 text-white px-2 py-0.5 rounded-full">{retiros.length}</span>
+                )}
+              </div>
+
+              {retiros.length === 0 ? (
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 text-center text-slate-500 dark:text-slate-400 text-sm">
+                  Sin retiros pendientes de confirmar.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {retiros.map((r) => (
+                    <div key={r.id} className="rounded-2xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/5 p-3.5">
+                      <div className="flex items-center gap-3 mb-2.5">
+                        <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-500/15 flex items-center justify-center shrink-0">
+                          <Banknote className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-sm truncate">{r.solicitado_por_nombre || "Cajero"}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{r.register_nombre || "Caja"} · {timeSince(r.created_at)}</div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          {r.monto_pyg > 0 && <div className="font-black text-sm" style={monoFont}>{formatPYG(r.monto_pyg)}</div>}
+                          {r.monto_usd > 0 && <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300" style={monoFont}>US$ {r.monto_usd.toFixed(2)}</div>}
+                          {r.monto_brl > 0 && <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300" style={monoFont}>R$ {r.monto_brl.toFixed(2)}</div>}
+                        </div>
+                      </div>
+                      {r.observaciones && <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-2.5">{r.observaciones}</div>}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setRejectingRetiro(r)}
+                          className="flex-1 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" /> Rechazar
+                        </button>
+                        <button
+                          onClick={() => openConfirmRetiro(r)}
+                          className="flex-1 py-2 rounded-xl bg-brand-orange text-[#1C1710] font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" /> Confirmar
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -929,18 +1047,18 @@ export default function SupervisorPage() {
       </div>
 
       {/* ── MODAL DE CONFIRMACIÓN DE ENTREGA ── */}
-      {confirmingId && (
+      {confirmingItem && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
           <div className="w-full sm:max-w-sm bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
             <div className="flex items-center justify-between mb-4">
-              <div className="font-black text-base" style={displayFont}>Confirmar Recepción</div>
-              <button onClick={() => setConfirmingId(null)} className="text-slate-400 cursor-pointer"><X className="w-5 h-5" /></button>
+              <div className="font-black text-base" style={displayFont}>{confirmingItem.kind === "handoff" ? "Confirmar Recepción" : "Confirmar Retiro"}</div>
+              <button onClick={() => setConfirmingItem(null)} className="text-slate-400 cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-              Cuente el efectivo usted misma antes de confirmar — este monto es su propio recuento, no el que declaró el cajero.
+              Cuente el efectivo usted misma antes de confirmar — estos montos son su propio recuento, no lo que declaró el cajero.
             </p>
             <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Monto contado (₲)</label>
-            <div className="relative mb-4">
+            <div className="relative mb-3">
               <Banknote className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
@@ -953,6 +1071,30 @@ export default function SupervisorPage() {
                 style={monoFont}
               />
             </div>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">US$</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={confirmAmountUsd}
+                  onChange={(e) => setConfirmAmountUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-brand-orange text-slate-900 dark:text-white"
+                  style={monoFont}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">R$</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={confirmAmountBrl}
+                  onChange={(e) => setConfirmAmountBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-brand-orange text-slate-900 dark:text-white"
+                  style={monoFont}
+                />
+              </div>
+            </div>
             <button
               onClick={submitConfirm}
               disabled={submittingConfirm}
@@ -960,6 +1102,38 @@ export default function SupervisorPage() {
             >
               {submittingConfirm ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               Confirmar y Registrar en Bóveda
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DE RECHAZO DE RETIRO ── */}
+      {rejectingRetiro && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+          <div className="w-full sm:max-w-sm bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
+            <div className="flex items-center justify-between mb-4">
+              <div className="font-black text-base" style={displayFont}>Rechazar Retiro</div>
+              <button onClick={() => setRejectingRetiro(null)} className="text-slate-400 cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              {rejectingRetiro.solicitado_por_nombre || "Cajero"} · {formatPYG(rejectingRetiro.monto_pyg)}
+            </p>
+            <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Motivo (opcional)</label>
+            <textarea
+              autoFocus
+              value={rejectRetiroMotivo}
+              onChange={(e) => setRejectRetiroMotivo(e.target.value)}
+              placeholder="Ej: monto no coincide con lo declarado"
+              rows={3}
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-brand-orange text-slate-900 dark:text-white mb-4 resize-none"
+            />
+            <button
+              onClick={submitRejectRetiro}
+              disabled={submittingRejectRetiro}
+              className="w-full py-3.5 rounded-xl bg-rose-600 hover:brightness-95 text-white font-black text-sm flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+            >
+              {submittingRejectRetiro ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
+              Rechazar Retiro
             </button>
           </div>
         </div>

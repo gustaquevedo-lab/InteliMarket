@@ -68,8 +68,22 @@ class CashSessionClose(BaseModel):
 
 
 class CashDropCreate(BaseModel):
-    monto: Decimal
+    monto: Decimal = Decimal("0")
+    monto_usd: Decimal = Decimal("0")
+    monto_brl: Decimal = Decimal("0")
     observaciones: Optional[str] = None
+
+
+class ConfirmCashDropRequest(BaseModel):
+    confirmado_por: UUID
+    confirmado_por_nombre: str
+    monto_confirmado_pyg: Optional[Decimal] = None
+    monto_confirmado_usd: Optional[Decimal] = None
+    monto_confirmado_brl: Optional[Decimal] = None
+
+
+class RejectCashDropRequest(BaseModel):
+    motivo: str
 
 
 class ConfirmHandoffRequest(BaseModel):

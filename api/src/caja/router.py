@@ -13,6 +13,7 @@ from api.src.caja.schemas import (
     CashRegisterCreate, CashRegisterUpdate, CashRegisterResponse,
     CashSessionCreate, CashSessionClose, CashSessionResponse, CashDropCreate,
     ConfirmHandoffRequest, DepositVaultEntriesRequest, RejectVaultDepositRequest,
+    ConfirmCashDropRequest, RejectCashDropRequest,
 )
 from api.src.caja import service
 from api.src.caja import pdf_reports
@@ -145,9 +146,39 @@ async def session_payment_breakdown(session_id: str, db: AsyncSession = Depends(
 
 @router.post("/cash-sessions/{session_id}/cash-drop", status_code=status.HTTP_201_CREATED)
 async def cash_drop(session_id: str, body: CashDropCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
-    result = await service.register_cash_drop(db, session_id, body.monto, body.observaciones, registrado_por=user.get("id"))
+    result = await service.register_cash_drop(
+        db, session_id, body.monto, body.monto_usd, body.monto_brl, body.observaciones, registrado_por=user.get("id"),
+    )
     if not result:
-        raise HTTPException(status_code=400, detail="No se pudo registrar el cash drop (¿la sesión está abierta?)")
+        raise HTTPException(status_code=400, detail="No se pudo registrar el retiro (¿la sesión está abierta?)")
+    return result
+
+
+@router.get("/cash-drop-requests")
+async def list_cash_drop_requests(
+    company_id: str = Query(...), estado: str | None = Query("pendiente"), db: AsyncSession = Depends(get_db),
+):
+    return await service.list_cash_drop_requests(db, company_id, estado)
+
+
+@router.post("/cash-drop-requests/{request_id}/confirm")
+async def confirm_cash_drop_request(request_id: str, body: ConfirmCashDropRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.confirm_cash_drop_request(
+        db, request_id, user["company_id"], str(body.confirmado_por), body.confirmado_por_nombre,
+        body.monto_confirmado_pyg, body.monto_confirmado_usd, body.monto_confirmado_brl,
+    )
+    if result == "forbidden":
+        raise HTTPException(status_code=403, detail="Solo un supervisor o administrador puede confirmar un retiro")
+    if not result:
+        raise HTTPException(status_code=400, detail="Retiro no encontrado o ya resuelto")
+    return result
+
+
+@router.post("/cash-drop-requests/{request_id}/reject")
+async def reject_cash_drop_request(request_id: str, body: RejectCashDropRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.reject_cash_drop_request(db, request_id, user["company_id"], body.motivo)
+    if not result:
+        raise HTTPException(status_code=400, detail="Retiro no encontrado o ya resuelto")
     return result
 
 
