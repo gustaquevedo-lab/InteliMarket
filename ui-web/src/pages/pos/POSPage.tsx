@@ -3344,59 +3344,90 @@ export default function POSPage() {
   return (
     <div className={`fixed inset-0 h-screen w-screen flex flex-col select-none overflow-hidden font-sans ${bgMain}`}>
       
-      {/* ── 1. HEADER COMPACTO CON SWITCH DE TEMA, BALANZA, COTIZACIONES Y CIERRE ── */}
-      <header className={`h-12 shrink-0 border-b px-3 flex items-center justify-between gap-2 shadow-sm z-20 ${bgPanel}`}>
-        
-        {/* Identidad de Marca y Turno */}
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-black text-xs shadow-sm">
-            EM
+      {/* ── 1. HEADER EN DOS FILAS -- antes todo (identidad, balanza,
+          cotizaciones, 10 botones de accion) se apretaba en una sola fila
+          de 48px, desbordando en cualquier ventana no maximizada. Fila de
+          arriba: identidad y estado (informativo). Fila de abajo: acciones
+          agrupadas por funcion, con scroll horizontal como ultimo recurso
+          en vez de un salto de linea desprolijo. ── */}
+      <header className={`shrink-0 border-b shadow-sm z-20 ${bgPanel}`}>
+        {/* Fila 1: identidad, balanza, cotizaciones, tema */}
+        <div className="h-10 px-3 flex items-center justify-between gap-2 border-b border-black/5 dark:border-white/5">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-black text-[10px] shadow-sm shrink-0">
+              EM
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 leading-none">
+                <span className={`font-black text-xs tracking-tight ${textHeading}`}>EXTRA SUPERMERCADO</span>
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-600 font-extrabold px-1.5 py-0.5 rounded shrink-0">
+                  {PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre.split('·')[0] || puntoEmision}
+                </span>
+              </div>
+              <div className={`text-[10px] font-posMono tabular-nums leading-none mt-0.5 ${textMuted}`}>
+                Cajero: <strong className={textHeading}>{user?.nombre || "Cajero"}</strong>
+                {isSupervisorUser && <span className="ml-1 text-[9px] bg-purple-500/20 text-purple-600 font-bold px-1 rounded">SUPERVISOR</span>}
+              </div>
+            </div>
           </div>
-          <div>
-            <div className="flex items-center gap-1.5 leading-none">
-              <span className={`font-black text-xs tracking-tight ${textHeading}`}>EXTRA SUPERMERCADO</span>
-              <span className="text-[10px] bg-emerald-500/10 text-emerald-600 font-extrabold px-1.5 py-0.5 rounded">
-                {PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre.split('·')[0] || puntoEmision}
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Widget Balanza USB Balmak BCK30 */}
+            <div
+              onClick={() => setShowScaleModal(true)}
+              title="Balanza Checkout Balmak BCK30. Haga clic para configurar o presione F3."
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer transition-all ${
+                scaleUsbConnected
+                  ? isScaleStable
+                    ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/40"
+                    : "bg-amber-500/15 text-amber-600 border-amber-500/50 animate-pulse"
+                  : "bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20"
+              }`}
+            >
+              <Scale className={`w-3.5 h-3.5 ${scaleUsbConnected ? (isScaleStable ? "text-emerald-500" : "text-amber-500") : "text-amber-500"}`} />
+              <span className="text-xs font-posMono tabular-nums font-black">
+                {scaleUsbConnected ? `${currentScaleWeight.toFixed(3)} KG` : "F3"}
               </span>
             </div>
-            <div className={`text-[10px] font-posMono tabular-nums leading-none mt-0.5 ${textMuted}`}>
-              Cajero: <strong className={textHeading}>{user?.nombre || "Cajero"}</strong>
-              {isSupervisorUser && <span className="ml-1 text-[9px] bg-purple-500/20 text-purple-600 font-bold px-1 rounded">SUPERVISOR</span>}
+
+            {/* Cotizaciones -- sin candado: el titulo ya explica si es
+                editable o solo lectura, el icono no sumaba nada. */}
+            <div
+              onClick={() => setShowRatesModal(true)}
+              title={isSupervisorUser ? "Editar Cotizaciones (Gerente/Admin)" : "Cotizaciones fijadas por Administración (Solo Lectura)"}
+              className={`flex items-center gap-2 text-xs font-posMono tabular-nums font-bold px-2.5 py-1 rounded-lg border cursor-pointer transition-colors ${
+                isSupervisorUser ? "hover:border-blue-500 bg-slate-800/10" : "opacity-90"
+              } ${borderTone}`}
+            >
+              <span className="text-amber-600 font-extrabold flex items-center gap-1">
+                <FlagBR /> {rates.BRL.toLocaleString("es-PY")}
+              </span>
+              <span className={textMuted}>|</span>
+              <span className="text-blue-600 font-extrabold flex items-center gap-1">
+                <FlagUS /> {rates.USD.toLocaleString("es-PY")}
+              </span>
             </div>
+
+            <button
+              onClick={toggleTheme}
+              title={dark ? "Cambiar a Modo Claro" : "Cambiar a Modo Oscuro"}
+              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all border cursor-pointer ${
+                dark
+                  ? "bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-300"
+              }`}
+            >
+              {dark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+            </button>
           </div>
         </div>
 
-        {/* Centro: Widget Balanza USB + Terminales POS + Cotizaciones */}
-        <div className="flex items-center gap-2">
-          
-          {/* Widget Balanza USB Balmak BCK30 */}
-          <div 
-            onClick={() => setShowScaleModal(true)}
-            title="Balanza Checkout Balmak BCK30. Haga clic para configurar o presione F3."
-            className={`flex items-center gap-2 px-3 py-1 rounded-lg border cursor-pointer transition-all ${
-              scaleUsbConnected 
-                ? isScaleStable 
-                  ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/40 shadow-xs" 
-                  : "bg-amber-500/15 text-amber-600 border-amber-500/50 animate-pulse"
-                : "bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20"
-            }`}
-          >
-            <Scale className={`w-4 h-4 ${scaleUsbConnected ? (isScaleStable ? "text-emerald-500" : "text-amber-500") : "text-amber-500"}`} />
-            <div className="flex flex-col text-left leading-none">
-              <span className="text-xs font-posMono tabular-nums font-black">
-                {currentScaleWeight.toFixed(3)} KG
-              </span>
-              <span className="text-[8px] uppercase tracking-wider font-extrabold opacity-80">
-                {scaleUsbConnected ? (isScaleStable ? `Balmak (Estable)` : `Balmak (Pesando...)`) : "⚡ Balanza (F3)"}
-              </span>
-            </div>
-          </div>
-
-          {/* Botón de Configuración de Terminales POS (Protegido por Supervisor) */}
+        {/* Fila 2: barra de acciones, agrupada por funcion */}
+        <div className="h-10 px-3 flex items-center gap-1.5 overflow-x-auto">
           <button
             onClick={() => requestSupervisorAuthorization({ type: "open_pos_config" })}
             title="Configurar y Asignar Terminales POS Bancard & Dinelco a esta caja (Requiere Supervisor)"
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs font-bold transition-all cursor-pointer shrink-0 ${
               dark ? "bg-slate-800 text-blue-400 border-slate-700 hover:bg-slate-700" : "bg-slate-200 text-blue-700 border-slate-300 hover:bg-slate-300"
             }`}
           >
@@ -3404,102 +3435,60 @@ export default function POSPage() {
             <span className="text-[10px] hidden md:inline">POS {activePosConfig.bancardTerminalId.split('-')[1]}</span>
           </button>
 
-          {/* Cotizaciones Monedas Extranjeras */}
-          <div
-            onClick={() => setShowRatesModal(true)}
-            title={isSupervisorUser ? "Editar Cotizaciones (Gerente/Admin)" : "Cotizaciones fijadas por Administración (Solo Lectura)"}
-            className={`flex items-center gap-2.5 text-xs font-posMono tabular-nums font-bold px-2.5 py-1 rounded-lg border cursor-pointer transition-colors ${
-              isSupervisorUser ? "hover:border-blue-500 bg-slate-800/10" : "opacity-90"
-            } ${borderTone}`}
-          >
-            <span className="text-amber-600 font-extrabold flex items-center gap-1.5">
-              <FlagBR /> R$ <strong>{rates.BRL.toLocaleString("es-PY")}</strong>
-            </span>
-            <span className={textMuted}>|</span>
-            <span className="text-blue-600 font-extrabold flex items-center gap-1.5">
-              <FlagUS /> US$ <strong>{rates.USD.toLocaleString("es-PY")}</strong>
-            </span>
-            {isSupervisorUser ? (
-              <Unlock className="w-3 h-3 text-blue-500" />
-            ) : (
-              <Lock className={`w-3 h-3 ${textMuted}`} />
-            )}
-          </div>
-        </div>
+          <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
 
-        {/* Derecha: Switch Modo Claro/Oscuro, Calculadora, Cierre de Turno y Salir */}
-        <div className="flex items-center gap-1.5">
-          
-          {/* SWITCH MODO CLARO / OSCURO — solo ícono, discreto */}
-          <button
-            onClick={toggleTheme}
-            title={dark ? "Cambiar a Modo Claro" : "Cambiar a Modo Oscuro"}
-            className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all border cursor-pointer ${
-              dark
-                ? "bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700"
-                : "bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-300"
-            }`}
-          >
-            {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-          </button>
-
-          {/* Calculadora */}
           <button
             onClick={handleOpenCalculator}
             title="Abrir Calculadora de Windows"
-            className={`p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer ${
+            className={`p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer shrink-0 ${
               dark ? "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700" : "bg-slate-200 text-slate-800 border-slate-300 hover:bg-slate-300"
             }`}
           >
             <Calculator className="w-4 h-4" />
           </button>
 
-          {/* Reimprimir Comprobante */}
           <button
             onClick={openReimprimirModal}
             title="Reimprimir Comprobante de una Venta Anterior"
-            className={`p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer ${
+            className={`p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer shrink-0 ${
               dark ? "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700" : "bg-slate-200 text-slate-800 border-slate-300 hover:bg-slate-300"
             }`}
           >
             <Printer className="w-4 h-4" />
           </button>
 
-          {/* Consulta de Precios (solo lectura, con escala por cantidad) */}
           <button
             onClick={() => setShowPriceCheckModal(true)}
             title="Consulta de Productos (precio, stock y promoción)"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600/10 text-emerald-600 border border-emerald-500/30 hover:bg-emerald-600/20 cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600/10 text-emerald-600 border border-emerald-500/30 hover:bg-emerald-600/20 cursor-pointer shrink-0"
           >
             <Search className="w-3.5 h-3.5" />
             <span className="text-[11px] hidden sm:inline">Productos</span>
           </button>
 
-          {/* Producto Faltante (Demanda Perdida -> Compras) */}
           <button
             onClick={() => setShowLostDemandModal(true)}
             title="Registrar Producto que el Cliente No Encontró (F4)"
-            className="p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20"
+            className="p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20 shrink-0"
           >
             <Package className="w-4 h-4" />
           </button>
 
-          {/* Devolución de Cliente (requiere autorización real de supervisor) */}
+          <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
+
           <button
             onClick={openDevolucionModal}
             title="Registrar Devolución de un Cliente (requiere autorización de Supervisor)"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-600/10 text-rose-500 border border-rose-500/30 hover:bg-rose-600/20 cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-600/10 text-rose-500 border border-rose-500/30 hover:bg-rose-600/20 cursor-pointer shrink-0"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span className="text-[11px] hidden sm:inline">Devolución</span>
           </button>
 
-          {/* Retiro de Efectivo (Cash Drop) -- se resalta solo cuando el
-              efectivo acumulado se acerca o supera el umbral configurado */}
           <button
             onClick={() => setShowCashDropModal(true)}
             title={cashDropStatus?.cash_drop_alert ? "Superó el umbral de retiro -- haga un retiro" : cashDropStatus?.cash_drop_warning ? "Se acerca al umbral de retiro" : "Registrar Retiro de Efectivo de la Caja"}
-            className={`relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-colors ${
+            className={`relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-colors shrink-0 ${
               cashDropStatus?.cash_drop_alert
                 ? "bg-rose-600/15 text-rose-600 border-rose-500/50 animate-pulse"
                 : cashDropStatus?.cash_drop_warning
@@ -3514,32 +3503,30 @@ export default function POSPage() {
             )}
           </button>
 
-          {/* Extra Club -- consulta rapida de saldo de linea de credito,
-              sin tocar el carrito ni la venta en curso. */}
           <button
             onClick={() => { setShowExtraClubBalanceModal(true); setBalanceModalQuery(""); setBalanceModalResults([]); setBalanceModalSelected(null) }}
             title="Consultar saldo de línea de crédito Extra Club"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-600/10 text-purple-600 border border-purple-500/30 hover:bg-purple-600/20 cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-600/10 text-purple-600 border border-purple-500/30 hover:bg-purple-600/20 cursor-pointer shrink-0"
           >
             <Star className="w-3.5 h-3.5" />
             <span className="text-[11px] hidden sm:inline">Extra Club</span>
           </button>
 
-          {/* Cierre de Caja */}
+          <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
+
           <button
             onClick={() => setShowCierreTurnoModal(true)}
             title="Cierre de Turno y Arqueo"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-600/10 text-amber-600 border border-amber-500/30 hover:bg-amber-600/20 cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-600/10 text-amber-600 border border-amber-500/30 hover:bg-amber-600/20 cursor-pointer shrink-0"
           >
             <Lock className="w-3.5 h-3.5" />
             <span className="text-[11px] hidden sm:inline">Cierre</span>
           </button>
 
-          {/* Salir */}
           <button
             onClick={() => { api.auth.endPosShift().catch(() => {}); logout() }}
             title="Cerrar Sesión"
-            className={`p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer ${
+            className={`p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer shrink-0 ${
               dark ? "bg-slate-800 text-rose-400 border-slate-700 hover:bg-rose-900/40" : "bg-slate-200 text-rose-600 border-slate-300 hover:bg-rose-100"
             }`}
           >
