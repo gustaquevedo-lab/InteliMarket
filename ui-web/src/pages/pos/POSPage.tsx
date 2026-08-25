@@ -2419,7 +2419,7 @@ export default function POSPage() {
   // (PriceCheckerKioskPage): si nadie toca la consulta se cierra sola, no
   // se queda abierta indefinidamente tapando la pantalla de cobro. Se
   // reinicia cada vez que se elige un producto nuevo.
-  const PRICE_CHECK_AUTOCLOSE_SECONDS = 25
+  const PRICE_CHECK_AUTOCLOSE_SECONDS = 10
   const [priceCheckCountdown, setPriceCheckCountdown] = useState(PRICE_CHECK_AUTOCLOSE_SECONDS)
   useEffect(() => {
     if (!showPriceCheckModal || !priceCheckSelected) return
