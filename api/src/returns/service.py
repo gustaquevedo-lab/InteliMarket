@@ -2,7 +2,7 @@ from decimal import Decimal
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import re
@@ -12,7 +12,7 @@ from api.src.returns.schemas import ReturnCreate, ReturnApprove
 from api.src.inventory.models import Stock, InventoryMovement
 from api.src.products.models import Product
 from api.src.customers.models import Customer
-from api.src.sales.models import Sale
+from api.src.sales.models import Sale, SaleItem
 from api.src.fiscal.models import NotaCreditoDebito, PuntoEmisionSecuencia
 from api.src.sifen.models import SifenTimbrado
 from api.src.fiscal.service import reserve_fiscal_invoice_number, TimbradoAgotadoError, TimbradoVencidoError
@@ -37,6 +37,21 @@ async def generate_return_number(db: AsyncSession, company_id: str) -> str:
     last = result.scalar_one_or_none()
     seq = int(last.numero.split("-")[-1]) + 1 if last else 1
     return f"DEV-{date_part}-{seq:06d}"
+
+
+async def get_returned_quantities(db: AsyncSession, sale_id) -> dict[str, Decimal]:
+    """Cuanto ya se devolvio de cada sale_item de una venta, sumando solo
+    devoluciones pendientes o aprobadas (una rechazada no bloquea nada --
+    libera la cantidad de nuevo). Es la fuente unica de verdad para no
+    permitir devolver dos veces el mismo item, tanto al crear una devolucion
+    nueva como al mostrar cuanto queda disponible en la pantalla de caja."""
+    result = await db.execute(
+        select(ReturnItem.sale_item_id, func.coalesce(func.sum(ReturnItem.cantidad), 0))
+        .join(Return, Return.id == ReturnItem.return_id)
+        .where(Return.sale_id == sale_id, Return.estado.in_(["pendiente", "aprobado"]))
+        .group_by(ReturnItem.sale_item_id)
+    )
+    return {str(sid): Decimal(str(qty)) for sid, qty in result.all() if sid is not None}
 
 
 async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
@@ -65,6 +80,30 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
     )
     db.add(return_obj)
     await db.flush()
+
+    # ── Anti doble-devolucion ────────────────────────────────────────────
+    # Sin esto, nada impedia devolver dos veces el mismo item de la misma
+    # venta -- cada devolucion se creaba en el vacio, sin mirar si ya se
+    # habia devuelto ese item antes.
+    if data.sale_id:
+        ya_devuelto = await get_returned_quantities(db, data.sale_id)
+        sale_items_result = await db.execute(select(SaleItem).where(SaleItem.sale_id == data.sale_id))
+        original_qty = {str(si.id): Decimal(str(si.cantidad)) for si in sale_items_result.scalars().all()}
+
+        for item_data in data.items:
+            if not item_data.sale_item_id:
+                continue
+            sid = str(item_data.sale_item_id)
+            if sid not in original_qty:
+                continue
+            disponible = original_qty[sid] - ya_devuelto.get(sid, Decimal("0"))
+            solicitado = Decimal(str(item_data.cantidad))
+            if solicitado > disponible:
+                desc = item_data.descripcion or "este ítem"
+                raise ValueError(
+                    f"{desc}: ya se devolvió {ya_devuelto.get(sid, Decimal(0))} de {original_qty[sid]}. "
+                    f"Disponible para devolver: {disponible}."
+                )
 
     for item_data in data.items:
         iva_tasa = Decimal(str(item_data.iva_tasa))
@@ -322,6 +361,20 @@ async def approve_return(db: AsyncSession, return_id: str, data: ReturnApprove) 
             await db.refresh(nota)
             return_obj.nota_credito_id = nota.id
             nota_credito_numero = nota.numero
+
+    # ── Marcar la venta como devuelta si ya no queda nada por devolver ──
+    # "devuelto" ya existia como estado reconocido (bloquea ediciones/
+    # cancelacion en sales/service.py) pero nada lo asignaba nunca -- la
+    # factura original quedaba visualmente intacta aunque se le hubiera
+    # devuelto todo.
+    if sale:
+        ya_devuelto = await get_returned_quantities(db, sale.id)
+        sale_items_result = await db.execute(select(SaleItem).where(SaleItem.sale_id == sale.id))
+        sale_items = sale_items_result.scalars().all()
+        if sale_items and all(
+            ya_devuelto.get(str(si.id), Decimal("0")) >= Decimal(str(si.cantidad)) for si in sale_items
+        ):
+            sale.estado = "devuelto"
 
     return_obj.updated_at = datetime.now(timezone.utc)
     await db.flush()

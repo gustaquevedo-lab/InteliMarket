@@ -4205,8 +4205,13 @@ export default function POSPage() {
             {remoteAuthLocalSupervisorAvailable && (
               <button
                 onClick={async () => {
-                  if (remoteAuthRequestId) {
-                    try { await api.supervisorRequests.resolve(remoteAuthRequestId, { aprobado: false, resuelto_por: user?.id || "", resuelto_por_nombre: "Resuelto localmente en caja" }) } catch {}
+                  if (remoteAuthRequestId && user?.id) {
+                    try {
+                      await api.supervisorRequests.resolve(remoteAuthRequestId, { aprobado: false, resuelto_por: user.id, resuelto_por_nombre: "Resuelto localmente en caja" })
+                    } catch (e: any) {
+                      toast.error("No se pudo avisar al supervisor remoto", e?.message || "El pedido puede seguir apareciendo en su PWA. Intente de nuevo o pídale que lo rechace ahí.")
+                      return
+                    }
                   }
                   setShowRemoteAuthModal(false)
                   setRemoteAuthRequestId(null)
@@ -4221,8 +4226,17 @@ export default function POSPage() {
             )}
             <button
               onClick={async () => {
-                if (remoteAuthRequestId) {
-                  try { await api.supervisorRequests.resolve(remoteAuthRequestId, { aprobado: false, resuelto_por: user?.id || "", resuelto_por_nombre: "Cancelado por el cajero" }) } catch {}
+                if (remoteAuthRequestId && user?.id) {
+                  try {
+                    await api.supervisorRequests.resolve(remoteAuthRequestId, { aprobado: false, resuelto_por: user.id, resuelto_por_nombre: "Cancelado por el cajero" })
+                  } catch (e: any) {
+                    // No cerramos el modal si esto falla -- si lo cerramos igual,
+                    // el pedido queda pendiente en el servidor pero el cajero cree
+                    // que lo canceló, y la supervisora sigue viéndolo colgado sin
+                    // que nadie sepa que pasó.
+                    toast.error("No se pudo cancelar la solicitud", e?.message || "Sigue pendiente para el supervisor. Intente de nuevo.")
+                    return
+                  }
                 }
                 setShowRemoteAuthModal(false)
                 setRemoteAuthRequestId(null)
@@ -4410,37 +4424,65 @@ export default function POSPage() {
                   <div className="text-center py-8 text-slate-500 dark:text-slate-400 text-xs">Esta venta no tiene ítems.</div>
                 ) : (
                   <>
-                    <div className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-2 shrink-0">
-                      Ítems a devolver:
+                    <div className="flex items-center justify-between mb-2 shrink-0">
+                      <div className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+                        Ítems a devolver:
+                      </div>
+                      {devolucionItems.some((it) => (it.cantidad_disponible ?? it.cantidad) > 0) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next: Record<string, number> = {}
+                            devolucionItems.forEach((it) => {
+                              const disp = it.cantidad_disponible ?? it.cantidad
+                              if (disp > 0) next[it.id] = disp
+                            })
+                            setDevolucionSeleccion(next)
+                          }}
+                          className="text-[10px] font-black uppercase tracking-wide text-rose-600 dark:text-rose-400 cursor-pointer"
+                        >
+                          Devolver factura completa
+                        </button>
+                      )}
                     </div>
                     <div className="space-y-1.5 mb-3">
                       {devolucionItems.map((it) => {
                         const checked = !!devolucionSeleccion[it.id]
+                        const disponible = it.cantidad_disponible ?? it.cantidad
+                        const yaDevuelto = it.cantidad_devuelta ?? 0
+                        const agotado = disponible <= 0
                         return (
                           <div
                             key={it.id}
-                            className={`flex items-center gap-3 rounded-lg px-3 py-2 border ${checked ? "bg-rose-50 dark:bg-rose-500/10 border-rose-500/40" : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"}`}
+                            className={`flex items-center gap-3 rounded-lg px-3 py-2 border ${agotado ? "opacity-50 bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800" : checked ? "bg-rose-50 dark:bg-rose-500/10 border-rose-500/40" : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"}`}
                           >
                             <input
                               type="checkbox"
                               checked={checked}
-                              onChange={() => toggleDevolucionItem(it.id, it.cantidad)}
-                              className="w-4 h-4 accent-rose-500 cursor-pointer"
+                              disabled={agotado}
+                              onChange={() => toggleDevolucionItem(it.id, disponible)}
+                              className="w-4 h-4 accent-rose-500 cursor-pointer disabled:cursor-not-allowed"
                             />
                             <div className="flex-1 min-w-0">
                               <div className="font-bold text-xs text-slate-900 dark:text-white truncate">{it.productName}</div>
                               <div className="text-[10px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">
                                 Vendido: {it.cantidad} x {formatPYG(it.precio_unitario)}
+                                {yaDevuelto > 0 && (
+                                  <span className="text-amber-600 dark:text-amber-400"> · Ya devuelto: {yaDevuelto}</span>
+                                )}
                               </div>
+                              {agotado && (
+                                <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400">Sin cantidad disponible para devolver</div>
+                              )}
                             </div>
-                            {checked && (
+                            {checked && !agotado && (
                               <input
                                 type="number"
                                 min={0}
-                                max={it.cantidad}
+                                max={disponible}
                                 step={1}
                                 value={devolucionSeleccion[it.id]}
-                                onChange={(e) => setDevolucionCantidad(it.id, Number(e.target.value), it.cantidad)}
+                                onChange={(e) => setDevolucionCantidad(it.id, Number(e.target.value), disponible)}
                                 className="w-16 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-posMono tabular-nums font-bold text-slate-900 dark:text-white text-center outline-none focus:border-rose-500"
                               />
                             )}

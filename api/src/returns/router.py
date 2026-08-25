@@ -10,7 +10,10 @@ router = APIRouter(prefix="/api/v1", tags=["returns"])
 
 @router.post("/returns", response_model=ReturnResponse, status_code=status.HTTP_201_CREATED)
 async def create_return(body: ReturnCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_return(db, body)
+    try:
+        return await service.create_return(db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/companies/{company_id}/returns", response_model=list[ReturnResponse])

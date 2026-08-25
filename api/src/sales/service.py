@@ -464,8 +464,23 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
 
 
 async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
+    from api.src.returns.models import Return, ReturnItem
+
     result = await db.execute(select(SaleItem).where(SaleItem.sale_id == uuid.UUID(sale_id)))
     items = result.scalars().all()
+
+    # Cuanto de cada item ya tiene una devolucion pendiente o aprobada --
+    # sin esto la pantalla de devolucion en caja no tiene forma de saber
+    # que parte de un item ya fue devuelta antes, y deja devolver de nuevo
+    # lo mismo.
+    devueltos_result = await db.execute(
+        select(ReturnItem.sale_item_id, func.coalesce(func.sum(ReturnItem.cantidad), 0))
+        .join(Return, Return.id == ReturnItem.return_id)
+        .where(Return.sale_id == uuid.UUID(sale_id), Return.estado.in_(["pendiente", "aprobado"]))
+        .group_by(ReturnItem.sale_item_id)
+    )
+    devueltos = {str(sid): float(qty) for sid, qty in devueltos_result.all() if sid is not None}
+
     return [
         {
             "id": str(i.id),
@@ -473,6 +488,8 @@ async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
             "product_id": str(i.product_id),
             "descripcion": i.descripcion,
             "cantidad": float(i.cantidad),
+            "cantidad_devuelta": devueltos.get(str(i.id), 0.0),
+            "cantidad_disponible": max(0.0, float(i.cantidad) - devueltos.get(str(i.id), 0.0)),
             "precio_unitario": int(i.precio_unitario),
             "descuento_pct": float(i.descuento_pct),
             "descuento_monto": int(i.descuento_monto),
