@@ -309,26 +309,32 @@ export default function PriceCheckerKioskPage() {
       {/* ── CONTENIDO PRINCIPAL ── */}
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 z-10 w-full max-w-6xl mx-auto">
 
-        {/* A) STANDBY */}
+        {/* A) STANDBY -- layout de 2 columnas para aprovechar el ancho real
+            de las terminales (1366x768, apaisada). Apilar todo en una sola
+            columna angosta obligaba a achicar logo/cotizaciones/banner para
+            que entraran en 768px de alto -- en horizontal sobra ancho de
+            sobra, así que cada elemento puede ser grande de verdad. */}
         {!scannedProduct && !notFoundCode && !connError && (
-          <div className="w-full flex flex-col items-center space-y-3 sm:space-y-4 animate-in fade-in zoom-in-95 duration-300">
-            <div className="relative flex flex-col items-center">
-              <div className="absolute -inset-6 rounded-full bg-gradient-to-r from-orange-500 via-blue-600 to-amber-400 opacity-30 dark:opacity-40 blur-2xl animate-pulse-glow pointer-events-none" />
-              <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-white p-2.5 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
-                {company?.logo_url ? (
-                  <img src={company.logo_url} alt={company.nombre || "Logo"} className="w-full h-full object-contain" />
-                ) : (
-                  <div className="w-full h-full rounded-full bg-gradient-to-tr from-slate-900 via-blue-950 to-slate-900 flex flex-col items-center justify-center text-center p-4">
-                    <span className="text-3xl sm:text-4xl font-black text-orange-500 tracking-tighter">EXTRA</span>
-                    <span className="text-xs sm:text-sm font-black text-blue-400 tracking-widest">PARAGUAY</span>
-                    <span className="text-[9px] text-slate-300 tracking-widest uppercase font-bold mt-1">Supermercado Mayorista</span>
-                  </div>
-                )}
-              </div>
-            </div>
+          <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center animate-in fade-in zoom-in-95 duration-300">
 
-            <div className="w-full max-w-xl flex flex-col items-center space-y-3">
-              <div className="px-6 py-2 rounded-full bg-orange-500/10 dark:bg-orange-500/20 border-2 border-orange-500/40 dark:border-orange-500/50 shadow-lg shadow-orange-500/10 flex items-center gap-2">
+            {/* COLUMNA IZQUIERDA -- identidad + llamado a escanear */}
+            <div className="lg:col-span-5 flex flex-col items-center space-y-4">
+              <div className="relative flex flex-col items-center">
+                <div className="absolute -inset-8 rounded-full bg-gradient-to-r from-orange-500 via-blue-600 to-amber-400 opacity-30 dark:opacity-40 blur-2xl animate-pulse-glow pointer-events-none" />
+                <div className="relative w-40 h-40 sm:w-48 sm:h-48 rounded-full bg-white p-3 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
+                  {company?.logo_url ? (
+                    <img src={company.logo_url} alt={company.nombre || "Logo"} className="w-full h-full object-contain" />
+                  ) : (
+                    <div className="w-full h-full rounded-full bg-gradient-to-tr from-slate-900 via-blue-950 to-slate-900 flex flex-col items-center justify-center text-center p-4">
+                      <span className="text-3xl sm:text-4xl font-black text-orange-500 tracking-tighter">EXTRA</span>
+                      <span className="text-xs sm:text-sm font-black text-blue-400 tracking-widest">PARAGUAY</span>
+                      <span className="text-[9px] text-slate-300 tracking-widest uppercase font-bold mt-1">Supermercado Mayorista</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-5 py-2 rounded-full bg-orange-500/10 dark:bg-orange-500/20 border-2 border-orange-500/40 dark:border-orange-500/50 shadow-lg shadow-orange-500/10 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-orange-500 dark:text-orange-400 animate-spin" />
                 <span className="text-xs sm:text-sm font-black tracking-widest text-orange-600 dark:text-orange-300 uppercase">
                   VERIFICADOR DIGITAL INSTANTÁNEO
@@ -336,14 +342,14 @@ export default function PriceCheckerKioskPage() {
                 <Sparkles className="w-4 h-4 text-orange-500 dark:text-orange-400 animate-spin" />
               </div>
 
-              <h1 className="text-3xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-slate-700 to-orange-600 dark:from-white dark:via-slate-100 dark:to-orange-200 tracking-tight text-center">
+              <h1 className="text-3xl sm:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-slate-700 to-orange-600 dark:from-white dark:via-slate-100 dark:to-orange-200 tracking-tight text-center">
                 ESCANEE AQUÍ SU PRODUCTO
               </h1>
 
-              <div className="relative w-full max-w-md h-20 sm:h-24 rounded-3xl bg-white dark:bg-slate-900/80 border-2 border-dashed border-blue-400/50 dark:border-blue-500/50 backdrop-blur-2xl p-3 flex flex-col items-center justify-center overflow-hidden shadow-2xl">
+              <div className="relative w-full max-w-md h-24 rounded-3xl bg-white dark:bg-slate-900/80 border-2 border-dashed border-blue-400/50 dark:border-blue-500/50 backdrop-blur-2xl p-3 flex flex-col items-center justify-center overflow-hidden shadow-2xl">
                 <div className="absolute left-4 right-4 h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent rounded-full shadow-[0_0_15px_#ff0033] animate-laser pointer-events-none" />
                 <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300">
-                  <Barcode className="w-12 h-12 sm:w-16 sm:h-16 text-blue-500 dark:text-blue-400 opacity-90" />
+                  <Barcode className="w-12 h-12 sm:w-14 sm:h-14 text-blue-500 dark:text-blue-400 opacity-90" />
                   <div className="text-left">
                     <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-white block uppercase tracking-wider">
                       Acerque el Código de Barras
@@ -361,76 +367,84 @@ export default function PriceCheckerKioskPage() {
               </div>
             </div>
 
-            {/* BANNER DE OFERTAS -- creativos reales cargados por marketing */}
-            {currentBanner && (
-              <div className="w-full max-w-3xl rounded-3xl border-2 border-slate-200 dark:border-white/20 shadow-2xl relative overflow-hidden bg-white dark:bg-slate-900/95">
-                {currentBanner.imagen_url ? (
-                  <div className="relative w-full aspect-[21/9]">
-                    <img src={currentBanner.imagen_url} alt={currentBanner.titulo} className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent flex flex-col justify-end p-5">
-                      <div className="flex items-center gap-2 mb-1">
+            {/* COLUMNA DERECHA -- banner de marketing grande + cotizaciones
+                grandes, una arriba de la otra pero con espacio real porque
+                no compiten por ancho con la columna izquierda. */}
+            <div className="lg:col-span-7 flex flex-col space-y-4">
+              {currentBanner ? (
+                <div className="w-full rounded-3xl border-2 border-slate-200 dark:border-white/20 shadow-2xl relative overflow-hidden bg-white dark:bg-slate-900/95">
+                  {currentBanner.imagen_url ? (
+                    <div className="relative w-full aspect-[16/9]">
+                      <img src={currentBanner.imagen_url} alt={currentBanner.titulo} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent flex flex-col justify-end p-5 sm:p-6">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          {currentBanner.etiqueta && (
+                            <span className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider shadow-lg ${colorClasses[currentBanner.color || "orange"] || colorClasses.orange}`}>
+                              {currentBanner.etiqueta}
+                            </span>
+                          )}
+                          {currentBanner.descuento_texto && (
+                            <span className="px-3 py-1 rounded-xl bg-white text-slate-900 font-black text-sm shadow-lg">{currentBanner.descuento_texto}</span>
+                          )}
+                        </div>
+                        <h3 className="text-xl sm:text-3xl font-black text-white tracking-tight leading-snug drop-shadow-lg">{currentBanner.titulo}</h3>
+                        {currentBanner.subtitulo && <p className="text-sm sm:text-base text-slate-200 leading-relaxed">{currentBanner.subtitulo}</p>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-6 sm:p-8 aspect-[16/9] flex flex-col justify-center">
+                      <div className="flex items-center gap-2 mb-2">
                         {currentBanner.etiqueta && (
                           <span className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider shadow-lg ${colorClasses[currentBanner.color || "orange"] || colorClasses.orange}`}>
                             {currentBanner.etiqueta}
                           </span>
                         )}
-                        {currentBanner.descuento_texto && (
-                          <span className="px-3 py-1 rounded-xl bg-white text-slate-900 font-black text-sm shadow-lg">{currentBanner.descuento_texto}</span>
-                        )}
                       </div>
-                      <h3 className="text-lg sm:text-2xl font-black text-white tracking-tight leading-snug drop-shadow-lg">{currentBanner.titulo}</h3>
-                      {currentBanner.subtitulo && <p className="text-xs sm:text-sm text-slate-200 leading-relaxed">{currentBanner.subtitulo}</p>}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-5 sm:p-6">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      {currentBanner.etiqueta && (
-                        <span className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider shadow-lg ${colorClasses[currentBanner.color || "orange"] || colorClasses.orange}`}>
-                          {currentBanner.etiqueta}
-                        </span>
+                      <h3 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight leading-snug">{currentBanner.titulo}</h3>
+                      {currentBanner.subtitulo && <p className="text-sm sm:text-base text-slate-500 dark:text-slate-300 mt-2">{currentBanner.subtitulo}</p>}
+                      {currentBanner.descuento_texto && (
+                        <div className="mt-4 inline-block w-fit px-6 py-3 rounded-2xl bg-gradient-to-br from-amber-400 via-orange-500 to-rose-600 text-white font-black text-xl font-mono shadow-xl">
+                          {currentBanner.descuento_texto}
+                        </div>
                       )}
                     </div>
-                    <h3 className="text-base sm:text-xl font-black text-slate-900 dark:text-white tracking-tight leading-snug">{currentBanner.titulo}</h3>
-                    {currentBanner.subtitulo && <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-300 mt-1">{currentBanner.subtitulo}</p>}
-                    {currentBanner.descuento_texto && (
-                      <div className="mt-3 inline-block px-5 py-2.5 rounded-2xl bg-gradient-to-br from-amber-400 via-orange-500 to-rose-600 text-white font-black text-lg font-mono shadow-xl">
-                        {currentBanner.descuento_texto}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {banners.length > 1 && (
-                  <div className="flex items-center justify-center gap-2 py-3 border-t border-slate-100 dark:border-white/10">
-                    {banners.map((_, i) => (
-                      <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === currentBannerIdx ? "w-8 bg-orange-500" : "w-2 bg-slate-300 dark:bg-white/20"}`} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                  {banners.length > 1 && (
+                    <div className="flex items-center justify-center gap-2 py-2.5 border-t border-slate-100 dark:border-white/10">
+                      {banners.map((_, i) => (
+                        <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === currentBannerIdx ? "w-8 bg-orange-500" : "w-2 bg-slate-300 dark:bg-white/20"}`} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="w-full aspect-[16/9] rounded-3xl border-2 border-dashed border-slate-300 dark:border-white/15 flex flex-col items-center justify-center text-center p-6 bg-slate-50/50 dark:bg-white/5">
+                  <Sparkles className="w-8 h-8 text-slate-300 dark:text-slate-600 mb-2" />
+                  <p className="text-sm font-bold text-slate-400 dark:text-slate-500">Sin ofertas cargadas todavía</p>
+                  <p className="text-xs text-slate-400 dark:text-slate-600 mt-1">Marketing puede subir el primer creativo desde Gerente de Marketing IA → Verificador de Precios</p>
+                </div>
+              )}
 
-            {/* COTIZACIONES */}
-            <div className="w-full max-w-3xl space-y-2">
-              <div className="flex items-center justify-between px-2">
-                <span className="text-xs font-black tracking-widest text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5">
+              {/* COTIZACIONES -- grandes, sin competir por espacio */}
+              <div className="space-y-2">
+                <span className="text-xs font-black tracking-widest text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5 px-1">
                   <DollarSign className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
-                  PIZARRA DE CAMBIO OFICIAL (CAJAS POS):
+                  PIZARRA DE CAMBIO OFICIAL (CAJAS POS)
                 </span>
-              </div>
-              <div className={`grid grid-cols-1 gap-3 ${activeCurrencies.length === 1 ? "" : activeCurrencies.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
-                {activeCurrencies.map((c) => (
-                  <div key={c.code} className={`p-4 rounded-2xl bg-white dark:bg-slate-900/90 border-2 ${colorBorder[c.color]} shadow-xl flex items-center justify-between`}>
-                    <div className="flex items-center gap-3">
-                      {c.flag}
-                      <div><span className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase block leading-none">{c.labelBoard}</span><span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">{c.prefix}</span></div>
+                <div className={`grid grid-cols-1 gap-3 ${activeCurrencies.length === 1 ? "" : "sm:grid-cols-2"}`}>
+                  {activeCurrencies.map((c) => (
+                    <div key={c.code} className={`p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900/90 border-2 ${colorBorder[c.color]} shadow-xl flex items-center justify-between`}>
+                      <div className="flex items-center gap-3">
+                        {c.flag}
+                        <div><span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase block leading-none">{c.labelBoard}</span><span className="text-sm font-mono font-bold text-slate-600 dark:text-slate-300">{c.prefix}</span></div>
+                      </div>
+                      <div className="text-right font-mono">
+                        <span className={`text-2xl sm:text-3xl font-black ${colorText[c.color]}`}>{c.rate.toLocaleString("es-PY")}</span>
+                        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block leading-none">Gs.</span>
+                      </div>
                     </div>
-                    <div className="text-right font-mono">
-                      <span className={`text-xl sm:text-2xl font-black ${colorText[c.color]}`}>{c.rate.toLocaleString("es-PY")}</span>
-                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block leading-none">Gs.</span>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -438,7 +452,7 @@ export default function PriceCheckerKioskPage() {
 
         {/* B) PRODUCTO ENCONTRADO */}
         {scannedProduct && (
-          <div className="w-full max-w-4xl bg-white dark:bg-slate-900/95 border-2 border-slate-200 dark:border-white/20 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-3 sm:space-y-4 animate-in zoom-in-95 duration-200">
+          <div className="w-full max-w-6xl bg-white dark:bg-slate-900/95 border-2 border-slate-200 dark:border-white/20 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-3 sm:space-y-4 animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-2.5">
               <div className="flex items-center gap-3">
                 <span className="px-3.5 py-1.5 rounded-2xl bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/40 text-xs sm:text-sm font-black flex items-center gap-2 uppercase tracking-wider">
@@ -457,7 +471,7 @@ export default function PriceCheckerKioskPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6 items-center">
               <div className="md:col-span-5 flex flex-col items-center justify-center">
-                <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-2xl bg-white p-2.5 shadow-2xl border-4 border-slate-100 dark:border-white/30 flex items-center justify-center overflow-hidden">
+                <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-2xl bg-white p-3 shadow-2xl border-4 border-slate-100 dark:border-white/30 flex items-center justify-center overflow-hidden">
                   {scannedProduct.imagen_url ? (
                     <img src={scannedProduct.imagen_url} alt={scannedProduct.nombre} className="w-full h-full object-contain" />
                   ) : (
