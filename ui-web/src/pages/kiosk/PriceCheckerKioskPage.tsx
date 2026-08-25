@@ -69,11 +69,14 @@ const monoFont = { fontFamily: "'IBM Plex Mono', monospace" }
 export default function PriceCheckerKioskPage() {
   const { dark, toggle: toggleTheme } = useTheme()
 
-  const [cotizaciones, setCotizaciones] = useState({
-    BRL: { venta: 1420, activo: true },
-    USD: { venta: 7550, activo: true },
-    ARS: { venta: 5.8, activo: false },
-  })
+  // Nunca arrancar con una cotizacion inventada en pantalla -- null hasta
+  // que llegue la configuracion real del tenant. Mientras tanto no se
+  // muestra ninguna cifra de cambio, ni una de referencia "por las dudas".
+  const [cotizaciones, setCotizaciones] = useState<{
+    BRL: { venta: number; activo: boolean }
+    USD: { venta: number; activo: boolean }
+    ARS: { venta: number; activo: boolean }
+  } | null>(null)
   const [company, setCompany] = useState<Company | null>(null)
   const [banners, setBanners] = useState<KioskBanner[]>([])
   const [currentBannerIdx, setCurrentBannerIdx] = useState(0)
@@ -98,21 +101,19 @@ export default function PriceCheckerKioskPage() {
       if (!comp) return
       setCompany(comp)
       const dbCurrencies = (comp.config as any)?.currencies
+      const base = { BRL: { venta: 0, activo: false }, USD: { venta: 0, activo: false }, ARS: { venta: 0, activo: false } }
       if (dbCurrencies) {
-        setCotizaciones((prev) => {
-          const next = { ...prev }
-          for (const code of ["BRL", "USD", "ARS"] as const) {
-            const val = dbCurrencies[code]
-            if (val && typeof val === "object") {
-              next[code] = {
-                venta: Number(val.venta ?? prev[code].venta),
-                activo: typeof val.activo === "boolean" ? val.activo : prev[code].activo,
-              }
+        for (const code of ["BRL", "USD", "ARS"] as const) {
+          const val = dbCurrencies[code]
+          if (val && typeof val === "object") {
+            base[code] = {
+              venta: Number(val.venta ?? 0),
+              activo: typeof val.activo === "boolean" ? val.activo : false,
             }
           }
-          return next
-        })
+        }
       }
+      setCotizaciones(base)
     }).catch(() => {})
   }, [])
 
@@ -236,9 +237,11 @@ export default function PriceCheckerKioskPage() {
     ARS: { label: "Pesos", labelBoard: "PESO AR", prefix: "1 ARS =", symbol: "$", flag: <FlagAR />, color: "cyan" },
   } as const
 
-  const activeCurrencies = (Object.keys(CURRENCY_META) as (keyof typeof CURRENCY_META)[])
-    .filter((code) => cotizaciones[code].activo)
-    .map((code) => ({ code, rate: cotizaciones[code].venta, ...CURRENCY_META[code] }))
+  const activeCurrencies = cotizaciones
+    ? (Object.keys(CURRENCY_META) as (keyof typeof CURRENCY_META)[])
+        .filter((code) => cotizaciones[code].activo)
+        .map((code) => ({ code, rate: cotizaciones[code].venta, ...CURRENCY_META[code] }))
+    : []
 
   const colorText: Record<string, string> = { emerald: "text-emerald-600 dark:text-emerald-400", blue: "text-blue-600 dark:text-blue-400", cyan: "text-cyan-600 dark:text-cyan-400" }
   const colorBorder: Record<string, string> = { emerald: "border-emerald-300 dark:border-emerald-500/30", blue: "border-blue-300 dark:border-blue-500/30", cyan: "border-cyan-300 dark:border-cyan-500/30" }
@@ -479,7 +482,7 @@ export default function PriceCheckerKioskPage() {
                   </p>
                 </div>
 
-                <div className="p-3 sm:p-4 rounded-2xl bg-orange-50 dark:bg-gradient-to-r dark:from-orange-500/25 dark:via-amber-500/15 dark:to-transparent border-2 border-orange-300 dark:border-orange-500/40 shadow-xl">
+                <div className="p-3 sm:p-4 rounded-2xl bg-orange-50 dark:bg-orange-500/10 border-2 border-orange-300 dark:border-orange-500/40 shadow-xl">
                   <span className="text-xs font-black uppercase tracking-widest text-orange-600 dark:text-orange-400 block mb-1">PRECIO UNITARIO AL CONTADO:</span>
                   <div className="text-2xl sm:text-4xl font-black font-mono tracking-tight text-slate-900 dark:text-white">
                     Gs. {precioUnitarioGs.toLocaleString("es-PY")}
