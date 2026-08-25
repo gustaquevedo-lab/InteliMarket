@@ -771,6 +771,14 @@ export default function POSPage() {
         const res = await api.products.list({ search: query, limit: 30 })
         setPriceCheckResults(res || [])
         setPriceCheckHighlight(0)
+        // Consulta directa: un codigo de barras escaneado siempre da una
+        // sola coincidencia exacta -- antes había que ademas tocar la fila
+        // o apretar Enter para recien ver el detalle (foto/escala/monedas),
+        // un paso de mas que generaba exactamente la confusion de "no
+        // aparece nada" cuando lo unico visible todavia era la lista.
+        if (res && res.length === 1) {
+          handlePriceCheckSelect(res[0])
+        }
       } catch (e) {
       } finally {
         setPriceCheckSearching(false)
