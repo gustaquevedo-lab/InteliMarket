@@ -69,7 +69,11 @@ const monoFont = { fontFamily: "'IBM Plex Mono', monospace" }
 export default function PriceCheckerKioskPage() {
   const { dark, toggle: toggleTheme } = useTheme()
 
-  const [cotizaciones] = useState({ BRL: 1420, USD: 7850, ARS: 5.8 })
+  const [cotizaciones, setCotizaciones] = useState({
+    BRL: { venta: 1420, activo: true },
+    USD: { venta: 7550, activo: true },
+    ARS: { venta: 5.8, activo: false },
+  })
   const [company, setCompany] = useState<Company | null>(null)
   const [banners, setBanners] = useState<KioskBanner[]>([])
   const [currentBannerIdx, setCurrentBannerIdx] = useState(0)
@@ -89,7 +93,27 @@ export default function PriceCheckerKioskPage() {
   // Configuracion. Si todavia no cargaron uno, se ve el emblema de
   // reemplazo en vez de dejar un hueco vacio.
   useEffect(() => {
-    api.companies.list().then((list) => { if (list?.[0]) setCompany(list[0]) }).catch(() => {})
+    api.companies.list().then((list) => {
+      const comp = list?.[0]
+      if (!comp) return
+      setCompany(comp)
+      const dbCurrencies = (comp.config as any)?.currencies
+      if (dbCurrencies) {
+        setCotizaciones((prev) => {
+          const next = { ...prev }
+          for (const code of ["BRL", "USD", "ARS"] as const) {
+            const val = dbCurrencies[code]
+            if (val && typeof val === "object") {
+              next[code] = {
+                venta: Number(val.venta ?? prev[code].venta),
+                activo: typeof val.activo === "boolean" ? val.activo : prev[code].activo,
+              }
+            }
+          }
+          return next
+        })
+      }
+    }).catch(() => {})
   }, [])
 
   // Banners reales, cargados desde el panel de marketing -- sin fallback
@@ -204,10 +228,22 @@ export default function PriceCheckerKioskPage() {
   }
 
   const precioUnitarioGs = scannedProduct?.precio_venta || 0
-  const precioBRL = (precioUnitarioGs / (cotizaciones.BRL || 1420)).toFixed(2)
-  const precioUSD = (precioUnitarioGs / (cotizaciones.USD || 7850)).toFixed(2)
-  const precioARS = Math.round(precioUnitarioGs / (cotizaciones.ARS || 5.8)).toLocaleString("es-PY")
   const currentBanner = banners[currentBannerIdx]
+
+  const CURRENCY_META = {
+    BRL: { label: "Reales", labelBoard: "REAL BRASIL", prefix: "1 R$ =", symbol: "R$", flag: <FlagBR />, color: "emerald" },
+    USD: { label: "Dólares", labelBoard: "DÓLAR USA", prefix: "1 US$ =", symbol: "US$", flag: <FlagUS />, color: "blue" },
+    ARS: { label: "Pesos", labelBoard: "PESO AR", prefix: "1 ARS =", symbol: "$", flag: <FlagAR />, color: "cyan" },
+  } as const
+
+  const activeCurrencies = (Object.keys(CURRENCY_META) as (keyof typeof CURRENCY_META)[])
+    .filter((code) => cotizaciones[code].activo)
+    .map((code) => ({ code, rate: cotizaciones[code].venta, ...CURRENCY_META[code] }))
+
+  const colorText: Record<string, string> = { emerald: "text-emerald-600 dark:text-emerald-400", blue: "text-blue-600 dark:text-blue-400", cyan: "text-cyan-600 dark:text-cyan-400" }
+  const colorBorder: Record<string, string> = { emerald: "border-emerald-300 dark:border-emerald-500/30", blue: "border-blue-300 dark:border-blue-500/30", cyan: "border-cyan-300 dark:border-cyan-500/30" }
+
+  const convert = (gs: number, rate: number) => (gs / (rate || 1))
 
   const colorClasses: Record<string, string> = {
     emerald: "bg-emerald-600 text-white shadow-emerald-600/30",
@@ -378,37 +414,19 @@ export default function PriceCheckerKioskPage() {
                   PIZARRA DE CAMBIO OFICIAL (CAJAS POS):
                 </span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/90 border-2 border-emerald-300 dark:border-emerald-500/30 shadow-xl flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <FlagBR />
-                    <div><span className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase block leading-none">REAL BRASIL</span><span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">1 R$ =</span></div>
+              <div className={`grid grid-cols-1 gap-3 ${activeCurrencies.length === 1 ? "" : activeCurrencies.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
+                {activeCurrencies.map((c) => (
+                  <div key={c.code} className={`p-4 rounded-2xl bg-white dark:bg-slate-900/90 border-2 ${colorBorder[c.color]} shadow-xl flex items-center justify-between`}>
+                    <div className="flex items-center gap-3">
+                      {c.flag}
+                      <div><span className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase block leading-none">{c.labelBoard}</span><span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">{c.prefix}</span></div>
+                    </div>
+                    <div className="text-right font-mono">
+                      <span className={`text-xl sm:text-2xl font-black ${colorText[c.color]}`}>{c.rate.toLocaleString("es-PY")}</span>
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block leading-none">Gs.</span>
+                    </div>
                   </div>
-                  <div className="text-right font-mono">
-                    <span className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400">{cotizaciones.BRL.toLocaleString("es-PY")}</span>
-                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block leading-none">Gs.</span>
-                  </div>
-                </div>
-                <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/90 border-2 border-blue-300 dark:border-blue-500/30 shadow-xl flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <FlagUS />
-                    <div><span className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase block leading-none">DÓLAR USA</span><span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">1 US$ =</span></div>
-                  </div>
-                  <div className="text-right font-mono">
-                    <span className="text-xl sm:text-2xl font-black text-blue-600 dark:text-blue-400">{cotizaciones.USD.toLocaleString("es-PY")}</span>
-                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block leading-none">Gs.</span>
-                  </div>
-                </div>
-                <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/90 border-2 border-cyan-300 dark:border-cyan-500/30 shadow-xl flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <FlagAR />
-                    <div><span className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase block leading-none">PESO AR</span><span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">1 ARS =</span></div>
-                  </div>
-                  <div className="text-right font-mono">
-                    <span className="text-xl sm:text-2xl font-black text-cyan-600 dark:text-cyan-400">{cotizaciones.ARS}</span>
-                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block leading-none">Gs.</span>
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           </div>
@@ -467,36 +485,44 @@ export default function PriceCheckerKioskPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-850/80 border border-emerald-300 dark:border-emerald-500/30 text-center shadow-md">
-                    <div className="flex items-center justify-center gap-1 mb-1"><FlagBR /><span className="text-[10px] font-black text-slate-500 dark:text-slate-300 uppercase">Reales</span></div>
-                    <span className="text-base sm:text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">R$ {precioBRL}</span>
+                {activeCurrencies.length > 0 && (
+                  <div className={`grid gap-3 ${activeCurrencies.length === 1 ? "grid-cols-1" : activeCurrencies.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+                    {activeCurrencies.map((c) => (
+                      <div key={c.code} className={`p-3 rounded-2xl bg-slate-50 dark:bg-slate-850/80 border ${colorBorder[c.color]} text-center shadow-md`}>
+                        <div className="flex items-center justify-center gap-1 mb-1">{c.flag}<span className="text-[10px] font-black text-slate-500 dark:text-slate-300 uppercase">{c.label}</span></div>
+                        <span className={`text-base sm:text-xl font-black font-mono ${colorText[c.color]}`}>{c.symbol} {convert(precioUnitarioGs, c.rate).toFixed(2)}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-850/80 border border-blue-300 dark:border-blue-500/30 text-center shadow-md">
-                    <div className="flex items-center justify-center gap-1 mb-1"><FlagUS /><span className="text-[10px] font-black text-slate-500 dark:text-slate-300 uppercase">Dólares</span></div>
-                    <span className="text-base sm:text-xl font-black font-mono text-blue-600 dark:text-blue-400">US$ {precioUSD}</span>
-                  </div>
-                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-850/80 border border-cyan-300 dark:border-cyan-500/30 text-center shadow-md">
-                    <div className="flex items-center justify-center gap-1 mb-1"><FlagAR /><span className="text-[10px] font-black text-slate-500 dark:text-slate-300 uppercase">Pesos</span></div>
-                    <span className="text-base sm:text-xl font-black font-mono text-cyan-600 dark:text-cyan-400">$ {precioARS}</span>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
 
             {/* ESCALA DE PRECIOS REAL -- de sp_tiered_prices, nunca calculada */}
             {scannedProduct.escalas.length > 0 && (
-              <div className="pt-3 border-t border-slate-100 dark:border-white/10">
-                <div className="flex items-center gap-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-2.5">
+              <div className="pt-4 border-t border-slate-100 dark:border-white/10">
+                <div className="flex items-center gap-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-3">
                   <Layers className="w-4 h-4" /><span>Escala de Precios por Cantidad</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className={`grid grid-cols-1 gap-3 ${scannedProduct.escalas.length >= 3 ? "sm:grid-cols-3" : scannedProduct.escalas.length === 2 ? "sm:grid-cols-2" : ""}`}>
                   {scannedProduct.escalas.map((t, i) => (
-                    <div key={i} className="p-3.5 rounded-2xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/15 flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                        {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} un:` : `Llevando ${t.min_qty}+ un:`}
-                      </span>
-                      <strong className="font-mono text-slate-900 dark:text-white text-sm font-black" style={monoFont}>Gs. {t.precio_unitario.toLocaleString("es-PY")} c/u</strong>
+                    <div key={i} className="rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-500/10 dark:to-orange-500/5 border-2 border-amber-300 dark:border-amber-500/30 shadow-lg overflow-hidden">
+                      <div className="px-3.5 py-1.5 bg-amber-400 dark:bg-amber-500/80 text-amber-950 text-[10px] font-black uppercase tracking-wide text-center">
+                        {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} unidades` : `Llevando ${t.min_qty}+ unidades`}
+                      </div>
+                      <div className="p-3.5 text-center">
+                        <div className="font-mono text-slate-900 dark:text-white text-xl sm:text-2xl font-black" style={monoFont}>
+                          Gs. {t.precio_unitario.toLocaleString("es-PY")}
+                        </div>
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase mb-1.5">precio por unidad</div>
+                        {activeCurrencies.length > 0 && (
+                          <div className="flex items-center justify-center gap-3 pt-1.5 border-t border-amber-200 dark:border-amber-500/20">
+                            {activeCurrencies.map((c) => (
+                              <span key={c.code} className={`text-xs font-mono font-bold ${colorText[c.color]}`}>{c.symbol} {convert(t.precio_unitario, c.rate).toFixed(2)}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -363,10 +363,10 @@ export default function SettingsPage() {
 
   // 2. Estado de Divisas y Cotizaciones en Cajas
   const [currencies, setCurrencies] = useState([
-    { codigo: "PYG", nombre: "Guaraní Paraguayo", simbolo: "Gs.", compra: 1, venta: 1, es_base: true, estado: "Moneda Base" },
-    { codigo: "BRL", nombre: "Real Brasileño", simbolo: "R$", compra: 1350, venta: 1420, es_base: false, estado: "Frontera Activo" },
-    { codigo: "USD", nombre: "Dólar Estadounidense", simbolo: "US$", compra: 7450, venta: 7550, es_base: false, estado: "Internacional" },
-    { codigo: "ARS", nombre: "Peso Argentino", simbolo: "$", compra: 6.5, venta: 7.2, es_base: false, estado: "Secundario" },
+    { codigo: "PYG", nombre: "Guaraní Paraguayo", simbolo: "Gs.", compra: 1, venta: 1, es_base: true, activo: true, estado: "Moneda Base" },
+    { codigo: "BRL", nombre: "Real Brasileño", simbolo: "R$", compra: 1350, venta: 1420, es_base: false, activo: true, estado: "Frontera Activo" },
+    { codigo: "USD", nombre: "Dólar Estadounidense", simbolo: "US$", compra: 7450, venta: 7550, es_base: false, activo: true, estado: "Internacional" },
+    { codigo: "ARS", nombre: "Peso Argentino", simbolo: "$", compra: 6.5, venta: 7.2, es_base: false, activo: false, estado: "No se usa en esta frontera" },
   ])
 
   // 3. Medios de Pago Habilitados
@@ -481,6 +481,7 @@ export default function SettingsPage() {
                 ...c,
                 compra: typeof val === "object" ? Number(val.compra ?? c.compra) : c.compra,
                 venta: typeof val === "object" ? Number(val.venta ?? c.venta) : Number(val),
+                activo: typeof val === "object" && typeof val.activo === "boolean" ? val.activo : c.activo,
               }
             }
             return c
@@ -639,13 +640,13 @@ export default function SettingsPage() {
   const handleSaveCurrencies = async () => {
     setSaving(true)
     try {
-      const currencyMap: Record<string, { compra: number; venta: number }> = {}
+      const currencyMap: Record<string, { compra: number; venta: number; activo: boolean }> = {}
       let brlVenta = 1420
       let usdVenta = 7550
       let arsVenta = 5.8
 
       currencies.forEach(c => {
-        currencyMap[c.codigo] = { compra: Number(c.compra), venta: Number(c.venta) }
+        currencyMap[c.codigo] = { compra: Number(c.compra), venta: Number(c.venta), activo: c.activo }
         if (c.codigo === "BRL") brlVenta = Number(c.venta)
         if (c.codigo === "USD") usdVenta = Number(c.venta)
         if (c.codigo === "ARS") arsVenta = Number(c.venta)
@@ -2040,10 +2041,21 @@ export default function SettingsPage() {
               }
 
               return (
-                <div key={c.codigo} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div key={c.codigo} className={`p-4 rounded-xl border space-y-3 transition-opacity ${c.activo ? "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700" : "bg-slate-50 dark:bg-slate-900 border-dashed border-slate-300 dark:border-slate-700 opacity-50"}`}>
                   <div className="flex items-center justify-between">
                     <span className="font-black text-sm text-gray-900 dark:text-white">{c.codigo} - {c.nombre}</span>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">{c.simbolo}</span>
+                  </div>
+                  <div className="flex items-center justify-between pb-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase">{c.es_base ? "Siempre activa" : "Se usa en el sistema"}</span>
+                    <button
+                      type="button"
+                      disabled={c.es_base}
+                      onClick={() => setCurrencies(prev => prev.map(item => item.codigo === c.codigo ? { ...item, activo: !item.activo } : item))}
+                      className={`relative w-9 h-5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${c.activo ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${c.activo ? "translate-x-4" : "translate-x-0"}`} />
+                    </button>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                     <div>
