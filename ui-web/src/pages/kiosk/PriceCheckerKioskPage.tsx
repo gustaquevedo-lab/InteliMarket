@@ -534,14 +534,14 @@ export default function PriceCheckerKioskPage() {
                         {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} unidades` : `Llevando ${t.min_qty}+ unidades`}
                       </div>
                       <div className="p-3 sm:p-4 text-center">
-                        <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black" style={monoFont}>
+                        <div className="font-mono text-slate-900 dark:text-white text-4xl sm:text-5xl font-black" style={monoFont}>
                           Gs. {t.precio_unitario.toLocaleString("es-PY")}
                         </div>
                         <div className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase mb-1.5">precio por unidad</div>
                         {activeCurrencies.length > 0 && (
                           <div className="flex items-center justify-center gap-4 pt-2 border-t border-amber-200 dark:border-amber-500/20">
                             {activeCurrencies.map((c) => (
-                              <span key={c.code} className={`text-xl sm:text-2xl font-mono font-black ${colorText[c.color]}`}>{c.symbol} {convert(t.precio_unitario, c.rate).toFixed(2)}</span>
+                              <span key={c.code} className={`text-2xl sm:text-3xl font-mono font-black ${colorText[c.color]}`}>{c.symbol} {convert(t.precio_unitario, c.rate).toFixed(2)}</span>
                             ))}
                           </div>
                         )}
