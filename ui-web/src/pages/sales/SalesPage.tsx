@@ -13,13 +13,35 @@ import { formatPYG, formatDate } from "../../utils/format"
 type SalesTab = "comprobantes" | "cierres_caja" | "notas_credito" | "extra_club_credito"
 type StatusFilter = "todas" | "contado" | "credito" | "canceladas"
 
+// Etiquetas legibles para las formas de pago reales que aparecen en
+// sale_payments (incluye tanto las que genera el POS nuevo como las
+// sincronizadas del legado Nemuha, que usan sus propios codigos).
+const FORMA_PAGO_LABELS: Record<string, string> = {
+  EFECTIVO: "🇵🇾 Efectivo",
+  TARJETA_BANCARD: "💳 Tarjeta Bancard",
+  TARJETA_DINELCO: "💳 Tarjeta Dinelco",
+  "TARJETA CREDITO": "💳 Tarjeta Crédito",
+  "TARJETA DEBITO": "💳 Tarjeta Débito",
+  QR: "📱 QR",
+  "QR CODE": "📱 QR",
+  PIX: "📱 Pix",
+  EXTRA_CLUB: "⭐ Extra Club (Crédito)",
+  "TRANF. BANCARIA": "🏦 Transferencia Bancaria",
+  CHEQUES: "🧾 Cheques",
+  "VALE COMPRA": "🎟️ Vale de Compra",
+}
+
 const PUNTOS_EMISION = [
   { id: "todos", nombre: "Todos los Puntos de Emisión" },
-  { id: "001-001", nombre: "Punto 001-001 (Caja 01 · Rápida)" },
-  { id: "001-002", nombre: "Punto 001-002 (Caja 02)" },
-  { id: "001-003", nombre: "Punto 001-003 (Caja 03)" },
-  { id: "001-004", nombre: "Punto 001-004 (Caja 04)" },
-  { id: "001-005", nombre: "Punto 001-005 (Mostrador Mayorista / Admin)" },
+  { id: "001-012", nombre: "Caja 01 · Salón Central (Boca 012)" },
+  { id: "001-013", nombre: "Caja 02 · Salón Central (Boca 013)" },
+  { id: "001-014", nombre: "Caja 03 · Salón Central (Boca 014)" },
+  { id: "001-015", nombre: "Caja 04 · Salón Central (Boca 015)" },
+  { id: "001-016", nombre: "Caja 05 · Salón Central (Boca 016)" },
+  { id: "001-017", nombre: "Caja 06 · Salón Central (Boca 017)" },
+  { id: "001-018", nombre: "Caja 07 · Línea de Caja (Boca 018)" },
+  { id: "001-019", nombre: "Caja Especial Mayorista / Administración (Boca 019)" },
+  { id: "001-020", nombre: "Caja Auxiliar / Refuerzo (Boca 020)" },
 ]
 
 export default function SalesPage() {
@@ -48,6 +70,15 @@ export default function SalesPage() {
   // Cierre de Caja X/Z
   const [cierreTipo, setCierreTipo] = useState<"X" | "Z">("Z")
   const [showCierreModal, setShowCierreModal] = useState(false)
+  // Desglose real por forma de pago para el reporte X/Z -- antes eran
+  // porcentajes fijos (35% tarjeta, 15% transferencia) inventados sobre el
+  // total, sin ninguna relacion con como pago cada cliente de verdad.
+  const [paymentBreakdown, setPaymentBreakdown] = useState<{ forma_pago: string; monto: number; cantidad: number }[]>([])
+  const [loadingBreakdown, setLoadingBreakdown] = useState(false)
+  // Cotizaciones reales de la empresa (misma fuente que el POS) -- antes
+  // esta pantalla dividia por 1380/7550 fijos, sin importar la cotizacion
+  // real configurada.
+  const [rates, setRates] = useState({ BRL: 1380, USD: 7550 })
 
   const toast = useToast()
   const confirm = useConfirm()
@@ -87,6 +118,33 @@ export default function SalesPage() {
   useEffect(() => {
     fetchData()
   }, [dateFrom, dateTo])
+
+  // Cotizaciones reales, una sola vez -- misma fuente que usa el POS
+  // (company.config.currencies), no valores fijos en el codigo.
+  useEffect(() => {
+    api.companies.list().then((comps) => {
+      const c = Array.isArray(comps) ? comps[0] : null
+      const currs = (c?.config as any)?.currencies
+      if (currs) {
+        setRates({
+          BRL: Number(currs.BRL?.venta || currs.BRL || 1380),
+          USD: Number(currs.USD?.venta || currs.USD || 7550),
+        })
+      }
+    }).catch(() => {})
+  }, [])
+
+  // Desglose real por forma de pago para el reporte de cierre X/Z, filtrado
+  // por el mismo rango de fechas y punto de emision que ya tiene la
+  // pantalla -- se pide recien al abrir el modal, no en cada carga.
+  useEffect(() => {
+    if (!showCierreModal) return
+    setLoadingBreakdown(true)
+    api.reports.salesByPaymentMethod({ fecha_desde: dateFrom || undefined, fecha_hasta: dateTo || undefined })
+      .then((rows) => setPaymentBreakdown(rows || []))
+      .catch(() => setPaymentBreakdown([]))
+      .finally(() => setLoadingBreakdown(false))
+  }, [showCierreModal, dateFrom, dateTo])
 
   // Mapa de Clientes
   const customersMap = useMemo(() => {
@@ -259,8 +317,8 @@ export default function SalesPage() {
             {formatPYG(kpis.totalMonto)}
           </div>
           <div className="flex items-center justify-between text-xs text-gray-500 mt-1 font-mono">
-            <span>🇧🇷 R$ {(kpis.totalMonto / 1380).toFixed(2)}</span>
-            <span>🇺🇸 USD {(kpis.totalMonto / 7550).toFixed(2)}</span>
+            <span>🇧🇷 R$ {(kpis.totalMonto / rates.BRL).toFixed(2)}</span>
+            <span>🇺🇸 USD {(kpis.totalMonto / rates.USD).toFixed(2)}</span>
           </div>
         </div>
 
@@ -467,7 +525,7 @@ export default function SalesPage() {
                           ) : (
                             <Receipt className="w-3.5 h-3.5 text-primary" />
                           )}
-                          <span>{s.numero || `001-001-00${s.id.slice(-5)}`}</span>
+                          <span>{s.numero || `Sin numero (ID ${s.id.slice(-8)})`}</span>
                         </div>
                       </td>
                       <td className="p-3.5 text-gray-500 font-mono text-[11px]">
@@ -698,30 +756,35 @@ export default function SalesPage() {
                 </div>
               </div>
 
-              {/* Recaudación por Medios de Pago */}
+              {/* Recaudación por Medios de Pago -- datos reales de
+                  sale_payments para el mismo rango de fechas, ya no
+                  porcentajes fijos inventados sobre el total. */}
               <div className="bg-gray-50 dark:bg-slate-800 p-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-2">
                 <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block">
-                  Recaudación Desglosada
+                  Recaudación Desglosada (real)
                 </span>
-                <div className="flex justify-between font-mono">
-                  <span>🇵🇾 Efectivo Guaraníes:</span>
-                  <strong>{formatPYG(kpis.totalContado)}</strong>
-                </div>
-                <div className="flex justify-between font-mono">
-                  <span>💳 Tarjetas Débito / Crédito:</span>
-                  <strong>{formatPYG(Math.round(kpis.totalMonto * 0.35))}</strong>
-                </div>
-                <div className="flex justify-between font-mono">
-                  <span>⭐ Extra Club (Crédito Propio):</span>
-                  <strong className="text-amber-500">{formatPYG(kpis.totalExtraClub || kpis.totalCredito)}</strong>
-                </div>
-                <div className="flex justify-between font-mono">
-                  <span>🏦 SIPAP / Transferencias:</span>
-                  <strong>{formatPYG(Math.round(kpis.totalMonto * 0.15))}</strong>
-                </div>
+                {loadingBreakdown ? (
+                  <div className="flex items-center justify-center py-3 text-gray-400">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  </div>
+                ) : paymentBreakdown.length === 0 ? (
+                  <p className="text-[11px] text-gray-400">Sin pagos registrados en el rango seleccionado.</p>
+                ) : (
+                  paymentBreakdown.map((p) => {
+                    const label = FORMA_PAGO_LABELS[p.forma_pago] || p.forma_pago
+                    return (
+                      <div key={p.forma_pago} className="flex justify-between font-mono">
+                        <span>{label}:</span>
+                        <strong>{formatPYG(p.monto)}</strong>
+                      </div>
+                    )
+                  })
+                )}
                 <div className="flex justify-between font-black text-sm text-gray-900 dark:text-white pt-2 border-t border-gray-200 dark:border-gray-700">
                   <span>TOTAL GENERAL:</span>
-                  <span className="font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(kpis.totalMonto)}</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                    {formatPYG(paymentBreakdown.reduce((s, p) => s + p.monto, 0))}
+                  </span>
                 </div>
               </div>
             </div>
