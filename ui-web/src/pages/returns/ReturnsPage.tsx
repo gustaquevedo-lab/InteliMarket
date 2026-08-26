@@ -413,7 +413,7 @@ export default function ReturnsPage() {
       {/* ── KPIS CONSOLIDADOS (SEGÚN LA PESTAÑA ACTIVA) ──────────────────────── */}
       {mainTab === "customer_returns" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Total Devoluciones Clientes
@@ -430,7 +430,7 @@ export default function ReturnsPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
                 Pendientes de RMA
@@ -447,7 +447,7 @@ export default function ReturnsPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Stock Restaurado
@@ -464,7 +464,7 @@ export default function ReturnsPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-red-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Rechazadas / Sin Efecto
@@ -485,7 +485,7 @@ export default function ReturnsPage() {
 
       {mainTab === "supplier_credit_notes" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Total Crédito a Favor
@@ -502,7 +502,7 @@ export default function ReturnsPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Proveedores con NC
@@ -519,7 +519,7 @@ export default function ReturnsPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Promedio por Nota
@@ -536,7 +536,7 @@ export default function ReturnsPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-cyan-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Estado Sincronización
@@ -557,7 +557,7 @@ export default function ReturnsPage() {
 
       {mainTab === "supplier_returns" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Total Devuelto a Proveedores
@@ -574,7 +574,7 @@ export default function ReturnsPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Proveedores Afectados
@@ -591,7 +591,7 @@ export default function ReturnsPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Origen de Devolución
@@ -608,7 +608,7 @@ export default function ReturnsPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Integración Nemuha
