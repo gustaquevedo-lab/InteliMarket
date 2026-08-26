@@ -612,7 +612,7 @@ export default function Dashboard() {
       ────────────────────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* KPI 1: Ventas */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 hover:shadow-md transition-shadow">
+        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-emerald-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
               {timeRange === "hoy" ? "Ventas de Hoy" : timeRange === "7d" ? "Ventas Últimos 7 Días" : timeRange === "mes" ? "Ventas Este Mes" : timeRange === "custom" ? "Ventas del Rango" : "Ventas Últimos 30 Días"}
@@ -624,6 +624,21 @@ export default function Dashboard() {
           <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-gray-900 dark:text-white font-mono tracking-tight">
             {formatPYG(totalVentasMonto)}
           </p>
+          {salesTrendData.length > 2 && (
+            <div className="h-8 -mx-1 mt-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={salesTrendData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="sparkVentas" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <Area type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={1.5} fill="url(#sparkVentas)" isAnimationActive={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
           <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
             <span>Tickets: <strong className="text-gray-700 dark:text-gray-200 font-mono">{totalTickets.toLocaleString()}</strong></span>
             {chartSummaryKPIs.totalSemanaPasada > 0 && (
@@ -636,7 +651,7 @@ export default function Dashboard() {
         </div>
 
         {/* KPI 2: Margen Bruto Comercial (Gs. y %) */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 hover:shadow-md transition-shadow">
+        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-teal-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Margen Bruto</span>
             <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400">
@@ -658,7 +673,7 @@ export default function Dashboard() {
         </div>
 
         {/* KPI 3: Ticket Promedio */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 hover:shadow-md transition-shadow">
+        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-indigo-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Ticket Promedio</span>
             <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
@@ -675,7 +690,7 @@ export default function Dashboard() {
         </div>
 
         {/* KPI 4: Liquidez Total */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 hover:shadow-md transition-shadow">
+        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-blue-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Caja & Bancos</span>
             <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
@@ -691,7 +706,7 @@ export default function Dashboard() {
         </div>
 
         {/* KPI 5: Alertas de Stock IA */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 hover:shadow-md transition-shadow">
+        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-red-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Riesgo Quiebre IA</span>
             <div className="p-2 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400">
