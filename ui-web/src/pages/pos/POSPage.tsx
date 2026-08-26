@@ -444,6 +444,15 @@ export default function POSPage() {
   // ── ESTADOS DE BALANZA BALMAK BCK30 (USB DIRECTO & ELECTRON) ──────────────
   const [currentScaleWeight, setCurrentScaleWeight] = useState<number>(0.000)
   const [isScaleStable, setIsScaleStable] = useState<boolean>(true)
+  // Verificacion peso etiqueta vs balanza -- pedido explicito: al escanear
+  // el codigo PLU de una etiqueta de pesables, comparar el peso que trae
+  // esa etiqueta contra lo que hay AHORA en la balanza conectada, para
+  // frenar el caso de que se cambie el contenido de una bolsa ya
+  // etiquetada sin volver a pesarla. Antes esto no existia -- se confiaba
+  // ciegamente en el numero de la etiqueta, sin ningun cruce contra la
+  // balanza real.
+  const PESO_TOLERANCIA_KG = 0.020
+  const [weightMismatch, setWeightMismatch] = useState<{ product: Product; etiquetaKg: number; balanzaKg: number } | null>(null)
   const [scaleUsbConnected, setScaleUsbConnected] = useState<boolean>(false)
   const [scalePortName, setScalePortName] = useState<string>("COM3")
   const [scaleBaudRate, setScaleBaudRate] = useState<number>(9600)
@@ -507,11 +516,13 @@ export default function POSPage() {
   const [verifyingSupervisor, setVerifyingSupervisor] = useState(false)
   const [supervisorReason, setSupervisorReason] = useState("Error de escaneo / digitación")
   const [pendingSupervisorAction, setPendingSupervisorAction] = useState<{
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice"
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight"
     itemId?: string
     delta?: number
     sale?: Sale
     customer?: Customer
+    weightProduct?: Product
+    weightEtiquetaKg?: number
   } | null>(null)
   const [showRemoteAuthModal, setShowRemoteAuthModal] = useState(false)
   const [remoteAuthRequestId, setRemoteAuthRequestId] = useState<string | null>(null)
@@ -1159,7 +1170,7 @@ export default function POSPage() {
   }, [])
 
   // ── AGREGAR AL CARRITO ────────────────────────────────────────────────────
-  const addToCart = useCallback((product: Product, quantityOverride?: number) => {
+  const addToCart = useCallback((product: Product, quantityOverride?: number, origenBalanza?: "balmak_bck30" | "etiqueta_plu") => {
     setLastScannedProduct(product)
 
     const isPesable = (product as any).tipo_venta === "peso" ||
@@ -1201,7 +1212,7 @@ export default function POSPage() {
           quantity: finalQty,
           iva_tasa: ivaTasa,
           es_pesable: true,
-          origen_balanza: "balmak_bck30"
+          origen_balanza: origenBalanza || "balmak_bck30"
         },
         ...prev,
       ])
@@ -1905,10 +1916,24 @@ export default function POSPage() {
         const weightKg = weightGrams / 1000
         const matchPesable = products.find(p => p.codigo_barra === pluCandidate || p.sku === pluCandidate || p.codigo_barra?.startsWith(pluCandidate))
         if (matchPesable) {
-          addToCart(matchPesable, weightKg)
+          // Verificacion contra la balanza conectada: si hay una lectura
+          // estable ahora mismo y difiere de lo que dice la etiqueta por
+          // mas de la tolerancia, no se agrega solo -- se pide resolver la
+          // discrepancia (posible cambio de contenido en una bolsa ya
+          // etiquetada, o etiqueta de otro producto).
+          const balanzaDisponible = isScaleStable && currentScaleWeight > 0.015
+          const diffKg = balanzaDisponible ? Math.abs(currentScaleWeight - weightKg) : 0
+          if (balanzaDisponible && diffKg > PESO_TOLERANCIA_KG) {
+            setWeightMismatch({ product: matchPesable, etiquetaKg: weightKg, balanzaKg: currentScaleWeight })
+            setSearch("")
+            return
+          }
+          addToCart(matchPesable, weightKg, "etiqueta_plu")
           setSearch("")
           searchInputRef.current?.focus()
-          toast.success("Balanza de Sección", `${matchPesable.nombre}: ${weightKg.toFixed(3)} KG leídos de etiqueta.`)
+          toast.success("Balanza de Sección", balanzaDisponible
+            ? `${matchPesable.nombre}: ${weightKg.toFixed(3)} KG -- coincide con la balanza.`
+            : `${matchPesable.nombre}: ${weightKg.toFixed(3)} KG leídos de etiqueta (balanza no disponible para verificar).`)
           return
         }
       }
@@ -1992,6 +2017,11 @@ export default function POSPage() {
         const nombre = (action as any).customer?.nombre || "cliente"
         return `Agregar identificación a factura Nº ${(action as any).sale?.numero || ""}: ${nombre}`
       }
+      case "use_label_weight": {
+        const wp = (action as any).weightProduct
+        const etiquetaKg = (action as any).weightEtiquetaKg
+        return `Usar peso de etiqueta pese a diferencia con la balanza: ${wp?.nombre || "producto"} · Etiqueta ${Number(etiquetaKg || 0).toFixed(3)} KG`
+      }
       default:
         return "Autorización de supervisor"
     }
@@ -2011,7 +2041,7 @@ export default function POSPage() {
     }
   }
 
-  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice", itemId?: string, delta?: number, sale?: Sale, customer?: Customer }) => {
+  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number }) => {
     if (isSupervisorUser) {
       if (action.type === "process_return") {
         await submitDevolucion(user!.id, user?.nombre || "Supervisor")
@@ -2084,9 +2114,14 @@ export default function POSPage() {
     return () => clearInterval(interval)
   }, [showRemoteAuthModal, remoteAuthRequestId, pendingSupervisorAction])
 
-  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice", itemId?: string, delta?: number, sale?: Sale, customer?: Customer }) => {
+  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number }) => {
     if (action.type === "extra_club_payment") {
       handleProcessCheckout()
+    } else if (action.type === "use_label_weight" && action.weightProduct && action.weightEtiquetaKg) {
+      addToCart(action.weightProduct, action.weightEtiquetaKg, "etiqueta_plu")
+      setWeightMismatch(null)
+      searchInputRef.current?.focus()
+      toast.warning("Peso de etiqueta autorizado", `${action.weightProduct.nombre}: se usó ${action.weightEtiquetaKg.toFixed(3)} KG de la etiqueta pese a la diferencia con la balanza.`)
     } else if (action.type === "remove_item" && action.itemId) {
       const itemToDelete = cart.find(i => i.id === action.itemId)
       setCart((prev) => prev.filter((i) => i.id !== action.itemId))
@@ -4543,6 +4578,57 @@ export default function POSPage() {
       )}
 
       {/* ── 5. MODAL REACTIVO DE PESAJE DE BALANZA (CON AUTO-CONFIRMACIÓN) ──────── */}
+      {weightMismatch && (
+        <div className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-rose-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-rose-500/30">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Diferencia de peso detectada</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{weightMismatch.product.nombre}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center">
+                <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Etiqueta</div>
+                <div className="text-xl font-black font-posMono tabular-nums text-slate-900 dark:text-white">{weightMismatch.etiquetaKg.toFixed(3)} KG</div>
+              </div>
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/30 text-center">
+                <div className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase">Balanza (ahora)</div>
+                <div className="text-xl font-black font-posMono tabular-nums text-rose-600 dark:text-rose-400">{weightMismatch.balanzaKg.toFixed(3)} KG</div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 text-center">
+              Lo que dice la etiqueta no coincide con lo que hay ahora en la balanza (diferencia de {(Math.abs(weightMismatch.etiquetaKg - weightMismatch.balanzaKg) * 1000).toFixed(0)} g). Puede ser que el contenido de la bolsa haya cambiado desde que se etiquetó.
+            </p>
+
+            <div className="space-y-2">
+              <button
+                onClick={() => { addToCart(weightMismatch.product, weightMismatch.balanzaKg, "balmak_bck30"); setWeightMismatch(null); searchInputRef.current?.focus() }}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Scale className="w-4 h-4" /> Usar peso de balanza ({weightMismatch.balanzaKg.toFixed(3)} KG)
+              </button>
+              <button
+                onClick={() => requestSupervisorAuthorization({ type: "use_label_weight", weightProduct: weightMismatch.product, weightEtiquetaKg: weightMismatch.etiquetaKg })}
+                className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4" /> Usar peso de etiqueta (requiere supervisor)
+              </button>
+              <button
+                onClick={() => { setWeightMismatch(null); searchInputRef.current?.focus() }}
+                className="w-full py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 cursor-pointer"
+              >
+                Cancelar -- volver a pesar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showManualWeightModal && (
         <div className="fixed inset-0 z-[115] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
