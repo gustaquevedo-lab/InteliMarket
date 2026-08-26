@@ -299,7 +299,7 @@ export default function CustomersPage() {
 
       {/* ── HERO KPIS CONSOLIDADOS ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-primary rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
               Padrón Total Clientes
@@ -316,7 +316,7 @@ export default function CustomersPage() {
           </p>
         </div>
 
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-emerald-500/30 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-emerald-500/30 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
               RUC / CI Validados
@@ -333,7 +333,7 @@ export default function CustomersPage() {
           </p>
         </div>
 
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
               Empresas / Jurídicas
@@ -350,7 +350,7 @@ export default function CustomersPage() {
           </p>
         </div>
 
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
               Crédito Habilitado
