@@ -108,6 +108,31 @@ Se rehizo el backfill cruzando `codigo_barra` directo contra la tabla `PLU` real
 
 **Conclusión para el corte Ñemuha → InteliMarket**: el vínculo producto↔PLU ya está resuelto al 99.8% con evidencia directa (no adivinado), listo para el día del corte sin fricción para el personal de balanza.
 
+### 🎯 SESIÓN 2026-08-26 (noche, continuación): intento de automatizar el ENVÍO a la balanza — investigado a fondo, no resuelto todavía
+
+Pedido del cliente: que al cambiar el precio de un producto pesable, se transmita **solo** a la balanza, sin que nadie tenga que entrar a mano al software SDL y apretar "Subir" (proceso hoy 100% manual, descrito por el cliente como "engorroso, lento y pasible de errores").
+
+**Se descartó (probado en vivo, seguro, reversible):**
+- Escribir directo en `SDL.mdb` (Access) funciona sin bloqueos -- se probó insertar/borrar una fila de prueba (`PLUID=9999`) mientras SDL.exe corría, sin errores.
+- **Pero escribir en la base NO alcanza**: SDL.exe no tiene un loop de sincronización continuo. El único envío real del día (08:21-08:46) coincidió con el arranque del proceso (`StartTime 08:00:37`); a las 16:21 (mismo día, proceso corriendo) no había pasado nada más. No hay ninguna tarea programada de Windows relacionada (`Get-ScheduledTask` no encontró nada con SDL/EDGE/Balan). El `AutoTask.xml` de la app tiene fechas de fábrica (2001/1999) — nunca se configuró un timer real.
+- **Se encontró el mecanismo real por reflection de .NET** sobre `SDL.App.dll` (sin decompilar, usando `[System.Reflection.Assembly]::LoadFrom` + `GetTypes()/GetMethods()` vía WinRM): la clase `SDL.App.NetForm` tiene `uploadButton_Click` → dispara `NetworkAction.UploadSDL` (enum con `UploadInfo/DownloadInfo/UploadTime/UploadSDL/DownloadSDL/UploadReport/UploadMdb/DownloadMdb/DownloadCSV/PingDevice`, entre otros). Esto confirma que el proceso manual que describe el cliente es literalmente: abrir esa pantalla y apretar ese botón.
+- **Se intentó invocar `UploadSDL` sin abrir ventana** (crear `NetForm` en memoria, headless, y leer su estado) — **falló con `NullReferenceException` en el constructor mismo**. `NetForm` depende de estado global del proceso `SDL.exe` ya corriendo (conexión ya abierta a `SDL.mdb`, singletons de la app cargados al arrancar) — no es invocable en frío desde un proceso nuevo. Ir más allá de esto requeriría inyectarse dentro del proceso real de SDL.exe en producción, que no se intentó (riesgo real sobre software de un tercero en producción, requiere autorización explícita).
+
+### Decisión con el cliente: reverse-engineering del protocolo de red, como proyecto aparte
+
+Se evaluaron 3 caminos con el cliente:
+1. Automatizar el click real de la UI (usuario/horario de servicio dedicado, para no chocar con el uso normal de la PC de Compras) -- más rápido de lograr, pero sigue dependiendo de SDL.exe.
+2. **Reverse-engineering del protocolo TCP real** (puertos `4001`/`4010`/`4011`, confirmados activos hacia `192.168.0.72/.73/.74` en el log) — reemplazaría a SDL.exe por completo, la solución más limpia a largo plazo. **Elegido por el cliente**, pero es scope de una sesión dedicada aparte (captura de tráfico real durante un envío + decodificación de un protocolo binario propietario).
+3. Frenar la automatización de envío por ahora, quedarse con lo ya resuelto (PLU vinculados 504/505 en `products.plu_balanza`).
+
+**Se eligió la opción 2.** Próxima sesión dedicada a esto debe:
+- Capturar tráfico real (tcpdump/Wireshark) durante un `uploadButton_Click` real hacia `192.168.0.72:4011` / `.73:4001` / `.74:4010` (coordinar con el cliente el momento, para tener certeza de qué tráfico corresponde a qué acción).
+- Decodificar el formato del paquete (probablemente TCP simple, dado el patrón de log "Baixar dados → Atualizar o banco de dados → PLU X/X Sucesso" sugiere un protocolo de aplicación propio sobre TCP, no HTTP/FTP).
+- Construir un cliente propio en InteliMarket (Python) que hable ese protocolo directo, sin pasar por SDL.exe ni por Windows.
+- **Credenciales/accesos ya documentados para retomar**: WinRM a `192.168.0.231` (user `dpto. compras 02` / clave `compras`, PowerShell de 32 bits en `C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe` para usar Jet OLEDB), password de `SDL.mdb` = `showmethemoney`.
+
+**Cuidado para la próxima sesión**: esa PC la usa una persona real de Compras en horario de trabajo (se la vio en vivo trabajando en el legacy durante esta sesión, sesión de consola activa `DPTO. COMPRAS 02`) — cualquier prueba que interactúe con la UI (no solo lectura de red/DB) debe coordinarse para no interrumpirla.
+
 ### Pendiente para la próxima sesión
 
 1. ~~Confirmar qué balanza es cuál~~ → ya no es necesario, el catálogo PLU es único y global para las 3 (ver corrección de arriba).
