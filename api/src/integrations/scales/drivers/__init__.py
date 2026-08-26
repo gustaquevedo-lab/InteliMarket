@@ -8,6 +8,7 @@ from api.src.integrations.scales.drivers.usb_hid import UsbHidDriver
 DRIVER_REGISTRY: dict[str, type[ScaleDriver]] = {
     "toledo_p03": ToledoP03Driver,
     "balmak_sdl": BalmakEdgeDriver,
+    "balmak_etiquetadora": BalmakEdgeDriver,  # alias real usado en las 2 balanzas Edge de carniceria/panaderia ya cargadas en scale_configs
     "filizola": FilizolaDriver,
     "rinnert": GenericSerialDriver,
     "generic_ascii": GenericSerialDriver,

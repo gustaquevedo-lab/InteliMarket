@@ -73,10 +73,10 @@ async def create_scale(db: AsyncSession, company_id: str, data: ScaleConfigCreat
     s = ScaleConfig(
         company_id=company_id,
         nombre=data.nombre,
-        marca=ScaleBrand(data.marca),
+        marca=ScaleBrand(data.marca).value,
         modelo=data.modelo,
-        protocolo=ScaleProtocol(data.protocolo),
-        conexion=ConnectionType(data.conexion),
+        protocolo=ScaleProtocol(data.protocolo).value,
+        conexion=ConnectionType(data.conexion).value,
         puerto_com=data.puerto_com,
         baudrate=data.baudrate,
         data_bits=data.data_bits,
@@ -89,6 +89,7 @@ async def create_scale(db: AsyncSession, company_id: str, data: ScaleConfigCreat
         product_id=data.product_id,
         ruta_carga=data.ruta_carga,
         sync_automatico=data.sync_automatico,
+        categorias_ids=data.categorias_ids,
         etiqueta_formato=data.etiqueta_formato,
         etiqueta_cabecera=data.etiqueta_cabecera,
         activa=data.activa,
@@ -106,11 +107,11 @@ async def update_scale(db: AsyncSession, scale_id: str, data: ScaleConfigUpdate)
     for field, val in data.model_dump(exclude_unset=True).items():
         if val is not None:
             if field == "marca":
-                setattr(s, field, ScaleBrand(val))
+                setattr(s, field, ScaleBrand(val).value)
             elif field == "protocolo":
-                setattr(s, field, ScaleProtocol(val))
+                setattr(s, field, ScaleProtocol(val).value)
             elif field == "conexion":
-                setattr(s, field, ConnectionType(val))
+                setattr(s, field, ConnectionType(val).value)
             else:
                 setattr(s, field, val)
     await db.commit()
@@ -299,36 +300,27 @@ async def detect_protocol(data) -> ProtocolDetectResult:
 # PLU SYNC
 # ═══════════════════════════════════════════════════════════════
 
-async def sync_plu(db: AsyncSession, company_id: str, scale_id: str, producto_ids: list[str], modo: str = "incremental") -> dict:
-    s = await get_scale(db, scale_id)
-    if not s or s.company_id != company_id:
-        raise ValueError("Scale not found")
+def _product_to_plu_dict(p: Product) -> dict:
+    return {
+        "id": str(p.id),
+        "codigo": p.sku or str(p.id)[:20],
+        "sku": p.sku,
+        "nombre": p.nombre,
+        "precio": float(p.precio_venta or 0),
+        "precio_venta": float(p.precio_venta or 0),
+        "codigo_barras": p.codigo_barra,
+        "tara": 0,
+    }
 
-    q = select(Product).where(Product.company_id == company_id)
-    if producto_ids:
-        q = q.where(Product.id.in_(producto_ids))
-    r = await db.execute(q)
-    productos = r.scalars().all()
 
-    plu_list = [
-        {
-            "id": str(p.id),
-            "codigo": p.codigo or str(p.id)[:20],
-            "sku": p.sku,
-            "nombre": p.nombre,
-            "precio": float(p.precio_venta or 0),
-            "precio_venta": float(p.precio_venta or 0),
-            "codigo_barras": p.codigo_barras,
-            "tara": 0,
-        }
-        for p in productos
-    ]
+async def _run_plu_sync(db: AsyncSession, s: ScaleConfig, productos: list[Product], modo: str) -> dict:
+    plu_list = [_product_to_plu_dict(p) for p in productos]
 
     driver = get_driver(s)
     result = await driver.sync_plu(plu_list)
 
     sync_log = ScalePLUSync(
-        company_id=company_id,
+        company_id=s.company_id,
         scale_id=s.id,
         total_productos=result.total_productos,
         exitosos=result.exitosos,
@@ -350,6 +342,48 @@ async def sync_plu(db: AsyncSession, company_id: str, scale_id: str, producto_id
         "archivo_generado": result.archivo_generado,
         "errores": result.errores,
     }
+
+
+async def sync_plu(db: AsyncSession, company_id: str, scale_id: str, producto_ids: list[str], modo: str = "incremental") -> dict:
+    s = await get_scale(db, scale_id)
+    if not s or s.company_id != company_id:
+        raise ValueError("Scale not found")
+
+    q = select(Product).where(Product.company_id == company_id)
+    if producto_ids:
+        q = q.where(Product.id.in_(producto_ids))
+    r = await db.execute(q)
+    productos = r.scalars().all()
+
+    return await _run_plu_sync(db, s, productos, modo)
+
+
+async def auto_sync_product(db: AsyncSession, company_id: str, product: Product) -> list[dict]:
+    """Called after a product's price/data changes. Pushes the update to every scale
+    configured with sync_automatico=True and scoped to this product's category
+    (categorias_ids vacio en la balanza = recibe todas las categorias)."""
+    r = await db.execute(
+        select(ScaleConfig).where(
+            ScaleConfig.company_id == company_id,
+            ScaleConfig.activa == True,  # noqa: E712
+            ScaleConfig.sync_automatico == True,  # noqa: E712
+        )
+    )
+    scales = list(r.scalars().all())
+    if not scales:
+        return []
+
+    categoria_id_str = str(product.categoria_id) if product.categoria_id else None
+    resultados = []
+    for s in scales:
+        scoped = s.categorias_ids or []
+        if scoped and categoria_id_str not in scoped:
+            continue
+        try:
+            resultados.append(await _run_plu_sync(db, s, [product], modo="auto"))
+        except Exception as e:
+            logger.warning("Auto PLU sync failed for scale %s (product %s): %s", s.id, product.id, e)
+    return resultados
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -375,7 +409,7 @@ async def print_label(db: AsyncSession, company_id: str, data: PrintLabelInput) 
         precio_total=total,
         fecha_vencimiento=data.fecha_vencimiento,
         lote=data.lote,
-        codigo_barras=p.codigo_barras,
+        codigo_barras=p.codigo_barra,
         formato=s.etiqueta_formato,
     )
 

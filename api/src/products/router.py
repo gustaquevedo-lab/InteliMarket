@@ -1,5 +1,7 @@
 """Product and category API router"""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +12,8 @@ from api.src.products.schemas import (
     CategoryCreate, CategoryResponse,
 )
 from api.src.products import service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["products"], dependencies=[Depends(require_auth)])
 
@@ -73,6 +77,12 @@ async def update_product(product_id: str, body: ProductUpdate, db: AsyncSession 
     product = await service.update_product(db, product_id, body)
     if not product:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
+    if "precio_venta" in body.model_dump(exclude_unset=True):
+        try:
+            from api.src.integrations.scales import service as scales_service
+            await scales_service.auto_sync_product(db, product.company_id, product)
+        except Exception as e:
+            logger.warning("Auto PLU sync failed for product %s: %s", product_id, e)
     return product
 
 
