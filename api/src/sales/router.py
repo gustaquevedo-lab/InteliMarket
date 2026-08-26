@@ -30,8 +30,16 @@ async def _get_customer_email_phone(db: AsyncSession, customer_id: str) -> tuple
 async def _send_sale_wa(db: AsyncSession, sale, customer_phone: str | None, tipo: str = "venta.creada", extra: dict | None = None):
     if not customer_phone or not sale.company_id:
         return
-    from uuid import UUID
-    template = await get_wa_template(db, UUID(sale.company_id), tipo)
+    # sale.company_id ya viene como UUID real (asyncpg lo devuelve tipado,
+    # no como string) -- volver a envolverlo en UUID(...) rompia con
+    # "'asyncpg.pgproto.pgproto.UUID' object has no attribute 'replace'".
+    # Esto tiraba abajo TODA la transaccion de cancel_sale (venta.cancelada
+    # es el unico tipo que pasa por aca con un customer_phone real
+    # habitualmente), asi que cancelar una venta con un cliente con
+    # telefono cargado nunca revertia nada -- ni el stock, ni el credito,
+    # ni la cuenta por cobrar -- pese a que la API respondia como si hubiera
+    # fallado limpio.
+    template = await get_wa_template(db, sale.company_id, tipo)
     if not template:
         return
     total_str = f"{float(sale.total):,.0f}" if sale.total else "0"
@@ -186,11 +194,24 @@ async def cancel_sale(sale_id: str, db: AsyncSession = Depends(get_db)):
     result = await service.cancel_sale(db, sale_id)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo cancelar la venta")
-    # WhatsApp cancellation notice
+    # Mismo patron que create_sale: comprometer la reversion (stock, credito,
+    # cuenta por cobrar, puntos) ANTES de los efectos secundarios. Antes, un
+    # fallo en la notificacion de WhatsApp (que ya paso, ver el fix de
+    # _send_sale_wa mas arriba) hacia ROLLBACK de toda la cancelacion sin
+    # avisar -- la API respondia error pero quedaba en un estado ambiguo, y
+    # si el error se hubiera tragado en silencio la venta hubiera quedado
+    # "cancelada" en la respuesta sin que ninguna reversion real se haya
+    # guardado.
+    await db.commit()
+    await db.refresh(result)
+
     if result.customer_id:
-        _, customer_phone = await _get_customer_email_phone(db, str(result.customer_id))
-        if customer_phone:
-            await _send_sale_wa(db, result, customer_phone, tipo="venta.cancelada", extra={"TOTAL": f"{float(result.total):,.0f}"})
+        try:
+            _, customer_phone = await _get_customer_email_phone(db, str(result.customer_id))
+            if customer_phone:
+                await _send_sale_wa(db, result, customer_phone, tipo="venta.cancelada", extra={"TOTAL": f"{float(result.total):,.0f}"})
+        except Exception:
+            pass
     try:
         await send_webhook_async(db, "venta.anulada", {
             "sale_id": str(result.id),
@@ -221,11 +242,18 @@ async def add_payment_to_sale(sale_id: str, body: SaleAddPayment, db: AsyncSessi
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     sale = result["sale"]
+    # Mismo motivo que cancel_sale: comprometer el pago ya registrado antes
+    # de que una notificacion pueda hacer rollback de todo.
+    await db.commit()
+    await db.refresh(sale)
     # WhatsApp payment notification
     if sale.customer_id:
-        _, customer_phone = await _get_customer_email_phone(db, str(sale.customer_id))
-        if customer_phone:
-            await _send_sale_wa(db, sale, customer_phone, tipo="pago.recibido", extra={"MONTO": f"{float(body.monto):,.0f}"})
+        try:
+            _, customer_phone = await _get_customer_email_phone(db, str(sale.customer_id))
+            if customer_phone:
+                await _send_sale_wa(db, sale, customer_phone, tipo="pago.recibido", extra={"MONTO": f"{float(body.monto):,.0f}"})
+        except Exception:
+            pass
     # Auto-generate InteliCont entry if not yet created
     try:
         await generate_sale_entry(db, str(sale.id))

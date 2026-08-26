@@ -80,6 +80,7 @@ async def get_open_session(register_id: str, db: AsyncSession = Depends(get_db))
 
 @router.get("/cash-sessions")
 async def list_sessions(
+    company_id: str = Query(),
     register_id: str | None = Query(None),
     user_id: str | None = Query(None),
     estado: str | None = Query(None),
@@ -87,7 +88,7 @@ async def list_sessions(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_sessions(db, register_id, user_id, estado, limit=limit, offset=offset)
+    return await service.list_sessions(db, company_id, register_id, user_id, estado, limit=limit, offset=offset)
 
 
 @router.get("/cash-sessions/{session_id}")

@@ -775,7 +775,7 @@ export const api = {
       update: (id: string, data: { nombre?: string; codigo?: string; activo?: boolean; cash_drop_threshold?: number; diferencia_maxima_tolerada?: number }) => client.put<CashRegister>(`/v1/cash-registers/${id}`, data),
     },
     sessions: {
-      list: (params?: { estado?: string; limit?: number; offset?: number }) => client.get<CashSession[]>("/v1/cash-sessions", params),
+      list: (params?: { estado?: string; limit?: number; offset?: number }) => client.get<CashSession[]>("/v1/cash-sessions", { company_id: COMPANY_ID, ...params }),
       create: (data: { cash_register_id?: string; caja_id?: string; user_id?: string; cajero_nombre?: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions", data),
       close: (id: string, data: { monto_cierre_real: number; monto_cierre_usd?: number; monto_cierre_brl?: number; observaciones?: string }) => client.post<{ session: CashSession; monto_cierre_esperado: number; diferencia: number; diferencia_usd: number; diferencia_brl: number; requiere_revision: boolean; total_cobrado: number; desglose_formas_pago: { forma_pago: string; moneda: string; monto: number }[] }>(`/v1/cash-sessions/${id}/close`, data),
     },

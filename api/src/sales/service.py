@@ -1,6 +1,6 @@
 """Sales service"""
 
-from sqlalchemy import select, update, func, cast, Integer
+from sqlalchemy import select, update, func, cast, Integer, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -525,6 +525,75 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
 
     sale.estado = "cancelado"
     sale.updated_at = datetime.now(timezone.utc)
+    # Antes solo se restauraba stock -- la cuenta por cobrar quedaba
+    # "pendiente" para siempre (podia bloquear credito futuro por mora de
+    # una venta que ya no existe), el credito reservado nunca se liberaba
+    # (el limite del cliente se iba comiendo con cada cancelacion aunque no
+    # deba nada), los puntos de fidelidad ganados quedaban en su saldo, y
+    # total_pagado/saldo se quedaban con el valor de una venta que ya no
+    # esta vigente.
+    sale.total_pagado = Decimal("0")
+    sale.saldo = Decimal("0")
+
+    if sale.condicion == "credito" and sale.customer_id:
+        from api.src.credit_accounts.models import CreditAccount, CreditMovement
+        compra_result = await db.execute(
+            select(CreditMovement)
+            .where(
+                CreditMovement.referencia_type == "sale",
+                CreditMovement.referencia_id == sale.id,
+                CreditMovement.tipo == "compra",
+            )
+            .order_by(CreditMovement.created_at.desc())
+            .limit(1)
+        )
+        compra_mov = compra_result.scalar_one_or_none()
+        if compra_mov:
+            account_result = await db.execute(select(CreditAccount).where(CreditAccount.id == compra_mov.credit_account_id))
+            account = account_result.scalar_one_or_none()
+            if account:
+                monto = compra_mov.monto
+                saldo_anterior = account.saldo_utilizado
+                account.saldo_utilizado = max(Decimal("0"), account.saldo_utilizado - monto)
+                account.saldo_disponible += monto
+                db.add(CreditMovement(
+                    company_id=account.company_id,
+                    credit_account_id=account.id,
+                    customer_id=account.customer_id,
+                    tipo="devolucion",
+                    monto=monto,
+                    saldo_anterior=saldo_anterior,
+                    saldo_nuevo=account.saldo_utilizado,
+                    referencia_type="sale",
+                    referencia_id=sale.id,
+                    observaciones=f"Venta {sale.numero} cancelada -- libera credito reservado",
+                ))
+
+        await db.execute(
+            text("""
+                UPDATE accounts_receivable
+                SET estado = 'cancelado', saldo_pendiente = 0
+                WHERE sale_id = :sale_id AND estado = 'pendiente'
+            """),
+            {"sale_id": str(sale.id)},
+        )
+
+    from api.src.loyalty.models import LoyaltyPoints
+    puntos_result = await db.execute(
+        select(func.coalesce(func.sum(LoyaltyPoints.puntos), 0))
+        .where(LoyaltyPoints.referencia_tipo == "sale", LoyaltyPoints.referencia_id == str(sale.id), LoyaltyPoints.tipo == "ganado")
+    )
+    puntos_otorgados = puntos_result.scalar() or 0
+    if puntos_otorgados and sale.customer_id:
+        db.add(LoyaltyPoints(
+            company_id=sale.company_id,
+            customer_id=sale.customer_id,
+            tipo="ajustado",
+            puntos=-int(puntos_otorgados),
+            referencia_tipo="sale",
+            referencia_id=str(sale.id),
+            descripcion=f"Reverso por cancelacion de venta {sale.numero}",
+        ))
 
     items_result = await db.execute(select(SaleItem).where(SaleItem.sale_id == sale.id))
     for item in items_result.scalars().all():
@@ -552,6 +621,17 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
                 lot.cantidad_disponible += remaining
                 lot.cantidad += remaining
                 remaining = 0
+
+            db.add(InventoryMovement(
+                company_id=sale.company_id,
+                product_id=item.product_id,
+                warehouse_id=stock.warehouse_id,
+                tipo="entrada_cancelacion_venta",
+                cantidad=qty,
+                referencia_type="sale",
+                referencia_id=sale.id,
+                motivo=f"Cancelacion de venta {sale.numero}",
+            ))
 
     await db.flush()
     await db.refresh(sale)

@@ -2704,9 +2704,14 @@ export default function POSPage() {
     // el cajero cargo en su propio campo -- eso reemplaza a la vieja
     // pestana "Pago Mixto".
     if (activeMethods.has("cash")) {
-      const pyg = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
-      const brl = parseFloat(payCashBrl.replace(/,/g, ".") || "0") * rates.BRL
-      const usd = parseFloat(payCashUsd.replace(/,/g, ".") || "0") * rates.USD
+      // Un monto mal tipeado (ej. una "," suelta en el campo de R$/US$)
+      // hace que parseFloat devuelva NaN, que se propaga a totalRecibidoPyg
+      // y de ahi a saldoRestantePyg -- y "NaN > 0" es false en JS, asi que
+      // el chequeo de "falta cobrar" en handleProcessCheckout se saltaba
+      // por completo, dejando pasar un cobro sin plata real detras.
+      const pyg = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10) || 0
+      const brl = (parseFloat(payCashBrl.replace(/,/g, ".") || "0") || 0) * rates.BRL
+      const usd = (parseFloat(payCashUsd.replace(/,/g, ".") || "0") || 0) * rates.USD
       recibido += pyg + brl + usd
     }
     if (activeMethods.has("bancard")) {
@@ -3581,7 +3586,12 @@ export default function POSPage() {
 
       if (e.key === "F12" || (e.code === "Space" && e.ctrlKey)) {
         e.preventDefault()
-        if (cart.length > 0) handleOpenPayment()
+        // Si el modal de cobro ya esta abierto, un F12 de mas (reflejo
+        // comun justo despues de abrirlo) no debe reiniciar handleOpenPayment
+        // -- eso borraba en silencio los montos que el cajero ya habia
+        // cargado en un pago dividido. Con el modal abierto, F12 no hace
+        // nada aca (el boton de Confirmar Cobro ya tiene su propio F12).
+        if (cart.length > 0 && !showPaymentModal) handleOpenPayment()
       } else if (e.key === "F2") {
         e.preventDefault()
         searchInputRef.current?.focus()
@@ -3594,7 +3604,11 @@ export default function POSPage() {
         setShowLostDemandModal(true)
       } else if (e.key === "F6") {
         e.preventDefault()
-        if (cart.length > 0) pauseCurrentSale()
+        // Mismo motivo que F12 arriba: con el modal de cobro abierto, F6
+        // pausaba la venta (vaciando el carrito) sin cerrar el modal, que
+        // se quedaba mostrando un cobro de una venta que ya no estaba en
+        // curso.
+        if (cart.length > 0 && !showPaymentModal) pauseCurrentSale()
       } else if (e.key === "F7") {
         e.preventDefault()
         if (pausedSales.length > 0) setShowPausedModal(true)
@@ -3613,7 +3627,7 @@ export default function POSPage() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [cart, totalPyg, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, manualWeightInput, targetWeighProduct])
+  }, [cart, totalPyg, pausedSales.length, showAperturaModal, showCierreTurnoModal, showManualWeightModal, showScaleModal, showSupervisorModal, showPosConfigModal, showPaymentModal, manualWeightInput, targetWeighProduct])
 
   // ── PALETA DE COLORES Y CONTRASTE DINÁMICO ────────────────────────────────
   const bgMain = dark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"
@@ -3907,7 +3921,7 @@ export default function POSPage() {
                         <td className="py-2 px-2 font-posMono tabular-nums">
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => updateQuantity(item.id, -1)}
+                              onClick={() => updateQuantity(item.id, item.es_pesable ? -0.1 : -1)}
                               className={`w-5 h-5 rounded flex items-center justify-center font-bold text-xs cursor-pointer ${
                                 dark ? "bg-slate-800 hover:bg-slate-700 text-slate-200" : "bg-slate-200 hover:bg-slate-300 text-slate-800"
                               }`}
@@ -3918,7 +3932,7 @@ export default function POSPage() {
                               {item.es_pesable ? item.quantity.toFixed(3) : item.quantity}
                             </span>
                             <button
-                              onClick={() => updateQuantity(item.id, 1)}
+                              onClick={() => updateQuantity(item.id, item.es_pesable ? 0.1 : 1)}
                               className={`w-5 h-5 rounded flex items-center justify-center font-bold text-xs cursor-pointer ${
                                 dark ? "bg-slate-800 hover:bg-slate-700 text-slate-200" : "bg-slate-200 hover:bg-slate-300 text-slate-800"
                               }`}

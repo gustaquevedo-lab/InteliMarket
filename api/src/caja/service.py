@@ -70,6 +70,7 @@ async def get_open_session(db: AsyncSession, register_id: str) -> CashSession | 
 
 async def list_sessions(
     db: AsyncSession,
+    company_id: str,
     register_id: str | None = None,
     user_id: str | None = None,
     estado: str | None = None,
@@ -78,7 +79,13 @@ async def list_sessions(
     limit: int = 50,
     offset: int = 0,
 ) -> list[CashSession]:
-    query = select(CashSession)
+    # Sin este join+filtro, cualquier usuario autenticado de CUALQUIER
+    # empresa podia listar las sesiones de caja de todas las demas (nombre
+    # de cajero, montos de apertura/cierre, estado) -- el unico filtro de
+    # tenant en este endpoint faltaba por completo.
+    query = select(CashSession).join(CashRegister, CashRegister.id == CashSession.register_id).where(
+        CashRegister.company_id == uuid.UUID(company_id)
+    )
     if register_id:
         query = query.where(CashSession.register_id == uuid.UUID(register_id))
     if user_id:
@@ -977,7 +984,14 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
     result = await db.execute(query)
     out = []
     for session_obj, count, register_nombre in result.all():
-        monto_cierre_esperado = float(session_obj.monto_apertura) + (float(count.monto_total) - float(count.diferencia or 0))
+        # count.monto_total ya es el efectivo contado (monto_cierre_real) y
+        # count.diferencia = contado - esperado, asi que
+        # (monto_total - diferencia) YA es el esperado completo (que ya
+        # incluye el fondo de apertura, sumado en close_session). Sumar
+        # monto_apertura de nuevo aca duplicaba el fondo en cada fila del
+        # arqueo diario -- el PDF mostraba un "esperado" inflado que nunca
+        # cuadraba con la diferencia real de la misma fila.
+        monto_cierre_esperado = float(count.monto_total) - float(count.diferencia or 0)
         out.append({
             "cajero_nombre": session_obj.cajero_nombre,
             "register_nombre": register_nombre,
