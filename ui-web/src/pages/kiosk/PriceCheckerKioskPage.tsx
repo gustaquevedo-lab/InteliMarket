@@ -62,7 +62,7 @@ function playBeepSound(ok: boolean) {
 }
 
 const SEGUNDOS_ESPERA = 8
-const BANNER_ROTATE_MS = 6000
+const BANNER_ROTATE_MS = 7000
 
 const monoFont = { fontFamily: "'IBM Plex Mono', monospace" }
 
