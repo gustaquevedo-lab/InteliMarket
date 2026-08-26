@@ -529,9 +529,13 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Quiebre preventivo -- ya era real (replenishmentData), se mantiene */}
-          <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center gap-1.5">
-              <ShieldAlert className="w-3.5 h-3.5 text-red-400" /> Quiebre Preventivo
+          <div
+            onClick={() => navigate("/purchases")}
+            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
+          >
+            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
+              <span className="flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5 text-red-400" /> Quiebre Preventivo</span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
             </div>
             <p className="text-xs text-slate-200">
               <strong className="text-red-400">{totalQuiebresIA} productos</strong> en quiebre inminente (&lt;3 días stock). Orden sugerida lista para emitir.
@@ -540,9 +544,13 @@ export default function Dashboard() {
 
           {/* Anomalias -- motor real de deteccion estadistica (demand_forecast),
               existia en el backend pero nunca se mostraba en ningun lado. */}
-          <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center gap-1.5">
-              <Activity className="w-3.5 h-3.5 text-amber-400" /> Anomalías Detectadas por IA
+          <div
+            onClick={() => navigate("/demand-forecast")}
+            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
+          >
+            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
+              <span className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-amber-400" /> Anomalías Detectadas por IA</span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
             </div>
             {anomalies.length > 0 ? (
               <p className="text-xs text-slate-200">
@@ -555,9 +563,13 @@ export default function Dashboard() {
 
           {/* Clientes en riesgo de fuga -- scoring RFM/churn real (customer360),
               con boton directo a las campañas de recuperacion ya existentes. */}
-          <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5 text-red-400" /> Clientes en Riesgo de Fuga
+          <div
+            onClick={() => navigate("/customer360")}
+            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
+          >
+            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
+              <span className="flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-red-400" /> Clientes en Riesgo de Fuga</span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
             </div>
             {churnDashboard ? (
               <p className="text-xs text-slate-200">
@@ -572,9 +584,13 @@ export default function Dashboard() {
           {/* Sugerencia de compra IA -- reposicion real ya calculada
               (replenishmentData / demand_forecast), antes solo alimentaba
               un numero en el KPI 5, sin mostrar la recomendacion en si. */}
-          <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center gap-1.5">
-              <Package className="w-3.5 h-3.5 text-emerald-400" /> Sugerencia de Compra IA
+          <div
+            onClick={() => navigate("/purchases")}
+            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
+          >
+            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
+              <span className="flex items-center gap-1.5"><Package className="w-3.5 h-3.5 text-emerald-400" /> Sugerencia de Compra IA</span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
             </div>
             {purchaseSuggestions.length > 0 ? (
               <p className="text-xs text-slate-200">
