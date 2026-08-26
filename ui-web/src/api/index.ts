@@ -491,8 +491,8 @@ export interface Vertical { id?: string; slug: string; nombre: string; descripci
 export interface CompanyVerticalConfig { vertical_id?: string; features?: string[]; config?: Record<string, unknown> }
 export interface IntegrationConfig { id: string; company_id?: string; destino?: string; tipo?: string; nombre?: string; url?: string; token?: string; headers?: Record<string, string>; activo?: boolean; eventos?: string[]; created_at?: string; updated_at?: string }
 export interface IntegrationDelivery { id: string; config_id?: string; evento?: string; url?: string; payload?: Record<string, unknown>; payload_size?: number; respuesta_status?: number; respuesta_body?: string; exitoso?: boolean; reintentos?: number; fecha_envio?: string; created_at?: string }
-export interface PriceList { id: string; company_id?: string; nombre?: string; descripcion?: string; tipo?: string; descuento_general?: number; activo?: boolean; fecha_inicio?: string; fecha_fin?: string; created_at?: string; updated_at?: string }
-export interface PriceListItem { id: string; lista_id?: string; producto_id?: string; producto?: Product; precio?: number; descuento?: number; margen?: number; activo?: boolean; created_at?: string; updated_at?: string }
+export interface PriceList { id: string; company_id?: string; nombre?: string; tipo?: string; customer_id?: string | null; grupo?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
+export interface PriceListItem { id: string; price_list_id?: string; product_id?: string; variant_id?: string | null; precio?: number; moneda?: string; notas?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
 export interface Kit { id: string; company_id?: string; nombre?: string; descripcion?: string; sku?: string; precio?: number; costo?: number; margen?: number; items?: KitItem[]; activo?: boolean; created_at?: string; updated_at?: string }
 export interface KitItem { id: string; kit_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; created_at?: string }
 export interface Backup { id: string; company_id?: string; tenant_id?: string; tenant_slug?: string | null; schema_name?: string; nombre?: string; filename?: string; file_size?: number; status?: string; backup_type?: string; expires_at?: string; tipo?: string; ruta?: string; tamano_bytes?: number; estado?: string; fecha_inicio?: string; fecha_fin?: string; duracion_seg?: number; error_mensaje?: string; created_at?: string }
@@ -1287,7 +1287,7 @@ export const api = {
     addItem: (listId: string, data: Partial<PriceListItem>) => client.post<PriceListItem>(`/v1/price-lists/${listId}/items`, data),
     updateItem: (listId: string, itemId: string, data: Partial<PriceListItem>) => client.patch<PriceListItem>(`/v1/price-lists/${listId}/items/${itemId}`, data),
     removeItem: (listId: string, itemId: string) => client.delete<void>(`/v1/price-lists/${listId}/items/${itemId}`),
-    lookup: (customerId: string, productId: string) => client.get<{ precio: number; lista_id: string; descuento: number }>("/v1/price-lists/lookup", { customer_id: customerId, product_id: productId }),
+    resolvePrice: (customerId: string, productId: string, quantity = 1) => client.get<{ precio: number; price_list_id: string; source: string } | null>("/v1/price-lists/lookup", { customer_id: customerId, product_id: productId, quantity }),
   },
   integrations: {
     configs: () => client.get<IntegrationConfig[]>("/api/integrations/configs"),
