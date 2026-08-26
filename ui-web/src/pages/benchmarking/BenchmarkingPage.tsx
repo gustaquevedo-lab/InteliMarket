@@ -190,24 +190,17 @@ export default function BenchmarkingPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-slate-800 pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <div className="p-2 rounded-2xl bg-gradient-to-tr from-sky-600 to-indigo-600 text-white shadow-md">
-              <Store className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
-                  <BarChart3 className="w-7 h-7 text-purple-600 dark:text-purple-400 shrink-0" />
-                  Benchmarking de Precios & Competitividad
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 uppercase">
-                  Datos Reales en Base de Datos
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Monitoreo continuo de precios en góndola de Superseis, Stock, Fortis, Box y Real para optimización de margen y competitividad.
-              </p>
-            </div>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
+              <BarChart3 className="w-7 h-7 text-purple-600 dark:text-purple-400 shrink-0" />
+              Benchmarking de Precios & Competitividad
+            </h1>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 uppercase">
+              Datos Reales en Base de Datos
+            </span>
           </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            Monitoreo continuo de precios en góndola de Superseis, Stock, Fortis, Box y Real para optimización de margen y competitividad.
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={loadData} disabled={loading} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">

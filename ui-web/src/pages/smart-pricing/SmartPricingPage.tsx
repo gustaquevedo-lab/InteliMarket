@@ -91,26 +91,19 @@ export default function SmartPricingPage() {
       {/* ── HEADER ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
         <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/20">
-              <Sparkles className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
-                  <Sparkles className="w-7 h-7 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  Smart Pricing & Optimización de Márgenes
-                </h1>
-                <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Catálogo Real ({totalProducts} SKUs)
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Cálculo de márgenes brutos, detección de precios desactualizados y ajuste en tiempo real
-              </p>
-            </div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
+              <Sparkles className="w-7 h-7 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              Smart Pricing & Optimización de Márgenes
+            </h1>
+            <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Catálogo Real ({totalProducts} SKUs)
+            </span>
           </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            Cálculo de márgenes brutos, detección de precios desactualizados y ajuste en tiempo real
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
