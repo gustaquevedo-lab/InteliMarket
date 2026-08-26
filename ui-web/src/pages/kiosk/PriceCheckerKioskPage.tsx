@@ -100,13 +100,17 @@ export default function PriceCheckerKioskPage() {
   // Logo real de la empresa y cotizaciones -- antes se pedian UNA sola
   // vez al montar, sin reintento; si ese pedido fallaba por cualquier corte
   // de red pasajero, la pantalla quedaba sin logo ni cotizaciones para
-  // siempre hasta que alguien la recargara a mano (a diferencia de los
-  // banners, que ya reintentaban solos). Ahora se repite cada 5 minutos,
-  // igual que los banners, para que se autorepare sola.
+  // siempre hasta que alguien la recargara a mano. Ahora, si falla (o la
+  // empresa todavia no esta disponible), reintenta a los 5 segundos en vez
+  // de esperar el ciclo normal de 5 minutos -- un corte pasajero se
+  // autorepara en segundos, no queda la pantalla en blanco mientras tanto.
   const fetchCompanyAndCurrencies = useCallback(() => {
     api.companies.list().then((list) => {
       const comp = list?.[0]
-      if (!comp) return
+      if (!comp) {
+        setTimeout(fetchCompanyAndCurrencies, 5000)
+        return
+      }
       setCompany(comp)
       const dbCurrencies = (comp.config as any)?.currencies
       const base = { BRL: { venta: 0, activo: false }, USD: { venta: 0, activo: false }, ARS: { venta: 0, activo: false } }
@@ -122,7 +126,7 @@ export default function PriceCheckerKioskPage() {
         }
       }
       setCotizaciones(base)
-    }).catch(() => {})
+    }).catch(() => setTimeout(fetchCompanyAndCurrencies, 5000))
   }, [])
 
   useEffect(() => {
@@ -133,13 +137,16 @@ export default function PriceCheckerKioskPage() {
 
   // Banners reales, cargados desde el panel de marketing -- sin fallback
   // inventado: si no hay ninguno cargado, simplemente no se muestra nada ahí.
-  useEffect(() => {
-    api.kiosk.banners.active().then(setBanners).catch(() => setBanners([]))
-    const interval = setInterval(() => {
-      api.kiosk.banners.active().then(setBanners).catch(() => {})
-    }, 5 * 60 * 1000)
-    return () => clearInterval(interval)
+  // Mismo reintento rapido que arriba ante un corte pasajero.
+  const fetchBanners = useCallback(() => {
+    api.kiosk.banners.active().then(setBanners).catch(() => setTimeout(fetchBanners, 5000))
   }, [])
+
+  useEffect(() => {
+    fetchBanners()
+    const interval = setInterval(fetchBanners, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [fetchBanners])
 
   useEffect(() => {
     if (banners.length <= 1) return
