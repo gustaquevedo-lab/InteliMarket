@@ -523,6 +523,7 @@ export default function POSPage() {
     customer?: Customer
     weightProduct?: Product
     weightEtiquetaKg?: number
+    weightBalanzaKg?: number
   } | null>(null)
   const [showRemoteAuthModal, setShowRemoteAuthModal] = useState(false)
   const [remoteAuthRequestId, setRemoteAuthRequestId] = useState<string | null>(null)
@@ -1923,7 +1924,28 @@ export default function POSPage() {
           // etiquetada, o etiqueta de otro producto).
           const balanzaDisponible = isScaleStable && currentScaleWeight > 0.015
           const diffKg = balanzaDisponible ? Math.abs(currentScaleWeight - weightKg) : 0
-          if (balanzaDisponible && diffKg > PESO_TOLERANCIA_KG) {
+          const esRiesgo = balanzaDisponible && diffKg > PESO_TOLERANCIA_KG
+          // Log de auditoria de CADA escaneo de etiqueta pesable -- coincida
+          // o no -- para que quede rastro completo, no solo de los casos
+          // que generan riesgo. accion distinta para el caso de riesgo asi
+          // se puede filtrar directo en /audit.
+          api.inteliaudit.recordEvent({
+            company_id: COMPANY_ID,
+            user_id: user?.id,
+            accion: esRiesgo ? "peso_discrepancia_detectada" : "peso_etiqueta_verificado",
+            entidad: "producto_pesable",
+            entidad_id: matchPesable.id,
+            datos_nuevos: {
+              producto_nombre: matchPesable.nombre,
+              etiqueta_kg: weightKg,
+              balanza_kg: balanzaDisponible ? currentScaleWeight : null,
+              balanza_disponible: balanzaDisponible,
+              diferencia_g: balanzaDisponible ? Math.round(diffKg * 1000) : null,
+              caja: puntoEmision,
+              cajero: user?.nombre,
+            },
+          } as any).catch(() => {})
+          if (esRiesgo) {
             setWeightMismatch({ product: matchPesable, etiquetaKg: weightKg, balanzaKg: currentScaleWeight })
             setSearch("")
             return
@@ -2037,11 +2059,11 @@ export default function POSPage() {
     } else if (action.type === "reopen_invoice") {
       await submitReabrirFactura(action.sale, action.customer, resolverId, resolverNombre)
     } else {
-      executeSupervisorAction(action)
+      executeSupervisorAction(action, resolverId, resolverNombre)
     }
   }
 
-  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number }) => {
+  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number, weightBalanzaKg?: number }) => {
     if (isSupervisorUser) {
       if (action.type === "process_return") {
         await submitDevolucion(user!.id, user?.nombre || "Supervisor")
@@ -2050,7 +2072,7 @@ export default function POSPage() {
       } else if (action.type === "reopen_invoice") {
         await submitReabrirFactura(action.sale!, action.customer!, user!.id, user?.nombre || "Supervisor")
       } else {
-        executeSupervisorAction(action)
+        executeSupervisorAction(action, user!.id, user?.nombre || "Supervisor")
       }
       return
     }
@@ -2114,10 +2136,26 @@ export default function POSPage() {
     return () => clearInterval(interval)
   }, [showRemoteAuthModal, remoteAuthRequestId, pendingSupervisorAction])
 
-  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number }) => {
+  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number, weightBalanzaKg?: number }, resolverId?: string, resolverNombre?: string) => {
     if (action.type === "extra_club_payment") {
       handleProcessCheckout()
     } else if (action.type === "use_label_weight" && action.weightProduct && action.weightEtiquetaKg) {
+      api.inteliaudit.recordEvent({
+        company_id: COMPANY_ID,
+        user_id: resolverId || user?.id,
+        accion: "peso_resuelto_etiqueta_autorizado",
+        entidad: "producto_pesable",
+        entidad_id: action.weightProduct.id,
+        datos_nuevos: {
+          producto_nombre: action.weightProduct.nombre,
+          etiqueta_kg: action.weightEtiquetaKg,
+          balanza_kg: action.weightBalanzaKg ?? null,
+          diferencia_g: action.weightBalanzaKg != null ? Math.round(Math.abs(action.weightEtiquetaKg - action.weightBalanzaKg) * 1000) : null,
+          caja: puntoEmision,
+          cajero: user?.nombre,
+          autorizado_por: resolverNombre || user?.nombre,
+        },
+      } as any).catch(() => {})
       addToCart(action.weightProduct, action.weightEtiquetaKg, "etiqueta_plu")
       setWeightMismatch(null)
       searchInputRef.current?.focus()
@@ -4607,19 +4645,55 @@ export default function POSPage() {
 
             <div className="space-y-2">
               <button
-                onClick={() => { addToCart(weightMismatch.product, weightMismatch.balanzaKg, "balmak_bck30"); setWeightMismatch(null); searchInputRef.current?.focus() }}
+                onClick={() => {
+                  api.inteliaudit.recordEvent({
+                    company_id: COMPANY_ID,
+                    user_id: user?.id,
+                    accion: "peso_resuelto_balanza",
+                    entidad: "producto_pesable",
+                    entidad_id: weightMismatch.product.id,
+                    datos_nuevos: {
+                      producto_nombre: weightMismatch.product.nombre,
+                      etiqueta_kg: weightMismatch.etiquetaKg,
+                      balanza_kg: weightMismatch.balanzaKg,
+                      diferencia_g: Math.round(Math.abs(weightMismatch.etiquetaKg - weightMismatch.balanzaKg) * 1000),
+                      caja: puntoEmision,
+                      cajero: user?.nombre,
+                    },
+                  } as any).catch(() => {})
+                  addToCart(weightMismatch.product, weightMismatch.balanzaKg, "balmak_bck30")
+                  setWeightMismatch(null)
+                  searchInputRef.current?.focus()
+                }}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Scale className="w-4 h-4" /> Usar peso de balanza ({weightMismatch.balanzaKg.toFixed(3)} KG)
               </button>
               <button
-                onClick={() => requestSupervisorAuthorization({ type: "use_label_weight", weightProduct: weightMismatch.product, weightEtiquetaKg: weightMismatch.etiquetaKg })}
+                onClick={() => requestSupervisorAuthorization({ type: "use_label_weight", weightProduct: weightMismatch.product, weightEtiquetaKg: weightMismatch.etiquetaKg, weightBalanzaKg: weightMismatch.balanzaKg })}
                 className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
               >
                 <ShieldCheck className="w-4 h-4" /> Usar peso de etiqueta (requiere supervisor)
               </button>
               <button
-                onClick={() => { setWeightMismatch(null); searchInputRef.current?.focus() }}
+                onClick={() => {
+                  api.inteliaudit.recordEvent({
+                    company_id: COMPANY_ID,
+                    user_id: user?.id,
+                    accion: "peso_discrepancia_cancelada",
+                    entidad: "producto_pesable",
+                    entidad_id: weightMismatch.product.id,
+                    datos_nuevos: {
+                      producto_nombre: weightMismatch.product.nombre,
+                      etiqueta_kg: weightMismatch.etiquetaKg,
+                      balanza_kg: weightMismatch.balanzaKg,
+                      caja: puntoEmision,
+                      cajero: user?.nombre,
+                    },
+                  } as any).catch(() => {})
+                  setWeightMismatch(null)
+                  searchInputRef.current?.focus()
+                }}
                 className="w-full py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 cursor-pointer"
               >
                 Cancelar -- volver a pesar
