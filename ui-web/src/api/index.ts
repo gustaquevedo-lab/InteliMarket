@@ -747,6 +747,7 @@ export const api = {
     linkQuote: (id: string, quoteId: string) => client.post<any>(`/v1/sales/${id}/link-quote`, { quote_id: quoteId }),
     linkOrder: (id: string, orderId: string) => client.post<any>(`/v1/sales/${id}/link-order`, { order_id: orderId }),
     attachTicket: (id: string, ticketB64: string) => client.patch<any>(`/v1/sales/${id}/ticket`, { recibo_escpos_b64: ticketB64 }),
+    reopenCustomer: (id: string, data: { customer_id: string; autorizado_por_id: string; autorizado_por_nombre: string }) => client.patch<Sale>(`/v1/sales/${id}/customer`, data),
     downloadReceipt: (id: string) => client.get<Blob>(`/v1/receipts/${id}`),
   },
   payments: {

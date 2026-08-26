@@ -260,10 +260,14 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         )
 
     await _deduct_stock_for_sale(db, sale, data)
-    await _award_loyalty_points(db, sale, data)
+    puntos_ganados = await _award_loyalty_points(db, sale, data)
 
     await db.flush()
     await db.refresh(sale)
+    # Atributo transitorio (no es columna) para que el router pueda mostrar
+    # los puntos recien ganados en la respuesta -- antes se calculaban pero
+    # se perdian, asi que la cajera nunca se enteraba de que se sumaron.
+    sale.puntos_ganados = puntos_ganados
     return sale
 
 
@@ -336,9 +340,9 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
             db.add(movement)
 
 
-async def _award_loyalty_points(db: AsyncSession, sale: Sale, data: SaleCreate) -> None:
+async def _award_loyalty_points(db: AsyncSession, sale: Sale, data: SaleCreate) -> int:
     if not data.customer_id:
-        return
+        return 0
     from api.src.loyalty import service as loyalty_service
     from api.src.loyalty.schemas import PointsCreate
     config = await loyalty_service.get_or_create_config(db, str(data.company_id))
@@ -361,6 +365,8 @@ async def _award_loyalty_points(db: AsyncSession, sale: Sale, data: SaleCreate) 
                 ),
                 config=config,
             )
+            return puntos
+    return 0
 
 
 async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:
@@ -408,10 +414,11 @@ async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:
         ],
     )
     await _deduct_stock_for_sale(db, sale, deduct_data)
-    await _award_loyalty_points(db, sale, deduct_data)
+    puntos_ganados = await _award_loyalty_points(db, sale, deduct_data)
 
     await db.flush()
     await db.refresh(sale)
+    sale.puntos_ganados = puntos_ganados
     return sale
 
 
@@ -426,6 +433,29 @@ async def attach_escpos_ticket(db: AsyncSession, sale_id: str, recibo_escpos_b64
     )
     await db.commit()
     return result.rowcount > 0
+
+
+async def reopen_sale_customer(
+    db: AsyncSession, sale_id: str, customer_id: str,
+    autorizado_por_id: str, autorizado_por_nombre: str,
+) -> Sale | None:
+    """Agrega la identificacion del cliente a una venta ya cerrada que salio
+    como Consumidor Final -- pedido real de las cajeras: el cliente se va,
+    la venta ya se cerro, y despues vuelve pidiendo que la factura lleve su
+    nombre. No reabre el cobro ni toca montos/items, solo el vinculo al
+    cliente -- siempre requiere autorizacion de supervisor (verificada en el
+    frontend via el mismo flujo de solicitud remota que ya usan devoluciones
+    y pagos Extra Club antes de llegar aca)."""
+    result = await db.execute(select(Sale).where(Sale.id == uuid.UUID(sale_id)))
+    sale = result.scalar_one_or_none()
+    if not sale:
+        return None
+    sale.customer_id = uuid.UUID(customer_id)
+    nota = f"[{datetime.now(timezone.utc).isoformat()}] Identificacion agregada por {autorizado_por_nombre}"
+    sale.observaciones = f"{sale.observaciones}\n{nota}" if sale.observaciones else nota
+    await db.commit()
+    await db.refresh(sale)
+    return sale
 
 
 async def list_sales(

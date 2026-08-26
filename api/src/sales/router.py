@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.sales.schemas import (
     SaleCreate, SaleUpdate, SaleResponse, SaleWithItems,
-    SaleAddPayment, SaleLinkQuote, SaleLinkOrder, SaleAttachTicket,
+    SaleAddPayment, SaleLinkQuote, SaleLinkOrder, SaleAttachTicket, SaleReopenCustomer,
 )
 from api.src.sales import service
 from api.src.events.emitters import emit_sale_completed
@@ -164,6 +164,16 @@ async def attach_ticket(sale_id: str, body: SaleAttachTicket, db: AsyncSession =
     if not ok:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
     return {"success": True}
+
+
+@router.patch("/sales/{sale_id}/customer", response_model=SaleResponse)
+async def reopen_sale_customer(sale_id: str, body: SaleReopenCustomer, db: AsyncSession = Depends(get_db)):
+    result = await service.reopen_sale_customer(
+        db, sale_id, str(body.customer_id), str(body.autorizado_por_id), body.autorizado_por_nombre,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return result
 
 
 @router.get("/companies/{company_id}/sales/today")

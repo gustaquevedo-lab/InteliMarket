@@ -369,6 +369,15 @@ export default function POSPage() {
   const [cashDropStatus, setCashDropStatus] = useState<{ efectivo_acumulado: number; cash_drop_threshold: number | null; cash_drop_alert: boolean; cash_drop_warning: boolean } | null>(null)
   const cashDropStatusNotifiedRef = useRef<"none" | "warning" | "alert">("none")
 
+  // Config de puntos de fidelidad -- se necesita al construir el ticket
+  // (antes de que la venta se cree en el backend) para poder imprimir
+  // "Sumaste X puntos" en el mismo comprobante, igual que ya se hace con
+  // el bloque de firma de Extra Club.
+  const [loyaltyConfig, setLoyaltyConfig] = useState<{ activo: boolean; crear_en_venta: boolean; puntos_por_guarani: number } | null>(null)
+  useEffect(() => {
+    api.loyalty.getConfig(COMPANY_ID).then((cfg: any) => setLoyaltyConfig(cfg)).catch(() => {})
+  }, [])
+
   useEffect(() => {
     api.caja.registers.list()
       .then((regs) => {
@@ -498,9 +507,11 @@ export default function POSPage() {
   const [verifyingSupervisor, setVerifyingSupervisor] = useState(false)
   const [supervisorReason, setSupervisorReason] = useState("Error de escaneo / digitación")
   const [pendingSupervisorAction, setPendingSupervisorAction] = useState<{
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment"
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice"
     itemId?: string
     delta?: number
+    sale?: Sale
+    customer?: Customer
   } | null>(null)
   const [showRemoteAuthModal, setShowRemoteAuthModal] = useState(false)
   const [remoteAuthRequestId, setRemoteAuthRequestId] = useState<string | null>(null)
@@ -1513,6 +1524,52 @@ export default function POSPage() {
   const [reimprimirReturns, setReimprimirReturns] = useState<any[]>([])
   const [reimprimirLoading, setReimprimirLoading] = useState(false)
   const [reimprimirError, setReimprimirError] = useState("")
+  // Reabrir factura -- agregar identificacion de cliente a una venta que
+  // salio como Consumidor Final. Pedido real: el cliente se va, la caja
+  // sigue, y despues vuelve pidiendo que la factura lleve su nombre.
+  // Siempre pasa por autorizacion de supervisor antes de tocar la venta.
+  const [reabrirFacturaSaleId, setReabrirFacturaSaleId] = useState<string | null>(null)
+  const [reabrirFacturaSearch, setReabrirFacturaSearch] = useState("")
+  const [reabrirFacturaResults, setReabrirFacturaResults] = useState<Customer[]>([])
+  const [reabrirFacturaSearching, setReabrirFacturaSearching] = useState(false)
+  const [submittingReabrirFactura, setSubmittingReabrirFactura] = useState(false)
+
+  useEffect(() => {
+    if (!reabrirFacturaSaleId) return
+    const query = reabrirFacturaSearch.trim()
+    if (!query) { setReabrirFacturaResults([]); return }
+    const timer = setTimeout(async () => {
+      setReabrirFacturaSearching(true)
+      try {
+        const res = await api.customers.list({ search: query, limit: 8 })
+        setReabrirFacturaResults((res || []).map(normalizeCustomer))
+      } catch (e) {
+      } finally {
+        setReabrirFacturaSearching(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [reabrirFacturaSearch, reabrirFacturaSaleId])
+
+  const submitReabrirFactura = async (sale: Sale, selected: Customer, resolverId: string, resolverNombre: string) => {
+    setSubmittingReabrirFactura(true)
+    try {
+      const updated = await api.sales.reopenCustomer(sale.id, {
+        customer_id: String(selected.id),
+        autorizado_por_id: resolverId,
+        autorizado_por_nombre: resolverNombre,
+      })
+      setReimprimirSales(prev => prev.map(s => s.id === sale.id ? { ...s, customer_id: updated.customer_id } as any : s))
+      setReabrirFacturaSaleId(null)
+      setReabrirFacturaSearch("")
+      setReabrirFacturaResults([])
+      toast.success("Factura reabierta", `${selected.nombre} vinculado a la venta Nº ${sale.numero}. Se puede reimprimir con su identificación.`)
+    } catch (e: any) {
+      toast.error("No se pudo reabrir la factura", e?.message || "Intente nuevamente.")
+    } finally {
+      setSubmittingReabrirFactura(false)
+    }
+  }
 
   const fetchReimprimirReturns = async () => {
     setReimprimirLoading(true)
@@ -1884,6 +1941,10 @@ export default function POSPage() {
         }
         return `Pago Extra Club: ${nombre}${numero} · ${formatPYG(totalPyg)}${saldoTxt}`
       }
+      case "reopen_invoice": {
+        const nombre = (action as any).customer?.nombre || "cliente"
+        return `Agregar identificación a factura Nº ${(action as any).sale?.numero || ""}: ${nombre}`
+      }
       default:
         return "Autorización de supervisor"
     }
@@ -1896,17 +1957,21 @@ export default function POSPage() {
       await submitAssignTerminal()
     } else if (action.type === "extra_club_payment") {
       await handleProcessCheckout()
+    } else if (action.type === "reopen_invoice") {
+      await submitReabrirFactura(action.sale, action.customer, resolverId, resolverNombre)
     } else {
       executeSupervisorAction(action)
     }
   }
 
-  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment", itemId?: string, delta?: number }) => {
+  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice", itemId?: string, delta?: number, sale?: Sale, customer?: Customer }) => {
     if (isSupervisorUser) {
       if (action.type === "process_return") {
         await submitDevolucion(user!.id, user?.nombre || "Supervisor")
       } else if (action.type === "assign_terminal") {
         await submitAssignTerminal()
+      } else if (action.type === "reopen_invoice") {
+        await submitReabrirFactura(action.sale!, action.customer!, user!.id, user?.nombre || "Supervisor")
       } else {
         executeSupervisorAction(action)
       }
@@ -1972,7 +2037,7 @@ export default function POSPage() {
     return () => clearInterval(interval)
   }, [showRemoteAuthModal, remoteAuthRequestId, pendingSupervisorAction])
 
-  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment", itemId?: string, delta?: number }) => {
+  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice", itemId?: string, delta?: number, sale?: Sale, customer?: Customer }) => {
     if (action.type === "extra_club_payment") {
       handleProcessCheckout()
     } else if (action.type === "remove_item" && action.itemId) {
@@ -3062,6 +3127,16 @@ export default function POSPage() {
       }
 
       // Formateo de Factura Térmica Dinámica (Calibrada al ancho y márgenes configurados en el Diseñador)
+      // Estimacion de puntos de fidelidad -- misma formula que usa el backend
+      // (piso de total/puntos_por_guarani), asi que coincide con lo que
+      // realmente se va a guardar. No aplica a Consumidor Final.
+      const puntosEstimados = (
+        customer.id !== DEFAULT_CUSTOMER.id &&
+        loyaltyConfig?.activo &&
+        loyaltyConfig?.crear_en_venta &&
+        loyaltyConfig?.puntos_por_guarani > 0
+      ) ? Math.floor(totalPyg / loyaltyConfig.puntos_por_guarani) : 0
+
       const receiptHtml = `
         <div style="font-family: '${font}', 'Consolas', 'Segoe UI', monospace; font-size: ${fontSize}px; line-height: ${interlineado}; margin: 0 auto; padding-left: ${margenIzqMm}mm; padding-right: ${margenDerMm}mm; box-sizing: border-box; width: 100%; max-width: ${anchoImprimibleMm}mm; color: #000;">
           <div style="text-align: center; margin-bottom: 5px;">
@@ -3164,6 +3239,12 @@ export default function POSPage() {
               <div>Empresa: ${customer.empresa_vinculada_nombre ? `${customer.empresa_vinculada_nombre.trim()}${customer.empresa_vinculada_ruc ? ` (${customer.empresa_vinculada_ruc})` : ""}` : "-"}</div>
               <div style="text-align: center; margin-top: 14px; border-top: 1px solid #000; padding-top: 2px; width: 70%; margin-left: auto; margin-right: auto;">Firma del cliente</div>
               <div style="text-align: center; font-size: 8px; margin-top: 3px;">Factura a crédito Extra Club -- documento con valor para cobro</div>
+            </div>
+          ` : ''}
+
+          ${puntosEstimados > 0 ? `
+            <div style="border-top: 1px dashed #000; margin-top: 5px; padding-top: 3px; font-size: 9.5px; text-align: center; font-weight: bold;">
+              ⭐ Sumaste ${puntosEstimados} puntos de fidelidad
             </div>
           ` : ''}
 
@@ -3379,6 +3460,13 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_LEFT
         }
 
+        if (puntosEstimados > 0) {
+          t += escposDashes(W) + '\n'
+          t += ESCPOS_ALIGN_CENTER
+          t += ESCPOS_BOLD_ON + `Sumaste ${puntosEstimados} puntos de fidelidad` + ESCPOS_BOLD_OFF + '\n'
+          t += ESCPOS_ALIGN_LEFT
+        }
+
         if (showIva) {
           t += escposDashes(W) + '\n'
           t += 'LIQUIDACION DEL IVA (Ley 6380/19):\n'
@@ -3458,7 +3546,7 @@ export default function POSPage() {
       setShowPaymentModal(false)
       setCart([])
       setCustomer(DEFAULT_CUSTOMER)
-      toast.success("¡Cobro Exitoso!", `Comprobante ${numeroComprobante} emitido. Vuelto: ${formatPYG(vueltoPyg)}`)
+      toast.success("¡Cobro Exitoso!", `Comprobante ${numeroComprobante} emitido. Vuelto: ${formatPYG(vueltoPyg)}` + (puntosEstimados > 0 ? ` -- Sumó ${puntosEstimados} puntos de fidelidad.` : ""))
     } catch (err: any) {
       toast.error("Error al procesar cobro", err.message)
     } finally {
@@ -5983,7 +6071,12 @@ export default function POSPage() {
                   }`}
                 >
                   <div>
-                    <div className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">{c.nombre}</div>
+                    <div className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 flex items-center gap-1.5">
+                      {c.nombre}
+                      {(c as any).extra_club_numero ? (
+                        <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">★ Extra Club</span>
+                      ) : null}
+                    </div>
                     <div className="text-[10px] text-slate-500 dark:text-slate-400 font-posMono tabular-nums">
                       {c.ruc ? `RUC: ${c.ruc}` : `CI: ${c.ci || 'Sin Doc'}`} · {c.razon_social || ""} {c.telefono ? `· Tel: ${c.telefono}` : ""}
                       {String(c.id).startsWith("lookup-") ? " · (padrón, se registrará al elegir)" : ""}
@@ -6341,26 +6434,80 @@ export default function POSPage() {
                   {reimprimirSales.length === 0 && (
                     <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">No hay ventas recientes para mostrar.</div>
                   )}
-                  {reimprimirSales.map((sale) => (
+                  {reimprimirSales.map((sale) => {
+                    const sinIdentificar = !sale.customer_id || sale.customer_id === DEFAULT_CUSTOMER.id
+                    return (
                     <div
                       key={sale.id}
-                      className="flex items-center justify-between gap-3 p-3 mx-1 my-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent hover:border-slate-300 dark:hover:border-slate-700"
+                      className="p-3 mx-1 my-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent hover:border-slate-300 dark:hover:border-slate-700"
                     >
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-slate-900 dark:text-white truncate">Nº {sale.numero || sale.id.slice(0, 8)}</div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
-                          {sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY") : "—"} · {formatPYG(sale.total || 0)}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-slate-900 dark:text-white truncate">Nº {sale.numero || sale.id.slice(0, 8)}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            {sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY") : "—"} · {formatPYG(sale.total || 0)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {sinIdentificar && (
+                            <button
+                              onClick={() => { setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id); setReabrirFacturaSearch(""); setReabrirFacturaResults([]) }}
+                              title="Agregar identificación de cliente a esta factura (requiere autorización de supervisor)"
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white"
+                            >
+                              <User className="w-3.5 h-3.5" />
+                              Reabrir
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleReimprimirSale(sale)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            Reimprimir
+                          </button>
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleReimprimirSale(sale)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shrink-0"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        Reimprimir
-                      </button>
+                      {reabrirFacturaSaleId === sale.id && (
+                        <div className="mt-2 border-t border-slate-200 dark:border-slate-800 pt-2">
+                          <input
+                            type="text"
+                            value={reabrirFacturaSearch}
+                            onChange={(e) => setReabrirFacturaSearch(e.target.value)}
+                            placeholder="Buscar cliente por nombre, CI o RUC..."
+                            autoFocus
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-sm text-slate-900 dark:text-white outline-none focus:border-purple-500"
+                          />
+                          {reabrirFacturaSearch.trim() && (
+                            <div className="mt-1.5 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                              {reabrirFacturaSearching ? (
+                                <div className="p-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando...</div>
+                              ) : reabrirFacturaResults.length > 0 ? (
+                                reabrirFacturaResults.map((c) => (
+                                  <button
+                                    key={String(c.id)}
+                                    disabled={submittingReabrirFactura}
+                                    onClick={() => requestSupervisorAuthorization({ type: "reopen_invoice", sale, customer: c })}
+                                    className="w-full text-left p-2 text-sm hover:bg-purple-50 dark:hover:bg-purple-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50"
+                                  >
+                                    <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                      {c.nombre}
+                                      {(c as any).extra_club_numero ? (
+                                        <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">★ Extra Club</span>
+                                      ) : null}
+                                    </div>
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">{c.ruc || c.ci || c.telefono || "—"}</div>
+                                  </button>
+                                ))
+                              ) : (
+                                <div className="p-2 text-xs text-slate-500 dark:text-slate-400">No se encontró ningún cliente.</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  )})}
                 </>
               )}
 
@@ -6447,7 +6594,12 @@ export default function POSPage() {
                             onClick={() => setLostDemandCustomer(c)}
                             className="w-full text-left p-2.5 text-sm hover:bg-amber-50 dark:hover:bg-amber-500/10 border-b border-slate-100 dark:border-slate-800 last:border-b-0"
                           >
-                            <div className="font-bold text-slate-800 dark:text-slate-200">{c.nombre}</div>
+                            <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                              {c.nombre}
+                              {(c as any).extra_club_numero ? (
+                                <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black uppercase tracking-wider">★ Extra Club</span>
+                              ) : null}
+                            </div>
                             <div className="text-xs text-slate-500 dark:text-slate-400">{c.telefono || c.ruc || c.ci || "—"}</div>
                           </button>
                         ))

@@ -74,6 +74,7 @@ class SaleResponse(BaseModel):
     cdc: Optional[str] = None
     sifen_estado: Optional[str] = None
     observaciones: Optional[str] = None
+    puntos_ganados: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -108,3 +109,9 @@ class SaleLinkOrder(BaseModel):
 
 class SaleAttachTicket(BaseModel):
     recibo_escpos_b64: str
+
+
+class SaleReopenCustomer(BaseModel):
+    customer_id: UUID
+    autorizado_por_id: UUID
+    autorizado_por_nombre: str
