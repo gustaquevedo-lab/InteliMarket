@@ -141,6 +141,41 @@ Se evaluaron 3 caminos con el cliente:
 4. Evaluar si integrar contra `SDL.mdb` directamente (más robusto, pero DB Access protegida) o seguir con archivo de import (más simple, pero requiere confirmar qué carpeta/mecanismo dispara la importación real — no se encontró ningún archivo generado en `C:\ConceptoSistemas\Balancas`, el parámetro del legacy `DESTINO_ARQUIVOS_INTEGRACAO_BALANCA` parece no estar realmente en uso).
 5. Acceso usado: WinRM a `192.168.0.231`, usuario `dpto. compras 02`, ver con el usuario si conviene un usuario de servicio dedicado en vez de reusar el de Compras.
 
+### ✅ SESIÓN 2026-08-26 (continuación) — protocolo capturado y decodificado, cliente TCP implementado
+
+Retomado el mismo día. Se coordinó con el cliente un envío real desde SDL.exe y se capturó tráfico de dos formas:
+
+1. **tcpdump pasivo desde la VM** — falló: la VM está en la misma LAN (`192.168.0.242`) pero el tráfico unicast `.231`↔balanzas no llega a su puerto de switch (no hay port mirroring). Solo se vio broadcast/multicast de `.231`.
+2. **`pktmon` nativo de Windows, corrido vía WinRM en la propia PC de Compras** (`192.168.0.231`, filtrado a las 3 IPs de balanza) — funcionó. Sin instalar nada de terceros (no Npcap/Wireshark), capturó el envío real completo, se convirtió a `.pcapng` con `pktmon pcapng` y se bajó a la VM por `smbclient` contra el share `C$` (mismas credenciales WinRM). Archivos temporales borrados de la PC de Compras al terminar.
+
+**El protocolo real NO es binario** (la hipótesis del `SDLtxt.tmp` de 284 bytes de la sesión anterior queda obsoleta) — es **texto plano, BOM UTF-8, líneas `\r\n`, campos tab-delimited**:
+
+```
+UPL\tINF\t\r\n                                                    → pide info de la balanza
+  resp: DWL\tINF\t\r\nINF\t<depto>\t<depto>\t1\t<modelo>\t0\t1\t<serial>\t\r\nEND\tINF\t\r\n
+DWL\tTIM\t\r\nTIM\t<dd>\t<mm>\t<yy>\t<hh>\t<mi>\t<ss>\t\r\nEND\tTIM\t\r\n      → sincroniza hora
+  resp: DWL\tTIM\t<YYYYMMDDHHMMSS>\t1\r\nTIM\t...\r\nEND\tTIM\t1\t\t\r\n
+DWL\tPLU\t\r\n\r\n<record>\r\n<record>...\r\nEND\tPLU\t\r\n               → carga catálogo completo
+  resp: DWL\tPLU\t<YYYYMMDDHHMMSS>\t1\r\nEND\tPLU\t1\t\t\r\n
+```
+
+Cada `<record>` PLU tiene **148 campos** tab-delimited, constantes en las 505 filas reales capturadas salvo 3: PLUID (campo 1), precio formato `<entero>,0` (campo 5) y nombre (campo 15).
+
+**Confirmado por INF real de cada balanza** (resuelve la duda pendiente de la sesión anterior sobre qué IP es cuál):
+- `192.168.0.72:4011` → **CARNICERIA1**
+- `192.168.0.73:4001` → **PANADERIA**
+- `192.168.0.74:4010` → **CARNICERIA**
+
+Es decir, hay **2 cabezales físicos de Carnicería** (`.72` y `.74`) y **1 de Panadería** (`.73`) — no 1 y 1 como asumían las 2 filas actuales de `scale_configs`.
+
+**Implementado en [`balmak_edge.py`](api/src/integrations/scales/drivers/balmak_edge.py)**: `BalmakEdgeDriver` reescrito para hablar este protocolo por TCP directo (sin SDL.exe, sin Windows). `test_connection()` probado en vivo contra las 3 IPs reales (INF real, solo lectura) — funciona. `sync_plu()` construye el mismo bloque `DWL/PLU` byte-a-byte compatible con lo que la balanza ya acepta (plantilla de 148 campos extraída y verificada carácter por carácter contra la captura real) — **implementado pero todavía NO probado en vivo contra el catálogo real** (evitado a propósito: escribiría sobre el catálogo de producción que usa el personal ahora mismo).
+
+**Pendiente para la próxima sesión**:
+1. Probar `sync_plu()` en vivo — idealmente con 1 producto de prueba contra una sola balanza, coordinado con el cliente, antes de habilitar `sync_automatico` de verdad.
+2. Decidir cómo modelar los 2 cabezales de Carnicería en `scale_configs` (agregar una 3ra fila "Carnicería · Cabezal 2" con host `.74`, o alguna otra estrategia) — hoy la tabla asume 1 host por fila.
+3. Cargar `host`/`puerto_tcp` reales en las 2 filas existentes (hoy vacío): Carnicería → `192.168.0.72` puerto `4011` (o `.74`/`4010` si se resuelve el punto 2), Panadería → `192.168.0.73` puerto `4001`.
+4. `sync_time()` no se automatizó (no hay evidencia de que la balanza lo exija antes de aceptar PLU) — si en producción se detecta que hace falta, agregar esa llamada antes del push.
+
 
 ## 🚨 SESIÓN 2026-08-26 (TARDE) — Verificador de Precios movido a PRODUCCIÓN, no volver a sandbox
 
