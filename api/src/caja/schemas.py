@@ -86,6 +86,12 @@ class RejectCashDropRequest(BaseModel):
     motivo: str
 
 
+class VoidCashDropRequest(BaseModel):
+    anulado_por: UUID
+    anulado_por_nombre: str
+    motivo: str
+
+
 class ConfirmHandoffRequest(BaseModel):
     recibido_por: UUID
     recibido_por_nombre: str

@@ -138,7 +138,17 @@ class WhatsAppTemplate(Base):
     tenant_id = Column(UUID(as_uuid=True), nullable=False)
     name = Column(String(100), nullable=False)
     content = Column(Text, nullable=False)
-    tipo = Column(SAEnum(TemplateTipo), nullable=False)
+    # No es TemplateTipo (ese enum es para otra cosa -- welcome/order_status/
+    # etc, una categorizacion de negocio que nunca se uso para esto). El
+    # valor real que se guarda aca son claves libres tipo "venta.creada",
+    # "pedido.pendiente", "entrega.assigned" (ver DEFAULT_WA_TEMPLATES en
+    # whatsapp/service.py) -- declararlo como SAEnum(TemplateTipo) generaba
+    # un tipo ENUM de Postgres ("templatetipo") que la tabla real nunca tuvo
+    # (la columna en la base siempre fue varchar), asi que CUALQUIER consulta
+    # a esta tabla tiraba "type templatetipo does not exist" y rompia todas
+    # las notificaciones de WhatsApp (venta creada, cancelada, pago
+    # recibido) para cualquier cliente con telefono cargado.
+    tipo = Column(String(50), nullable=False)
     active = Column(Boolean, default=True, server_default="true")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

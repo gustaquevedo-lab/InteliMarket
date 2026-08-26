@@ -170,8 +170,13 @@ async def close_session(
     observaciones: str | None = None,
     tenant_id: str | None = None,
 ) -> dict | None:
+    # FOR UPDATE: si dos cierres del mismo turno llegan casi juntos (doble
+    # click, reintento de red), el segundo espera a que el primero termine
+    # su transaccion y recien ahi lee el estado -- sin esto, ambos podian
+    # leer estado=="abierta" al mismo tiempo y los dos generaban su propio
+    # CashCount + CashHandoff para el mismo efectivo contado una sola vez.
     result = await db.execute(
-        select(CashSession).where(CashSession.id == uuid.UUID(session_id))
+        select(CashSession).where(CashSession.id == uuid.UUID(session_id)).with_for_update()
     )
     session_obj = result.scalar_one_or_none()
     if not session_obj or session_obj.estado != "abierta":
@@ -627,6 +632,61 @@ async def reject_cash_drop_request(db: AsyncSession, request_id: str, company_id
     return req
 
 
+async def void_confirmed_cash_drop(
+    db: AsyncSession, request_id: str, company_id: str, anulado_por: str, anulado_por_nombre: str, motivo: str,
+) -> CashDropRequest | str | None:
+    """Antes, un retiro YA confirmado por un supervisor (con monto mal
+    contado, o cargado por error) no tenia forma de deshacerse -- ni la
+    CashRegisterMovement ni la VaultEntry que genero confirm_cash_drop_request
+    podian anularse, solo corrigiendose a mano en la base. Requiere el mismo
+    nivel de autorizacion que confirmar (admin/supervisor), deja el monto
+    fuera del saldo de boveda (VaultEntry.estado deja de ser 'en_boveda') y
+    dos asientos nuevos (uno en cada ledger) documentando la anulacion en
+    vez de borrar el rastro de lo que paso."""
+    user_result = await db.execute(select(User).where(User.id == uuid.UUID(anulado_por)))
+    supervisor = user_result.scalar_one_or_none()
+    if not supervisor or not supervisor.activo or (supervisor.rol not in ("admin", "supervisor") and not supervisor.is_superadmin):
+        return "forbidden"
+
+    result = await db.execute(
+        select(CashDropRequest)
+        .where(CashDropRequest.id == uuid.UUID(request_id), CashDropRequest.company_id == uuid.UUID(company_id))
+        .with_for_update()
+    )
+    req = result.scalar_one_or_none()
+    if not req or req.estado != "confirmado":
+        return None
+
+    vault_result = await db.execute(
+        select(VaultEntry).where(
+            VaultEntry.company_id == req.company_id,
+            VaultEntry.origen == "cash_drop",
+            VaultEntry.estado == "en_boveda",
+            VaultEntry.monto_pyg == req.monto_confirmado_pyg,
+        ).order_by(VaultEntry.created_at.desc()).limit(1)
+    )
+    vault_entry = vault_result.scalar_one_or_none()
+    if vault_entry:
+        vault_entry.estado = "anulado"
+        vault_entry.observaciones = f"{vault_entry.observaciones + ' -- ' if vault_entry.observaciones else ''}Anulado por {anulado_por_nombre}: {motivo}"
+
+    req.estado = "anulado"
+    req.observaciones = f"{req.observaciones + ' -- ' if req.observaciones else ''}ANULADO por {anulado_por_nombre}: {motivo}"
+
+    db.add(CashRegisterMovement(
+        company_id=req.company_id,
+        register_id=req.register_id,
+        tipo="retiro_anulado",
+        monto=req.monto_confirmado_pyg or req.monto_pyg,
+        moneda="PYG",
+        fecha=datetime.now(timezone.utc),
+        observaciones=f"Anulacion de retiro confirmado, sesion {req.session_id} -- {motivo}",
+    ))
+    await db.flush()
+    await db.refresh(req)
+    return req
+
+
 # ── Entregas de efectivo (custodia cajera -> supervisor) ────────────────
 
 async def list_pending_handoffs(db: AsyncSession, company_id: str, estado: str | None = None, limit: int = 100) -> list[dict]:
@@ -700,8 +760,14 @@ async def confirm_handoff(
     if not supervisor or not supervisor.activo or (supervisor.rol not in ("admin", "supervisor") and not supervisor.is_superadmin):
         return "forbidden"
 
+    # FOR UPDATE: dos supervisores confirmando el mismo traspaso casi a la
+    # vez no deben generar dos VaultEntry para el mismo efectivo contado una
+    # sola vez -- el segundo espera, relee el estado ya "confirmado" y sale
+    # por el mismo camino de "ya estaba confirmada" de siempre.
     result = await db.execute(
-        select(CashHandoff).where(CashHandoff.id == uuid.UUID(handoff_id), CashHandoff.company_id == uuid.UUID(company_id))
+        select(CashHandoff)
+        .where(CashHandoff.id == uuid.UUID(handoff_id), CashHandoff.company_id == uuid.UUID(company_id))
+        .with_for_update()
     )
     handoff = result.scalar_one_or_none()
     if not handoff or handoff.estado != "pendiente":
@@ -894,11 +960,15 @@ async def list_vault_deposit_approvals(db: AsyncSession, company_id: str, estado
 async def approve_vault_deposit(db: AsyncSession, request_id: str, company_id: str, user_id: str, tenant_id: str) -> dict:
     from api.src.rbac.service import get_user_roles
 
+    # FOR UPDATE: dos aprobadores del mismo rol llenando el mismo slot casi
+    # a la vez (ej. dos Gerentes) no deben poder pisarse el id el uno al
+    # otro -- el segundo espera, relee el slot ya lleno y no vuelve a
+    # sobreescribirlo (el UPDATE por PK de SQLAlchemy no distinguia esto).
     result = await db.execute(
         select(VaultDepositApprovalRequest).where(
             VaultDepositApprovalRequest.id == uuid.UUID(request_id),
             VaultDepositApprovalRequest.company_id == uuid.UUID(company_id),
-        )
+        ).with_for_update()
     )
     request = result.scalar_one_or_none()
     if not request:
@@ -945,7 +1015,7 @@ async def reject_vault_deposit(db: AsyncSession, request_id: str, company_id: st
         select(VaultDepositApprovalRequest).where(
             VaultDepositApprovalRequest.id == uuid.UUID(request_id),
             VaultDepositApprovalRequest.company_id == uuid.UUID(company_id),
-        )
+        ).with_for_update()
     )
     request = result.scalar_one_or_none()
     if not request:

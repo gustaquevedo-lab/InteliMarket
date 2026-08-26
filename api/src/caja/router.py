@@ -13,7 +13,7 @@ from api.src.caja.schemas import (
     CashRegisterCreate, CashRegisterUpdate, CashRegisterResponse,
     CashSessionCreate, CashSessionClose, CashSessionResponse, CashDropCreate,
     ConfirmHandoffRequest, DepositVaultEntriesRequest, RejectVaultDepositRequest,
-    ConfirmCashDropRequest, RejectCashDropRequest,
+    ConfirmCashDropRequest, RejectCashDropRequest, VoidCashDropRequest,
 )
 from api.src.caja import service
 from api.src.caja import pdf_reports
@@ -180,6 +180,18 @@ async def reject_cash_drop_request(request_id: str, body: RejectCashDropRequest,
     result = await service.reject_cash_drop_request(db, request_id, user["company_id"], body.motivo)
     if not result:
         raise HTTPException(status_code=400, detail="Retiro no encontrado o ya resuelto")
+    return result
+
+
+@router.post("/cash-drop-requests/{request_id}/void")
+async def void_confirmed_cash_drop(request_id: str, body: VoidCashDropRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    result = await service.void_confirmed_cash_drop(
+        db, request_id, user["company_id"], str(body.anulado_por), body.anulado_por_nombre, body.motivo,
+    )
+    if result == "forbidden":
+        raise HTTPException(status_code=403, detail="Solo un supervisor o administrador puede anular un retiro")
+    if not result:
+        raise HTTPException(status_code=400, detail="Retiro no encontrado o no esta confirmado")
     return result
 
 
