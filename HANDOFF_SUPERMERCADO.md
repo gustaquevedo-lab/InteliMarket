@@ -9,6 +9,29 @@
 
 ---
 
+## 🚨 SESIÓN 2026-08-26 (TARDE) — Verificador de Precios movido a PRODUCCIÓN, no volver a sandbox
+
+**Decisión explícita del usuario**: las terminales físicas del salón ahora apuntan a **producción** (`http://192.168.0.242:5173/verificador`), no a sandbox. El usuario pidió expresamente no volver a tocar esto ("no volvamos a tocar lo que funciona") — **cualquier cambio futuro al Verificador de Precios se prueba en sandbox primero, pero el URL de las terminales físicas ya NO se toca sin pedido explícito.**
+
+**Por qué se cambió**: el usuario cargó un banner de marketing y no aparecía en las pantallas — cargó en producción (el sistema que usa por costumbre) mientras las terminales apuntaban a sandbox. Dos bases de datos separadas, confusión real y repetida. Se decidió unificar en producción de una vez.
+
+**Qué se hizo para el cambio**:
+1. Se restartearon `intelimarket-api.service` e `intelimarket-ui.service` (con `sudo -n systemctl restart intelimarket-api` / `intelimarket-ui`, permitido sin contraseña) para que producción tenga todo el código del Verificador (antes nunca se había reiniciado con este trabajo adentro).
+2. **`public.companies.config.currencies` no tenía los flags `activo` por moneda** (ese fix solo se había aplicado a `sandbox` vía API). Se corrigió directo por SQL (ver `UPDATE public.companies SET config = jsonb_set(...)`, cast `config::jsonb` porque la columna es `json` plano, no `jsonb`). Sin esto, producción hubiera mostrado los 3 tipos de cambio como inactivos (pizarra vacía) apenas se cambiara el URL.
+3. El banner que el usuario había cargado en producción (`public.kiosk_banners`, id `90d3228c-...`) se copió también a `sandbox.kiosk_banners` para que quedaran sincronizados mientras se probaba.
+4. **Bug real encontrado y corregido**: `PriceCheckerKioskPage.tsx` pedía el logo y las cotizaciones **una sola vez** al montar, sin reintento (`useEffect(..., [])`) — a diferencia de los banners, que ya reintentaban solos cada 5 min. Si ese único pedido fallaba por cualquier corte de red pasajero (hubo varios cortes reales de LAN/Tailscale esta sesión), la pantalla quedaba sin logo ni cotizaciones **para siempre** hasta un reload manual. Commit `e38059a`: ahora se repite cada 5 min igual que los banners, autoreparándose sola.
+5. Terminales físicas: `launch.bat` reescrito para apuntar a `:5173` en vez de `:5174`, mismos flags de siempre + `--remote-debugging-port=9222 --remote-allow-origins=*` agregado para poder depurar la consola real a distancia sin adivinar la próxima vez.
+
+**Estado de las terminales**:
+- `192.168.0.234` (usuario `pc`, host `CONSULTOR3`) — **pendiente de cambiar a producción.** Estuvo inalcanzable por WinRM (`No route to host` en el puerto 5985) toda la sesión pese a que el usuario reportó ver la pantalla funcionando (sandbox, banner visible) — el canal de gestión remota está caído aunque la app siga corriendo. Reintentar `nc -zv -w5 192.168.0.234 5985`; cuando responda, correr el mismo `switch_to_prod.ps1` que se corrió en `.247` (ver abajo).
+- `192.168.0.247` (usuario `user`, host `CONSULTOR1`) — ✅ cambiada a producción y verificada end-to-end desde la propia máquina (`Invoke-WebRequest` contra `:5173/api/v1/kiosk/lookup` y `/api/v1/companies`, ambos 200).
+
+**Script para cambiar una terminal a producción** (queda en `/tmp/switch_to_prod.ps1` en la VM, correr vía el helper `/tmp/run_winrm.py <ip> <user> <pass> /tmp/switch_to_prod.ps1`): reescribe `launch.bat` con el URL de `:5173`, mata Edge, y relanza vía `Start-ScheduledTask -TaskName KioskWatchdog` (nunca `Start-Process` directo por WinRM — ver el gotcha de Sesión 0 documentado más abajo).
+
+**Conectividad de esta tarde**: hubo cortes intermitentes reales tanto de `192.168.0.242` (LAN) como momentos donde solo `100.83.91.76` (Tailscale) respondía, y viceversa — coherente con la nota de la sección de arriba (noche del 25). Confirmar ambos caminos antes de asumir que el VM está caído.
+
+---
+
 ## 🚨 SESIÓN 2026-08-26 — Dashboard overhaul + nota de conectividad
 
 **Conectividad**: la nota de arriba dice usar `192.168.0.242` directo porque Tailscale estaba desactualizado -- en esta sesión fue al revés, `192.168.0.242` (LAN) estuvo inalcanzable un buen rato y `100.83.91.76` (Tailscale) fue el único camino que funcionó. **Conclusión: no asumir cuál de los dos funciona, probar ambos si uno falla.**
