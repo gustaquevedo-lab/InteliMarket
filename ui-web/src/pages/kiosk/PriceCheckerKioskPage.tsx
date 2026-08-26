@@ -272,7 +272,7 @@ export default function PriceCheckerKioskPage() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 dark:bg-[#070b14] text-slate-900 dark:text-white flex flex-col justify-between overflow-hidden select-none font-sans relative transition-colors">
+    <div className="h-screen w-full bg-slate-50 dark:bg-[#070b14] text-slate-900 dark:text-white flex flex-col justify-between overflow-hidden select-none font-sans relative transition-colors">
       <style>{`
         @keyframes scanLaser { 0% { top: 0%; opacity: 0.8; } 50% { top: 90%; opacity: 1; } 100% { top: 0%; opacity: 0.8; } }
         .animate-laser { animation: scanLaser 2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
@@ -321,7 +321,7 @@ export default function PriceCheckerKioskPage() {
       </header>
 
       {/* ── CONTENIDO PRINCIPAL ── */}
-      <main className="flex-1 flex flex-col items-center justify-center p-6 sm:p-8 lg:p-10 z-10 w-full max-w-6xl mx-auto">
+      <main className="flex-1 min-h-0 flex flex-col items-center justify-center p-6 sm:p-8 lg:p-10 z-10 w-full max-w-6xl mx-auto">
 
         {/* A) STANDBY -- layout de 2 columnas para aprovechar el ancho real
             de las terminales (1366x768, apaisada). Apilar todo en una sola
@@ -384,11 +384,11 @@ export default function PriceCheckerKioskPage() {
             {/* COLUMNA DERECHA -- banner de marketing grande + cotizaciones
                 grandes, una arriba de la otra pero con espacio real porque
                 no compiten por ancho con la columna izquierda. */}
-            <div className="lg:col-span-7 h-full flex flex-col justify-between gap-6">
+            <div className="lg:col-span-7 h-full min-h-0 flex flex-col justify-between gap-6">
               {currentBanner ? (
-                <div className="w-full flex-1 flex flex-col rounded-3xl border-2 border-slate-200 dark:border-white/20 shadow-2xl relative overflow-hidden bg-white dark:bg-slate-900/95">
+                <div className="w-full flex-1 min-h-0 flex flex-col rounded-3xl border-2 border-slate-200 dark:border-white/20 shadow-2xl relative overflow-hidden bg-white dark:bg-slate-900/95">
                   {currentBanner.imagen_url ? (
-                    <div className="relative w-full aspect-[16/9]">
+                    <div className="relative w-full flex-1 min-h-0">
                       <img src={currentBanner.imagen_url} alt={currentBanner.titulo} className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent flex flex-col justify-end p-5 sm:p-6">
                         <div className="flex items-center gap-2 mb-1.5">
@@ -439,8 +439,9 @@ export default function PriceCheckerKioskPage() {
                 </div>
               )}
 
-              {/* COTIZACIONES -- grandes, sin competir por espacio */}
-              <div className="space-y-2">
+              {/* COTIZACIONES -- grandes, sin competir por espacio. shrink-0
+                  para que el banner nunca la empuje fuera de la pantalla. */}
+              <div className="space-y-2 shrink-0">
                 <span className="text-xs font-black tracking-widest text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5 px-1">
                   <DollarSign className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
                   PIZARRA DE CAMBIO OFICIAL (CAJAS POS)
