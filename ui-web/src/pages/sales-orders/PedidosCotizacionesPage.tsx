@@ -623,7 +623,8 @@ export default function PedidosCotizacionesPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-5">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white">
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
+              <FileText className="w-7 h-7 text-blue-600 dark:text-blue-400 shrink-0" />
               Pedidos & Cotizaciones
             </h1>
             <span className="px-3 py-1 rounded-full text-xs font-black bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
