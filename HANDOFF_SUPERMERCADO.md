@@ -9,6 +9,21 @@
 
 ---
 
+## 🚨 SESIÓN 2026-08-26 — Dashboard overhaul + nota de conectividad
+
+**Conectividad**: la nota de arriba dice usar `192.168.0.242` directo porque Tailscale estaba desactualizado -- en esta sesión fue al revés, `192.168.0.242` (LAN) estuvo inalcanzable un buen rato y `100.83.91.76` (Tailscale) fue el único camino que funcionó. **Conclusión: no asumir cuál de los dos funciona, probar ambos si uno falla.**
+
+**Qué se hizo**: overhaul completo de `Dashboard.tsx` (commit `92e69ff`, ya pusheado). Antes tenía datos inventados presentados como insights de IA en tiempo real -- "+12.4%" de proyección, "18.5 días" de cobertura de liquidez (repetido 2 veces), "+40%" estacional, "+8.5%" en la tarjeta de Ventas, badges "Óptimo"/"Solvente" fijos -- y texto de otro cliente/vertical bakeado en el commit ("Casa Gonzalito — Distribuidora & Mayorista", 3 veces). También se encontró (y arregló) `Layout.tsx` con una insignia "DISTRIBUIDORA" pisada sin commitear encima de "Versión: Supermercado" por otra sesión concurrente -- **se conservó el resto de ese diff**, que era un selector de sucursales real y funcional que esa sesión había dejado sin commitear, no tenía nada que ver con la contaminación.
+
+Reemplazos con datos reales:
+- El gráfico de tendencia (venta actual vs semana pasada vs meta) ahora usa `/api/reports/sales/chart-comparison`, un endpoint que ya existía en el backend con cálculo real (mismo día de la semana anterior, meta = mismo período del mes pasado +10%) y nunca se llamaba desde el frontend.
+- Las 4 tarjetas fijas de "AI Executive Briefing" se reemplazaron por 3 tarjetas reales: anomalías (`demand_forecast/anomalies`), clientes en riesgo de fuga (scoring RFM real de `customer360/dashboard`), sugerencia de compra IA (`demand_forecast/purchase-suggestions`) -- motores que ya existían en el backend y nunca se mostraban en ningún lado.
+- Selector de rango de fechas custom (calendario) agregado junto a los presets Hoy/7d/30d/Mes.
+
+**Patrón reforzado una vez más**: `Dashboard.tsx` y `Layout.tsx` son archivos compartidos entre verticales y siguen colisionando en vivo -- antes de tocarlos, siempre `git status --short` + `git diff` primero para separar contaminación real de trabajo legítimo sin commitear (como pasó acá con el selector de sucursales).
+
+---
+
 ## 🚨 SESIÓN 2026-08-25 (NOCHE) — CRÍTICO, LEER PRIMERO ANTES DE ABRIR NADA
 
 Esta es la sección más reciente. Reemplaza en prioridad a la de abajo (misma fecha, sesión distinta — la de abajo fue de tarde/Verificador de Precios, esta fue de noche/POS-Facturación). Se tocó **el corazón del sistema: checkout, caja, facturación** — leer completo antes de tocar `POSPage.tsx`, `CajaRapidaPage.tsx`, `sales/`, `caja/`.
