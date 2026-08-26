@@ -251,7 +251,8 @@ export default function CommissionsPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-5">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight">
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
+              <Percent className="w-7 h-7 text-amber-600 dark:text-amber-400 shrink-0" />
               Gestión de Comisiones
             </h1>
             <span className="px-3 py-1 rounded-full text-xs font-black bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
@@ -295,7 +296,7 @@ export default function CommissionsPage() {
 
       {/* ── HERO KPIS CONSOLIDADOS ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
               Total Comisiones
@@ -312,7 +313,7 @@ export default function CommissionsPage() {
           </p>
         </div>
 
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
               Pendientes de Liquidación
@@ -329,7 +330,7 @@ export default function CommissionsPage() {
           </p>
         </div>
 
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
               Asesores Comerciales
@@ -346,7 +347,7 @@ export default function CommissionsPage() {
           </p>
         </div>
 
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
               Reglas Activas

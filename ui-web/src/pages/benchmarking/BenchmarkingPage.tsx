@@ -195,7 +195,8 @@ export default function BenchmarkingPage() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
+                <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
+                  <BarChart3 className="w-7 h-7 text-purple-600 dark:text-purple-400 shrink-0" />
                   Benchmarking de Precios & Competitividad
                 </h1>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 uppercase">
@@ -222,7 +223,7 @@ export default function BenchmarkingPage() {
 
       {/* 4 KPIS SUPERIORES */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 border-l-4 border-l-indigo-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between text-xs text-gray-500">
             <span className="font-bold">Price Index General</span>
             <Award className="w-4 h-4 text-indigo-600" />
@@ -233,7 +234,7 @@ export default function BenchmarkingPage() {
           </p>
         </div>
 
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between text-xs text-gray-500">
             <span className="font-bold">vs. Superseis (Retail Premium)</span>
             <TrendingDown className="w-4 h-4 text-emerald-600" />
@@ -244,7 +245,7 @@ export default function BenchmarkingPage() {
           </p>
         </div>
 
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between text-xs text-gray-500">
             <span className="font-bold">vs. Fortis / Box (Mayoristas)</span>
             <TrendingUp className="w-4 h-4 text-amber-600" />
@@ -255,7 +256,7 @@ export default function BenchmarkingPage() {
           </p>
         </div>
 
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between text-xs text-gray-500">
             <span className="font-bold">Oportunidades de Margen</span>
             <Sparkles className="w-4 h-4 text-purple-600" />
