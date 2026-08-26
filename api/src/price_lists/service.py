@@ -50,6 +50,9 @@ async def delete_price_list(db: AsyncSession, pl_id: str) -> bool:
     items = await db.execute(select(PriceListItem).where(PriceListItem.price_list_id == pl.id))
     for item in items.scalars().all():
         await db.delete(item)
+    assignments = await db.execute(select(PriceListAssignment).where(PriceListAssignment.price_list_id == pl.id))
+    for assignment in assignments.scalars().all():
+        await db.delete(assignment)
     await db.delete(pl)
     await db.commit()
     return True

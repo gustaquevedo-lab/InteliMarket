@@ -1244,8 +1244,8 @@ export default function POSPage() {
 
     setSearch("")
     searchInputRef.current?.focus()
-    applyTieredPrice(product.id, newQty)
-  }, [currentScaleWeight, cart])
+    applyTieredPrice(product.id, newQty, customer.id)
+  }, [currentScaleWeight, cart, customer.id])
 
   // ── ESCALA DE PRECIOS POR CANTIDAD (sp_tiered_prices) ──────────────────────
   // Recalcula el precio unitario de la línea no pesable de `productId` contra
@@ -1253,8 +1253,27 @@ export default function POSPage() {
   // cantidad actual (ya sea por debajo del mínimo, o la API no encuentra
   // nada), vuelve al precio base del producto -- nunca se queda con un precio
   // de escalón que ya no corresponde a la cantidad real.
-  const applyTieredPrice = useCallback(async (productId: string, quantity: number) => {
+  // Precio real por cliente (sp_price_list_assignments / Customer.price_list_id,
+  // resuelto server-side en /price-lists/lookup) tiene prioridad sobre el
+  // escalon por cantidad global -- si el cliente de la venta tiene una lista
+  // de precios asignada, se prueba esa fuente primero. Si no hay cliente
+  // real (Consumidor Final) o la lista no tiene nada para este producto,
+  // cae exactamente al comportamiento de siempre (escalon global, luego
+  // precio_base) -- ningun camino existente cambia de comportamiento.
+  const applyTieredPrice = useCallback(async (productId: string, quantity: number, customerId?: string) => {
     try {
+      if (customerId && customerId !== DEFAULT_CUSTOMER.id) {
+        const resolved = await api.priceLists.resolvePrice(customerId, productId, Math.floor(quantity)).catch(() => null)
+        const resolvedPrice = resolved && typeof resolved.precio !== "undefined" ? Number(resolved.precio) : null
+        if (resolvedPrice !== null && !isNaN(resolvedPrice)) {
+          setCart((prev) => prev.map((item) =>
+            item.product_id === productId && !item.es_pesable
+              ? { ...item, precio: resolvedPrice }
+              : item
+          ))
+          return
+        }
+      }
       const tier = await api.smartPricing.calculateTieredPrice(productId, Math.floor(quantity))
       const tierPrice = tier && typeof tier.precio_unitario !== "undefined" ? Number(tier.precio_unitario) : null
       setCart((prev) => prev.map((item) =>
@@ -1270,6 +1289,16 @@ export default function POSPage() {
       ))
     }
   }, [])
+
+  // Cuando cambia el cliente de la venta (F9, o volver a Consumidor Final),
+  // recalcular el precio de las lineas no pesables ya en el carrito contra
+  // la lista/asignacion del nuevo cliente.
+  useEffect(() => {
+    cart.forEach((item) => {
+      if (!item.es_pesable) applyTieredPrice(item.product_id, item.quantity, customer.id)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer.id])
 
   // Iniciar/asegurar flujo de lectura serie continuo al abrir el modal de pesaje
   useEffect(() => {
@@ -2081,7 +2110,7 @@ export default function POSPage() {
       )
       if (itemBefore && !itemBefore.es_pesable) {
         const nextQty = itemBefore.quantity + (action.delta || 0)
-        if (nextQty > 0) applyTieredPrice(itemBefore.product_id, nextQty)
+        if (nextQty > 0) applyTieredPrice(itemBefore.product_id, nextQty, customer.id)
       }
     } else if (action.type === "open_pos_config") {
       setShowPosConfigModal(true)
@@ -2382,7 +2411,7 @@ export default function POSPage() {
       )
       const item = cart.find((i) => i.id === id)
       if (item && !item.es_pesable) {
-        applyTieredPrice(item.product_id, item.quantity + delta)
+        applyTieredPrice(item.product_id, item.quantity + delta, customer.id)
       }
     }
   }
