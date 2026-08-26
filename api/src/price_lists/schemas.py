@@ -16,6 +16,9 @@ class PriceListCreate(BaseModel):
 
 class PriceListUpdate(BaseModel):
     nombre: Optional[str] = None
+    tipo: Optional[str] = None
+    customer_id: Optional[uuid.UUID] = None
+    grupo: Optional[str] = None
     activo: Optional[bool] = None
 
 
