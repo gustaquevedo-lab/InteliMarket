@@ -44,12 +44,12 @@ async def get_sales_summary(db: AsyncSession, company_id: str, fecha_desde: Opti
         params["branch_id"] = branch_id
 
     query = f"""
-        WITH filtered_sales AS (
+        WITH filtered_sales AS MATERIALIZED (
             SELECT v.id, v.total, v.iva_10, v.iva_5
             FROM sales v
             WHERE {where}
         ),
-        items_agg AS (
+        items_agg AS MATERIALIZED (
             SELECT 
                 SUM(vi.cantidad) as total_items,
                 SUM(COALESCE(vi.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) * vi.cantidad) as costo_total
