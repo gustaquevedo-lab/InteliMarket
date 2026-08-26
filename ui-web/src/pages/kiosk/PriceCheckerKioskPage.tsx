@@ -97,10 +97,13 @@ export default function PriceCheckerKioskPage() {
   const timerRef = useRef<any>(null)
   const countdownIntervalRef = useRef<any>(null)
 
-  // Logo real de la empresa -- el mismo que ya esta cargado en
-  // Configuracion. Si todavia no cargaron uno, se ve el emblema de
-  // reemplazo en vez de dejar un hueco vacio.
-  useEffect(() => {
+  // Logo real de la empresa y cotizaciones -- antes se pedian UNA sola
+  // vez al montar, sin reintento; si ese pedido fallaba por cualquier corte
+  // de red pasajero, la pantalla quedaba sin logo ni cotizaciones para
+  // siempre hasta que alguien la recargara a mano (a diferencia de los
+  // banners, que ya reintentaban solos). Ahora se repite cada 5 minutos,
+  // igual que los banners, para que se autorepare sola.
+  const fetchCompanyAndCurrencies = useCallback(() => {
     api.companies.list().then((list) => {
       const comp = list?.[0]
       if (!comp) return
@@ -121,6 +124,12 @@ export default function PriceCheckerKioskPage() {
       setCotizaciones(base)
     }).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    fetchCompanyAndCurrencies()
+    const interval = setInterval(fetchCompanyAndCurrencies, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [fetchCompanyAndCurrencies])
 
   // Banners reales, cargados desde el panel de marketing -- sin fallback
   // inventado: si no hay ninguno cargado, simplemente no se muestra nada ahí.
