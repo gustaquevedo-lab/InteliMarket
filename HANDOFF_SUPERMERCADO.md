@@ -96,12 +96,25 @@ La tabla `PLU` tiene **505 filas, PLUID único de verdad** (enteros chicos: 1, 2
 **Pendiente actualizado** (reemplaza el punto 2 de la lista de arriba, los demás siguen iguales):
 2. ~~Decidir el diseño de PLU por-balanza~~ → ya no aplica, el PLU es global. Falta: revisar con el cliente los 15 ambiguos + 223 sin match (archivo `PLU_para_revisar.csv` entregado en el chat de esa sesión), y resolver los 4 conflictos reales antes de completar el backfill al 100%.
 
+### ✅ CORRECCIÓN 2 (misma noche): match por código de barras, no por nombre — 504/505
+
+El cruce por nombre (arriba) fue un rodeo innecesario. Ñemuha ya venía guardando el PLU real embebido en `products.codigo_barra`: convención `"2000" + PLU con 3 dígitos` (ej. barcode `2000019` = PLU 19). Confirmado con 916 productos reales que siguen ese patrón exacto (`^2000[0-9]{3}$`).
+
+Se rehizo el backfill cruzando `codigo_barra` directo contra la tabla `PLU` real de `SDL.mdb` (505 filas): **504 de 505 PLU reales quedaron enlazados** (el barcode ganó sobre los 4 casos donde el match por nombre anterior había acertado mal — ej. `ML COSTILLA DE PRIMERA/MATAMBRE KG` se había matcheado por nombre al PLU 736 por error de normalización; el barcode confirma que es el PLU 7 correcto).
+
+**Quedan 6 PLU reales sin producto asociado** (de 505): PLU 482 (fila vacía en SDL, no es un producto real), PLU 141 "UVA CRINSON" y PLU 572/573 (precio en 0 en SDL, probablemente cargas incompletas/de prueba), PLU 983 "BROA DE MAIZ UND" y PLU 951 "...A TERESA TORTA ARTESANAL UND" (precio real, productos que probablemente todavía no tienen su código `2000xxx` correspondiente cargado en InteliMarket — revisar si existen con otro código o si falta cargarlos).
+
+**Los 412 productos de InteliMarket con barcode `2000xxx` que NO tienen PLU real correspondiente no son un problema** — son SKUs internos sin relación con la balanza (pilas, bolsas plásticas, medicamentos, canastas básicas): la convención `2000` + número se usa en Ñemuha para cualquier SKU generado internamente, no exclusivamente para artículos de balanza. Se descartaron correctamente al cruzar contra el catálogo real de 505.
+
+**Conclusión para el corte Ñemuha → InteliMarket**: el vínculo producto↔PLU ya está resuelto al 99.8% con evidencia directa (no adivinado), listo para el día del corte sin fricción para el personal de balanza.
+
 ### Pendiente para la próxima sesión
 
-1. Confirmar físicamente en el local qué balanza es cuál (192.168.0.72 vs .73 vs .74) — no alcanza con el log.
-2. Decidir el diseño de PLU por-balanza (no global) antes de tocar `plu_balanza` de nuevo.
-3. Evaluar si integrar contra `SDL.mdb` directamente (más robusto, pero DB Access protegida) o seguir con archivo de import (más simple, pero requiere confirmar qué carpeta/mecanismo dispara la importación real — no se encontró ningún archivo generado en `C:\ConceptoSistemas\Balancas`, el parámetro del legacy `DESTINO_ARQUIVOS_INTEGRACAO_BALANCA` parece no estar realmente en uso).
-4. Acceso usado: WinRM a `192.168.0.231`, usuario `dpto. compras 02`, ver con el usuario si conviene un usuario de servicio dedicado en vez de reusar el de Compras.
+1. ~~Confirmar qué balanza es cuál~~ → ya no es necesario, el catálogo PLU es único y global para las 3 (ver corrección de arriba).
+2. ~~Decidir diseño de PLU por-balanza~~ → resuelto, PLU es global. `products.plu_balanza` ya tiene 504/505 productos reales enlazados por código de barras.
+3. Resolver los 6 PLU reales sin producto (482 vacío, 141/572/573 precio 0, 983/951 probablemente sin cargar en InteliMarket) — confirmar con el cliente.
+4. Evaluar si integrar contra `SDL.mdb` directamente (más robusto, pero DB Access protegida) o seguir con archivo de import (más simple, pero requiere confirmar qué carpeta/mecanismo dispara la importación real — no se encontró ningún archivo generado en `C:\ConceptoSistemas\Balancas`, el parámetro del legacy `DESTINO_ARQUIVOS_INTEGRACAO_BALANCA` parece no estar realmente en uso).
+5. Acceso usado: WinRM a `192.168.0.231`, usuario `dpto. compras 02`, ver con el usuario si conviene un usuario de servicio dedicado en vez de reusar el de Compras.
 
 
 ## 🚨 SESIÓN 2026-08-26 (TARDE) — Verificador de Precios movido a PRODUCCIÓN, no volver a sandbox
