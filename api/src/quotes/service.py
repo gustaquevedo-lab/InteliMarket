@@ -19,21 +19,23 @@ def _calculate_taxes(item: dict) -> dict:
 
     subtotal_bruto = precio * cantidad
     descuento_monto = subtotal_bruto * (descuento_pct / Decimal("100"))
-    base = subtotal_bruto - descuento_monto
+    # Mismo fix que sales/service.py::calculate_taxes -- el precio ya
+    # incluye el IVA, no hay que sumarlo de nuevo encima.
+    total = (subtotal_bruto - descuento_monto).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
 
     if iva_tasa == Decimal("0"):
         iva_monto = Decimal("0")
-        total = base
+        base = total
     else:
-        iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        total = base + iva_monto
+        base = (total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        iva_monto = total - base
 
     return {
         "subtotal_bruto": subtotal_bruto.quantize(Decimal("1")),
         "descuento_monto": descuento_monto.quantize(Decimal("1")),
         "iva_monto": iva_monto,
-        "total": total.quantize(Decimal("1")),
-        "base": base.quantize(Decimal("1")),
+        "total": total,
+        "base": base,
     }
 
 
@@ -110,7 +112,7 @@ async def create_quote(db: AsyncSession, data: QuoteCreate) -> Quote:
     quote.base_exenta = base_exenta
     quote.iva_10 = iva_10
     quote.iva_5 = iva_5
-    quote.total = subtotal + iva_10 + iva_5
+    quote.total = subtotal - descuento_total
 
     await db.flush()
     await db.refresh(quote)
@@ -215,7 +217,7 @@ async def update_quote(db: AsyncSession, quote_id: str, data: QuoteUpdate) -> Qu
         quote.base_exenta = base_exenta
         quote.iva_10 = iva_10
         quote.iva_5 = iva_5
-        quote.total = subtotal + iva_10 + iva_5
+        quote.total = subtotal - descuento_total
 
     quote.updated_at = datetime.now(timezone.utc)
     await db.flush()

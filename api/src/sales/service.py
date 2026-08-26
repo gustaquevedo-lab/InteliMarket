@@ -21,21 +21,28 @@ def calculate_taxes(item: dict) -> dict:
 
     subtotal_bruto = precio * cantidad
     descuento_monto = subtotal_bruto * (descuento_pct / Decimal("100"))
-    base = subtotal_bruto - descuento_monto
+    # El precio de venta en Paraguay ya viene con el IVA incluido (precio de
+    # gondola/vidriera) -- esta funcion trataba precio_unitario como una
+    # base SIN IVA y le sumaba el impuesto encima, inflando ~9-10% el total
+    # de CADA venta por sobre lo que el cliente realmente pagaba (el modal
+    # de cobro ya cobraba el monto correcto -- era el total grabado en la
+    # base, la liquidacion de IVA y lo que iria a SIFEN lo que quedaba mal).
+    # Ahora el IVA se EXTRAE del precio ya incluido, no se agrega de nuevo.
+    total = (subtotal_bruto - descuento_monto).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
 
     if iva_tasa == Decimal("0"):
         iva_monto = Decimal("0")
-        total = base
+        base = total
     else:
-        iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        total = base + iva_monto
+        base = (total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        iva_monto = total - base
 
     return {
         "subtotal_bruto": subtotal_bruto.quantize(Decimal("1")),
         "descuento_monto": descuento_monto.quantize(Decimal("1")),
         "iva_monto": iva_monto,
-        "total": total.quantize(Decimal("1")),
-        "base": base.quantize(Decimal("1")),
+        "total": total,
+        "base": base,
     }
 
 
@@ -158,7 +165,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     sale.base_exenta = base_exenta
     sale.iva_10 = iva_10
     sale.iva_5 = iva_5
-    sale.total = subtotal + iva_10 + iva_5
+    sale.total = subtotal - descuento_total
     sale.saldo = sale.total
 
     # ── Desglose real de medios de pago -- antes este array se armaba en el
@@ -628,7 +635,7 @@ async def update_sale(db: AsyncSession, sale_id: str, data: SaleUpdate) -> Sale 
         sale.subtotal = subtotal; sale.descuento_total = descuento_total
         sale.base_gravada_10 = base_gravada_10; sale.base_gravada_5 = base_gravada_5
         sale.base_exenta = base_exenta; sale.iva_10 = iva_10; sale.iva_5 = iva_5
-        sale.total = subtotal + iva_10 + iva_5
+        sale.total = subtotal - descuento_total
         sale.saldo = sale.total - (sale.total_pagado or 0)
 
     sale.updated_at = datetime.now(timezone.utc)

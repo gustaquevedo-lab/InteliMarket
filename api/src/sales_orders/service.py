@@ -17,21 +17,23 @@ def _calculate_taxes(item: dict) -> dict:
 
     subtotal_bruto = precio * cantidad
     descuento_monto = subtotal_bruto * (descuento_pct / Decimal("100"))
-    base = subtotal_bruto - descuento_monto
+    # Mismo fix que sales/service.py::calculate_taxes -- el precio ya
+    # incluye el IVA, no hay que sumarlo de nuevo encima.
+    total = (subtotal_bruto - descuento_monto).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
 
     if iva_tasa == Decimal("0"):
         iva_monto = Decimal("0")
-        total = base
+        base = total
     else:
-        iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        total = base + iva_monto
+        base = (total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        iva_monto = total - base
 
     return {
         "subtotal_bruto": subtotal_bruto.quantize(Decimal("1")),
         "descuento_monto": descuento_monto.quantize(Decimal("1")),
         "iva_monto": iva_monto,
-        "total": total.quantize(Decimal("1")),
-        "base": base.quantize(Decimal("1")),
+        "total": total,
+        "base": base,
     }
 
 
@@ -112,7 +114,7 @@ async def create_order(db: AsyncSession, data: SalesOrderCreate) -> SalesOrder:
     order.base_exenta = base_exenta
     order.iva_10 = iva_10
     order.iva_5 = iva_5
-    order.total = subtotal + iva_10 + iva_5
+    order.total = subtotal - descuento_total
 
     await db.flush()
     await db.refresh(order)
@@ -199,7 +201,7 @@ async def update_order(db: AsyncSession, order_id: str, data: SalesOrderUpdate) 
         order.base_exenta = base_exenta
         order.iva_10 = iva_10
         order.iva_5 = iva_5
-        order.total = subtotal + iva_10 + iva_5
+        order.total = subtotal - descuento_total
 
     order.updated_at = datetime.now(timezone.utc)
     await db.flush()
