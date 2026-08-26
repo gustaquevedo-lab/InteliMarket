@@ -9,6 +9,41 @@
 
 ---
 
+## 🔒 SESIÓN 2026-08-26 (tarde) — Verificador de Precios: blindaje definitivo contra volver a sandbox / pantalla sin logo
+
+Pedido explícito del cliente, textual: *"nunca mas van a apuntar a sandbox y no quiero volver a ver sin logo y cotizacion, esto debe ser infalible, granitico."* Esto NO es una preferencia estética, es una directiva dura. Cualquier sesión futura que toque los terminales físicos del Verificador debe leer esto ANTES de tocar nada.
+
+### Terminales físicas activas (las 2 que funcionan; la tercera tiene lector roto y sigue sin configurar)
+
+- **`.247`** ("Terminal 1", Windows 10, user `user` / `Extra2026`)
+- **`.120`** ("CONSULTOR3", ex-`.234` — **cambió de IP esta sesión**, user `pc` / `Extra2026`). Si no responde en `.120`, puede haber cambiado de IP de nuevo — pedirle al cliente la IP actual antes de asumir que está caída.
+
+Ambas apuntan a **producción** (`http://192.168.0.242:5173/verificador`), nunca a sandbox (`:5174`). Método de gestión: WinRM + NTLM desde la VM (`/tmp/winrm_env`, helper `/tmp/run_winrm.py <ip> <user> <pass> <script.ps1>`). **Relanzar Edge SIEMPRE vía `Start-ScheduledTask -TaskName KioskWatchdog`, nunca `Start-Process` directo por WinRM** — Start-Process directo aterriza en la Session 0 invisible (o, peor, el proceso puede desaparecer solo poco después, confirmado de nuevo esta sesión al testear el self-heal). Técnica para ver la pantalla real (no solo curl/API): registrar una scheduled task one-off con `-LogonType Interactive`, tomar el screenshot a disco, leerlo en base64 vía WinRM normal.
+
+### Qué se blindó (3 capas, no una sola)
+
+1. **`C:\ProgramData\kiosk\watchdog.ps1` (corre cada 5 min vía la tarea `KioskWatchdog`) ya NO solo revisa que Edge esté vivo — ahora verifica el `CommandLine` real del proceso contra la URL de producción exacta, y si no matchea (sandbox, URL vieja, lo que sea) mata Edge y lo relanza correcto.** Probado en vivo: se forzó `:5174` a mano, se corrió el watchdog, se confirmó que se autocorrigió solo a `:5173`. Esto es lo que hace que "apuntar a sandbox" ya no pueda quedar pegado más de 5 minutos, pase lo que pase.
+2. **Eliminado el punto de desincronización real que ya había causado el problema una vez**: en `.120` había una copia vieja de `launch.bat` en la carpeta de Inicio de Windows (`%APPDATA%\...\Startup\launch.bat`) que **todavía apuntaba a `:5174`** — un reinicio de esa PC (corte de luz, Windows Update) iba a bootear directo a sandbox sin que nadie lo tocara. Ahora esa copia en Startup ya no tiene contenido propio: solo hace `call "C:\ProgramData\kiosk\launch.bat"` — un solo archivo fuente de verdad, no dos copias que se puedan desincronizar. Verificar esto en la tercera terminal el día que se configure.
+3. **La app legacy del sistema anterior (`consulta_preco.exe`, en `C:\ConceptoSistemas\ConsultaDePrecios\`) seguía instalada y corriendo en las 3 terminales, invisible detrás de Edge en modo kiosk.** Se descubrió por accidente: al matar Edge para un test, quedó expuesta una pantalla de "Configuración / IP del Servidor" del sistema viejo. Si Edge se cae aunque sea un instante y el watchdog tarda en relanzar, el cliente vería ESO en vez del Verificador. Se deshabilitó en `.247` y `.120` (renombrado a `consulta_preco.exe.DESHABILITADO_INTELIMARKET`, no se puede ejecutar) y se borraron los accesos directos del escritorio que apuntaban a él. **Pendiente: hacer lo mismo en la tercera terminal cuando se configure.**
+
+### Frontend: reintento rápido en vez de esperar 5 minutos
+
+`PriceCheckerKioskPage.tsx` — tanto `fetchCompanyAndCurrencies` (logo + cotizaciones) como `fetchBanners` ya reintentaban solos cada 5 minutos si fallaban, pero un corte de red pasajero dejaba la pantalla en blanco hasta ese próximo ciclo. Ahora, si el pedido falla (o `company` viene vacío), reintenta a los 5 segundos — la ventana de "pantalla sin logo" pasó de "hasta 5 minutos" a "unos segundos". Commit `9eac02f`.
+
+### Banners: rotación
+
+`BANNER_ROTATE_MS` en la misma página, ahora en `7000` (antes 6000, pedido explícito). Se verificó con un `MutationObserver` en vivo sobre los dots del carrusel que rota exactamente cada 7000ms en el orden correcto — si alguna vez parece "trabada" al mirarla 20-30 segundos, esperar un ciclo completo antes de asumir que está rota (se confirmó por experiencia propia que 2 capturas de pantalla mal espaciadas pueden coincidir en el mismo banner por pura casualidad de timing).
+
+### Layout del Verificador (standby): cotización a la izquierda, banner completo a la derecha
+
+Los creativos reales de Marketing son **verticales** (formato tipo Instagram ~4:5), no 16:9 horizontal. Se movió la "PIZARRA DE CAMBIO OFICIAL" a la columna izquierda (junto al logo), se sacó el pill "VERIFICADOR DIGITAL INSTANTÁNEO", y el banner ahora usa `object-contain` (se ve completo, sin recortar) en vez de `object-cover`. El hint de dimensiones del uploader en `MarketingAgentPage.tsx` ya dice formato vertical. Commits `998d828` (layout) y `bc1d865` (7s).
+
+### Si algo de esto vuelve a fallar
+
+No asumir que es un bug de código nuevo — primero chequear, en este orden: (1) `launch.bat` en `C:\ProgramData\kiosk\` en la terminal específica (¿dice `:5173`?), (2) si hay una copia en Startup desincronizada, (3) si `consulta_preco.exe` volvió a aparecer (no debería, no tiene mecanismo de auto-inicio conocido, pero no se descarta que alguien la reinstale o la abra a mano), (4) recién ahí sospechar del código del Verificador.
+
+---
+
 ## ⚖️ SESIÓN 2026-08-26 — INTEGRACIÓN BALANZAS BALMAK EDGE (carnicería/panadería), investigación profunda
 
 Pedido: automatizar sync de PLU/precio hacia las balanzas Balmak Edge de carnicería y panadería (**no** la báscula de checkout — esa ya está integrada y funciona, es un flujo aparte). Se hizo una investigación a fondo, con hallazgos reales que cambian el diseño original. Documentado acá para que ninguna sesión futura repita el camino equivocado.
