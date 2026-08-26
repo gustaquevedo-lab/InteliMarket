@@ -68,7 +68,7 @@ Vía WinRM a la PC de Compras (`192.168.0.231`, usuario `dpto. compras 02`) se e
 
 Es decir: **3 balanzas físicas activas** en `192.168.0.72/.73/.74` (puertos 4011/4001/4010), sincronizando en ciclos de minutos, con éxito, ahora mismo. Las IPs que había cargadas en `scale_configs` (`192.168.1.150`/`.151`) son **incorrectas** — se limpiaron (`host = NULL`) en vez de dejarlas apuntando a algo que no existe. **No se pudo determinar con certeza qué IP física corresponde a qué balanza/departamento** — los 3 ciclos del log muestran el mismo conteo de PLU en simultáneo para las 3 IPs, lo que sugiere que podrían estar recibiendo el mismo catálogo combinado en vez de uno por departamento. Requiere confirmación física en el local (mirar cada balanza) antes de asumir nada.
 
-**SDL guarda su catálogo en `SDL.mdb`** (Access, protegido con contraseña `showmethemoney` — hardcodeada en `SDL.exe.config`, la misma en las 24 carpetas de configuración `Include\SDL901-906\SDLE01-06\SDLP01-06\SDLT01-06`, aunque solo 3 unidades están físicamente activas). La integración correcta a futuro probablemente sea escribir/leer contra esa base (o usar el import de archivo que ya trae el propio SDL), **no** reimplementar el protocolo TCP de las balanzas — eso ya lo hace SDL.exe y ya funciona.
+**SDL guarda su catálogo en `SDL.mdb`** (Access, protegido con contraseña — hardcodeada en texto plano en `SDL.exe.config` (no reproducida acá, ver notas internas de la sesión), la misma en las 24 carpetas de configuración `Include\SDL901-906\SDLE01-06\SDLP01-06\SDLT01-06`, aunque solo 3 unidades están físicamente activas). La integración correcta a futuro probablemente sea escribir/leer contra esa base (o usar el import de archivo que ya trae el propio SDL), **no** reimplementar el protocolo TCP de las balanzas — eso ya lo hace SDL.exe y ya funciona.
 
 ### Formato de archivo real (para exportación PLU vía import de SDL)
 
@@ -81,10 +81,10 @@ Se extrajo `SDLtxt.tmp` (348 filas reales) y se decodificó byte a byte — impl
 
 ### ✅ CORRECCIÓN (misma noche, después de seguir investigando): el PLU SÍ es global — la fuente de antes estaba mal
 
-Lo de arriba ("el PLU no es global, cada unidad numera desde 1") era un diagnóstico equivocado, basado en `SDLtxt.tmp` — que resultó ser un archivo viejo/de prueba, no la fuente real. Se encontró la fuente de verdad real: **`SDL.mdb`** (Access, protegido con `Jet OLEDB:Database Password=showmethemoney` — visible en texto plano en `SDL.exe.config`), consultada directamente vía WinRM + PowerShell de 32 bits (`C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe`, el Jet OLEDB de 4.0 es de 32 bits, la sesión WinRM por defecto es de 64 y falla si no se fuerza esa ruta):
+Lo de arriba ("el PLU no es global, cada unidad numera desde 1") era un diagnóstico equivocado, basado en `SDLtxt.tmp` — que resultó ser un archivo viejo/de prueba, no la fuente real. Se encontró la fuente de verdad real: **`SDL.mdb`** (Access, protegido con password -- visible en texto plano en `SDL.exe.config`, no reproducida acá), consultada directamente vía WinRM + PowerShell de 32 bits (`C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe`, el Jet OLEDB de 4.0 es de 32 bits, la sesión WinRM por defecto es de 64 y falla si no se fuerza esa ruta):
 
 ```powershell
-$conn.ConnectionString = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=C:\Program Files (x86)\EDGE\EDGE\SDL.mdb;Persist Security Info=True;Jet OLEDB:Database Password=showmethemoney"
+$conn.ConnectionString = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=C:\Program Files (x86)\EDGE\EDGE\SDL.mdb;Persist Security Info=True;Jet OLEDB:Database Password=<ver notas internas>"
 ```
 
 La tabla `PLU` tiene **505 filas, PLUID único de verdad** (enteros chicos: 1, 2, 3... hasta 983, no 7 dígitos). La tabla `Dept` (3 filas: T-Weight/T-Count/Service Charge) **no es departamento físico** — es el modo de venta (peso/unidad/cargo de servicio) de SDL, nada que ver con carnicería vs panadería. Las 3 IPs activas del log (`192.168.0.72/.73/.74`) reciben el **mismo catálogo completo** las tres — son 3 cabezales físicos mostrando el mismo catálogo único, no un catálogo por departamento.
@@ -129,7 +129,7 @@ Se evaluaron 3 caminos con el cliente:
 - Capturar tráfico real (tcpdump/Wireshark) durante un `uploadButton_Click` real hacia `192.168.0.72:4011` / `.73:4001` / `.74:4010` (coordinar con el cliente el momento, para tener certeza de qué tráfico corresponde a qué acción).
 - Decodificar el formato del paquete (probablemente TCP simple, dado el patrón de log "Baixar dados → Atualizar o banco de dados → PLU X/X Sucesso" sugiere un protocolo de aplicación propio sobre TCP, no HTTP/FTP).
 - Construir un cliente propio en InteliMarket (Python) que hable ese protocolo directo, sin pasar por SDL.exe ni por Windows.
-- **Credenciales/accesos ya documentados para retomar**: WinRM a `192.168.0.231` (user `dpto. compras 02` / clave `compras`, PowerShell de 32 bits en `C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe` para usar Jet OLEDB), password de `SDL.mdb` = `showmethemoney`.
+- **Credenciales/accesos ya documentados para retomar**: WinRM a `192.168.0.231` (user `dpto. compras 02`, clave no reproducida acá -- pedirla al usuario), PowerShell de 32 bits en `C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe` para usar Jet OLEDB. La password de `SDL.mdb` está hardcodeada en texto plano dentro de `SDL.exe.config` en la propia máquina -- consultarla ahí en vez de guardarla en este repo.
 
 **Cuidado para la próxima sesión**: esa PC la usa una persona real de Compras en horario de trabajo (se la vio en vivo trabajando en el legacy durante esta sesión, sesión de consola activa `DPTO. COMPRAS 02`) — cualquier prueba que interactúe con la UI (no solo lectura de red/DB) debe coordinarse para no interrumpirla.
 
