@@ -677,7 +677,7 @@ export default function PedidosCotizacionesPage() {
       {/* ── KPIS CONSOLIDADOS (ESTILO SALESPAGE) ──────────────────────────────── */}
       {tab === "orders" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Monto en Cartera
@@ -694,7 +694,7 @@ export default function PedidosCotizacionesPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
                 Pendientes Aprobación
@@ -711,7 +711,7 @@ export default function PedidosCotizacionesPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 En Preparación / Despacho
@@ -728,7 +728,7 @@ export default function PedidosCotizacionesPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Completados & Facturados
@@ -747,7 +747,7 @@ export default function PedidosCotizacionesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Volumen Cotizado
@@ -764,7 +764,7 @@ export default function PedidosCotizacionesPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Cotizaciones Vigentes
@@ -781,7 +781,7 @@ export default function PedidosCotizacionesPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Aceptadas / Convertidas
@@ -798,7 +798,7 @@ export default function PedidosCotizacionesPage() {
             </p>
           </div>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-red-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                 Expiradas / Rechazadas
