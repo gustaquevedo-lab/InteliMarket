@@ -79,6 +79,23 @@ Se extrajo `SDLtxt.tmp` (348 filas reales) y se decodificó byte a byte — impl
 
 **Trampa encontrada y corregida**: el PLU **no es global** — cada una de las 24 unidades SDL numera su propio catálogo empezando de nuevo en 1 (`"1000001"` aparece 80 veces en el archivo real, para productos totalmente distintos). Se intentó un primer backfill de `products.plu_balanza` (campo nuevo, migración `20260826150000`) cruzando por nombre contra InteliMarket — **se deshizo** (`UPDATE ... SET plu_balanza = NULL`) al descubrirse el problema. La columna quedó en el modelo, vacía, a la espera de decidir el diseño correcto (probablemente una asignación por producto × balanza, no un campo único en `products`).
 
+### ✅ CORRECCIÓN (misma noche, después de seguir investigando): el PLU SÍ es global — la fuente de antes estaba mal
+
+Lo de arriba ("el PLU no es global, cada unidad numera desde 1") era un diagnóstico equivocado, basado en `SDLtxt.tmp` — que resultó ser un archivo viejo/de prueba, no la fuente real. Se encontró la fuente de verdad real: **`SDL.mdb`** (Access, protegido con `Jet OLEDB:Database Password=showmethemoney` — visible en texto plano en `SDL.exe.config`), consultada directamente vía WinRM + PowerShell de 32 bits (`C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe`, el Jet OLEDB de 4.0 es de 32 bits, la sesión WinRM por defecto es de 64 y falla si no se fuerza esa ruta):
+
+```powershell
+$conn.ConnectionString = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=C:\Program Files (x86)\EDGE\EDGE\SDL.mdb;Persist Security Info=True;Jet OLEDB:Database Password=showmethemoney"
+```
+
+La tabla `PLU` tiene **505 filas, PLUID único de verdad** (enteros chicos: 1, 2, 3... hasta 983, no 7 dígitos). La tabla `Dept` (3 filas: T-Weight/T-Count/Service Charge) **no es departamento físico** — es el modo de venta (peso/unidad/cargo de servicio) de SDL, nada que ver con carnicería vs panadería. Las 3 IPs activas del log (`192.168.0.72/.73/.74`) reciben el **mismo catálogo completo** las tres — son 3 cabezales físicos mostrando el mismo catálogo único, no un catálogo por departamento.
+
+**Con esta fuente correcta se rehizo el cruce por nombre contra InteliMarket: 249 matches exactos, cero colisiones de PLU (a diferencia del intento anterior). Ya aplicado a `products.plu_balanza` en producción** (245 escritos, 4 productos con conflicto real detectado y saltados a propósito — ver abajo). Quedan 15 ambiguos + 223 sin match para revisar con el cliente — puede ser fruta/verdura que InteliMarket todavía no tiene cargada, o nombres que no matchean por escritura distinta.
+
+**4 conflictos reales encontrados** (el backfill los saltó, no los pisó): 2 filas de SDL apuntando al mismo nombre normalizado de producto en InteliMarket con 2 PLU distintos cada una (`MANDIOCA C/ CASCARA KG` y `UVA ITALIA KG` aparecen duplicados en la tabla `PLU` de SDL con el mismo nombre) — puede ser una entrada vieja sin borrar en SDL, o dos variantes reales (por peso vs por unidad) que InteliMarket todavía no distingue como productos separados. Confirmar con el cliente antes de decidir cuál PLU es el vigente.
+
+**Pendiente actualizado** (reemplaza el punto 2 de la lista de arriba, los demás siguen iguales):
+2. ~~Decidir el diseño de PLU por-balanza~~ → ya no aplica, el PLU es global. Falta: revisar con el cliente los 15 ambiguos + 223 sin match (archivo `PLU_para_revisar.csv` entregado en el chat de esa sesión), y resolver los 4 conflictos reales antes de completar el backfill al 100%.
+
 ### Pendiente para la próxima sesión
 
 1. Confirmar físicamente en el local qué balanza es cuál (192.168.0.72 vs .73 vs .74) — no alcanza con el log.
