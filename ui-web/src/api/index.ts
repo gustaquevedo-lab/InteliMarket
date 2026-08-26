@@ -1081,6 +1081,7 @@ export const api = {
   reports: {
     salesSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/sales/summary", params),
     salesByPeriod: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<any>("/api/reports/sales/by-period", params),
+    salesChartComparison: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<{ series: any[]; totales: any }>("/api/reports/sales/chart-comparison", params),
     salesByCategory: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/sales/by-category", params),
     salesByProduct: (params?: { fecha_desde?: string; fecha_hasta?: string; limit?: number }) => client.get<{ producto: string; sku: string; unidad_medida: string; cantidad: number; monto: number; costo: number; margen: number }[]>("/api/reports/sales/by-product", params),
     salesByPaymentMethod: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<{ forma_pago: string; cantidad: number; monto: number; porcentaje: number }[]>("/api/reports/sales/by-payment-method", params),

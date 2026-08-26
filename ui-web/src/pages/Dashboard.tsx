@@ -17,7 +17,7 @@ import { useAuth } from "../context/AuthContext"
 import { useToast } from "../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../utils/format"
 
-type TimeRange = "hoy" | "7d" | "30d" | "mes"
+type TimeRange = "hoy" | "7d" | "30d" | "mes" | "custom"
 
 function formatLocalDate(d: Date = new Date()): string {
   const year = d.getFullYear()
@@ -26,9 +26,16 @@ function formatLocalDate(d: Date = new Date()): string {
   return `${year}-${month}-${day}`
 }
 
-function computeDateRange(range: TimeRange) {
+function computeDateRange(range: TimeRange, customFrom?: string, customTo?: string) {
   const now = new Date()
   const todayStr = formatLocalDate(now)
+
+  if (range === "custom" && customFrom && customTo) {
+    const from = new Date(customFrom + "T00:00:00")
+    const to = new Date(customTo + "T00:00:00")
+    const dias = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000) + 1)
+    return { fecha_desde: customFrom, fecha_hasta: customTo, label: `${customFrom} a ${customTo}`, dias, agrupar: "dia" }
+  }
   
   if (range === "hoy") {
     return { fecha_desde: todayStr, fecha_hasta: todayStr, label: "Hoy", dias: 1, agrupar: "hora" }
@@ -51,9 +58,13 @@ export default function Dashboard() {
   const navigate = useNavigate()
 
   const [timeRange, setTimeRange] = useState<TimeRange>("30d")
+  const [customFrom, setCustomFrom] = useState<string>("")
+  const [customTo, setCustomTo] = useState<string>("")
+  const [showCustomPicker, setShowCustomPicker] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
+  const [companyInfo, setCompanyInfo] = useState<any>(null)
   const [salesSummary, setSalesSummary] = useState<any>(null)
   const [salesByCat, setSalesByCat] = useState<any[]>([])
   const [salesByProd, setSalesByProd] = useState<any[]>([])
@@ -66,13 +77,22 @@ export default function Dashboard() {
   const [agingData, setAgingData] = useState<any>(null)
   const [periodLoading, setPeriodLoading] = useState(false)
 
+  // Tarjetas de inteligencia real, con motor propio ya existente en el
+  // backend (demand_forecast / customer360) -- antes el "AI Executive
+  // Briefing" mostraba texto fijo (+12.4%, 18.5 dias, +40%) sin ningun
+  // calculo detras. Ahora son datos reales o la tarjeta no se muestra.
+  const [anomalies, setAnomalies] = useState<any[]>([])
+  const [churnDashboard, setChurnDashboard] = useState<any>(null)
+  const [purchaseSuggestions, setPurchaseSuggestions] = useState<any[]>([])
+
   // Cache en memoria para transiciones instantáneas (0ms)
   const cacheRef = useMemo(() => new Map<string, { summary: any; byCat: any[]; byProd: any[]; period: any[]; comparison: any[] }>(), [])
 
   // 1. Carga rápida exclusiva de Ventas según período (80-150ms)
-  const loadSalesData = useCallback(async (currentRange: TimeRange, showSpinner = false) => {
+  const loadSalesData = useCallback(async (currentRange: TimeRange, showSpinner = false, cf?: string, ct?: string) => {
+    const cacheKey = currentRange === "custom" ? `custom:${cf}:${ct}` : currentRange
     // Si ya existe en caché, aplicar inmediatamente para latencia 0
-    const cached = cacheRef.get(currentRange)
+    const cached = cacheRef.get(cacheKey)
     if (cached) {
       setSalesSummary(cached.summary)
       setSalesByCat(cached.byCat)
@@ -82,34 +102,31 @@ export default function Dashboard() {
     }
 
     if (showSpinner || !cached) setPeriodLoading(true)
-    const { fecha_desde, fecha_hasta, agrupar } = computeDateRange(currentRange)
+    const { fecha_desde, fecha_hasta, agrupar } = computeDateRange(currentRange, cf, ct)
 
     try {
-      console.log("[Dashboard] Fetching sales data for range:", currentRange, { fecha_desde, fecha_hasta, agrupar })
-      const [summaryRes, byCatRes, byProdRes, periodRes] = await Promise.allSettled([
+      const [summaryRes, byCatRes, byProdRes, periodRes, comparisonRes] = await Promise.allSettled([
         api.reports.salesSummary({ fecha_desde, fecha_hasta }),
         api.reports.salesByCategory({ fecha_desde, fecha_hasta }),
         api.reports.salesByProduct({ fecha_desde, fecha_hasta, limit: 6 }),
         api.reports.salesByPeriod({ fecha_desde, fecha_hasta, agrupar_por: agrupar }),
+        api.reports.salesChartComparison({ fecha_desde, fecha_hasta, agrupar_por: agrupar }),
       ])
-
-      console.log("[Dashboard] salesSummary result:", summaryRes)
-      console.log("[Dashboard] salesByCategory result:", byCatRes)
-      console.log("[Dashboard] salesByProduct result:", byProdRes)
-      console.log("[Dashboard] salesByPeriod result:", periodRes)
 
       const newSummary = summaryRes.status === "fulfilled" ? summaryRes.value : cached?.summary || null
       const newByCat = byCatRes.status === "fulfilled" ? byCatRes.value || [] : cached?.byCat || []
       const newByProd = byProdRes.status === "fulfilled" ? byProdRes.value || [] : cached?.byProd || []
       const newPeriod = periodRes.status === "fulfilled" ? periodRes.value || [] : cached?.period || []
+      const newComparison = comparisonRes.status === "fulfilled" ? comparisonRes.value?.series || [] : cached?.comparison || []
 
       setSalesSummary(newSummary)
       setSalesByCat(newByCat)
       setSalesByProd(newByProd)
       setSalesPeriodData(newPeriod)
+      setChartComparisonData(newComparison)
 
       // Guardar en caché
-      cacheRef.set(currentRange, { summary: newSummary, byCat: newByCat, byProd: newByProd, period: newPeriod, comparison: [] })
+      cacheRef.set(cacheKey, { summary: newSummary, byCat: newByCat, byProd: newByProd, period: newPeriod, comparison: newComparison })
     } catch (e: any) {
       console.error("Error al cargar ventas dashboard:", e)
     } finally {
@@ -122,12 +139,16 @@ export default function Dashboard() {
   // 2. Carga única de estado operativo general (no bloquea los períodos)
   const loadStaticData = useCallback(async () => {
     try {
-      const [replenishRes, finRes, ordersRes, lowStockRes, agingRes] = await Promise.allSettled([
+      const [replenishRes, finRes, ordersRes, lowStockRes, agingRes, companyRes, anomaliesRes, churnRes, suggestRes] = await Promise.allSettled([
         api.purchases.smartReplenishmentPreview({ dias_cobertura: 30, limit: 100 }),
         api.financial.dashboard(),
         api.purchases.listPOs(),
         api.stock.lowStock(),
         api.accountsReceivable.aging(),
+        api.companies.list(),
+        api.demandForecast.listAnomalies((user as any)?.company_id || "00000000-0000-0000-0000-000000000010", undefined, undefined),
+        api.customer360.getDashboard((user as any)?.company_id || "00000000-0000-0000-0000-000000000010"),
+        api.demandForecast.listPurchaseSuggestions((user as any)?.company_id || "00000000-0000-0000-0000-000000000010", "pendiente", 5),
       ])
 
       if (replenishRes.status === "fulfilled") setReplenishmentData(replenishRes.value)
@@ -135,8 +156,12 @@ export default function Dashboard() {
       if (ordersRes.status === "fulfilled") setRecentOrders(ordersRes.value || [])
       if (lowStockRes.status === "fulfilled") setLowStockItems(lowStockRes.value || [])
       if (agingRes.status === "fulfilled") setAgingData(agingRes.value)
+      if (companyRes.status === "fulfilled") setCompanyInfo((companyRes.value || [])[0] || null)
+      if (anomaliesRes.status === "fulfilled") setAnomalies((anomaliesRes.value || []).filter((a: any) => !a.reviewed).slice(0, 3))
+      if (churnRes.status === "fulfilled") setChurnDashboard(churnRes.value)
+      if (suggestRes.status === "fulfilled") setPurchaseSuggestions(suggestRes.value || [])
     } catch {}
-  }, [])
+  }, [user])
 
   useEffect(() => {
     loadSalesData(timeRange)
@@ -145,16 +170,28 @@ export default function Dashboard() {
 
   const handlePeriodChange = (newRange: TimeRange) => {
     setTimeRange(newRange)
+    setShowCustomPicker(newRange === "custom")
     // Limpiar datos del período anterior para que no se vea stale mientras carga
     setChartComparisonData([])
     setSalesPeriodData([])
-    loadSalesData(newRange, true)
+    if (newRange !== "custom") loadSalesData(newRange, true)
+  }
+
+  const applyCustomRange = () => {
+    if (!customFrom || !customTo) {
+      toast.warning("Rango incompleto", "Elija una fecha de inicio y una de fin.")
+      return
+    }
+    setTimeRange("custom")
+    setChartComparisonData([])
+    setSalesPeriodData([])
+    loadSalesData("custom", true, customFrom, customTo)
   }
 
   const handleManualRefresh = () => {
     setRefreshing(true)
     cacheRef.clear()
-    loadSalesData(timeRange, true)
+    loadSalesData(timeRange, true, customFrom, customTo)
     loadStaticData()
   }
 
@@ -221,27 +258,48 @@ export default function Dashboard() {
   // DATOS PARA GRÁFICOS RECHARTS (ESTÉTICA DE CLASE MUNDIAL & REACTIVO A PERÍODO)
   // ---------------------------------------------------------------------------
   // Construcción reactiva de la serie de ventas reales y Curva de Rentabilidad Bruta en Gs
+  // Serie real de ventas vs semana pasada / meta -- antes "semana_pasada" y
+  // "meta" eran monto*0.92 y monto*1.1 (inventado, sin ningun dato real
+  // detras). El backend ya tenia un endpoint (chart-comparison) que calcula
+  // esto con datos reales (mismo dia de la semana anterior, y el mismo
+  // periodo del mes pasado x1.10 como meta) -- nunca se llamaba desde aca.
   const salesTrendData = useMemo(() => {
+    if (chartComparisonData && chartComparisonData.length > 0) {
+      return chartComparisonData.map((d: any) => {
+        const monto = Number(d.actual || 0)
+        const ticketsCount = Number(d.tickets || 0)
+        return {
+          label: d.label || "",
+          fecha: d.dia || "",
+          actual: monto,
+          venta_real: monto,
+          meta: Number(d.meta || 0),
+          semana_pasada: Number(d.semana_pasada || 0),
+          rentabilidad_real: Number(d.rentabilidad_real || 0),
+          rentabilidad_meta: Number(d.rentabilidad_meta || 0),
+          margen_pct: Number(d.margen_pct || 0),
+          tickets: ticketsCount,
+          transacciones: ticketsCount,
+          ticket_promedio: ticketsCount > 0 ? Math.round(monto / ticketsCount) : 0,
+        }
+      })
+    }
+    // Mientras carga (o si el endpoint de comparacion falla), se muestra al
+    // menos la venta real -- sin inventar semana pasada ni meta.
     if (salesPeriodData && salesPeriodData.length > 0) {
-      const defaultMargenPct = margenBrutoPct > 0 ? margenBrutoPct : 23.5
       return salesPeriodData.map((d: any) => {
         const monto = Number(d.monto || d.venta_real || d.total || 0)
-        const margenMonto = d.margen_bruto !== undefined
-          ? Number(d.margen_bruto)
-          : Math.round(monto * (defaultMargenPct / 100))
-        const margenItemPct = monto > 0 ? Number(((margenMonto / monto) * 100).toFixed(1)) : defaultMargenPct
-        const ticketsCount = Number(d.cantidad || d.tickets || d.transacciones || 1)
-
+        const ticketsCount = Number(d.cantidad || d.tickets || d.transacciones || 0)
         return {
           label: d.periodo ? String(d.periodo).slice(-5) : d.label || "",
           fecha: d.periodo || d.fecha || "",
           actual: monto,
           venta_real: monto,
-          meta: Math.round(monto * 1.1),
-          semana_pasada: Math.round(monto * 0.92),
-          rentabilidad_real: margenMonto,
-          rentabilidad_meta: Math.round(monto * 0.22),
-          margen_pct: margenItemPct,
+          meta: 0,
+          semana_pasada: 0,
+          rentabilidad_real: 0,
+          rentabilidad_meta: 0,
+          margen_pct: 0,
           tickets: ticketsCount,
           transacciones: ticketsCount,
           ticket_promedio: ticketsCount > 0 ? Math.round(monto / ticketsCount) : 0,
@@ -249,7 +307,7 @@ export default function Dashboard() {
       })
     }
     return []
-  }, [salesPeriodData, margenBrutoPct])
+  }, [chartComparisonData, salesPeriodData])
 
   const categoryMixData = useMemo(() => {
     if (!salesByCat || salesByCat.length === 0) return []
@@ -364,7 +422,7 @@ export default function Dashboard() {
               <Sparkles className="w-3 h-3 text-indigo-500" /> Centro de Comando Ejecutivo • Sincronizado
             </span>
             <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
-              Casa Gonzalito — Distribuidora & Mayorista
+              {companyInfo?.nombre_fantasia || companyInfo?.razon_social || "Panel de Control"}
             </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-black tracking-tight text-gray-900 dark:text-white flex items-center gap-3">
@@ -376,31 +434,67 @@ export default function Dashboard() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <div className="bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl flex items-center gap-1 border border-slate-200 dark:border-slate-600 text-xs font-bold">
-            {(["hoy", "7d", "30d", "mes"] as TimeRange[]).map((r) => (
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl flex items-center gap-1 border border-slate-200 dark:border-slate-600 text-xs font-bold">
+              {(["hoy", "7d", "30d", "mes"] as TimeRange[]).map((r) => (
+                <button
+                  key={r}
+                  onClick={() => handlePeriodChange(r)}
+                  className={`px-3 py-1.5 rounded-lg transition-all capitalize ${
+                    timeRange === r
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-600"
+                  }`}
+                >
+                  {r === "7d" ? "7 Días" : r === "30d" ? "30 Días" : r === "mes" ? "Este Mes" : "Hoy"}
+                </button>
+              ))}
               <button
-                key={r}
-                onClick={() => handlePeriodChange(r)}
-                className={`px-3 py-1.5 rounded-lg transition-all capitalize ${
-                  timeRange === r
+                onClick={() => setShowCustomPicker(v => !v)}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  timeRange === "custom"
                     ? "bg-indigo-600 text-white shadow-xs"
                     : "text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-600"
                 }`}
               >
-                {r === "7d" ? "7 Días" : r === "30d" ? "30 Días" : r === "mes" ? "Este Mes" : "Hoy"}
+                <Calendar className="w-3.5 h-3.5" /> Rango
               </button>
-            ))}
+            </div>
+
+            <button
+              onClick={handleManualRefresh}
+              disabled={refreshing}
+              className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors flex items-center gap-1.5 text-xs font-bold border border-slate-200 dark:border-slate-600"
+              title="Actualizar datos en vivo"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-600" : ""}`} />
+            </button>
           </div>
 
-          <button
-            onClick={handleManualRefresh}
-            disabled={refreshing}
-            className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors flex items-center gap-1.5 text-xs font-bold border border-slate-200 dark:border-slate-600"
-            title="Actualizar datos en vivo"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-600" : ""}`} />
-          </button>
+          {showCustomPicker && (
+            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white outline-none"
+              />
+              <span className="text-xs text-slate-400">a</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white outline-none"
+              />
+              <button
+                onClick={applyCustomRange}
+                className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+              >
+                Aplicar
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -420,7 +514,7 @@ export default function Dashboard() {
                 Executive AI Briefing — Diagnóstico Operativo & Oportunidades
               </h3>
               <span className="text-[11px] text-indigo-200/70">
-                Modelos de Demanda & Analítica Sincronizada de Casa Gonzalito
+                Modelos de Demanda & Analítica Sincronizada en Tiempo Real
               </span>
             </div>
           </div>
@@ -434,15 +528,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Tracción Comercial
-            </div>
-            <p className="text-xs text-slate-200">
-              Ventas proyectadas <strong className="text-emerald-400">+12.4%</strong> por encima del promedio del mes. Pico esperado entre las 18:00 y 21:00 hs.
-            </p>
-          </div>
-
+          {/* Quiebre preventivo -- ya era real (replenishmentData), se mantiene */}
           <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
             <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center gap-1.5">
               <ShieldAlert className="w-3.5 h-3.5 text-red-400" /> Quiebre Preventivo
@@ -452,22 +538,55 @@ export default function Dashboard() {
             </p>
           </div>
 
+          {/* Anomalias -- motor real de deteccion estadistica (demand_forecast),
+              existia en el backend pero nunca se mostraba en ningun lado. */}
           <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
             <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center gap-1.5">
-              <Wallet className="w-3.5 h-3.5 text-indigo-400" /> Salud Financiera
+              <Activity className="w-3.5 h-3.5 text-amber-400" /> Anomalías Detectadas por IA
             </div>
-            <p className="text-xs text-slate-200">
-              Cobertura de liquidez en <strong className="text-indigo-300">18.5 días</strong> de operación. Pagos a proveedores programados al día.
-            </p>
+            {anomalies.length > 0 ? (
+              <p className="text-xs text-slate-200">
+                <strong className="text-amber-300">{anomalies.length} sin revisar.</strong> {anomalies[0]?.descripcion || anomalies[0]?.tipo || "Ver detalle en Demanda & Forecast."}
+              </p>
+            ) : (
+              <p className="text-xs text-slate-400">Sin anomalías pendientes de revisión en el período.</p>
+            )}
           </div>
 
+          {/* Clientes en riesgo de fuga -- scoring RFM/churn real (customer360),
+              con boton directo a las campañas de recuperacion ya existentes. */}
           <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
             <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-amber-400" /> Factor Estacional
+              <Users className="w-3.5 h-3.5 text-red-400" /> Clientes en Riesgo de Fuga
             </div>
-            <p className="text-xs text-slate-200">
-              Se prevé incremento de <strong className="text-amber-300">+40%</strong> en Carnicería y Bebidas por fin de semana.
-            </p>
+            {churnDashboard ? (
+              <p className="text-xs text-slate-200">
+                <strong className="text-red-400">{churnDashboard.high_risk_churn ?? 0} clientes</strong> con score de fuga alto.
+                {churnDashboard.active_recovery_campaigns > 0 ? ` ${churnDashboard.active_recovery_campaigns} campañas de recuperación activas.` : " Sin campaña de recuperación activa todavía."}
+              </p>
+            ) : (
+              <p className="text-xs text-slate-400">Cargando scoring de clientes...</p>
+            )}
+          </div>
+
+          {/* Sugerencia de compra IA -- reposicion real ya calculada
+              (replenishmentData / demand_forecast), antes solo alimentaba
+              un numero en el KPI 5, sin mostrar la recomendacion en si. */}
+          <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center gap-1.5">
+              <Package className="w-3.5 h-3.5 text-emerald-400" /> Sugerencia de Compra IA
+            </div>
+            {purchaseSuggestions.length > 0 ? (
+              <p className="text-xs text-slate-200">
+                <strong className="text-emerald-400">{purchaseSuggestions[0]?.producto_nombre || purchaseSuggestions[0]?.product_name || "Producto"}</strong>: reponer {Math.round(Number(purchaseSuggestions[0]?.cantidad_sugerida || 0))} unidades según demanda proyectada.
+              </p>
+            ) : montoOrdenSugeridaIA > 0 ? (
+              <p className="text-xs text-slate-200">
+                Orden sugerida por <strong className="text-emerald-400">{formatPYG(montoOrdenSugeridaIA)}</strong> lista para revisar en Compras.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-400">Sin sugerencias de compra pendientes.</p>
+            )}
           </div>
         </div>
       </div>
@@ -480,7 +599,7 @@ export default function Dashboard() {
         <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
-              {timeRange === "hoy" ? "Ventas de Hoy" : timeRange === "7d" ? "Ventas Últimos 7 Días" : timeRange === "mes" ? "Ventas Este Mes" : "Ventas Últimos 30 Días"}
+              {timeRange === "hoy" ? "Ventas de Hoy" : timeRange === "7d" ? "Ventas Últimos 7 Días" : timeRange === "mes" ? "Ventas Este Mes" : timeRange === "custom" ? "Ventas del Rango" : "Ventas Últimos 30 Días"}
             </span>
             <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
               <DollarSign className="w-4 h-4" />
@@ -491,9 +610,12 @@ export default function Dashboard() {
           </p>
           <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
             <span>Tickets: <strong className="text-gray-700 dark:text-gray-200 font-mono">{totalTickets.toLocaleString()}</strong></span>
-            <span className="text-emerald-600 font-bold font-mono flex items-center gap-0.5">
-              <ArrowUpRight className="w-3.5 h-3.5" /> +8.5%
-            </span>
+            {chartSummaryKPIs.totalSemanaPasada > 0 && (
+              <span className={`font-bold font-mono flex items-center gap-0.5 ${chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
+                {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "+" : ""}{chartSummaryKPIs.pctVsSemanaPasada}%
+              </span>
+            )}
           </div>
         </div>
 
@@ -532,9 +654,7 @@ export default function Dashboard() {
           </p>
           <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
             <span>Canasta: <strong className="text-gray-700 dark:text-gray-200 font-mono">{canastaMedia} un.</strong></span>
-            <span className="text-indigo-600 font-bold font-mono flex items-center gap-0.5">
-              <TrendingUp className="w-3.5 h-3.5" /> Óptimo
-            </span>
+
           </div>
         </div>
 
@@ -550,8 +670,7 @@ export default function Dashboard() {
             {formatPYG(saldoLiquidezTotal)}
           </p>
           <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Cobertura: <strong className="text-gray-700 dark:text-gray-200 font-mono">18.5d</strong></span>
-            <span className="text-blue-600 font-bold font-mono">Solvente</span>
+            <span>Caja + bancos disponibles</span>
           </div>
         </div>
 
@@ -947,7 +1066,7 @@ export default function Dashboard() {
                 Top Productos Líderes en Facturación (Top Movers)
               </h3>
               <p className="text-xs text-gray-400 mt-0.5">
-                Artículos de mayor rotación y contribución al margen en Casa Gonzalito.
+                Artículos de mayor rotación y contribución al margen.
               </p>
             </div>
 

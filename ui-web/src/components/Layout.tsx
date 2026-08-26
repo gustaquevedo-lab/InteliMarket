@@ -12,6 +12,7 @@ import {
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { useFeatures } from "../context/FeatureContext"
+import { api } from "../api"
 import Logo from "./Logo"
 import NotificationBell from "./NotificationBell"
 
@@ -151,6 +152,22 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState<string[]>([])
+  const [branches, setBranches] = useState<any[]>([])
+  const [selectedBranch, setSelectedBranch] = useState<any>(null)
+  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false)
+
+  useEffect(() => {
+    api.branches.list()
+      .then((data: any) => {
+        if (Array.isArray(data)) {
+          setBranches(data)
+          if (data.length > 0) {
+            setSelectedBranch(data[0])
+          }
+        }
+      })
+      .catch((err: any) => console.error("Error fetching branches:", err))
+  }, [])
 
   useEffect(() => {
     const activeGroup = navGroups.find(g => g.items.some(i => i.path === location.pathname))
@@ -366,15 +383,40 @@ export default function Layout() {
           {/* Right Tools */}
           <div className="flex items-center gap-2 sm:gap-4 ml-auto">
             {/* Branch Selector */}
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors text-left">
-              <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center text-primary">
-                <Store className="w-3.5 h-3.5" />
+            <div className="relative">
+              <div 
+                onClick={() => setBranchDropdownOpen(!branchDropdownOpen)}
+                className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors text-left"
+              >
+                <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center text-primary">
+                  <Store className="w-3.5 h-3.5" />
+                </div>
+                <div className="flex flex-col text-left">
+                  <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider leading-none text-left">Sucursal</span>
+                  <span className="text-xs font-medium text-gray-900 dark:text-white leading-tight mt-0.5 text-left truncate max-w-[150px]">
+                    {selectedBranch?.nombre || "Casa Central"}
+                  </span>
+                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-gray-400 ml-1" />
               </div>
-              <div className="flex flex-col text-left">
-                <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider leading-none text-left">Sucursal</span>
-                <span className="text-xs font-medium text-gray-900 dark:text-white leading-tight mt-0.5 text-left">Centro (Súper)</span>
-              </div>
-              <ChevronDown className="w-3.5 h-3.5 text-gray-400 ml-1" />
+
+              {branchDropdownOpen && branches.length > 0 && (
+                <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50 text-left font-sans">
+                  {branches.map((b) => (
+                    <button
+                      key={b.id}
+                      onClick={() => {
+                        setSelectedBranch(b)
+                        setBranchDropdownOpen(false)
+                      }}
+                      className="w-full flex flex-col items-start px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-slate-700/60 transition-colors text-left"
+                    >
+                      <span className="text-xs font-bold text-gray-900 dark:text-white">{b.nombre}</span>
+                      <span className="text-[10px] text-gray-500">{b.ciudad} · Código {b.codigo}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Quick Actions & Notifications */}
