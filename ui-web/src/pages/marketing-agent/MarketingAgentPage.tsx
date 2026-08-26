@@ -763,16 +763,16 @@ export default function MarketingAgentPage() {
                   <label className="block">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400">Imagen del banner</span>
-                      <span className="text-[10px] font-bold text-pink-600 dark:text-pink-400">Recomendado: 1600×900px (16:9)</span>
+                      <span className="text-[10px] font-bold text-pink-600 dark:text-pink-400">Recomendado: formato vertical (ej. 1080×1350px, tipo post de Instagram)</span>
                     </div>
-                    <div className="aspect-[16/9] rounded-2xl bg-gray-100 dark:bg-slate-800 border-2 border-dashed border-gray-300 dark:border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer relative group">
+                    <div className="aspect-[4/5] max-h-64 rounded-2xl bg-gray-100 dark:bg-slate-800 border-2 border-dashed border-gray-300 dark:border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer relative group mx-auto">
                       {bannerImagePreview ? (
-                        <img src={bannerImagePreview} alt="preview" className="w-full h-full object-cover" />
+                        <img src={bannerImagePreview} alt="preview" className="w-full h-full object-contain" />
                       ) : (
                         <div className="flex flex-col items-center text-gray-400 text-center px-4">
                           <ImagePlus className="w-8 h-8 mb-1" />
-                          <span className="text-xs font-bold">Subir imagen horizontal</span>
-                          <span className="text-[10px] mt-1">Ideal 1600×900px (relacion 16:9) -- otras proporciones se recortan al centro para llenar el marco</span>
+                          <span className="text-xs font-bold">Subir imagen vertical</span>
+                          <span className="text-[10px] mt-1">Ideal formato vertical (4:5 o similar) -- se muestra completa en el verificador, sin recortar</span>
                         </div>
                       )}
                       <input

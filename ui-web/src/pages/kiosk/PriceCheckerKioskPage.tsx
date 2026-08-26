@@ -323,47 +323,38 @@ export default function PriceCheckerKioskPage() {
       {/* ── CONTENIDO PRINCIPAL ── */}
       <main className="flex-1 min-h-0 flex flex-col items-center justify-center p-6 sm:p-8 lg:p-10 z-10 w-full max-w-6xl mx-auto">
 
-        {/* A) STANDBY -- layout de 2 columnas para aprovechar el ancho real
-            de las terminales (1366x768, apaisada). Apilar todo en una sola
-            columna angosta obligaba a achicar logo/cotizaciones/banner para
-            que entraran en 768px de alto -- en horizontal sobra ancho de
-            sobra, así que cada elemento puede ser grande de verdad. */}
+        {/* A) STANDBY -- layout de 2 columnas. Izquierda: identidad + escaneo +
+            cotizaciones. Derecha: banner de marketing solo, mostrado entero
+            (los creativos reales de Marketing son verticales tipo Instagram,
+            no 16:9 apaisado -- object-contain para no recortarlos). */}
         {!scannedProduct && !notFoundCode && !connError && (
-          <div className="w-full h-full grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-stretch animate-in fade-in zoom-in-95 duration-300">
+          <div className="w-full h-full grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-stretch animate-in fade-in zoom-in-95 duration-300">
 
-            {/* COLUMNA IZQUIERDA -- identidad + llamado a escanear */}
-            <div className="lg:col-span-5 flex flex-col items-center justify-center space-y-5">
-              <div className="relative flex flex-col items-center">
-                <div className="absolute -inset-8 rounded-full bg-gradient-to-r from-orange-500 via-blue-600 to-amber-400 opacity-30 dark:opacity-40 blur-2xl animate-pulse-glow pointer-events-none" />
-                <div className="relative w-48 h-48 sm:w-56 sm:h-56 rounded-full bg-white p-3.5 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
+            {/* COLUMNA IZQUIERDA -- identidad + llamado a escanear + cotizaciones */}
+            <div className="lg:col-span-5 h-full min-h-0 flex flex-col items-center justify-center gap-3">
+              <div className="relative flex flex-col items-center shrink-0">
+                <div className="absolute -inset-6 rounded-full bg-gradient-to-r from-orange-500 via-blue-600 to-amber-400 opacity-30 dark:opacity-40 blur-2xl animate-pulse-glow pointer-events-none" />
+                <div className="relative w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-white p-3 shadow-2xl ring-4 ring-slate-200 dark:ring-white/30 flex items-center justify-center overflow-hidden">
                   {company?.logo_url ? (
                     <img src={company.logo_url} alt={company.nombre || "Logo"} className="w-full h-full object-contain" />
                   ) : (
                     <div className="w-full h-full rounded-full bg-gradient-to-tr from-slate-900 via-blue-950 to-slate-900 flex flex-col items-center justify-center text-center p-4">
-                      <span className="text-3xl sm:text-4xl font-black text-orange-500 tracking-tighter">EXTRA</span>
-                      <span className="text-xs sm:text-sm font-black text-blue-400 tracking-widest">PARAGUAY</span>
-                      <span className="text-[9px] text-slate-300 tracking-widest uppercase font-bold mt-1">Supermercado Mayorista</span>
+                      <span className="text-2xl sm:text-3xl font-black text-orange-500 tracking-tighter">EXTRA</span>
+                      <span className="text-[11px] sm:text-xs font-black text-blue-400 tracking-widest">PARAGUAY</span>
+                      <span className="text-[8px] text-slate-300 tracking-widest uppercase font-bold mt-1">Supermercado Mayorista</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="px-5 py-2 rounded-full bg-orange-500/10 dark:bg-orange-500/20 border-2 border-orange-500/40 dark:border-orange-500/50 shadow-lg shadow-orange-500/10 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-orange-500 dark:text-orange-400 animate-spin" />
-                <span className="text-xs sm:text-sm font-black tracking-widest text-orange-600 dark:text-orange-300 uppercase">
-                  VERIFICADOR DIGITAL INSTANTÁNEO
-                </span>
-                <Sparkles className="w-4 h-4 text-orange-500 dark:text-orange-400 animate-spin" />
-              </div>
-
-              <h1 className="text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-slate-700 to-orange-600 dark:from-white dark:via-slate-100 dark:to-orange-200 tracking-tight text-center">
+              <h1 className="text-3xl sm:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-slate-700 to-orange-600 dark:from-white dark:via-slate-100 dark:to-orange-200 tracking-tight text-center shrink-0">
                 ESCANEE AQUÍ SU PRODUCTO
               </h1>
 
-              <div className="relative w-full max-w-md h-28 rounded-3xl bg-white dark:bg-slate-900/80 border-2 border-dashed border-blue-400/50 dark:border-blue-500/50 backdrop-blur-2xl p-4 flex flex-col items-center justify-center overflow-hidden shadow-2xl">
+              <div className="relative w-full max-w-md h-20 rounded-3xl bg-white dark:bg-slate-900/80 border-2 border-dashed border-blue-400/50 dark:border-blue-500/50 backdrop-blur-2xl p-3 flex flex-col items-center justify-center overflow-hidden shadow-2xl shrink-0">
                 <div className="absolute left-4 right-4 h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent rounded-full shadow-[0_0_15px_#ff0033] animate-laser pointer-events-none" />
                 <div className="flex items-center gap-3 text-slate-600 dark:text-slate-300">
-                  <Barcode className="w-12 h-12 sm:w-14 sm:h-14 text-blue-500 dark:text-blue-400 opacity-90" />
+                  <Barcode className="w-9 h-9 sm:w-10 sm:h-10 text-blue-500 dark:text-blue-400 opacity-90" />
                   <div className="text-left">
                     <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-white block uppercase tracking-wider">
                       Acerque el Código de Barras
@@ -373,40 +364,42 @@ export default function PriceCheckerKioskPage() {
                     </span>
                   </div>
                 </div>
-                <div className="absolute bottom-2 flex items-center gap-1 text-[11px] font-black text-orange-500 dark:text-orange-400 uppercase tracking-widest animate-bounce">
-                  <ArrowDown className="w-3.5 h-3.5" />
-                  <span>Posición del sensor abajo</span>
-                  <ArrowDown className="w-3.5 h-3.5" />
+              </div>
+
+              {/* COTIZACIONES -- movida a la izquierda para que quede junto
+                  al resto de la identidad, dejando el banner solo a la derecha. */}
+              <div className="w-full max-w-md space-y-2 shrink-0">
+                <span className="text-xs font-black tracking-widest text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5 px-1">
+                  <DollarSign className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                  PIZARRA DE CAMBIO OFICIAL (CAJAS POS)
+                </span>
+                <div className="grid grid-cols-1 gap-2">
+                  {activeCurrencies.map((c) => (
+                    <div key={c.code} className={`px-4 py-2.5 rounded-2xl bg-white dark:bg-slate-900/90 border-2 ${colorBorder[c.color]} shadow-xl flex items-center justify-between`}>
+                      <div className="flex items-center gap-3">
+                        {c.flag}
+                        <div><span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase block leading-none">{c.labelBoard}</span><span className="text-sm font-mono font-bold text-slate-600 dark:text-slate-300">{c.prefix}</span></div>
+                      </div>
+                      <div className="text-right font-mono">
+                        <span className={`text-xl sm:text-2xl font-black ${colorText[c.color]}`}>{c.rate.toLocaleString("es-PY")}</span>
+                        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block leading-none">Gs.</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
 
-            {/* COLUMNA DERECHA -- banner de marketing grande + cotizaciones
-                grandes, una arriba de la otra pero con espacio real porque
-                no compiten por ancho con la columna izquierda. */}
-            <div className="lg:col-span-7 h-full min-h-0 flex flex-col justify-between gap-6">
+            {/* COLUMNA DERECHA -- solo el banner de marketing, entero y grande. */}
+            <div className="lg:col-span-7 h-full min-h-0 flex flex-col">
               {currentBanner ? (
-                <div className="w-full flex-1 min-h-0 flex flex-col rounded-3xl border-2 border-slate-200 dark:border-white/20 shadow-2xl relative overflow-hidden bg-white dark:bg-slate-900/95">
+                <div className="w-full flex-1 min-h-0 flex flex-col rounded-3xl border-2 border-slate-200 dark:border-white/20 shadow-2xl relative overflow-hidden bg-slate-100 dark:bg-slate-900/95">
                   {currentBanner.imagen_url ? (
-                    <div className="relative w-full flex-1 min-h-0">
-                      <img src={currentBanner.imagen_url} alt={currentBanner.titulo} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent flex flex-col justify-end p-5 sm:p-6">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          {currentBanner.etiqueta && (
-                            <span className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider shadow-lg ${colorClasses[currentBanner.color || "orange"] || colorClasses.orange}`}>
-                              {currentBanner.etiqueta}
-                            </span>
-                          )}
-                          {currentBanner.descuento_texto && (
-                            <span className="px-3 py-1 rounded-xl bg-white text-slate-900 font-black text-sm shadow-lg">{currentBanner.descuento_texto}</span>
-                          )}
-                        </div>
-                        <h3 className="text-xl sm:text-3xl font-black text-white tracking-tight leading-snug drop-shadow-lg">{currentBanner.titulo}</h3>
-                        {currentBanner.subtitulo && <p className="text-sm sm:text-base text-slate-200 leading-relaxed">{currentBanner.subtitulo}</p>}
-                      </div>
+                    <div className="relative w-full flex-1 min-h-0 flex items-center justify-center bg-slate-100 dark:bg-black/40">
+                      <img src={currentBanner.imagen_url} alt={currentBanner.titulo} className="max-w-full max-h-full object-contain" />
                     </div>
                   ) : (
-                    <div className="p-6 sm:p-8 aspect-[16/9] flex flex-col justify-center">
+                    <div className="p-6 sm:p-8 flex-1 min-h-0 flex flex-col justify-center">
                       <div className="flex items-center gap-2 mb-2">
                         {currentBanner.etiqueta && (
                           <span className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider shadow-lg ${colorClasses[currentBanner.color || "orange"] || colorClasses.orange}`}>
@@ -424,7 +417,7 @@ export default function PriceCheckerKioskPage() {
                     </div>
                   )}
                   {banners.length > 1 && (
-                    <div className="flex items-center justify-center gap-2 py-2.5 border-t border-slate-100 dark:border-white/10">
+                    <div className="flex items-center justify-center gap-2 py-2 border-t border-slate-100 dark:border-white/10 shrink-0">
                       {banners.map((_, i) => (
                         <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === currentBannerIdx ? "w-8 bg-orange-500" : "w-2 bg-slate-300 dark:bg-white/20"}`} />
                       ))}
@@ -438,29 +431,6 @@ export default function PriceCheckerKioskPage() {
                   <p className="text-xs text-slate-400 dark:text-slate-600 mt-1">Marketing puede subir el primer creativo desde Gerente de Marketing IA → Verificador de Precios</p>
                 </div>
               )}
-
-              {/* COTIZACIONES -- grandes, sin competir por espacio. shrink-0
-                  para que el banner nunca la empuje fuera de la pantalla. */}
-              <div className="space-y-2 shrink-0">
-                <span className="text-xs font-black tracking-widest text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5 px-1">
-                  <DollarSign className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
-                  PIZARRA DE CAMBIO OFICIAL (CAJAS POS)
-                </span>
-                <div className={`grid grid-cols-1 gap-3 ${activeCurrencies.length === 1 ? "" : "sm:grid-cols-2"}`}>
-                  {activeCurrencies.map((c) => (
-                    <div key={c.code} className={`p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900/90 border-2 ${colorBorder[c.color]} shadow-xl flex items-center justify-between`}>
-                      <div className="flex items-center gap-3">
-                        {c.flag}
-                        <div><span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase block leading-none">{c.labelBoard}</span><span className="text-sm font-mono font-bold text-slate-600 dark:text-slate-300">{c.prefix}</span></div>
-                      </div>
-                      <div className="text-right font-mono">
-                        <span className={`text-2xl sm:text-3xl font-black ${colorText[c.color]}`}>{c.rate.toLocaleString("es-PY")}</span>
-                        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block leading-none">Gs.</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
         )}
