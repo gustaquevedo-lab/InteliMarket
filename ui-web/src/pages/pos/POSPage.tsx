@@ -604,7 +604,30 @@ export default function POSPage() {
 
   // ── MODALES DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO ─────────
   const [showPaymentModal, setShowPaymentModal] = useState(false)
-  const [paymentTab, setPaymentTab] = useState<"cash" | "bancard" | "dinelco" | "qr" | "extra_club" | "mixed">("cash")
+  // Metodos de cobro activos -- reemplaza el viejo "paymentTab" de
+  // seleccion unica (+ una pestana "Pago Mixto" que duplicaba cada campo).
+  // Ahora cada metodo es un boton que se prende/apaga: con uno solo activo
+  // se comporta igual que antes (implica el total, sin campo de monto
+  // visible salvo en Efectivo); con 2+ activos, cada linea no-efectivo
+  // muestra su propio campo de monto para dividir el cobro -- eso ES el
+  // pago mixto, sin pantalla aparte.
+  const [activeMethods, setActiveMethods] = useState<Set<"cash" | "bancard" | "dinelco" | "qr" | "extra_club">>(new Set(["cash"]))
+  const isMultiPayment = activeMethods.size > 1
+  const toggleActiveMethod = (m: "cash" | "bancard" | "dinelco" | "qr" | "extra_club") => {
+    setActiveMethods(prev => {
+      const next = new Set(prev)
+      if (next.has(m)) {
+        if (next.size === 1) return prev
+        next.delete(m)
+      } else {
+        next.add(m)
+      }
+      return next
+    })
+    setPosVerifyStatus("idle")
+    setPosVerifyCandidates([])
+    setPosVerifiedTxn(null)
+  }
   
   // Efectivo Multimoneda simultáneo (Guaraníes NUNCA tiene decimales)
   const [payCashPyg, setPayCashPyg] = useState<string>("")
@@ -615,9 +638,11 @@ export default function POSPage() {
   const payCashPygInputRef = useRef<HTMLInputElement>(null)
   const payCashBrlInputRef = useRef<HTMLInputElement>(null)
   const payCashUsdInputRef = useRef<HTMLInputElement>(null)
-  const mixedCashPygInputRef = useRef<HTMLInputElement>(null)
-  const mixedCashBrlInputRef = useRef<HTMLInputElement>(null)
+  // Monto de cada linea cuando hay 2+ metodos activos (pago dividido) --
+  // con un solo metodo activo estos campos no se muestran, el monto es
+  // implicitamente el total de la venta.
   const mixedCardPygInputRef = useRef<HTMLInputElement>(null)
+  const mixedDinelcoPygInputRef = useRef<HTMLInputElement>(null)
   const mixedQrPygInputRef = useRef<HTMLInputElement>(null)
   const mixedExtraClubPygInputRef = useRef<HTMLInputElement>(null)
 
@@ -627,14 +652,12 @@ export default function POSPage() {
   const [posCardLote, setPosCardLote] = useState(activePosConfig.bancardLote)
   const [posCardCupon, setPosCardCupon] = useState("")
   const [posCardLast4, setPosCardLast4] = useState("")
-  const [posCardMontoPyg, setPosCardMontoPyg] = useState("")
 
   // Dinelco POS vinculada a la caja activa
   const [dinelcoTerminalId, setDinelcoTerminalId] = useState(activePosConfig.dinelcoTerminalId)
   const [dinelcoCardType, setDinelcoCardType] = useState<"debito" | "credito" | "social">("debito")
   const [dinelcoLote, setDinelcoLote] = useState(activePosConfig.dinelcoLote)
   const [dinelcoCupon, setDinelcoCupon] = useState("")
-  const [dinelcoMontoPyg, setDinelcoMontoPyg] = useState("")
 
   // Verificación real contra la maquinita física (Bancard/Dinelco) -- busca
   // en la transacción real que la terminal ya registró en su propia red,
@@ -653,9 +676,8 @@ export default function POSPage() {
   }, [activePosConfig])
 
   // Cobro Mixto
-  const [mixedCashPyg, setMixedCashPyg] = useState("")
-  const [mixedCashBrl, setMixedCashBrl] = useState("")
   const [mixedCardPyg, setMixedCardPyg] = useState("")
+  const [mixedDinelcoPyg, setMixedDinelcoPyg] = useState("")
   const [mixedQrPyg, setMixedQrPyg] = useState("")
   const [mixedExtraClubPyg, setMixedExtraClubPyg] = useState("")
 
@@ -930,7 +952,7 @@ export default function POSPage() {
   // cedula y nombre"), ya cubierto por el search del backend que matchea
   // extra_club_numero/ruc/ci/razon_social en un solo query.
   useEffect(() => {
-    if (paymentTab !== "extra_club") return
+    if (!activeMethods.has("extra_club")) return
     const query = extraClubQuery.trim()
     if (!query) { setExtraClubResults([]); setExtraClubSearching(false); return }
     const timer = setTimeout(async () => {
@@ -956,18 +978,14 @@ export default function POSPage() {
       }
     }, 250)
     return () => clearTimeout(timer)
-  }, [extraClubQuery, paymentTab])
+  }, [extraClubQuery, activeMethods])
 
   // Linea de credito real del cliente elegido para Extra Club -- se pide
   // apenas hay un cliente real seleccionado en ese tab (no el generico
   // DEFAULT_CUSTOMER). Sin cuenta de credito, extraClubCredit queda null
   // -- eso es lo que bloquea el cobro salvo override de admin.
   useEffect(() => {
-    // Antes esto solo corria en el tab "extra_club" -- en "mixed" (efectivo
-    // + Extra Club) extraClubCredit se quedaba en null para siempre, sin
-    // importar si el cliente tenia limite real, y el boton de cobro
-    // rechazaba la venta diciendo "sin linea de credito" a cualquiera.
-    if ((paymentTab !== "extra_club" && paymentTab !== "mixed") || !customer || customer.id === DEFAULT_CUSTOMER.id) {
+    if (!activeMethods.has("extra_club") || !customer || customer.id === DEFAULT_CUSTOMER.id) {
       setExtraClubCredit(null)
       return
     }
@@ -977,7 +995,7 @@ export default function POSPage() {
       .then((acc) => { if (!cancelled) setExtraClubCredit(acc ? { limite_credito: Number(acc.limite_credito || 0), saldo_disponible: Number(acc.saldo_disponible || 0), saldo_utilizado: Number(acc.saldo_utilizado || 0), activo: acc.activo !== false } : null) })
       .catch(() => { if (!cancelled) setExtraClubCredit(null) })
     return () => { cancelled = true }
-  }, [customer, paymentTab])
+  }, [customer, activeMethods])
 
   // Busqueda para el boton dedicado de consulta de saldo (Electron toolbar)
   // -- no toca el carrito ni el cliente de la venta, es solo lectura.
@@ -1935,7 +1953,7 @@ export default function POSPage() {
         // En pago mixto solo la porcion Extra Club va a credito -- mostrar
         // el total de la venta ahi seria enganoso para la supervisora, que
         // necesita saber cuanto de esto es realmente fiado.
-        if (paymentTab === "mixed") {
+        if (isMultiPayment) {
           const montoCredito = parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)
           return `Pago mixto con Extra Club: ${nombre}${numero} · ${formatPYG(montoCredito)} a crédito de ${formatPYG(totalPyg)} total${saldoTxt}`
         }
@@ -2680,26 +2698,28 @@ export default function POSPage() {
   const { totalRecibidoPyg, saldoRestantePyg, vueltoPyg } = useMemo(() => {
     let recibido = 0
 
-    if (paymentTab === "cash") {
+    // Con un solo metodo activo, ese metodo implica el total de la venta
+    // (nunca se pide un monto -- la tarjeta/QR/Extra Club se cobran enteros
+    // de una). Con 2+ metodos activos, cada uno no-efectivo aporta lo que
+    // el cajero cargo en su propio campo -- eso reemplaza a la vieja
+    // pestana "Pago Mixto".
+    if (activeMethods.has("cash")) {
       const pyg = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
       const brl = parseFloat(payCashBrl.replace(/,/g, ".") || "0") * rates.BRL
       const usd = parseFloat(payCashUsd.replace(/,/g, ".") || "0") * rates.USD
-      recibido = pyg + brl + usd
-    } else if (paymentTab === "bancard") {
-      recibido = parseInt(posCardMontoPyg.replace(/\D/g, "") || String(totalPyg), 10)
-    } else if (paymentTab === "dinelco") {
-      recibido = parseInt(dinelcoMontoPyg.replace(/\D/g, "") || String(totalPyg), 10)
-    } else if (paymentTab === "qr") {
-      recibido = totalPyg
-    } else if (paymentTab === "extra_club") {
-      recibido = totalPyg
-    } else if (paymentTab === "mixed") {
-      const pyg = parseInt(mixedCashPyg.replace(/\D/g, "") || "0", 10)
-      const brl = parseFloat(mixedCashBrl.replace(/,/g, ".") || "0") * rates.BRL
-      const card = parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)
-      const qr = parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)
-      const extraClub = parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)
-      recibido = pyg + brl + card + qr + extraClub
+      recibido += pyg + brl + usd
+    }
+    if (activeMethods.has("bancard")) {
+      recibido += isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    }
+    if (activeMethods.has("dinelco")) {
+      recibido += isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    }
+    if (activeMethods.has("qr")) {
+      recibido += isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    }
+    if (activeMethods.has("extra_club")) {
+      recibido += isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     }
 
     // El guaraní no circula en billetes/monedas por debajo de ₲500 -- al
@@ -2719,7 +2739,7 @@ export default function POSPage() {
       saldoRestantePyg: Math.round(saldo),
       vueltoPyg: Math.round(vuelto)
     }
-  }, [paymentTab, payCashPyg, payCashBrl, payCashUsd, posCardMontoPyg, dinelcoMontoPyg, mixedCashPyg, mixedCashBrl, mixedCardPyg, mixedQrPyg, mixedExtraClubPyg, totalPyg, rates])
+  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedExtraClubPyg, totalPyg, rates])
 
   // Al abrir el modal de cobro, foco directo al campo de Guaraníes (ya viene
   // precargado con el monto exacto) con el texto seleccionado -- así el
@@ -2729,23 +2749,24 @@ export default function POSPage() {
   // alcanzaba, lo que le sacaba el foco al campo mientras el cajero
   // todavía estaba tipeando un monto distinto.
   useEffect(() => {
-    if (showPaymentModal && paymentTab === "cash") {
+    if (showPaymentModal && activeMethods.has("cash")) {
       payCashPygInputRef.current?.focus()
       payCashPygInputRef.current?.select()
-    } else if (showPaymentModal && paymentTab === "mixed") {
-      mixedCashPygInputRef.current?.focus()
-      mixedCashPygInputRef.current?.select()
     }
-  }, [showPaymentModal, paymentTab])
+  }, [showPaymentModal, activeMethods])
 
   // Mismo ciclo con precarga del faltante que en efectivo, pero para pago
   // mixto: Gs -> R$ -> Tarjeta -> QR -> Gs. El pago mixto antes era 4
   // campos sueltos sin ninguna ayuda -- ahora cada Enter sugiere cuánto
   // falta convertido a la moneda del siguiente campo.
+  // Enter en el campo de monto de una linea no-efectivo (Bancard, Dinelco,
+  // QR, Extra Club) cuando hay pago dividido: si lo que ya se cargo cubre
+  // el total, cobra directo; si no, autocompleta ESTE campo con el
+  // faltante (equivalente a tocar "Resto" pero sin soltar el teclado). El
+  // ciclo Gs -> R$ -> US$ -> Gs de Efectivo es aparte y no cambia.
   const handleMixedFieldKeyDown = (
     e: React.KeyboardEvent<HTMLInputElement>,
-    nextRef: React.RefObject<HTMLInputElement>,
-    fillNext?: (faltantePyg: number) => void,
+    setValue: (v: string) => void,
   ) => {
     if (e.key === "Enter") {
       e.preventDefault()
@@ -2753,15 +2774,7 @@ export default function POSPage() {
         handleProcessCheckout()
       } else {
         const faltante = Math.max(0, totalPyg - totalRecibidoPyg)
-        if (faltante > 0 && fillNext) fillNext(faltante)
-        // El setTimeout es necesario: si el campo se precargó recién arriba
-        // (fillNext), React todavía no pintó ese valor en el DOM en este
-        // mismo tick -- un .select() inmediato selecciona el valor viejo
-        // (vacío), no el precargado, y el cajero terminaba borrando a mano.
-        setTimeout(() => {
-          nextRef.current?.focus()
-          nextRef.current?.select()
-        }, 0)
+        if (faltante > 0) setValue(Math.ceil(faltante).toLocaleString("es-PY"))
       }
     }
   }
@@ -2838,16 +2851,15 @@ export default function POSPage() {
 
   // ── PROCESAMIENTO DE COBRO (FACTURACIÓN E IMPRESIÓN 80MM) ──────────────────
   const handleOpenPayment = () => {
+    setActiveMethods(new Set(["cash"]))
     setPayCashPyg(totalPyg.toLocaleString("es-PY"))
     setPayCashBrl("")
     setPayCashUsd("")
     setHasClickedQuickCash(false)
-    setPosCardMontoPyg(totalPyg.toLocaleString("es-PY"))
-    setDinelcoMontoPyg(totalPyg.toLocaleString("es-PY"))
-    setMixedCashPyg("")
-    setMixedCashBrl("")
     setMixedCardPyg("")
+    setMixedDinelcoPyg("")
     setMixedQrPyg("")
+    setMixedExtraClubPyg("")
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
@@ -2860,10 +2872,10 @@ export default function POSPage() {
   // cable con IP propia y Dinelco por WiFi, ninguno atado a Ñemuha) la
   // transacción que corresponde al cobro actual, en vez de que el cajero
   // tipee el voucher a mano sin ninguna verificación real.
-  const handleVerifyPosTerminal = async () => {
-    const procesador = paymentTab === "bancard" ? "BANCARD" : "DINELCO"
-    const montoStr = paymentTab === "bancard" ? posCardMontoPyg : dinelcoMontoPyg
-    const monto = parseInt(montoStr.replace(/\D/g, "") || String(totalPyg), 10)
+  const handleVerifyPosTerminal = async (metodo: "bancard" | "dinelco") => {
+    const procesador = metodo === "bancard" ? "BANCARD" : "DINELCO"
+    const montoStr = metodo === "bancard" ? mixedCardPyg : mixedDinelcoPyg
+    const monto = isMultiPayment ? parseInt(montoStr.replace(/\D/g, "") || String(totalPyg), 10) : totalPyg
     setPosVerifyStatus("searching")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
@@ -2874,7 +2886,7 @@ export default function POSPage() {
         desde: posVerifyOpenedAt || new Date(Date.now() - 5 * 60 * 1000).toISOString(),
       })
       if (candidates.length === 1) {
-        handleSelectPosCandidate(candidates[0])
+        handleSelectPosCandidate(metodo, candidates[0])
       } else if (candidates.length > 1) {
         setPosVerifyCandidates(candidates)
         setPosVerifyStatus("multiple")
@@ -2886,16 +2898,16 @@ export default function POSPage() {
     }
   }
 
-  const handleSelectPosCandidate = (c: { id: string; fecha: string; tarjeta_marca: string; monto: number; voucher: string; cajero: string }) => {
+  const handleSelectPosCandidate = (metodo: "bancard" | "dinelco", c: { id: string; fecha: string; tarjeta_marca: string; monto: number; voucher: string; cajero: string }) => {
     setPosVerifiedTxn(c)
     setPosVerifyStatus("found")
     setPosVerifyCandidates([])
-    if (paymentTab === "bancard") setPosCardCupon(c.voucher)
+    if (metodo === "bancard") setPosCardCupon(c.voucher)
     else setDinelcoCupon(c.voucher)
   }
 
   const handleProcessCheckout = async () => {
-    if (saldoRestantePyg > 0 && paymentTab !== "qr") {
+    if (saldoRestantePyg > 0 && !(activeMethods.size === 1 && activeMethods.has("qr"))) {
       toast.warning("Saldo Pendiente", `Falta saldar ${formatPYG(saldoRestantePyg)} para completar el cobro.`)
       return
     }
@@ -2992,7 +3004,7 @@ export default function POSPage() {
       // (cualquier venta con nombre de cliente salia rotulada "FACTURA
       // CREDITO", incluso pagada en efectivo) -- ahora es especificamente
       // "se pago con Extra Club", que es lo unico que realmente es credito.
-      const isClubMember = paymentTab === "extra_club" || (paymentTab === "mixed" && (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0))
+      const isClubMember = activeMethods.has("extra_club") && (!isMultiPayment || parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0)
       const msgSocio = tpl.mensaje_socio_club || `⭐ SOCIO EXTRA CLUB: Sumaste +${Math.round(totalPyg / 1000)} Puntos. Saldo Total: 2.850 Puntos.`
       const msgInvitacion = tpl.mensaje_invitacion_club || "🎁 ¿Aún no eres socio Extra Club? Regístrate gratis en caja o en club.extrasuper.com.py y acumula puntos para canjear por premios y descuentos exclusivos."
       const showMarketing = tpl.habilitar_mensaje_marketing && tpl.mensaje_marketing
@@ -3058,36 +3070,33 @@ export default function POSPage() {
       // coinciden con lo que ya usa caja/service.py para calcular el
       // efectivo acumulado de la alerta de retiro.
       const salePaymentsForCreate: { forma_pago: string; monto: number; moneda?: string }[] = (() => {
-        if (paymentTab === "cash") {
-          const out: { forma_pago: string; monto: number; moneda?: string }[] = []
+        const out: { forma_pago: string; monto: number; moneda?: string }[] = []
+        if (activeMethods.has("cash")) {
           const pyg = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
           const brl = parseFloat(payCashBrl.replace(/,/g, ".") || "0")
           const usd = parseFloat(payCashUsd.replace(/,/g, ".") || "0")
           if (pyg > 0) out.push({ forma_pago: "EFECTIVO", monto: pyg, moneda: "PYG" })
           if (brl > 0) out.push({ forma_pago: "EFECTIVO", monto: brl, moneda: "BRL" })
           if (usd > 0) out.push({ forma_pago: "EFECTIVO", monto: usd, moneda: "USD" })
-          if (out.length === 0) out.push({ forma_pago: "EFECTIVO", monto: totalPyg, moneda: "PYG" })
-          return out
         }
-        if (paymentTab === "bancard") return [{ forma_pago: "TARJETA_BANCARD", monto: totalPyg, moneda: "PYG" }]
-        if (paymentTab === "dinelco") return [{ forma_pago: "TARJETA_DINELCO", monto: totalPyg, moneda: "PYG" }]
-        if (paymentTab === "qr") return [{ forma_pago: "QR", monto: totalPyg, moneda: "PYG" }]
-        if (paymentTab === "extra_club") return [{ forma_pago: "EXTRA_CLUB", monto: totalPyg, moneda: "PYG" }]
-        if (paymentTab === "mixed") {
-          const out: { forma_pago: string; monto: number; moneda?: string }[] = []
-          const pyg = parseInt(mixedCashPyg.replace(/\D/g, "") || "0", 10)
-          const brl = parseFloat(mixedCashBrl.replace(/,/g, ".") || "0")
-          const card = parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)
-          const qr = parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)
-          const extraClub = parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)
-          if (pyg > 0) out.push({ forma_pago: "EFECTIVO", monto: pyg, moneda: "PYG" })
-          if (brl > 0) out.push({ forma_pago: "EFECTIVO", monto: brl, moneda: "BRL" })
-          if (card > 0) out.push({ forma_pago: "TARJETA_BANCARD", monto: card, moneda: "PYG" })
-          if (qr > 0) out.push({ forma_pago: "QR", monto: qr, moneda: "PYG" })
-          if (extraClub > 0) out.push({ forma_pago: "EXTRA_CLUB", monto: extraClub, moneda: "PYG" })
-          return out
+        if (activeMethods.has("bancard")) {
+          const monto = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (monto > 0) out.push({ forma_pago: "TARJETA_BANCARD", monto, moneda: "PYG" })
         }
-        return [{ forma_pago: "EFECTIVO", monto: totalPyg, moneda: "PYG" }]
+        if (activeMethods.has("dinelco")) {
+          const monto = isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (monto > 0) out.push({ forma_pago: "TARJETA_DINELCO", monto, moneda: "PYG" })
+        }
+        if (activeMethods.has("qr")) {
+          const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (monto > 0) out.push({ forma_pago: "QR", monto, moneda: "PYG" })
+        }
+        if (activeMethods.has("extra_club")) {
+          const monto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (monto > 0) out.push({ forma_pago: "EXTRA_CLUB", monto, moneda: "PYG" })
+        }
+        if (out.length === 0) out.push({ forma_pago: "EFECTIVO", monto: totalPyg, moneda: "PYG" })
+        return out
       })()
       const saleBasePayload = {
         company_id: COMPANY_ID,
@@ -3105,7 +3114,7 @@ export default function POSPage() {
         estado: "completada",
         items: saleItemsForCreate,
         payments: salePaymentsForCreate,
-        admin_override_credito: paymentTab === "extra_club" ? extraClubAdminOverride : false,
+        admin_override_credito: activeMethods.has("extra_club") ? extraClubAdminOverride : false,
       }
 
       let numeroComprobante = saleNumber
@@ -3340,9 +3349,9 @@ export default function POSPage() {
       // terminal, se reclama ahora (best-effort, sin esperar -- no debe
       // sumar delay entre cobrar y que salga el ticket) para que esa
       // transacción no se le pueda asignar por error a otra venta.
-      if ((paymentTab === "bancard" || paymentTab === "dinelco") && posVerifiedTxn) {
+      if ((activeMethods.has("bancard") || activeMethods.has("dinelco")) && posVerifiedTxn) {
         const claimTxn = posVerifiedTxn
-        const claimProcesador = paymentTab === "bancard" ? "BANCARD" : "DINELCO"
+        const claimProcesador = activeMethods.has("bancard") ? "BANCARD" : "DINELCO"
         const doClaim = (saleIdForClaim?: string) => api.integrations.posClaim({
           fin_operacao_pos_id: claimTxn.id,
           procesador: claimProcesador,
@@ -5219,7 +5228,10 @@ export default function POSPage() {
               )}
             </div>
 
-            {/* Pestañas de Métodos de Cobro (Filtrados según configuración en Configuración > Medios de Pago) */}
+            {/* Metodos de cobro -- cada boton agrega/quita su linea (no
+                reemplaza la pantalla). Con uno solo activo se ve y funciona
+                igual que antes; agregar un segundo ES el pago mixto, sin
+                pestana aparte. Numeros 1-5 hacen lo mismo por teclado. */}
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 mb-4">
               {(() => {
                 let pMethods: any[] = []
@@ -5235,42 +5247,44 @@ export default function POSPage() {
                 }
 
                 const allTabs = [
-                  { id: "cash", label: "Efectivo Multimoneda", icon: Banknote, show: isEnabled("EFECTIVO") },
-                  { id: "bancard", label: `POS Bancard (${posTerminalId})`, icon: CreditCard, show: isEnabled("BANCARD") },
-                  { id: "dinelco", label: `POS Dinelco (${dinelcoTerminalId})`, icon: CreditCard, show: isEnabled("DINELCO") },
-                  { id: "qr", label: "QR / Pix", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
-                  { id: "extra_club", label: "Extra Club (Crédito)", icon: Star, show: isEnabled("EXTRA_CLUB") },
-                  { id: "mixed", label: "Pago Mixto", icon: Coins, show: true },
+                  { id: "cash", key: "1", label: "Efectivo", icon: Banknote, show: isEnabled("EFECTIVO") },
+                  { id: "bancard", key: "2", label: "Bancard", icon: CreditCard, show: isEnabled("BANCARD") },
+                  { id: "dinelco", key: "3", label: "Dinelco", icon: CreditCard, show: isEnabled("DINELCO") },
+                  { id: "qr", key: "4", label: "QR / Pix", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
+                  { id: "extra_club", key: "5", label: "Extra Club", icon: Star, show: isEnabled("EXTRA_CLUB") },
                 ]
 
                 return allTabs.filter(t => t.show).map((m) => (
                   <button
                     key={m.id}
-                    onClick={() => {
-                      setPaymentTab(m.id as any)
-                      setPosVerifyStatus("idle")
-                      setPosVerifyCandidates([])
-                      setPosVerifiedTxn(null)
-                    }}
-                    className={`p-2 rounded-xl border font-bold text-[11px] flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                      paymentTab === m.id
+                    onClick={() => toggleActiveMethod(m.id as any)}
+                    className={`relative p-2 rounded-xl border font-bold text-[11px] flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                      activeMethods.has(m.id as any)
                         ? "bg-emerald-600 text-white border-emerald-500 shadow-md"
                         : "bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white"
                     }`}
                   >
+                    <span className={`absolute top-1 left-1.5 text-[9px] font-black ${activeMethods.has(m.id as any) ? "text-emerald-200" : "text-slate-400 dark:text-slate-600"}`}>{m.key}</span>
                     <m.icon className="w-4 h-4" />
                     <span className="text-center leading-tight truncate w-full">{m.label}</span>
                   </button>
                 ))
               })()}
             </div>
+            {isMultiPayment && (
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 -mt-2.5 mb-3">Pago dividido entre {activeMethods.size} métodos -- complete el monto de cada línea hasta cubrir el total.</p>
+            )}
 
-            {/* Contenido según método de cobro */}
-            <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 mb-4">
+            {/* Una tarjeta por método activo -- todas visibles a la vez,
+                nada se oculta al agregar otro método. */}
+            <div className="space-y-3 mb-4">
               
               {/* 1. EFECTIVO MULTIMONEDA (CON BANDERA PARAGUAY Y CAMPOS ALINEADOS) */}
-              {paymentTab === "cash" && (
-                <div className="space-y-3">
+              {activeMethods.has("cash") && (
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-black text-slate-700 dark:text-slate-300">
+                    <Banknote className="w-4 h-4" /> Efectivo
+                  </div>
                   <div className="grid grid-cols-3 gap-2 items-end">
                     <div>
                       <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
@@ -5362,8 +5376,8 @@ export default function POSPage() {
               )}
 
               {/* 2. POS BANCARD INFONET */}
-              {paymentTab === "bancard" && (
-                <div className="space-y-3">
+              {activeMethods.has("bancard") && (
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
                     <div className="flex items-center gap-2">
                       <CreditCard className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -5419,11 +5433,37 @@ export default function POSPage() {
                     </div>
                   </div>
 
+                  {isMultiPayment && (
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                      <div className="flex gap-1">
+                        <input
+                          ref={mixedCardPygInputRef}
+                          type="text"
+                          value={mixedCardPyg}
+                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedCardPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                          onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedCardPyg)}
+                          onFocus={(e) => e.target.select()}
+                          placeholder="0"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
+                        />
+                        <button
+                          type="button"
+                          title="Completar con el resto"
+                          onClick={() => setMixedCardPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                        >
+                          Resto
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Verificación real contra la transacción que la terminal ya registró */}
                   <div className="mt-2">
                     <button
                       type="button"
-                      onClick={handleVerifyPosTerminal}
+                      onClick={() => handleVerifyPosTerminal("bancard")}
                       disabled={posVerifyStatus === "searching"}
                       className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold bg-blue-600/20 text-blue-300 border border-blue-500/40 hover:bg-blue-600/30 disabled:opacity-60 cursor-pointer"
                     >
@@ -5450,7 +5490,7 @@ export default function POSPage() {
                           <button
                             key={c.id}
                             type="button"
-                            onClick={() => handleSelectPosCandidate(c)}
+                            onClick={() => handleSelectPosCandidate("bancard", c)}
                             className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:border-blue-500 text-left cursor-pointer"
                           >
                             <span className="text-[11px] text-slate-900 dark:text-white font-posMono tabular-nums">{c.tarjeta_marca} · {c.cajero}</span>
@@ -5464,8 +5504,8 @@ export default function POSPage() {
               )}
 
               {/* 3. POS DINELCO BEPSA */}
-              {paymentTab === "dinelco" && (
-                <div className="space-y-3">
+              {activeMethods.has("dinelco") && (
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
                     <div className="flex items-center gap-2">
                       <CreditCard className="w-5 h-5 text-purple-600 dark:text-purple-400" />
@@ -5517,11 +5557,37 @@ export default function POSPage() {
                     </div>
                   </div>
 
+                  {isMultiPayment && (
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                      <div className="flex gap-1">
+                        <input
+                          ref={mixedDinelcoPygInputRef}
+                          type="text"
+                          value={mixedDinelcoPyg}
+                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedDinelcoPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                          onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedDinelcoPyg)}
+                          onFocus={(e) => e.target.select()}
+                          placeholder="0"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
+                        />
+                        <button
+                          type="button"
+                          title="Completar con el resto"
+                          onClick={() => setMixedDinelcoPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                        >
+                          Resto
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Verificación real contra la transacción que la terminal ya registró */}
                   <div className="mt-2">
                     <button
                       type="button"
-                      onClick={handleVerifyPosTerminal}
+                      onClick={() => handleVerifyPosTerminal("dinelco")}
                       disabled={posVerifyStatus === "searching"}
                       className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold bg-purple-600/20 text-purple-300 border border-purple-500/40 hover:bg-purple-600/30 disabled:opacity-60 cursor-pointer"
                     >
@@ -5548,7 +5614,7 @@ export default function POSPage() {
                           <button
                             key={c.id}
                             type="button"
-                            onClick={() => handleSelectPosCandidate(c)}
+                            onClick={() => handleSelectPosCandidate("dinelco", c)}
                             className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:border-purple-500 text-left cursor-pointer"
                           >
                             <span className="text-[11px] text-slate-900 dark:text-white font-posMono tabular-nums">{c.tarjeta_marca} · {c.cajero}</span>
@@ -5562,15 +5628,41 @@ export default function POSPage() {
               )}
 
               {/* 4. QR ZIMPLE / PIX */}
-              {paymentTab === "qr" && (
-                <div className="flex flex-col items-center text-center p-2">
+              {activeMethods.has("qr") && (
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center">
                   <div className="w-36 h-36 bg-white rounded-xl p-2 flex items-center justify-center shadow-lg mb-2">
                     <QrCode className="w-32 h-32 text-slate-900" />
                   </div>
                   <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple / Pix Brasil</div>
-                  <div className="text-xs font-posMono tabular-nums font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
-                    {formatPYG(totalPyg)} (R$ {totalBrl})
-                  </div>
+                  {!isMultiPayment ? (
+                    <div className="text-xs font-posMono tabular-nums font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      {formatPYG(totalPyg)} (R$ {totalBrl})
+                    </div>
+                  ) : (
+                    <div className="w-full mt-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                      <div className="flex gap-1">
+                        <input
+                          ref={mixedQrPygInputRef}
+                          type="text"
+                          value={mixedQrPyg}
+                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                          onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedQrPyg)}
+                          onFocus={(e) => e.target.select()}
+                          placeholder="0"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
+                        />
+                        <button
+                          type="button"
+                          title="Completar con el resto"
+                          onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                        >
+                          Resto
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
                     Presente la pantalla al cliente para el escaneo directo.
                   </span>
@@ -5583,8 +5675,8 @@ export default function POSPage() {
                   admin (su propio login, no un supervisor cualquiera) la
                   habilite ahi mismo. La aprobacion de supervisora sigue
                   siendo obligatoria despues, sea cual sea el resultado acá. */}
-              {paymentTab === "extra_club" && (
-                <div className="space-y-2.5">
+              {activeMethods.has("extra_club") && (
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
                   {(!customer || customer.id === DEFAULT_CUSTOMER.id) ? (
                     <>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -5695,198 +5787,34 @@ export default function POSPage() {
                           )}
                         </div>
                       )}
-                    </>
-                  )}
-                </div>
-              )}
 
-              {/* 5. COBRO MIXTO -- combinar dos o más formas de pago. Cada
-                  campo, al presionar Enter, sugiere cuánto falta (ya
-                  convertido a esa moneda) para el siguiente método, y el
-                  botón "Completar resto" hace lo mismo con el mouse. */}
-              {paymentTab === "mixed" && (
-                <div className="space-y-2.5">
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Combine efectivo, tarjeta y QR hasta cubrir el total. Enter en cualquier campo sugiere el resto en la siguiente moneda.
-                  </p>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
-                        <FlagPY /> Efectivo Guaraníes (₲):
-                      </label>
-                      <div className="flex gap-1">
-                        <input
-                          ref={mixedCashPygInputRef}
-                          type="text"
-                          value={mixedCashPyg}
-                          onChange={(e) => {
-                            const clean = e.target.value.replace(/\D/g, "")
-                            setMixedCashPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
-                          }}
-                          onKeyDown={(e) => handleMixedFieldKeyDown(e, mixedCashBrlInputRef, (f) => setMixedCashBrl((f / rates.BRL).toFixed(2)))}
-                          onFocus={(e) => e.target.select()}
-                          onClick={(e) => e.currentTarget.select()}
-                          placeholder="0"
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-emerald-600 dark:text-emerald-400 outline-none focus:border-emerald-500"
-                        />
-                        <button
-                          type="button"
-                          title="Completar con el resto"
-                          onClick={() => setMixedCashPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedCashPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
-                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
-                        >
-                          Resto
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
-                        <FlagBR /> Efectivo Reales (R$ x{rates.BRL}):
-                      </label>
-                      <div className="flex gap-1">
-                        <input
-                          ref={mixedCashBrlInputRef}
-                          type="text"
-                          value={mixedCashBrl}
-                          onChange={(e) => setMixedCashBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
-                          onKeyDown={(e) => handleMixedFieldKeyDown(e, mixedCardPygInputRef, (f) => setMixedCardPyg(Math.ceil(f).toLocaleString("es-PY")))}
-                          onFocus={(e) => e.target.select()}
-                          onClick={(e) => e.currentTarget.select()}
-                          placeholder="0.00"
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-amber-600 dark:text-amber-400 outline-none focus:border-amber-500"
-                        />
-                        <button
-                          type="button"
-                          title="Completar con el resto"
-                          onClick={() => {
-                            const yaPuestoBrl = parseFloat(mixedCashBrl.replace(/,/g, ".") || "0") * rates.BRL
-                            const restoPyg = Math.max(0, totalPyg - totalRecibidoPyg + yaPuestoBrl)
-                            setMixedCashBrl((restoPyg / rates.BRL).toFixed(2))
-                          }}
-                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
-                        >
-                          Resto
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
-                        <CreditCard className="w-3 h-3" /> Tarjeta POS (₲):
-                      </label>
-                      <div className="flex gap-1">
-                        <input
-                          ref={mixedCardPygInputRef}
-                          type="text"
-                          value={mixedCardPyg}
-                          onChange={(e) => {
-                            const clean = e.target.value.replace(/\D/g, "")
-                            setMixedCardPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
-                          }}
-                          onKeyDown={(e) => handleMixedFieldKeyDown(e, mixedQrPygInputRef, (f) => setMixedQrPyg(Math.ceil(f).toLocaleString("es-PY")))}
-                          onFocus={(e) => e.target.select()}
-                          onClick={(e) => e.currentTarget.select()}
-                          placeholder="0"
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500"
-                        />
-                        <button
-                          type="button"
-                          title="Completar con el resto"
-                          onClick={() => setMixedCardPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
-                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
-                        >
-                          Resto
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
-                        <QrCode className="w-3 h-3" /> QR / Transferencia (₲):
-                      </label>
-                      <div className="flex gap-1">
-                        <input
-                          ref={mixedQrPygInputRef}
-                          type="text"
-                          value={mixedQrPyg}
-                          onChange={(e) => {
-                            const clean = e.target.value.replace(/\D/g, "")
-                            setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
-                          }}
-                          onKeyDown={(e) => handleMixedFieldKeyDown(e, mixedExtraClubPygInputRef, (f) => setMixedExtraClubPyg(Math.ceil(f).toLocaleString("es-PY")))}
-                          onFocus={(e) => e.target.select()}
-                          onClick={(e) => e.currentTarget.select()}
-                          placeholder="0"
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500"
-                        />
-                        <button
-                          type="button"
-                          title="Completar con el resto"
-                          onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
-                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
-                        >
-                          Resto
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
-                        <Star className="w-3 h-3" /> Extra Club Crédito (₲):
-                      </label>
-                      <div className="flex gap-1">
-                        <input
-                          ref={mixedExtraClubPygInputRef}
-                          type="text"
-                          value={mixedExtraClubPyg}
-                          onChange={(e) => {
-                            const clean = e.target.value.replace(/\D/g, "")
-                            setMixedExtraClubPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
-                          }}
-                          onKeyDown={(e) => handleMixedFieldKeyDown(e, mixedCashPygInputRef, (f) => setMixedCashPyg(Math.ceil(f).toLocaleString("es-PY")))}
-                          onFocus={(e) => e.target.select()}
-                          onClick={(e) => e.currentTarget.select()}
-                          placeholder="0"
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-fuchsia-600 dark:text-fuchsia-400 outline-none focus:border-fuchsia-500"
-                        />
-                        <button
-                          type="button"
-                          title="Completar con el resto"
-                          onClick={() => setMixedExtraClubPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
-                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
-                        >
-                          Resto
-                        </button>
-                      </div>
-                      {parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0 && (!customer || customer.id === DEFAULT_CUSTOMER.id) && (
-                        <div className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1">Elija un cliente (F9) para la porción a crédito.</div>
-                      )}
-                      {/* Mismo estado de credito que el tab Extra Club puro --
-                          antes en "mixed" no se veia nada de esto, el cajero
-                          recien se enteraba si habia limite al confirmar. */}
-                      {parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) > 0 && customer && customer.id !== DEFAULT_CUSTOMER.id && (
-                        <div className="mt-1.5">
-                          {extraClubCredit === "loading" && (
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Consultando línea de crédito…</div>
-                          )}
-                          {extraClubCredit && extraClubCredit !== "loading" && (
-                            <div className={`text-[10px] font-bold flex items-center gap-1 ${extraClubCredit.activo && extraClubCredit.saldo_disponible >= parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
-                              Disponible: {formatPYG(extraClubCredit.saldo_disponible)} de {formatPYG(extraClubCredit.limite_credito)}
-                              {!extraClubCredit.activo && " · Cuenta inactiva"}
-                            </div>
-                          )}
-                          {extraClubCredit === null && (
-                            <div className="text-[10px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3" /> Sin línea de crédito habilitada.
-                              {(user?.rol === "admin" || user?.is_superadmin) && (
-                                <label className="flex items-center gap-1 cursor-pointer ml-1">
-                                  <input type="checkbox" checked={extraClubAdminOverride} onChange={(e) => setExtraClubAdminOverride(e.target.checked)} className="w-3 h-3 accent-rose-500 cursor-pointer" />
-                                  Autorizar igual
-                                </label>
-                              )}
-                            </div>
-                          )}
+                      {isMultiPayment && (
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                          <div className="flex gap-1">
+                            <input
+                              ref={mixedExtraClubPygInputRef}
+                              type="text"
+                              value={mixedExtraClubPyg}
+                              onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedExtraClubPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                              onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedExtraClubPyg)}
+                              onFocus={(e) => e.target.select()}
+                              placeholder="0"
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-fuchsia-600 dark:text-fuchsia-400 outline-none focus:border-fuchsia-500"
+                            />
+                            <button
+                              type="button"
+                              title="Completar con el resto"
+                              onClick={() => setMixedExtraClubPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                              className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                            >
+                              Resto
+                            </button>
+                          </div>
                         </div>
                       )}
-                    </div>
-                  </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -5899,8 +5827,8 @@ export default function POSPage() {
             <button
               ref={confirmCheckoutBtnRef}
               onClick={() => {
-                const montoExtraClubMixto = paymentTab === "mixed" ? (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)) : 0
-                if (paymentTab === "extra_club" || montoExtraClubMixto > 0) {
+                const montoExtraClub = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
+                if (montoExtraClub > 0) {
                   if (!customer || customer.id === DEFAULT_CUSTOMER.id) {
                     toast.warning("Elija un socio Extra Club", "Busque al cliente por número de socio, RUC, cédula o nombre.")
                     return
