@@ -666,6 +666,21 @@ export default function Dashboard() {
               {margenBrutoPct.toFixed(1)}%
             </span>
           </div>
+          {salesTrendData.length > 2 && (
+            <div className="h-8 -mx-1 mt-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={salesTrendData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="sparkMargen" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#14b8a6" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#14b8a6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <Area type="monotone" dataKey="rentabilidad_real" stroke="#14b8a6" strokeWidth={1.5} fill="url(#sparkMargen)" isAnimationActive={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
           <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
             <span className="truncate">Costo: <strong className="text-gray-700 dark:text-gray-200 font-mono">{formatPYG(costoTotalMercaderias)}</strong></span>
             <span className="text-teal-600 font-bold font-mono">Ganancia</span>
@@ -683,9 +698,23 @@ export default function Dashboard() {
           <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-indigo-600 dark:text-indigo-400 font-mono tracking-tight">
             {formatPYG(ticketPromedio)}
           </p>
+          {salesTrendData.length > 2 && (
+            <div className="h-8 -mx-1 mt-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={salesTrendData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="sparkTicket" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <Area type="monotone" dataKey="ticket_promedio" stroke="#6366f1" strokeWidth={1.5} fill="url(#sparkTicket)" isAnimationActive={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
           <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
             <span>Canasta: <strong className="text-gray-700 dark:text-gray-200 font-mono">{canastaMedia} un.</strong></span>
-
           </div>
         </div>
 
