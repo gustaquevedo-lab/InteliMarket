@@ -9,6 +9,45 @@
 
 ---
 
+## 🚨 SESIÓN 2026-08-25 (NOCHE) — CRÍTICO, LEER PRIMERO ANTES DE ABRIR NADA
+
+Esta es la sección más reciente. Reemplaza en prioridad a la de abajo (misma fecha, sesión distinta — la de abajo fue de tarde/Verificador de Precios, esta fue de noche/POS-Facturación). Se tocó **el corazón del sistema: checkout, caja, facturación** — leer completo antes de tocar `POSPage.tsx`, `CajaRapidaPage.tsx`, `sales/`, `caja/`.
+
+### Qué pasó esta noche (para que no se repita)
+
+**1) Otra sesión concurrente corrompió `App.tsx` en vivo.** A mitad de esta sesión se encontró `ui-web/src/App.tsx` con 3 líneas cambiadas sin commitear (import de `Dashboard` repuntado a `DashboardDistribuidora`, ruta `/supervisor` eliminada) — nadie de esta sesión las tocó. Causó que `/supervisor` mostrara un login genérico sin lista de supervisoras. Se revirtió a lo último commiteado. **Causa raíz: dos sesiones (Distribuidora y Supermercado) escriben sobre el mismo working directory de la VM sin ningún lock — la separación por rama de git NO protege contra esto, porque las ediciones directas a disco pisan lo que sea que esté ahí, commiteado o no.**
+
+**2) El checkout local de la Mac de control estaba gravemente desincronizado — casi arruina una auditoría.** Al pedir una auditoría de correctitud del POS, corrió (por defecto) contra el checkout local de la sesión de Claude, que estaba en un commit viejísimo (`ebdcc09 WIP: snapshot antes de separar por vertical`, 389 archivos de diferencia con la rama real). Salieron hallazgos "gravísimos" que en realidad eran de código **ya corregido** en la VM (falta `company_id` en el checkout, `session_id` nunca se guarda, caja nunca llama al backend). Se verificó cada hallazgo contra el código real de la VM antes de actuar — varios eran falsos positivos por el desfase, pero **9 eran reales** y se corrigieron (ver commits `dcfa39d` y `bfddece`).
+
+> **Regla dura de acá en adelante: la VM (`192.168.0.242` / Tailscale `100.83.91.76`) es la ÚNICA fuente de verdad para código de Supermercado. Cualquier herramienta, auditoría o revisión que corra sobre un checkout local primero tiene que sincronizarse contra `origin/vertical/supermercado` (o mejor, correr directo contra la VM por SSH) — nunca asumir que el local está al día.**
+
+**3) 51 commits llevaban semanas sin pushearse a GitHub.** Todo el trabajo de varias sesiones (incluyendo el Verificador de Precios completo, las terminales Digiware, y todo lo de esta noche) vivía **solo en el disco local de la VM**, nunca en `origin/vertical/supermercado`. Si ese disco se pierde o alguien hace algo destructivo ahí, se pierde todo sin repuesto. **Ya se pusheó** (`git push origin vertical/supermercado`, ahora sincronizado hasta `bfddece`).
+
+**4) Un `DELETE` de limpieza de datos de prueba, filtrado solo por monto, borró una fila real de `sandbox.cash_register_movements`** (coincidía por casualidad con el mismo monto que la prueba). Se detectó enseguida, se confirmó que `public` (producción real) nunca se tocó, y se restauró la fila copiándola desde `public` (que resultó ser casi un espejo de `sandbox`). **Lección aplicada: limpiar datos de prueba siempre por ID exacto o por ventana de tiempo acotada a la sesión actual, nunca por un campo de valor (monto, nombre) que puede coincidir con datos reales.**
+
+### Protocolo obligatorio de acá en adelante (cualquier sesión, cualquier IA)
+
+1. **Antes de tocar cualquier archivo compartido** (`App.tsx`, `POSPage.tsx`/`CajaRapidaPage.tsx`, `sales/`, `caja/`, `customers/`, `Dashboard*.tsx`): correr `git status --short` y `git log --oneline -5 -- <archivo>` en la VM primero. Si hay cambios sin commitear que no son propios, **no pisarlos** — investigar antes de tocar (puede ser la otra sesión trabajando en vivo).
+2. **Commitear cada fix apenas se verifica**, nunca acumular (regla ya existente, ver sección de abajo — se volvió a incumplir esta noche con los 51 commits sin pushear, ahora doblemente reforzada).
+3. **Pushear a `origin` con frecuencia**, no solo commitear local. Un commit sin pushear en la VM tiene la misma fragilidad que no commitear en absoluto si el disco de la VM falla.
+4. **Nunca correr una auditoría, code-review o herramienta de análisis contra un checkout que no se verificó estar sincronizado con la VM.** Si hay dudas, `git fetch origin vertical/supermercado && git log HEAD..origin/vertical/supermercado --oneline` para ver qué tan atrás está el local.
+5. **Limpieza de datos de prueba: siempre por ID exacto**, nunca por monto/nombre/fecha aproximada — aunque parezca "obviamente" un dato de prueba, puede coincidir con un dato real por casualidad.
+
+### Qué se hizo esta noche (POS / Facturación / Caja) — commits en orden
+
+- `d3fea65` — stock real en Consulta de Productos (bug de URL `/inventory/` de más) + tamaño de letra de escalas/monedas.
+- `732ee5c` — cierre de caja multimoneda, desglose por forma de pago, bug de efectivo esperado (contaba TODAS las formas de pago, no solo efectivo).
+- `7c626b9` — búsqueda/alta de cliente y urgencia en el modal de Producto No Encontrado.
+- `02b4343` — aviso de puntos de fidelidad ganados (toast + ticket), tag Extra Club en búsquedas, función "Reabrir Factura" (agregar identificación a una venta que salió Consumidor Final, con autorización de supervisor).
+- `78343c5` — **rediseño completo del modal de Liquidación y Cobro**: de 6 pestañas excluyentes (con "Pago Mixto" duplicando cada campo) a botones que se prenden/apagan por método, mostrando todas las líneas activas a la vez. Preserva el ciclo de teclado Gs→R$→US$→Gs, los campos reales de Bancard/Dinelco, y la regla de cliente de Extra Club.
+- `c6472df` — **bug fiscal grave**: el IVA se sumaba ENCIMA del precio de venta en vez de extraerse de un precio que ya lo incluye — el total grabado en cada venta/presupuesto/pedido quedaba ~9-10% inflado sobre lo realmente cobrado. Mismo bug copiado en `quotes/` y `sales_orders/`. **Cero ventas de producción afectadas** (producción todavía corre sobre datos legado, no sobre este flujo).
+- `dcfa39d` — auditoría línea por línea del checkout/caja/ventas: `cancel_sale` no revertía crédito/CxC/puntos (solo stock), `add_payment` estaba roto de raíz (import faltante), fuga de datos entre empresas en `list_sessions`, reporte de arqueo duplicaba el fondo de apertura, bug de cantidad en productos pesables (báscula), atajos de teclado activos con el modal de cobro abierto, `NaN` se colaba en el chequeo de "falta cobrar".
+- `bfddece` — WhatsApp real (columna con tipo de dato que nunca existió en la base), bloqueo de concurrencia en 4 puntos de caja/bóveda, función de anulación de un retiro de efectivo ya confirmado.
+
+Todo verificado contra datos reales en sandbox (ventas de prueba creadas y limpiadas por ID), no solo leído. Ver el chat de esta sesión para el detalle línea por línea de cada fix si hace falta reconstruir el razonamiento.
+
+---
+
 ## ⚠️ SESIÓN 2026-08-25 — LEER ANTES DE TOCAR NADA
 
 Esta sección es la más reciente y prioritaria. Hubo **dos sesiones trabajando en paralelo** sobre esta misma rama (una en Supervisor PWA / Verificador de Precios / Caja — este handoff — y otra en POS/Extra Club/Customers/Dashboard, ver commits `83514b1`, `8819995`, `5cfd2fd`, `ae114b3`, `d3fea65` y los que sigan). **Antes de tocar `ui-web/src/pages/pos/POSPage.tsx`, `CajaRapidaPage.tsx`, `Dashboard.tsx`, `customers/`, `sales/` revisar `git log` reciente de esos archivos — puede haber trabajo de esa otra sesión en curso.**
