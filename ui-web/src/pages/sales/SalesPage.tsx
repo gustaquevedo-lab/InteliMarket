@@ -304,7 +304,7 @@ export default function SalesPage() {
       {/* ── KPIS FINANCIEROS CONSOLIDADOS ──────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Facturado */}
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
               Facturación Neta del Período
@@ -323,7 +323,7 @@ export default function SalesPage() {
         </div>
 
         {/* Liquidación Fiscal IVA */}
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
               Total IVA Liquidado (DNIT)
@@ -342,7 +342,7 @@ export default function SalesPage() {
         </div>
 
         {/* Extra Club & Crédito de la Casa */}
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
               Ventas Extra Club (Crédito)
@@ -360,7 +360,7 @@ export default function SalesPage() {
         </div>
 
         {/* Volumen de Tickets & Ticket Promedio */}
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xs">
+        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-indigo-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
               Volumen y Ticket Promedio
