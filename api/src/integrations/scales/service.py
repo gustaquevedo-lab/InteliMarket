@@ -309,6 +309,7 @@ def _product_to_plu_dict(p: Product) -> dict:
         "precio": float(p.precio_venta or 0),
         "precio_venta": float(p.precio_venta or 0),
         "codigo_barras": p.codigo_barra,
+        "plu_balanza": p.plu_balanza,
         "tara": 0,
     }
 

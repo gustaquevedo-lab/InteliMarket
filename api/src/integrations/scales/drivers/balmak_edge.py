@@ -1,29 +1,47 @@
 """Balmak Edge driver — hybrid: Toledo P03 for weight + SDL file-based for PLU/labels
 
-The Balmak Edge is a "balança computadora" with:
-- Wi-Fi / Ethernet connectivity
-- Integrated thermal printer
-- DGI/RGI (file-based import/export for product/PLU sync)
-- Compatible with Toledo P03 protocol for weight reading
-- SDL software for management
+The Balmak Edge is a "balança computadora" running Novatek's SDL management
+software (found installed as `C:\\Program Files (x86)\\EDGE\\EDGE\\SDL.exe` on
+the client's scale-management PC, Extra Supermercado, 26-ago-2026).
 
-For weight reading: uses ToledoP03Driver via TCP (port 9000 default)
-For PLU sync: generates SDL-compatible CSV/TXT files and pushes via SMB/HTTP
+For weight reading: uses ToledoP03Driver via TCP (port 9000 default) --
+unconfirmed for this specific model, kept as-is (out of scope, POS checkout
+scale integration already solved separately).
+
+For PLU sync: writes a fixed-width text file, one 284-byte record per
+product, CRLF-terminated. Format reverse-engineered from a real file already
+accepted by the client's SDL install (`SDLtxt.tmp`, 348 real products):
+
+  bytes[0:2]    "01"            constante (idéntica en las 348 filas reales)
+  bytes[2:9]    PLU             7 dígitos, zero-padded (p.ej. "1000001")
+  bytes[9:18]   PRECIO          9 dígitos, zero-padded = precio_real * 1000
+  bytes[18:68]  NOMBRE          50 chars, CP1252, espacio-padded/truncado
+  bytes[68:284] (reservado)     216 bytes -- idénticos en las 348 filas
+                                 reales (impuestos/fechas/etiqueta sin usar
+                                 por este cliente), se copian tal cual
+
 For label printing: sends label commands directly to the scale's printer
-
-SDL File Format (tab-delimited):
-  PLU\tDESCRIPTION\tPRICE\tTARE\tBARCODE\tSHELF_LIFE\tNUTRITION_INFO
+(unconfirmed format, kept as-is -- fuera de alcance de esta investigación).
 """
 
-import csv
-import io
 import os
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from api.src.integrations.scales.drivers.base import ScaleDriver, ScaleConfig, WeightReading, ConnectionStatus, PLUResult, LabelData
 from api.src.integrations.scales.drivers.toledo_p03 import ToledoP03Driver
+
+# Cola de 216 bytes idéntica en las 348 filas reales de SDLtxt.tmp (26-ago-2026,
+# extraído vía WinRM de la PC de compras que administra la balanza). Campos
+# opcionales de SDL (impuestos, fechas de venc/empaque, etiqueta) que este
+# cliente nunca configuró -- se replica tal cual para no romper el import.
+_SDL_RECORD_TAIL = (
+    "0000000000000000000000                       "
+    "0000000000000000000000000000000000000000000||"
+    "                                                                      "
+    "0000000000000000000000000||0||            00000000000000"
+)
 
 
 class BalmakEdgeDriver(ScaleDriver):
@@ -53,33 +71,45 @@ class BalmakEdgeDriver(ScaleDriver):
         return await self._weight_driver.test_connection()
 
     async def sync_plu(self, productos: list[dict]) -> PLUResult:
-        """Generate SDL-compatible CSV and write to ruta_carga or return content."""
+        """Write a fixed-width SDL PLU file (see module docstring for the real
+        284-byte record layout) to ruta_carga.
+
+        Productos sin `plu_balanza` se saltean: no hay forma segura de
+        inventarles un PLU nuevo sin colisionar con el catálogo ya cargado
+        en la balanza (numeración propia del software SDL, sin relación con
+        ningún ID de InteliMarket ni del ERP legacy)."""
         result = PLUResult(total_productos=len(productos))
-        output = io.StringIO()
-        writer = csv.writer(output, delimiter="\t")
+        records = []
         errors = []
         ok = 0
 
         for p in productos:
             try:
-                plu = p.get("codigo") or p.get("sku") or p.get("id", "")[:20]
-                nombre = (p.get("nombre") or "Producto")[:40]
-                precio = p.get("precio_venta") or p.get("precio", 0)
-                tara = p.get("tara", 0)
-                barcode = p.get("codigo_barras") or p.get("barcode", "")
-                vida_util = p.get("vida_util_dias", "")
-                writer.writerow([plu, nombre, precio, tara, barcode, vida_util])
+                plu_balanza = p.get("plu_balanza")
+                if not plu_balanza:
+                    errors.append({"producto_id": p.get("id"), "error": "sin plu_balanza asignado"})
+                    continue
+                plu = f"{int(plu_balanza):07d}"
+                if len(plu) != 7:
+                    raise ValueError(f"plu_balanza fuera de rango (7 digitos): {plu_balanza}")
+                precio = p.get("precio_venta") or p.get("precio") or 0
+                precio_field = f"{round(float(precio) * 1000):09d}"
+                nombre = (p.get("nombre") or "")[:50].ljust(50)
+                record = f"01{plu}{precio_field}{nombre}{_SDL_RECORD_TAIL}"
+                records.append(record.encode("cp1252", errors="replace"))
                 ok += 1
             except Exception as e:
                 errors.append({"producto_id": p.get("id"), "error": str(e)})
 
-        content = output.getvalue()
+        content = b"\r\n".join(records)
+        if records:
+            content += b"\r\n"
 
-        if self.config.ruta_carga:
+        if self.config.ruta_carga and records:
             os.makedirs(self.config.ruta_carga, exist_ok=True)
-            fname = f"plu_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+            fname = f"plu_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.txt"
             fpath = os.path.join(self.config.ruta_carga, fname)
-            with open(fpath, "w", encoding="utf-8") as f:
+            with open(fpath, "wb") as f:
                 f.write(content)
             result.archivo_generado = fpath
 

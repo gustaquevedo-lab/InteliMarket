@@ -9,6 +9,49 @@
 
 ---
 
+## ⚖️ SESIÓN 2026-08-26 — INTEGRACIÓN BALANZAS BALMAK EDGE (carnicería/panadería), investigación profunda
+
+Pedido: automatizar sync de PLU/precio hacia las balanzas Balmak Edge de carnicería y panadería (**no** la báscula de checkout — esa ya está integrada y funciona, es un flujo aparte). Se hizo una investigación a fondo, con hallazgos reales que cambian el diseño original. Documentado acá para que ninguna sesión futura repita el camino equivocado.
+
+### Lo que se corrigió en código (commiteado)
+
+El módulo `api/src/integrations/scales/` estaba **muerto desde su creación**: `scale_configs.marca/protocolo/conexion` declarados como `SAEnum` en el modelo, pero ese tipo Postgres nunca existió (columna real = varchar) → ningún `ScaleConfig` se pudo crear jamás vía API, ni siquiera las 2 filas reales ya cargadas a mano (`Balmak Edge · Carnicería`, `Balmak Edge · Panadería & Rotisería`, protocolo `balmak_etiquetadora`, tampoco registrado en `DRIVER_REGISTRY`). Mismo patrón que el bug de WhatsApp de la noche anterior — ver [[bug-patron-enum-sin-tipo-postgres]] en la memoria de la sesión de Claude. Se corrigió, se agregó `categorias_ids` a `ScaleConfig` para acotar qué categoría de producto sincroniza cada balanza, y se agregó disparo automático (`auto_sync_product`, en `products/router.py`) cada vez que cambia `precio_venta`.
+
+También se corrigieron 3 `AttributeError` latentes (`Product` no tiene `codigo` ni `codigo_barras`, son `sku`/`codigo_barra`).
+
+### El hallazgo grande: el software real es SDL, y ya está funcionando EN VIVO
+
+Vía WinRM a la PC de Compras (`192.168.0.231`, usuario `dpto. compras 02`) se encontró el acceso directo **EDGE** del escritorio, que apunta a `C:\Program Files (x86)\EDGE\EDGE\SDL.exe` — el software real del fabricante (Novatek/SDL), no algo inventado.
+
+**El mecanismo real NO es "dejar un archivo en una carpeta compartida"**: SDL.exe corre en esa PC y empuja los PLU directo por TCP a las balanzas físicas, en un loop automático. Confirmado en el log de HOY (`LogFile\20260826.Log`):
+
+```
+08:21:09  192.168.0.72:4011  Baixar dados → Atualizar o banco de dados → PLU 10/10 (100%) Sucesso
+08:21:09  192.168.0.73:4001  Baixar dados → Atualizar o banco de dados → PLU 10/10 (100%) Sucesso
+08:21:09  192.168.0.74:4010  Baixar dados → Atualizar o banco de dados → PLU 10/10 (100%) Sucesso
+```
+
+Es decir: **3 balanzas físicas activas** en `192.168.0.72/.73/.74` (puertos 4011/4001/4010), sincronizando en ciclos de minutos, con éxito, ahora mismo. Las IPs que había cargadas en `scale_configs` (`192.168.1.150`/`.151`) son **incorrectas** — se limpiaron (`host = NULL`) en vez de dejarlas apuntando a algo que no existe. **No se pudo determinar con certeza qué IP física corresponde a qué balanza/departamento** — los 3 ciclos del log muestran el mismo conteo de PLU en simultáneo para las 3 IPs, lo que sugiere que podrían estar recibiendo el mismo catálogo combinado en vez de uno por departamento. Requiere confirmación física en el local (mirar cada balanza) antes de asumir nada.
+
+**SDL guarda su catálogo en `SDL.mdb`** (Access, protegido con contraseña `showmethemoney` — hardcodeada en `SDL.exe.config`, la misma en las 24 carpetas de configuración `Include\SDL901-906\SDLE01-06\SDLP01-06\SDLT01-06`, aunque solo 3 unidades están físicamente activas). La integración correcta a futuro probablemente sea escribir/leer contra esa base (o usar el import de archivo que ya trae el propio SDL), **no** reimplementar el protocolo TCP de las balanzas — eso ya lo hace SDL.exe y ya funciona.
+
+### Formato de archivo real (para exportación PLU vía import de SDL)
+
+Se extrajo `SDLtxt.tmp` (348 filas reales) y se decodificó byte a byte — implementado en [`balmak_edge.py`](api/src/integrations/scales/drivers/balmak_edge.py):
+
+- Registro de **284 bytes**, `CRLF` entre filas, codificación **CP1252**.
+- `[0:2]` = `"01"` constante · `[2:9]` = PLU (7 dígitos) · `[9:18]` = precio × 1000 (9 dígitos) · `[18:68]` = nombre (50 chars) · `[68:284]` = cola de campos opcionales, idéntica en las 348 filas reales (se replica tal cual).
+
+**Trampa encontrada y corregida**: el PLU **no es global** — cada una de las 24 unidades SDL numera su propio catálogo empezando de nuevo en 1 (`"1000001"` aparece 80 veces en el archivo real, para productos totalmente distintos). Se intentó un primer backfill de `products.plu_balanza` (campo nuevo, migración `20260826150000`) cruzando por nombre contra InteliMarket — **se deshizo** (`UPDATE ... SET plu_balanza = NULL`) al descubrirse el problema. La columna quedó en el modelo, vacía, a la espera de decidir el diseño correcto (probablemente una asignación por producto × balanza, no un campo único en `products`).
+
+### Pendiente para la próxima sesión
+
+1. Confirmar físicamente en el local qué balanza es cuál (192.168.0.72 vs .73 vs .74) — no alcanza con el log.
+2. Decidir el diseño de PLU por-balanza (no global) antes de tocar `plu_balanza` de nuevo.
+3. Evaluar si integrar contra `SDL.mdb` directamente (más robusto, pero DB Access protegida) o seguir con archivo de import (más simple, pero requiere confirmar qué carpeta/mecanismo dispara la importación real — no se encontró ningún archivo generado en `C:\ConceptoSistemas\Balancas`, el parámetro del legacy `DESTINO_ARQUIVOS_INTEGRACAO_BALANCA` parece no estar realmente en uso).
+4. Acceso usado: WinRM a `192.168.0.231`, usuario `dpto. compras 02`, ver con el usuario si conviene un usuario de servicio dedicado en vez de reusar el de Compras.
+
+
 ## 🚨 SESIÓN 2026-08-26 (TARDE) — Verificador de Precios movido a PRODUCCIÓN, no volver a sandbox
 
 **Decisión explícita del usuario**: las terminales físicas del salón ahora apuntan a **producción** (`http://192.168.0.242:5173/verificador`), no a sandbox. El usuario pidió expresamente no volver a tocar esto ("no volvamos a tocar lo que funciona") — **cualquier cambio futuro al Verificador de Precios se prueba en sandbox primero, pero el URL de las terminales físicas ya NO se toca sin pedido explícito.**
