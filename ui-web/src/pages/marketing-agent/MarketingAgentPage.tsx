@@ -761,14 +761,18 @@ export default function MarketingAgentPage() {
 
                 <div className="space-y-3">
                   <label className="block">
-                    <span className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Imagen del banner</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400">Imagen del banner</span>
+                      <span className="text-[10px] font-bold text-pink-600 dark:text-pink-400">Recomendado: 1600×900px (16:9)</span>
+                    </div>
                     <div className="aspect-[16/9] rounded-2xl bg-gray-100 dark:bg-slate-800 border-2 border-dashed border-gray-300 dark:border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer relative group">
                       {bannerImagePreview ? (
                         <img src={bannerImagePreview} alt="preview" className="w-full h-full object-cover" />
                       ) : (
-                        <div className="flex flex-col items-center text-gray-400">
+                        <div className="flex flex-col items-center text-gray-400 text-center px-4">
                           <ImagePlus className="w-8 h-8 mb-1" />
-                          <span className="text-xs font-bold">Subir imagen (horizontal)</span>
+                          <span className="text-xs font-bold">Subir imagen horizontal</span>
+                          <span className="text-[10px] mt-1">Ideal 1600×900px (relacion 16:9) -- otras proporciones se recortan al centro para llenar el marco</span>
                         </div>
                       )}
                       <input
