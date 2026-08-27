@@ -493,6 +493,7 @@ export interface IntegrationConfig { id: string; company_id?: string; destino?: 
 export interface IntegrationDelivery { id: string; config_id?: string; evento?: string; url?: string; payload?: Record<string, unknown>; payload_size?: number; respuesta_status?: number; respuesta_body?: string; exitoso?: boolean; reintentos?: number; fecha_envio?: string; created_at?: string }
 export interface PriceList { id: string; company_id?: string; nombre?: string; tipo?: string; customer_id?: string | null; grupo?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
 export interface PriceListItem { id: string; price_list_id?: string; product_id?: string; variant_id?: string | null; precio?: number; moneda?: string; notas?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
+export interface PosTerminalTransaction { id: string; company_id?: string; sale_id?: string | null; customer_id?: string | null; tipo_operacion: string; terminal_ip?: string | null; punto_emision?: string | null; factura_nro_provisional?: string | null; bin?: string | null; nsu?: string | null; codigo_autorizacion?: string | null; codigo_comercio?: string | null; issuer_id?: string | null; nombre_tarjeta?: string | null; pan?: string | null; mensaje_display?: string | null; nombre_cliente?: string | null; monto?: number | null; monto_vuelto?: number | null; monto_comision?: number | null; monto_extraccion?: number | null; saldo?: number | null; moneda_alt?: string | null; monto_alt?: number | null; exitosa: boolean; verificado_automaticamente: boolean; error_message?: string | null; raw_response?: any; created_at?: string }
 export interface Kit { id: string; company_id?: string; nombre?: string; descripcion?: string; sku?: string; precio?: number; costo?: number; margen?: number; items?: KitItem[]; activo?: boolean; created_at?: string; updated_at?: string }
 export interface KitItem { id: string; kit_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; created_at?: string }
 export interface Backup { id: string; company_id?: string; tenant_id?: string; tenant_slug?: string | null; schema_name?: string; nombre?: string; filename?: string; file_size?: number; status?: string; backup_type?: string; expires_at?: string; tipo?: string; ruta?: string; tamano_bytes?: number; estado?: string; fecha_inicio?: string; fecha_fin?: string; duracion_seg?: number; error_mensaje?: string; created_at?: string }
@@ -1288,6 +1289,10 @@ export const api = {
     updateItem: (listId: string, itemId: string, data: Partial<PriceListItem>) => client.patch<PriceListItem>(`/v1/price-lists/${listId}/items/${itemId}`, data),
     removeItem: (listId: string, itemId: string) => client.delete<void>(`/v1/price-lists/${listId}/items/${itemId}`),
     resolvePrice: (customerId: string, productId: string, quantity = 1) => client.get<{ precio: number; price_list_id: string; source: string } | null>("/v1/price-lists/lookup", { customer_id: customerId, product_id: productId, quantity }),
+  },
+  posTerminalTransactions: {
+    create: (data: Partial<PosTerminalTransaction>) => client.post<PosTerminalTransaction>("/v1/pos-terminal-transactions", data),
+    update: (id: string, data: Partial<PosTerminalTransaction>) => client.patch<PosTerminalTransaction>(`/v1/pos-terminal-transactions/${id}`, data),
   },
   integrations: {
     configs: () => client.get<IntegrationConfig[]>("/api/integrations/configs"),

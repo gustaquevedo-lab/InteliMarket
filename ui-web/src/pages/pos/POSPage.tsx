@@ -91,6 +91,7 @@ interface CurrencyRates {
 interface PosTerminalAssignment {
   puntoEmision: string
   nombreCaja: string
+  bancardIp: string
   bancardTerminalId: string
   bancardLote: string
   bancardPort: string
@@ -477,6 +478,7 @@ export default function POSPage() {
       initial[pe.id] = {
         puntoEmision: pe.id,
         nombreCaja: pe.nombre,
+        bancardIp: "",
         bancardTerminalId: `BC-9844${pad}`,
         bancardLote: "001",
         bancardPort: `COM${idx + 4}`,
@@ -493,6 +495,7 @@ export default function POSPage() {
     return posAssignments[puntoEmision] || {
       puntoEmision,
       nombreCaja: puntoEmision,
+      bancardIp: "",
       bancardTerminalId: "BC-984401",
       bancardLote: "001",
       bancardPort: "COM4",
@@ -639,6 +642,7 @@ export default function POSPage() {
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
+    resetBancardFlow()
   }
   
   // Efectivo Multimoneda simultáneo (Guaraníes NUNCA tiene decimales)
@@ -678,6 +682,186 @@ export default function POSPage() {
   const [posVerifyCandidates, setPosVerifyCandidates] = useState<{ id: string; fecha: string; tarjeta_marca: string; monto: number; voucher: string; cajero: string }[]>([])
   const [posVerifiedTxn, setPosVerifiedTxn] = useState<{ id: string; fecha: string; tarjeta_marca: string; monto: number; voucher: string; cajero: string } | null>(null)
   const [posVerifyOpenedAt, setPosVerifyOpenedAt] = useState<string | null>(null)
+  // ── FLUJO REAL DE COBRO BANCARD (API POS Android, via electron/main.cjs) ──
+  // El terminal ya habla REST/JSON en <ip>:3000 -- documentado oficialmente y
+  // verificado en vivo. Dos pasos para tarjeta (venta/debito|credito -> bin+nsu
+  // -> descuento con bin+nsu+monto), uno solo para QR (venta-qr, respuesta ya
+  // viene completa). Se distingue rechazo real de negocio (el terminal SI
+  // contestó, no se ofrece respaldo manual -- cargarlo a mano inventaría una
+  // aprobación que no existió) de falla de conexión (no sabemos si cobró o
+  // no, ahí sí se habilita el cupón manual como respaldo).
+  type BancardTxnResult = {
+    bin?: string; nsu?: string; codigoAutorizacion?: string; codigoComercio?: string
+    issuerId?: string; nombreTarjeta?: string; pan?: string; mensajeDisplay?: string
+    nombreCliente?: string; montoVuelto?: number; saldo?: number; nroBoleta?: string
+  }
+  const [bancardTxnState, setBancardTxnState] = useState<"idle" | "esperando_tarjeta" | "confirmando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
+  const [bancardTxnResult, setBancardTxnResult] = useState<BancardTxnResult | null>(null)
+  const [bancardTxnError, setBancardTxnError] = useState<string>("")
+  const [showBancardManualFallback, setShowBancardManualFallback] = useState(false)
+  const [bancardTxnLogId, setBancardTxnLogId] = useState<string | null>(null)
+
+  const [bancardQrState, setBancardQrState] = useState<"idle" | "esperando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
+  const [bancardQrResult, setBancardQrResult] = useState<BancardTxnResult | null>(null)
+  const [bancardQrError, setBancardQrError] = useState<string>("")
+  const [bancardQrManualConfirm, setBancardQrManualConfirm] = useState(false)
+  const [bancardQrLogId, setBancardQrLogId] = useState<string | null>(null)
+
+  const resetBancardFlow = () => {
+    setBancardTxnState("idle"); setBancardTxnResult(null); setBancardTxnError(""); setShowBancardManualFallback(false); setBancardTxnLogId(null)
+    setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null)
+  }
+
+  const logBancardTxn = async (data: Record<string, any>) => {
+    try {
+      return await api.posTerminalTransactions.create({
+        ...data,
+        punto_emision: puntoEmision,
+        customer_id: customer && customer.id !== DEFAULT_CUSTOMER.id ? customer.id : null,
+      } as any)
+    } catch (e) {
+      console.error("No se pudo registrar la transacción del terminal Bancard:", e)
+      return null
+    }
+  }
+
+  const handleBancardCharge = async () => {
+    const ip = activePosConfig.bancardIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoBancard = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    if (montoBancard <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por Bancard antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.bancardCall) {
+      setBancardTxnState("error_conexion")
+      setBancardTxnError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
+      setShowBancardManualFallback(true)
+      return
+    }
+    const facturaNro = Date.now()
+    setBancardTxnState("esperando_tarjeta")
+    setBancardTxnError("")
+    setBancardTxnResult(null)
+    setShowBancardManualFallback(false)
+
+    const path1 = posCardType === "debito" ? "/pos/venta/debito" : "/pos/venta/credito"
+    const body1: any = { facturaNro }
+    if (posCardType === "credito") { body1.cuotas = 0; body1.plan = 0 }
+    const res1 = await electronAPI.bancardCall(ip, path1, body1, 90000)
+
+    if (!res1.ok) {
+      if (res1.status === 400 || res1.status === 500) {
+        setBancardTxnState("error_rechazo")
+        setBancardTxnError(res1.body?.message || "El terminal rechazó la operación.")
+        await logBancardTxn({
+          tipo_operacion: posCardType === "debito" ? "venta_debito" : "venta_credito",
+          exitosa: false, verificado_automaticamente: true, error_message: res1.body?.message,
+          monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res1.body,
+        })
+      } else {
+        setBancardTxnState("error_conexion")
+        setBancardTxnError(`No se pudo conectar con el terminal (${res1.message || "error de red"}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.`)
+        setShowBancardManualFallback(true)
+      }
+      return
+    }
+
+    const { bin, nsu } = res1.body || {}
+    setBancardTxnState("confirmando")
+    const res2 = await electronAPI.bancardCall(ip, "/pos/descuento", { bin, nsu, monto: montoBancard }, 30000)
+
+    if (!res2.ok) {
+      if (res2.status === 400 || res2.status === 500) {
+        setBancardTxnState("error_rechazo")
+        setBancardTxnError(res2.body?.message || "El terminal rechazó la operación.")
+        await logBancardTxn({
+          tipo_operacion: posCardType === "debito" ? "venta_debito" : "venta_credito",
+          exitosa: false, verificado_automaticamente: true, error_message: res2.body?.message,
+          bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res2.body,
+        })
+      } else {
+        setBancardTxnState("error_conexion")
+        setBancardTxnError(`Se cobró en el terminal pero no se pudo confirmar la respuesta (${res2.message || "error de red"}) -- revisá el terminal y cargá el cupón manualmente.`)
+        setShowBancardManualFallback(true)
+      }
+      return
+    }
+
+    const result = res2.body || {}
+    setBancardTxnResult(result)
+    setBancardTxnState("aprobada")
+    const logged = await logBancardTxn({
+      tipo_operacion: posCardType === "debito" ? "venta_debito" : "venta_credito",
+      exitosa: true, verificado_automaticamente: true,
+      bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+    })
+    setBancardTxnLogId((logged as any)?.id || null)
+    setPosCardCupon(result.nroBoleta || "")
+  }
+
+  const handleBancardQR = async () => {
+    const ip = activePosConfig.bancardIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoQr = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    if (montoQr <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.bancardCall) {
+      setBancardQrState("error_conexion")
+      setBancardQrError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
+      return
+    }
+    const facturaNro = Date.now()
+    setBancardQrState("esperando")
+    setBancardQrError("")
+    setBancardQrResult(null)
+    setBancardQrManualConfirm(false)
+
+    const res = await electronAPI.bancardCall(ip, "/pos/venta-qr", { facturaNro, monto: montoQr }, 120000)
+
+    if (!res.ok) {
+      if (res.status === 400 || res.status === 500) {
+        setBancardQrState("error_rechazo")
+        setBancardQrError(res.body?.message || "El terminal rechazó la operación QR.")
+        await logBancardTxn({
+          tipo_operacion: "venta_qr", exitosa: false, verificado_automaticamente: true, error_message: res.body?.message,
+          monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res.body,
+        })
+      } else {
+        setBancardQrState("error_conexion")
+        setBancardQrError(`No se pudo conectar con el terminal (${res.message || "error de red"}).`)
+      }
+      return
+    }
+
+    const result = res.body || {}
+    setBancardQrResult(result)
+    setBancardQrState("aprobada")
+    const logged = await logBancardTxn({
+      tipo_operacion: "venta_qr", exitosa: true, verificado_automaticamente: true,
+      monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
+      issuer_id: result.issuerId, nombre_tarjeta: result.nombreTarjeta, pan: result.pan,
+      mensaje_display: result.mensajeDisplay, nombre_cliente: result.nombreCliente,
+      monto_vuelto: result.montoVuelto, saldo: result.saldo, raw_response: result,
+    })
+    setBancardQrLogId((logged as any)?.id || null)
+  }
+
 
   // Sincronizar terminales cuando cambia la caja
   useEffect(() => {
@@ -2971,6 +3155,7 @@ export default function POSPage() {
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
     setPosVerifyOpenedAt(new Date().toISOString())
+    resetBancardFlow()
     setShowPaymentModal(true)
   }
 
@@ -3339,6 +3524,14 @@ export default function POSPage() {
                   <td style="text-align: right;">${p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : `Gs. ${fmtGs(p.monto)}`}</td>
                 </tr>
               `).join("")}
+              ${(bancardTxnState === "aprobada" && bancardTxnResult) ? `
+                <tr><td colspan="2" style="font-size: 8.5px; padding-top: 1px;">${bancardTxnResult.nombreTarjeta || ""}${bancardTxnResult.pan ? ` **** ${bancardTxnResult.pan}` : ""}</td></tr>
+                <tr><td colspan="2" style="font-size: 8.5px;">Aut. ${bancardTxnResult.codigoAutorizacion || "-"} · Boleta ${bancardTxnResult.nroBoleta || "-"}</td></tr>
+              ` : ""}
+              ${(bancardQrState === "aprobada" && bancardQrResult) ? `
+                <tr><td colspan="2" style="font-size: 8.5px; padding-top: 1px;">${bancardQrResult.nombreTarjeta || ""}</td></tr>
+                <tr><td colspan="2" style="font-size: 8.5px;">Aut. ${bancardQrResult.codigoAutorizacion || "-"} · Boleta ${bancardQrResult.nroBoleta || "-"}</td></tr>
+              ` : ""}
               <tr style="font-weight: bold; font-size: 10.5px;">
                 <td style="padding-top: 2px;">VUELTO:</td>
                 <td style="text-align: right; padding-top: 2px; white-space: nowrap;">
@@ -3473,6 +3666,22 @@ export default function POSPage() {
           saleCreatePromise.then((s: any) => doClaim(s?.id))
         } else {
           doClaim()
+        }
+      }
+
+      // Igual que arriba, pero para el registro de pos_terminal_transactions
+      // del flujo automatico nuevo (Bancard real via API) -- linkea el
+      // sale_id una vez que la venta ya existe, best-effort.
+      const bancardLogId = bancardTxnLogId || bancardQrLogId
+      if (bancardLogId) {
+        const doLinkSale = (saleIdForLink?: string) => {
+          if (!saleIdForLink) return
+          api.posTerminalTransactions.update(bancardLogId, { sale_id: saleIdForLink } as any).catch(() => {})
+        }
+        if (createdSaleId) {
+          doLinkSale(createdSaleId)
+        } else if (saleCreatePromise) {
+          saleCreatePromise.then((s: any) => doLinkSale(s?.id))
         }
       }
 
@@ -4814,6 +5023,7 @@ export default function POSPage() {
                   const cfg = posAssignments[pe.id] || {
                     puntoEmision: pe.id,
                     nombreCaja: pe.nombre,
+                    bancardIp: "",
                     bancardTerminalId: "BC-984401",
                     bancardLote: "001",
                     bancardPort: "COM4",
@@ -4873,6 +5083,22 @@ export default function POSPage() {
                                   }))
                                 }}
                                 className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded px-2 py-1 font-posMono tabular-nums text-xs text-slate-900 dark:text-white outline-none"
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <label className="text-[9px] text-slate-500 dark:text-slate-400 uppercase">IP del Terminal (red local, API POS Android):</label>
+                              <input
+                                type="text"
+                                value={cfg.bancardIp || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  setPosAssignments(prev => ({
+                                    ...prev,
+                                    [pe.id]: { ...cfg, bancardIp: val }
+                                  }))
+                                }}
+                                placeholder="Ej: 192.168.0.32"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded px-2 py-1 font-posMono tabular-nums text-xs text-emerald-600 dark:text-emerald-400 font-bold outline-none"
                               />
                             </div>
                           </div>
@@ -5590,49 +5816,19 @@ export default function POSPage() {
                       <button
                         type="button"
                         onClick={() => setPosCardType("debito")}
-                        className={`px-3 py-1 rounded-lg text-xs font-bold ${posCardType === "debito" ? "bg-blue-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"}`}
+                        disabled={bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold disabled:opacity-50 ${posCardType === "debito" ? "bg-blue-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"}`}
                       >
                         Débito
                       </button>
                       <button
                         type="button"
                         onClick={() => setPosCardType("credito")}
-                        className={`px-3 py-1 rounded-lg text-xs font-bold ${posCardType === "credito" ? "bg-blue-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"}`}
+                        disabled={bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold disabled:opacity-50 ${posCardType === "credito" ? "bg-blue-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"}`}
                       >
                         Crédito
                       </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal Asignada:</label>
-                      <input
-                        type="text"
-                        value={posTerminalId}
-                        onChange={(e) => setPosTerminalId(e.target.value)}
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums text-xs text-blue-600 dark:text-blue-400 font-bold outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
-                      <input
-                        type="text"
-                        value={posCardLote}
-                        onChange={(e) => setPosCardLote(e.target.value)}
-                        placeholder="001"
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums text-xs text-slate-900 dark:text-white outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Cupón / Voucher:</label>
-                      <input
-                        type="text"
-                        value={posCardCupon}
-                        onChange={(e) => setPosCardCupon(e.target.value)}
-                        placeholder="123456"
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums text-xs text-emerald-600 dark:text-emerald-400 font-bold outline-none"
-                      />
                     </div>
                   </div>
 
@@ -5662,47 +5858,143 @@ export default function POSPage() {
                     </div>
                   )}
 
-                  {/* Verificación real contra la transacción que la terminal ya registró */}
-                  <div className="mt-2">
+                  {!activePosConfig.bancardIp && (
+                    <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300">
+                      No hay IP de terminal configurada para esta caja.{" "}
+                      <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                    </div>
+                  )}
+
+                  {/* Camino primario: cobro real y automatico contra el terminal (API POS Android de Bancard) */}
+                  {bancardTxnState !== "aprobada" && (
                     <button
                       type="button"
-                      onClick={() => handleVerifyPosTerminal("bancard")}
-                      disabled={posVerifyStatus === "searching"}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold bg-blue-600/20 text-blue-300 border border-blue-500/40 hover:bg-blue-600/30 disabled:opacity-60 cursor-pointer"
+                      onClick={handleBancardCharge}
+                      disabled={!activePosConfig.bancardIp || bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-black bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 cursor-pointer"
                     >
-                      {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                      <span>{posVerifyStatus === "searching" ? "Buscando en la terminal..." : "Verificar Transacción en Terminal"}</span>
+                      {(bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                      <span>
+                        {bancardTxnState === "esperando_tarjeta" ? "Presente la tarjeta en el terminal..."
+                          : bancardTxnState === "confirmando" ? "Confirmando con el terminal..."
+                          : "Cobrar con Bancard"}
+                      </span>
                     </button>
+                  )}
 
-                    {posVerifyStatus === "found" && posVerifiedTxn && (
-                      <div className="mt-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-300">
-                        ✓ Verificado: {posVerifiedTxn.tarjeta_marca} · {formatPYG(posVerifiedTxn.monto)} · Voucher {posVerifiedTxn.voucher} · {posVerifiedTxn.fecha.slice(11)}
-                      </div>
-                    )}
+                  {bancardTxnState === "aprobada" && bancardTxnResult && (
+                    <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                      <div className="font-black">✓ {bancardTxnResult.mensajeDisplay || "Aprobada"}</div>
+                      {bancardTxnResult.nombreTarjeta && <div>{bancardTxnResult.nombreTarjeta}{bancardTxnResult.pan ? ` · **** ${bancardTxnResult.pan}` : ""}</div>}
+                      {bancardTxnResult.nombreCliente && <div>{bancardTxnResult.nombreCliente}</div>}
+                      <div className="font-posMono tabular-nums">Autorización {bancardTxnResult.codigoAutorizacion} · Boleta {bancardTxnResult.nroBoleta}</div>
+                    </div>
+                  )}
 
-                    {posVerifyStatus === "none" && (
-                      <div className="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-300">
-                        No se encontró todavía la transacción en la terminal. Reintente o cargue el voucher a mano.
-                      </div>
-                    )}
+                  {bancardTxnState === "error_rechazo" && (
+                    <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1.5">
+                      <div className="font-black">✕ {bancardTxnError}</div>
+                      <button type="button" onClick={handleBancardCharge} className="text-[11px] font-bold underline cursor-pointer">Reintentar</button>
+                    </div>
+                  )}
 
-                    {posVerifyStatus === "multiple" && (
-                      <div className="mt-2 space-y-1">
-                        <div className="text-[11px] font-bold text-amber-300">Hay más de una coincidencia, elija la correcta:</div>
-                        {posVerifyCandidates.map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => handleSelectPosCandidate("bancard", c)}
-                            className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:border-blue-500 text-left cursor-pointer"
-                          >
-                            <span className="text-[11px] text-slate-900 dark:text-white font-posMono tabular-nums">{c.tarjeta_marca} · {c.cajero}</span>
-                            <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums font-bold">{formatPYG(c.monto)} · {c.fecha.slice(11)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {bancardTxnState === "error_conexion" && (
+                    <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1.5">
+                      <div className="font-black">⚠ {bancardTxnError}</div>
+                      <button type="button" onClick={handleBancardCharge} className="text-[11px] font-bold underline cursor-pointer">Reintentar conexión</button>
+                    </div>
+                  )}
+
+                  {/* Respaldo manual -- colapsado salvo que falle la conexión (auto-expandido ahí) o el cajero lo abra */}
+                  {bancardTxnState !== "aprobada" && (
+                    <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setShowBancardManualFallback((v) => !v)}
+                        className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                      >
+                        {showBancardManualFallback ? "▾" : "▸"} Cargar manualmente (si ya cobraste en el terminal aparte)
+                      </button>
+
+                      {showBancardManualFallback && (
+                        <div className="mt-2 space-y-2">
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal Asignada:</label>
+                              <input
+                                type="text"
+                                value={posTerminalId}
+                                onChange={(e) => setPosTerminalId(e.target.value)}
+                                className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums text-xs text-blue-600 dark:text-blue-400 font-bold outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
+                              <input
+                                type="text"
+                                value={posCardLote}
+                                onChange={(e) => setPosCardLote(e.target.value)}
+                                placeholder="001"
+                                className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums text-xs text-slate-900 dark:text-white outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Cupón / Voucher:</label>
+                              <input
+                                type="text"
+                                value={posCardCupon}
+                                onChange={(e) => setPosCardCupon(e.target.value)}
+                                placeholder="123456"
+                                className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums text-xs text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Verificación real contra la transacción que la terminal ya registró */}
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              onClick={() => handleVerifyPosTerminal("bancard")}
+                              disabled={posVerifyStatus === "searching"}
+                              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold bg-blue-600/20 text-blue-300 border border-blue-500/40 hover:bg-blue-600/30 disabled:opacity-60 cursor-pointer"
+                            >
+                              {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                              <span>{posVerifyStatus === "searching" ? "Buscando en la terminal..." : "Verificar Transacción en Terminal"}</span>
+                            </button>
+
+                            {posVerifyStatus === "found" && posVerifiedTxn && (
+                              <div className="mt-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-300">
+                                ✓ Verificado: {posVerifiedTxn.tarjeta_marca} · {formatPYG(posVerifiedTxn.monto)} · Voucher {posVerifiedTxn.voucher} · {posVerifiedTxn.fecha.slice(11)}
+                              </div>
+                            )}
+
+                            {posVerifyStatus === "none" && (
+                              <div className="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-300">
+                                No se encontró todavía la transacción en la terminal. Reintente o cargue el voucher a mano.
+                              </div>
+                            )}
+
+                            {posVerifyStatus === "multiple" && (
+                              <div className="mt-2 space-y-1">
+                                <div className="text-[11px] font-bold text-amber-300">Hay más de una coincidencia, elija la correcta:</div>
+                                {posVerifyCandidates.map((c) => (
+                                  <button
+                                    key={c.id}
+                                    type="button"
+                                    onClick={() => handleSelectPosCandidate("bancard", c)}
+                                    className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:border-blue-500 text-left cursor-pointer"
+                                  >
+                                    <span className="text-[11px] text-slate-900 dark:text-white font-posMono tabular-nums">{c.tarjeta_marca} · {c.cajero}</span>
+                                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums font-bold">{formatPYG(c.monto)} · {c.fecha.slice(11)}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -5866,6 +6158,53 @@ export default function POSPage() {
                       </div>
                     </div>
                   )}
+
+                  {!activePosConfig.bancardIp && (
+                    <div className="w-full mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300">
+                      No hay IP de terminal configurada para esta caja.{" "}
+                      <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                    </div>
+                  )}
+
+                  {bancardQrState !== "aprobada" && (
+                    <button
+                      type="button"
+                      onClick={handleBancardQR}
+                      disabled={!activePosConfig.bancardIp || bancardQrState === "esperando"}
+                      className="w-full mt-2 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
+                    >
+                      {bancardQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+                      <span>{bancardQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR"}</span>
+                    </button>
+                  )}
+
+                  {bancardQrState === "aprobada" && bancardQrResult && (
+                    <div className="w-full mt-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5 text-left">
+                      <div className="font-black">✓ {bancardQrResult.mensajeDisplay || "Pago Exitoso"}</div>
+                      {bancardQrResult.nombreTarjeta && <div>{bancardQrResult.nombreTarjeta}</div>}
+                      {bancardQrResult.nombreCliente && <div>{bancardQrResult.nombreCliente}</div>}
+                      <div className="font-posMono tabular-nums">Autorización {bancardQrResult.codigoAutorizacion} · Boleta {bancardQrResult.nroBoleta}</div>
+                    </div>
+                  )}
+
+                  {bancardQrState === "error_rechazo" && (
+                    <div className="w-full mt-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                      <div className="font-black">✕ {bancardQrError}</div>
+                      <button type="button" onClick={handleBancardQR} className="text-[11px] font-bold underline cursor-pointer">Reintentar</button>
+                    </div>
+                  )}
+
+                  {bancardQrState === "error_conexion" && (
+                    <div className="w-full mt-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
+                      <div className="font-black">⚠ {bancardQrError}</div>
+                      <button type="button" onClick={handleBancardQR} className="text-[11px] font-bold underline cursor-pointer mr-3">Reintentar conexión</button>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold cursor-pointer mt-1">
+                        <input type="checkbox" checked={bancardQrManualConfirm} onChange={(e) => setBancardQrManualConfirm(e.target.checked)} className="w-3.5 h-3.5" />
+                        Confirmo que cobré por QR fuera del sistema
+                      </label>
+                    </div>
+                  )}
+
                   <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
                     Presente la pantalla al cliente para el escaneo directo.
                   </span>
@@ -6030,6 +6369,14 @@ export default function POSPage() {
             <button
               ref={confirmCheckoutBtnRef}
               onClick={() => {
+                if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim()) {
+                  toast.warning("Bancard sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
+                  return
+                }
+                if (activeMethods.has("qr") && bancardQrState !== "aprobada" && !bancardQrManualConfirm) {
+                  toast.warning("QR sin confirmar", "Generá el QR y esperá el pago, o marcá que ya cobraste por fuera del sistema.")
+                  return
+                }
                 const montoExtraClub = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
                 if (montoExtraClub > 0) {
                   if (!customer || customer.id === DEFAULT_CUSTOMER.id) {
