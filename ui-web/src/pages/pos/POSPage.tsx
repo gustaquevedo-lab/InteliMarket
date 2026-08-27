@@ -645,8 +645,18 @@ export default function POSPage() {
   // pago mixto, sin pantalla aparte.
   const [activeMethods, setActiveMethods] = useState<Set<"cash" | "bancard" | "dinelco" | "qr" | "extra_club">>(new Set(["cash"]))
   const isMultiPayment = activeMethods.size > 1
+  // Por defecto un tap en un medio de pago REEMPLAZA la seleccion (un solo
+  // medio activo a la vez, como espera cualquier cajero). Antes cada tap
+  // solo AGREGABA al set sin sacar los anteriores -- tocar Bancard dejaba
+  // Efectivo prendido, tocar Dinelco despues prendia los 3 a la vez, sin
+  // forma obvia de volver atras. El pago dividido en varios medios sigue
+  // existiendo, pero ahora requiere prender "Pago mixto" a proposito.
+  const [allowMixedPayment, setAllowMixedPayment] = useState(false)
   const toggleActiveMethod = (m: "cash" | "bancard" | "dinelco" | "qr" | "extra_club") => {
     setActiveMethods(prev => {
+      if (!allowMixedPayment) {
+        return new Set([m])
+      }
       const next = new Set(prev)
       if (next.has(m)) {
         if (next.size === 1) return prev
@@ -3160,6 +3170,7 @@ export default function POSPage() {
   // ── PROCESAMIENTO DE COBRO (FACTURACIÓN E IMPRESIÓN 80MM) ──────────────────
   const handleOpenPayment = () => {
     setActiveMethods(new Set(["cash"]))
+    setAllowMixedPayment(false)
     setPayCashPyg(totalPyg.toLocaleString("es-PY"))
     setPayCashBrl("")
     setPayCashUsd("")
@@ -5674,10 +5685,30 @@ export default function POSPage() {
               )}
             </div>
 
-            {/* Metodos de cobro -- cada boton agrega/quita su linea (no
-                reemplaza la pantalla). Con uno solo activo se ve y funciona
-                igual que antes; agregar un segundo ES el pago mixto, sin
-                pestana aparte. Numeros 1-5 hacen lo mismo por teclado. */}
+            {/* Metodos de cobro -- por defecto cada boton REEMPLAZA el
+                medio activo (seleccion exclusiva, como espera cualquier
+                cajero). Antes cada tap solo agregaba sin sacar los
+                anteriores: tocar Bancard dejaba Efectivo prendido, tocar
+                Dinelco despues prendia los 3 a la vez -- eso se reporto
+                como bug real en caja. El pago dividido entre varios medios
+                sigue existiendo, pero ahora hay que prender "Pago mixto" a
+                proposito para que los taps empiecen a sumar en vez de
+                reemplazar. Numeros 1-5 seleccionan por teclado igual. */}
+            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={allowMixedPayment}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  setAllowMixedPayment(on)
+                  if (!on) {
+                    setActiveMethods(prev => new Set([prev.values().next().value || "cash"]))
+                  }
+                }}
+                className="w-3.5 h-3.5"
+              />
+              Pago mixto (dividir el cobro entre varios medios)
+            </label>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 mb-4">
               {(() => {
                 let pMethods: any[] = []
