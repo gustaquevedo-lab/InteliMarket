@@ -64,6 +64,7 @@ from api.src.variants.router import router as variants_router
 from api.src.crm.router import router as crm_router
 from api.src.verticals.router import router as verticals_router
 from api.src.price_lists.router import router as price_lists_router
+from api.src.pos_terminal_transactions.router import router as pos_terminal_transactions_router
 from api.src.portal.router import router as portal_router
 from api.src.security.router import router as security_router
 from api.src.bancard.router import router as bancard_router
@@ -291,6 +292,7 @@ app.include_router(variants_router)
 app.include_router(verticals_router)
 app.include_router(crm_router)
 app.include_router(price_lists_router)
+app.include_router(pos_terminal_transactions_router)
 app.include_router(portal_router)
 app.include_router(security_router)
 app.include_router(bancard_router)
