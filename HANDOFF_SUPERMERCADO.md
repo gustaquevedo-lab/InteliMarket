@@ -179,10 +179,24 @@ Prueba real: PLU 7 (ML COSTILLA DE PRIMERA / MATAMBRE KG) contra `192.168.0.72` 
 1. **Orden de campos de `TIM` estaba invertido.** La primera captura (26-ago) tenía día=26 y año=26 coincidiendo, así que no se podía distinguir el orden real. Al probar en vivo el 27-ago (día≠año) se descubrió: el orden correcto es `<yy>\t<mm>\t<dd>`, no `<dd>\t<mm>\t<yy>` como se había asumido. Mandar el orden viejo dejó la balanza `.72` con **fecha interna en 2027** por un rato (se corrigió en el momento, sin impacto real detectado).
 2. **La balanza acepta el push de PLU (con ack) pero no lo refleja en el visor si nunca recibió un `TIM` válido en esa sesión.** El primer push de prueba (sin sincronizar hora antes) quedó "aceptado" pero invisible en el display — recién después de un `TIM` correcto se vio el cambio real. Por eso `sync_plu()` ahora manda `TIM` automáticamente (con el orden de campos corregido) antes de cada push de PLU.
 
-**Pendiente para la próxima sesión**:
-1. Decidir cómo modelar los 2 cabezales de Carnicería en `scale_configs` (agregar una 3ra fila "Carnicería · Cabezal 2" con host `.74`, o alguna otra estrategia) — hoy la tabla asume 1 host por fila.
-2. Cargar `host`/`puerto_tcp` reales en las 2 filas existentes (hoy vacío): Carnicería → `192.168.0.72` puerto `4011` (o `.74`/`4010` si se resuelve el punto 1), Panadería → `192.168.0.73` puerto `4001`.
-3. Antes de habilitar `sync_automatico` de verdad (push en cada cambio de precio), correr una sincronización completa del catálogo una vez y confirmar con el cliente que no rompe nada en un pico de uso real.
+### ✅ SESIÓN 2026-08-27 (continuación) — comportamiento y config definidos, UI conectada a datos reales
+
+**`scale_configs` resuelto en producción**:
+- `Balmak Edge · Carnicería` → host `192.168.0.72:4011`.
+- `Balmak Edge · Carnicería (Cabezal 2)` → **fila nueva**, host `192.168.0.74:4010` (el 2do cabezal físico de carnicería que no tenía fila).
+- `Balmak Edge · Panadería & Rotisería` → host `192.168.0.73:4001`.
+- Las 3 con `sync_automatico=true` (ya estaba así, solo faltaba el host para que funcionara).
+
+**Bug de scoping por categoría encontrado y corregido**: `categorias_ids` en las 3 filas apuntaba a categorías (`Carnicería, Fiambres y Congelados`, `Panadería y Repostería`) que casi ningún producto real usa — la categorización real está fragmentada en 33 categorías distintas para productos con `plu_balanza` (`CARNES` con 165 productos, `FRUTAS` 55, `EMBUTIDOS` 41, etc., contra solo 4 productos en cada una de las 2 categorías configuradas). Con eso, el auto-sync casi nunca se disparaba. Además contradice lo ya confirmado por captura real: **las 3 balanzas reciben el mismo catálogo completo**, no uno por categoría/departamento. Se vació `categorias_ids` en las 3 filas (`[]` = todas) — el único filtro real ahora es tener `plu_balanza` asignado.
+
+**Verificado en vivo** (sin tocar ningún precio real): `auto_sync_product()` corrido directo contra el producto código 7 confirma que ahora las 3 balanzas reciben el push correctamente (`exitosos: 1` en cada una).
+
+**UI de [`ScalesPage.tsx`](ui-web/src/pages/scales/ScalesPage.tsx) conectada a datos reales**: la pestaña "Balanzas de Red & IP" mostraba 3 balanzas 100% inventadas (`192.168.10.150-152`, marcas Toledo/Filizola que no existen en este cliente) y el botón "Test Ping" solo mostraba un toast fijo sin llamar a nada. Reescrita para listar las balanzas reales (`api.scales.configs.list()`, ya se pedían pero no se usaban) y el botón ahora llama a `api.scales.test(id)` de verdad. La pestaña "Sincronización de PLUs" tenía el mismo problema (toast fijo "342 productos... a las 6 balanzas") — el botón ahora llama a `api.scales.syncPLU(id, ...)` para cada balanza activa con host configurado y muestra el resultado real. TypeScript compila sin errores nuevos. **No se pudo verificar visualmente en el navegador** (el clasificador de seguridad de la sesión bloqueó tanto inyectar un token de sesión como escribir una contraseña en el login, correctamente) — pendiente que el cliente lo confirme entrando con su usuario a `/escalas`.
+
+**Pendiente real para la próxima sesión**:
+1. Verificar visualmente `/escalas` con un usuario real (login normal).
+2. Revisar los KPIs del header de `ScalesPage.tsx` ("6 balanzas", "342 ítems", etc.) — siguen hardcodeados, no se tocaron en esta sesión (fuera de foco: la pestaña de configs/PLU sync era lo prioritario).
+3. Confirmar con el cliente que está bien que el auto-sync ahora dispare de verdad en cada cambio de precio de cualquier producto con `plu_balanza` (antes estaba "encendido" en la base pero muerto por falta de host — ahora es real).
 
 
 ## 🚨 SESIÓN 2026-08-26 (TARDE) — Verificador de Precios movido a PRODUCCIÓN, no volver a sandbox

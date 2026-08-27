@@ -37,6 +37,9 @@ export default function ScalesPage() {
   const [templates, setTemplates] = useState<ScaleLabelTemplate[]>([])
   const [logs, setLogs] = useState<any[]>([])
   const [search, setSearch] = useState("")
+  const [pingResults, setPingResults] = useState<Record<string, ConnectionTestResult>>({})
+  const [pingingId, setPingingId] = useState<string | null>(null)
+  const [syncingPlu, setSyncingPlu] = useState(false)
 
   // ── ESTADOS DE DIAGNÓSTICO WEB SERIAL USB (BALMAK BCK30 CHECKOUT) ────────
   const [usbConnected, setUsbConnected] = useState(false)
@@ -68,6 +71,50 @@ export default function ScalesPage() {
   useEffect(() => {
     fetchAll()
   }, [])
+
+  const testScale = async (scale: ScaleConfig) => {
+    setPingingId(scale.id)
+    try {
+      const result = await api.scales.test(scale.id)
+      setPingResults((prev) => ({ ...prev, [scale.id]: result }))
+      if (result.conectada) {
+        toast.success(`${scale.nombre}: conectada`, `${result.mensaje}${result.latencia_ms != null ? ` · ${result.latencia_ms}ms` : ""}`)
+      } else {
+        toast.error(`${scale.nombre}: sin conexión`, result.mensaje)
+      }
+    } catch (err: any) {
+      toast.error(`${scale.nombre}: error`, err?.message || "No se pudo probar la conexión")
+    } finally {
+      setPingingId(null)
+    }
+  }
+
+  const syncAllPLU = async () => {
+    const objetivo = scales.filter((s) => s.activa && s.host)
+    if (objetivo.length === 0) {
+      toast.warning("Sin balanzas configuradas", "Ninguna balanza tiene host/IP cargado todavía.")
+      return
+    }
+    setSyncingPlu(true)
+    try {
+      const resultados = await Promise.all(
+        objetivo.map((s) => api.scales.syncPLU(s.id, { producto_ids: [], modo: "completo" }).catch((err: any) => ({
+          scale_nombre: s.nombre, exitosos: 0, fallidos: 0, total_productos: 0, error: err?.message,
+        })))
+      )
+      const totalExitosos = resultados.reduce((acc: number, r: any) => acc + (r.exitosos || 0), 0)
+      const totalFallidos = resultados.reduce((acc: number, r: any) => acc + (r.fallidos || 0), 0)
+      const conError = resultados.filter((r: any) => r.error)
+      if (conError.length > 0) {
+        toast.error("Sincronización con errores", conError.map((r: any) => `${r.scale_nombre}: ${r.error}`).join(" · "))
+      } else {
+        toast.success("PLUs enviados", `${totalExitosos} productos transmitidos a ${objetivo.length} balanzas${totalFallidos ? ` (${totalFallidos} sin plu_balanza asignado)` : ""}`)
+      }
+      fetchAll()
+    } finally {
+      setSyncingPlu(false)
+    }
+  }
 
   const startUsbSerialTest = async () => {
     if (!("serial" in navigator)) {
@@ -277,33 +324,45 @@ export default function ScalesPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              { id: "b1", nombre: "Balanza Carnicería #01", ip: "192.168.10.150:9000", marca: "Toledo Prix 5 Plus", seccion: "Carnicería", estado: "online" },
-              { id: "b2", nombre: "Balanza Fiambrería #01", ip: "192.168.10.151:9000", marca: "Balmak Edge 30kg", seccion: "Fiambrería", estado: "online" },
-              { id: "b3", nombre: "Balanza Panadería #01", ip: "192.168.10.152:9000", marca: "Filizola Platina", seccion: "Panadería", estado: "online" },
-            ].map(b => (
-              <div key={b.id} className="p-4 rounded-xl bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-black text-gray-900 dark:text-white">{b.nombre}</p>
-                  <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-mono">
-                    {b.estado}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-600 dark:text-gray-300">Modelo: <strong>{b.marca}</strong></p>
-                <p className="text-[11px] text-gray-500 font-mono">IP: {b.ip}</p>
-                <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700/60 text-xs">
-                  <span className="text-gray-400 font-mono text-[11px]">Sector: {b.seccion}</span>
-                  <button
-                    onClick={() => toast.success("Test de Conexión OK", `Balanza ${b.nombre} respondió en 8ms`)}
-                    className="text-xs font-bold text-teal-600 hover:underline"
-                  >
-                    Test Ping
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+          {loading ? (
+            <p className="text-xs text-gray-400">Cargando balanzas...</p>
+          ) : scales.length === 0 ? (
+            <p className="text-xs text-gray-400">No hay balanzas configuradas todavía.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {scales.map(b => {
+                const ping = pingResults[b.id]
+                return (
+                  <div key={b.id} className="p-4 rounded-xl bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-black text-gray-900 dark:text-white">{b.nombre}</p>
+                      <span className={`px-2 py-0.5 text-xs font-bold rounded-full font-mono ${
+                        ping ? (ping.conectada ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300")
+                          : b.activa ? "bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300" : "bg-gray-100 text-gray-400 dark:bg-slate-700 dark:text-gray-500"
+                      }`}>
+                        {ping ? (ping.conectada ? "online" : "sin conexión") : (b.activa ? "sin probar" : "inactiva")}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-300">Modelo: <strong>{b.marca}{b.modelo ? ` · ${b.modelo}` : ""}</strong></p>
+                    <p className="text-[11px] text-gray-500 font-mono">
+                      {b.host ? `${b.host}:${b.puerto_tcp}` : b.puerto_com || "sin conexión configurada"}
+                    </p>
+                    {ping && <p className="text-[11px] text-gray-400">{ping.mensaje}{ping.latencia_ms != null ? ` · ${ping.latencia_ms}ms` : ""}</p>}
+                    <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700/60 text-xs">
+                      <span className="text-gray-400 font-mono text-[11px]">{b.sync_automatico ? "Auto-sync ON" : "Auto-sync OFF"}</span>
+                      <button
+                        onClick={() => testScale(b)}
+                        disabled={pingingId === b.id}
+                        className="text-xs font-bold text-teal-600 hover:underline disabled:opacity-50"
+                      >
+                        {pingingId === b.id ? "Probando..." : "Test Ping"}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -366,12 +425,21 @@ export default function ScalesPage() {
               <p className="text-xs text-gray-500 dark:text-gray-400">Transmisión de productos pesables, códigos de balanza y precios a las memorias de las básculas</p>
             </div>
             <button
-              onClick={() => toast.success("¡PLUs Enviados!", "342 productos pesables transmitidos a las 6 balanzas")}
-              className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition flex items-center gap-1.5"
+              onClick={syncAllPLU}
+              disabled={syncingPlu}
+              className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition flex items-center gap-1.5 disabled:opacity-50"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Enviar PLUs a Todas las Balanzas
+              <RefreshCw className={`w-3.5 h-3.5 ${syncingPlu ? "animate-spin" : ""}`} />
+              {syncingPlu ? "Enviando..." : "Enviar PLUs a Todas las Balanzas"}
             </button>
+          </div>
+          <div className="space-y-1.5">
+            {scales.filter(s => s.host).map(s => (
+              <div key={s.id} className="flex items-center justify-between text-xs px-3 py-2 rounded-lg bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60">
+                <span className="font-bold text-gray-700 dark:text-gray-200">{s.nombre}</span>
+                <span className="text-gray-400 font-mono">{s.host}:{s.puerto_tcp}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
