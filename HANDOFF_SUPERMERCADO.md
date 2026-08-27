@@ -168,13 +168,21 @@ Cada `<record>` PLU tiene **148 campos** tab-delimited, constantes en las 505 fi
 
 Es decir, hay **2 cabezales físicos de Carnicería** (`.72` y `.74`) y **1 de Panadería** (`.73`) — no 1 y 1 como asumían las 2 filas actuales de `scale_configs`.
 
-**Implementado en [`balmak_edge.py`](api/src/integrations/scales/drivers/balmak_edge.py)**: `BalmakEdgeDriver` reescrito para hablar este protocolo por TCP directo (sin SDL.exe, sin Windows). `test_connection()` probado en vivo contra las 3 IPs reales (INF real, solo lectura) — funciona. `sync_plu()` construye el mismo bloque `DWL/PLU` byte-a-byte compatible con lo que la balanza ya acepta (plantilla de 148 campos extraída y verificada carácter por carácter contra la captura real) — **implementado pero todavía NO probado en vivo contra el catálogo real** (evitado a propósito: escribiría sobre el catálogo de producción que usa el personal ahora mismo).
+**Implementado en [`balmak_edge.py`](api/src/integrations/scales/drivers/balmak_edge.py)**: `BalmakEdgeDriver` reescrito para hablar este protocolo por TCP directo (sin SDL.exe, sin Windows). `test_connection()` probado en vivo contra las 3 IPs reales (INF real, solo lectura) — funciona.
+
+### ✅ `sync_plu()` PROBADO EN VIVO CONTRA PRODUCCIÓN (27-ago-2026) — funciona
+
+Prueba real: PLU 7 (ML COSTILLA DE PRIMERA / MATAMBRE KG) contra `192.168.0.72` (Carnicería1), primero a Gs 29.000 (precio de prueba pedido por el cliente), confirmado visualmente en el visor físico de la balanza por el cliente ("funciona! eureka!"), y después devuelto a Gs 34.777 (precio real del producto) para dejar todo en estado limpio.
+
+**2 bugs reales encontrados y corregidos en el camino**:
+
+1. **Orden de campos de `TIM` estaba invertido.** La primera captura (26-ago) tenía día=26 y año=26 coincidiendo, así que no se podía distinguir el orden real. Al probar en vivo el 27-ago (día≠año) se descubrió: el orden correcto es `<yy>\t<mm>\t<dd>`, no `<dd>\t<mm>\t<yy>` como se había asumido. Mandar el orden viejo dejó la balanza `.72` con **fecha interna en 2027** por un rato (se corrigió en el momento, sin impacto real detectado).
+2. **La balanza acepta el push de PLU (con ack) pero no lo refleja en el visor si nunca recibió un `TIM` válido en esa sesión.** El primer push de prueba (sin sincronizar hora antes) quedó "aceptado" pero invisible en el display — recién después de un `TIM` correcto se vio el cambio real. Por eso `sync_plu()` ahora manda `TIM` automáticamente (con el orden de campos corregido) antes de cada push de PLU.
 
 **Pendiente para la próxima sesión**:
-1. Probar `sync_plu()` en vivo — idealmente con 1 producto de prueba contra una sola balanza, coordinado con el cliente, antes de habilitar `sync_automatico` de verdad.
-2. Decidir cómo modelar los 2 cabezales de Carnicería en `scale_configs` (agregar una 3ra fila "Carnicería · Cabezal 2" con host `.74`, o alguna otra estrategia) — hoy la tabla asume 1 host por fila.
-3. Cargar `host`/`puerto_tcp` reales en las 2 filas existentes (hoy vacío): Carnicería → `192.168.0.72` puerto `4011` (o `.74`/`4010` si se resuelve el punto 2), Panadería → `192.168.0.73` puerto `4001`.
-4. `sync_time()` no se automatizó (no hay evidencia de que la balanza lo exija antes de aceptar PLU) — si en producción se detecta que hace falta, agregar esa llamada antes del push.
+1. Decidir cómo modelar los 2 cabezales de Carnicería en `scale_configs` (agregar una 3ra fila "Carnicería · Cabezal 2" con host `.74`, o alguna otra estrategia) — hoy la tabla asume 1 host por fila.
+2. Cargar `host`/`puerto_tcp` reales en las 2 filas existentes (hoy vacío): Carnicería → `192.168.0.72` puerto `4011` (o `.74`/`4010` si se resuelve el punto 1), Panadería → `192.168.0.73` puerto `4001`.
+3. Antes de habilitar `sync_automatico` de verdad (push en cada cambio de precio), correr una sincronización completa del catálogo una vez y confirmar con el cliente que no rompe nada en un pico de uso real.
 
 
 ## 🚨 SESIÓN 2026-08-26 (TARDE) — Verificador de Precios movido a PRODUCCIÓN, no volver a sandbox

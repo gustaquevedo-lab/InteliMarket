@@ -15,10 +15,18 @@ Balanzas confirmadas (mismo catálogo completo a las 3, ver INF de cada una):
 Comandos observados:
   UPL\\tINF\\t              -> pide info de la balanza
     resp: DWL\\tINF\\t\\r\\nINF\\t<depto>\\t<depto>\\t1\\t<modelo>\\t0\\t1\\t<serial>\\t\\r\\nEND\\tINF\\t
-  DWL\\tTIM\\t\\r\\nTIM\\t<dd>\\t<mm>\\t<yy>\\t<hh>\\t<mi>\\t<ss>\\t  -> sincroniza hora
+  DWL\\tTIM\\t\\r\\nTIM\\t<yy>\\t<mm>\\t<dd>\\t<hh>\\t<mi>\\t<ss>\\t  -> sincroniza hora
     resp: DWL\\tTIM\\t<YYYYMMDDHHMMSS>\\t1\\t\\r\\nTIM\\t...\\r\\nEND\\tTIM\\t1\\t\\t
   DWL\\tPLU\\t\\r\\n\\r\\n<record>\\r\\n<record>...\\r\\nEND\\tPLU\\t  -> carga catálogo completo
     resp: DWL\\tPLU\\t<YYYYMMDDHHMMSS>\\t1\\t\\r\\nEND\\tPLU\\t1\\t\\t
+
+OJO -- el orden real de TIM es <yy>\\t<mm>\\t<dd>, NO <dd>\\t<mm>\\t<yy> como
+parecía sugerir la primera captura (donde día y año coincidían en 26 y no
+se podía distinguir el orden). Se confirmó mal en una prueba en vivo
+27-ago-2026: mandar "27\\t8\\t26" (con la intención día=27,mes=8,año=26)
+la balanza lo interpretó como año=2027,mes=8,día=26 (eco: "20270826...").
+Corregido acá; si se vuelve a tocar este campo, verificar contra una fecha
+donde día y año NO coincidan, no contra los primeros días del mes.
 
 Cada `<record>` tiene 148 campos separados por tab (constante en las 505
 filas reales capturadas). Solo 3 varían por producto: PLUID (campo 1),
@@ -33,10 +41,13 @@ productos reales (ver HANDOFF_SUPERMERCADO.md, sección INTEGRACIÓN BALANZAS
 BALMAK EDGE) -- no se inventa un PLU nuevo acá, se usa el que ya está
 asignado.
 
-NOTA: en la captura real, TIM y PLU viajaron en conexiones separadas (TIM
-contra `.72` sin PLU; PLU contra `.74` sin TIM previo) -- no hay evidencia
-de que la balanza exija sincronizar hora antes de aceptar un catálogo, así
-que `sync_plu()` no lo hace automáticamente.
+CONFIRMADO EN VIVO (27-ago-2026, PLU 7 = costilla, Gs 29.000, contra
+CARNICERIA1): la balanza acepta el push de PLU con ack en todos los casos,
+pero **el precio nuevo no se refleja en el visor físico si la balanza nunca
+recibió un TIM válido en esa sesión** -- el primer push (sin TIM previo)
+quedó "aceptado" pero invisible; recién después de un TIM correcto se vio
+el cambio real en el display. Por eso `sync_plu()` manda TIM automáticamente
+antes de cada push de PLU.
 
 Para peso/impresión de etiqueta (no investigado en esta sesión, fuera de
 alcance -- la báscula de checkout ya está integrada por un flujo aparte):
@@ -45,6 +56,7 @@ se mantiene el fallback previo vía ToledoP03Driver, sin cambios.
 
 import asyncio
 import time
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -159,6 +171,15 @@ class BalmakEdgeDriver(ScaleDriver):
         except Exception as e:
             return ConnectionStatus(conectada=False, mensaje=str(e))
 
+    async def _sync_time(self, reader, writer):
+        """Sincroniza la hora de la balanza. Necesario -- comprobado en vivo -- para
+        que un push de PLU posterior en la misma sesión se refleje en el visor."""
+        now = datetime.now()
+        tim = f"{now.year % 100}\t{now.month}\t{now.day}\t{now.hour}\t{now.minute}\t{now.second}\t"
+        writer.write(_BOM + f"\r\nDWL\tTIM\t\r\nTIM\t{tim}\r\nEND\tTIM\t\r\n".encode("utf-8"))
+        await writer.drain()
+        await asyncio.wait_for(reader.readuntil(b"END\tTIM"), timeout=self.config.timeout)
+
     async def sync_plu(self, productos: list[dict]) -> PLUResult:
         """Empuja el catálogo completo directo a la balanza vía TCP (protocolo SDL real).
 
@@ -191,6 +212,7 @@ class BalmakEdgeDriver(ScaleDriver):
 
         reader, writer = await self._open()
         try:
+            await self._sync_time(reader, writer)
             writer.write(payload)
             await writer.drain()
             ack = await asyncio.wait_for(reader.readuntil(b"END\tPLU"), timeout=max(self.config.timeout, 15))
