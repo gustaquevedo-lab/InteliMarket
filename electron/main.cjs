@@ -3,6 +3,7 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const { spawn, exec } = require('child_process')
+const http = require('http')
 
 let mainWindow = null
 let currentScalePort = null
@@ -665,6 +666,47 @@ ipcMain.handle('app:maximize', () => {
   else mainWindow?.maximize()
 })
 ipcMain.handle('app:close', () => mainWindow?.close())
+
+// -- PUENTE HTTP HACIA EL TERMINAL BANCARD (POS Android, API REST oficial) --
+// Se llama desde el main process (no desde el renderer) para evitar CORS: el
+// terminal no manda cabeceras Access-Control-Allow-Origin porque esta pensado
+// para clientes nativos (Postman, apps de facturacion), no paginas web.
+// Nunca lanza -- siempre resuelve con { ok, status, body } o { ok: false,
+// status: null, message } para que el renderer maneje el estado sin
+// try/catch anidados.
+ipcMain.handle('pos:bancard-call', async (_event, { ip, path: reqPath, body, timeoutMs }) => {
+  const payload = JSON.stringify(body || {})
+  return new Promise((resolve) => {
+    const req = http.request({
+      hostname: ip,
+      port: 3000,
+      path: reqPath,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+      timeout: timeoutMs || 90000,
+    }, (res) => {
+      let raw = ''
+      res.on('data', (chunk) => { raw += chunk })
+      res.on('end', () => {
+        let parsed = null
+        try { parsed = JSON.parse(raw) } catch (e) { parsed = null }
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, body: parsed })
+      })
+    })
+    req.on('timeout', () => {
+      req.destroy()
+      resolve({ ok: false, status: null, message: 'timeout' })
+    })
+    req.on('error', (err) => {
+      resolve({ ok: false, status: null, message: err.code || err.message || 'connection_error' })
+    })
+    req.write(payload)
+    req.end()
+  })
+})
 
 ipcMain.handle('pos:get-status', async () => {
   return {
