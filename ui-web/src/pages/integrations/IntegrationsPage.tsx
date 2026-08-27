@@ -4,18 +4,34 @@ import {
   RefreshCcw, Search, Plus, ExternalLink, ShieldCheck, DollarSign,
   ArrowUpRight, ArrowDownRight, Layers, FileSpreadsheet, Lock, Zap,
   Terminal, Store, ChevronRight, Eye, Smartphone, Wifi, Radio, Filter,
-  TrendingUp, Activity, CheckCircle, Flame, ShieldAlert
+  TrendingUp, Activity, CheckCircle, Flame, ShieldAlert, Settings, Save, EyeOff
 } from "lucide-react"
 import { api } from "../../api"
 import { formatPYG } from "../../utils/format"
+import { useToast } from "../../context/ToastContext"
 
-type Tab = "bancard" | "dinelco" | "cierres_lote" | "qr_pix" | "hardware"
+type Tab = "bancard" | "dinelco" | "cierres_lote" | "qr_pix" | "hardware" | "config"
+
+// Mismo listado que PUNTOS_EMISION en POSPage.tsx/CajaRapidaPage.tsx --
+// duplicado a propósito, mismo patrón que esos dos archivos ya usan entre sí.
+const PUNTOS_EMISION = [
+  { id: "001-012", nombre: "Caja 01 · Salón Central (Boca 012)" },
+  { id: "001-013", nombre: "Caja 02 · Salón Central (Boca 013)" },
+  { id: "001-014", nombre: "Caja 03 · Salón Central (Boca 014)" },
+  { id: "001-015", nombre: "Caja 04 · Salón Central (Boca 015)" },
+  { id: "001-016", nombre: "Caja 05 · Salón Central (Boca 016)" },
+  { id: "001-017", nombre: "Caja 06 · Salón Central (Boca 017)" },
+  { id: "001-018", nombre: "Caja 07 · Línea de Caja (Boca 018)" },
+  { id: "001-019", nombre: "Caja Especial Mayorista / Administración (Boca 019)" },
+  { id: "001-020", nombre: "Caja Auxiliar / Refuerzo (Boca 020)" },
+]
 
 export default function IntegrationsPage() {
   const [tab, setTab] = useState<Tab>("bancard")
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(false)
   const [transactions, setTransactions] = useState<any[]>([])
+  const toast = useToast()
   // Arrancan en 0/desconectado -- antes había números inventados acá que se
   // veían idénticos a datos reales, incluso cuando la consulta al legacy
   // fallaba o devolvía 0 de verdad. Ahora "connected" refleja si la
@@ -66,6 +82,92 @@ export default function IntegrationsPage() {
   const dinelcoTxs = useMemo(() => {
     return transactions.filter(t => t.procesador.toUpperCase().includes("DINELCO"))
   }, [transactions])
+
+  // ── CONFIGURACIÓN: Bancard (IP por caja) + PlugPay (credenciales) ─────────
+  const [bancardIps, setBancardIps] = useState<Record<string, string>>({})
+  const [bancardEnabled, setBancardEnabled] = useState(true)
+  const [savingBancard, setSavingBancard] = useState(false)
+  const [loadingConfig, setLoadingConfig] = useState(false)
+
+  const [plugpayClientId, setPlugpayClientId] = useState("")
+  const [plugpayPassword, setPlugpayPassword] = useState("")
+  const [plugpayHasSavedPassword, setPlugpayHasSavedPassword] = useState(false)
+  const [plugpayShowPassword, setPlugpayShowPassword] = useState(false)
+  const [plugpayDocumentMerchant, setPlugpayDocumentMerchant] = useState("")
+  const [plugpayEnvironment, setPlugpayEnvironment] = useState<"sandbox" | "production">("sandbox")
+  const [plugpayEnabled, setPlugpayEnabled] = useState(true)
+  const [savingPlugpay, setSavingPlugpay] = useState(false)
+
+  const loadConfig = useCallback(async () => {
+    setLoadingConfig(true)
+    try {
+      const [bancardCfg, plugpayCfg] = await Promise.all([
+        api.paymentIntegrations.get("bancard").catch(() => null),
+        api.paymentIntegrations.get("plugpay").catch(() => null),
+      ])
+      if (bancardCfg) {
+        setBancardIps(bancardCfg.config?.ips_por_punto_emision || {})
+        setBancardEnabled(bancardCfg.enabled)
+      }
+      if (plugpayCfg) {
+        setPlugpayClientId(plugpayCfg.config?.client_id || "")
+        setPlugpayHasSavedPassword(!!plugpayCfg.config?.client_id) // si hay client_id guardado, asumimos que hay password (nunca vuelve en el GET)
+        setPlugpayDocumentMerchant(plugpayCfg.config?.document_merchant || "")
+        setPlugpayEnvironment((plugpayCfg.environment as any) || "sandbox")
+        setPlugpayEnabled(plugpayCfg.enabled)
+      }
+    } finally {
+      setLoadingConfig(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (tab === "config") loadConfig()
+  }, [tab, loadConfig])
+
+  async function handleSaveBancard() {
+    setSavingBancard(true)
+    try {
+      await api.paymentIntegrations.update("bancard", {
+        environment: "production",
+        enabled: bancardEnabled,
+        config: { ips_por_punto_emision: bancardIps },
+      })
+      toast.success("Guardado", "IPs de terminales Bancard actualizadas -- el POS las toma la próxima vez que abra la venta.")
+    } catch {
+      toast.error("Error", "No se pudo guardar la configuración de Bancard.")
+    } finally {
+      setSavingBancard(false)
+    }
+  }
+
+  async function handleSavePlugpay() {
+    setSavingPlugpay(true)
+    try {
+      const config: Record<string, any> = {
+        client_id: plugpayClientId,
+        document_merchant: plugpayDocumentMerchant,
+      }
+      // Solo se manda la password si el usuario tipeó una nueva -- si la
+      // dejó vacía y ya había una guardada, el backend la preserva (hace
+      // merge, no reemplazo total).
+      if (plugpayPassword.trim()) config.password = plugpayPassword.trim()
+      await api.paymentIntegrations.update("plugpay", {
+        environment: plugpayEnvironment,
+        enabled: plugpayEnabled,
+        config,
+      })
+      setPlugpayPassword("")
+      setPlugpayHasSavedPassword(true)
+      toast.success("Guardado", "Configuración de PlugPay actualizada.")
+    } catch {
+      toast.error("Error", "No se pudo guardar la configuración de PlugPay.")
+    } finally {
+      setSavingPlugpay(false)
+    }
+  }
+
+  const webhookUrl = useMemo(() => `${window.location.origin.replace(":5174", ":8001")}/api/v1/plugpay/webhook`, [])
 
   return (
     <div className="space-y-6">
@@ -193,6 +295,7 @@ export default function IntegrationsPage() {
           { key: "cierres_lote", label: "Cierres de Lote & Conciliación", icon: FileSpreadsheet },
           { key: "qr_pix", label: "QR Pagopar & PIX", icon: QrCode },
           { key: "hardware", label: "Hardware de Caja (Impresoras/Gavetas)", icon: Printer },
+          { key: "config", label: "Configuración", icon: Settings },
         ].map(t => (
           <button
             key={t.key}
@@ -365,8 +468,145 @@ export default function IntegrationsPage() {
             </div>
           </div>
           <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300">
-            PIX Brasil y QR Pagopar mostraban antes montos fijos inventados -- se sacaron porque no hay ninguna fuente real conectada para esos dos todavía.
+            PIX Brasil (PlugPay) ya está integrado -- configuralo en la pestaña "Configuración". Los KPIs reales de PIX/crédito parcelado Brasil se agregan acá una vez que haya transacciones de verdad. QR Pagopar sigue sin una fuente real conectada.
           </div>
+        </div>
+      )}
+
+      {/* ── TAB: CONFIGURACIÓN ── */}
+      {tab === "config" && (
+        <div className="space-y-5">
+          {loadingConfig && (
+            <div className="flex items-center justify-center py-8 text-gray-400"><RefreshCcw className="w-5 h-5 animate-spin" /></div>
+          )}
+
+          {!loadingConfig && (
+            <>
+              {/* BANCARD: IP por caja */}
+              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                    <h2 className="text-base font-black text-gray-900 dark:text-white">Bancard -- IP de Terminal por Caja</h2>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300 cursor-pointer">
+                    <input type="checkbox" checked={bancardEnabled} onChange={(e) => setBancardEnabled(e.target.checked)} className="w-4 h-4" />
+                    Habilitado
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Cada terminal Bancard Infonet tiene su propia IP en la red local del comercio. Se carga acá una sola vez por caja -- el POS la usa directo, sin tocar ningún archivo ni configurar nada por caja individualmente.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-gray-50/50 dark:bg-slate-750/50 text-gray-500 dark:text-gray-400 uppercase text-[10px] font-bold border-b border-gray-100 dark:border-slate-700">
+                      <tr>
+                        <th className="p-3">Punto de Emisión</th>
+                        <th className="p-3">IP del Terminal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-slate-700/60">
+                      {PUNTOS_EMISION.map((pe) => (
+                        <tr key={pe.id}>
+                          <td className="p-3 font-bold text-gray-900 dark:text-white">{pe.nombre}</td>
+                          <td className="p-3">
+                            <input
+                              type="text"
+                              value={bancardIps[pe.id] || ""}
+                              onChange={(e) => setBancardIps((prev) => ({ ...prev, [pe.id]: e.target.value }))}
+                              placeholder="Ej: 192.168.0.32"
+                              className="w-48 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-gray-900 dark:text-white font-mono text-xs outline-none focus:border-blue-500"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={handleSaveBancard}
+                  disabled={savingBancard}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold disabled:opacity-60 cursor-pointer"
+                >
+                  {savingBancard ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Guardar IPs de Bancard
+                </button>
+              </div>
+
+              {/* PLUGPAY */}
+              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <QrCode className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                    <h2 className="text-base font-black text-gray-900 dark:text-white">PlugPay -- PIX & Crédito Parcelado Brasil</h2>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300 cursor-pointer">
+                    <input type="checkbox" checked={plugpayEnabled} onChange={(e) => setPlugpayEnabled(e.target.checked)} className="w-4 h-4" />
+                    Habilitado
+                  </label>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">Client ID</label>
+                    <input
+                      type="text"
+                      value={plugpayClientId}
+                      onChange={(e) => setPlugpayClientId(e.target.value)}
+                      className="w-full mt-1 px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-gray-900 dark:text-white text-xs outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">
+                      Password {plugpayHasSavedPassword && <span className="text-emerald-600 dark:text-emerald-400">(ya hay una guardada)</span>}
+                    </label>
+                    <div className="relative mt-1">
+                      <input
+                        type={plugpayShowPassword ? "text" : "password"}
+                        value={plugpayPassword}
+                        onChange={(e) => setPlugpayPassword(e.target.value)}
+                        placeholder={plugpayHasSavedPassword ? "Dejar vacío para no cambiarla" : ""}
+                        className="w-full px-2.5 py-2 pr-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-gray-900 dark:text-white text-xs outline-none focus:border-orange-500"
+                      />
+                      <button type="button" onClick={() => setPlugpayShowPassword((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 cursor-pointer">
+                        {plugpayShowPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">Documento del Comercio (RUC)</label>
+                    <input
+                      type="text"
+                      value={plugpayDocumentMerchant}
+                      onChange={(e) => setPlugpayDocumentMerchant(e.target.value)}
+                      placeholder="80150377-9"
+                      className="w-full mt-1 px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-gray-900 dark:text-white font-mono text-xs outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">Entorno</label>
+                    <div className="flex gap-1.5 mt-1">
+                      <button type="button" onClick={() => setPlugpayEnvironment("sandbox")} className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold ${plugpayEnvironment === "sandbox" ? "bg-orange-600 text-white" : "bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-gray-400"}`}>Sandbox</button>
+                      <button type="button" onClick={() => setPlugpayEnvironment("production")} className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold ${plugpayEnvironment === "production" ? "bg-orange-600 text-white" : "bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-gray-400"}`}>Producción</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                  <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">URL de Webhook (registrar manualmente en el portal AERO de PlugPay)</p>
+                  <p className="text-xs font-mono text-gray-700 dark:text-gray-300 break-all">{webhookUrl}</p>
+                </div>
+
+                <button
+                  onClick={handleSavePlugpay}
+                  disabled={savingPlugpay}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold disabled:opacity-60 cursor-pointer"
+                >
+                  {savingPlugpay ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Guardar Configuración de PlugPay
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
