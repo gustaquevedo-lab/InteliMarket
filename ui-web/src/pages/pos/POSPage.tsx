@@ -490,9 +490,25 @@ export default function POSPage() {
     return initial
   })
 
+  // IP de terminal Bancard por caja -- viene del modulo de Configuracion de
+  // Integraciones (payment_integration_configs), ya no depende de tocar
+  // codigo ni de localStorage por maquina. Si el backend todavia no tiene
+  // nada cargado, se cae al valor de posAssignments (localStorage) como
+  // respaldo, para no romper cajas que ya tenian la IP puesta a mano.
+  const [bancardIpsPorCaja, setBancardIpsPorCaja] = useState<Record<string, string>>({})
+  useEffect(() => {
+    api.paymentIntegrations.get("bancard")
+      .then((cfg) => {
+        if (cfg?.config?.ips_por_punto_emision) {
+          setBancardIpsPorCaja(cfg.config.ips_por_punto_emision)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   // Obtener la configuración de la caja actual activa
   const activePosConfig = useMemo(() => {
-    return posAssignments[puntoEmision] || {
+    const base = posAssignments[puntoEmision] || {
       puntoEmision,
       nombreCaja: puntoEmision,
       bancardIp: "",
@@ -503,7 +519,8 @@ export default function POSPage() {
       dinelcoLote: "001",
       dinelcoPort: "COM7",
     }
-  }, [posAssignments, puntoEmision])
+    return { ...base, bancardIp: bancardIpsPorCaja[puntoEmision] || base.bancardIp }
+  }, [posAssignments, puntoEmision, bancardIpsPorCaja])
 
   // ── SEGURIDAD Y CONTROL DE SUPERVISOR (PIN) ──────────────────────────────
   const isSupervisorUser = useMemo(() => {
