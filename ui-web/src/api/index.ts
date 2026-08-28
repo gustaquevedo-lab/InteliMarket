@@ -2714,11 +2714,18 @@ export const api = {
     deleteIndicator: (id: string) => client.delete<void>(`/v1/supplier-kpis/indicators/${id}`),
     addIndicator: (periodId: string, data: any) => client.post<any>(`/v1/supplier-kpis/periods/${periodId}/indicators`, data),
   },
+  supplierRebates: {
+    getDashboard: (mes?: string, branchId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { mes, branch_id: branchId }),
+  },
   cupones: {
     registrar: (data: any) => client.post<any>("/v1/cupones/registrar", data),
+    tickets: (params?: any) => client.get<any[]>("/v1/cupones/tickets", params),
     listarTickets: (params?: any) => client.get<any[]>("/v1/cupones/tickets", params),
+    clientes: (params?: any) => client.get<any[]>("/v1/cupones/clientes", params),
     listarClientes: (params?: any) => client.get<any[]>("/v1/cupones/clientes", params),
+    lookupCliente: (doc: string) => client.get<any>(`/v1/cupones/lookup/${encodeURIComponent(doc)}`),
     stats: (params?: any) => client.get<any>("/v1/cupones/stats", params),
+    analisisIA: (params?: any) => client.get<any>("/v1/cupones/ai-insights", params),
     aiInsights: (params?: any) => client.get<any>("/v1/cupones/ai-insights", params),
   },
   posTerminals: {

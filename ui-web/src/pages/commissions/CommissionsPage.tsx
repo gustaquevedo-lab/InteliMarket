@@ -386,8 +386,8 @@ export default function CommissionsPage() {
                       <td className="p-4 text-slate-500 font-mono text-[11px]">{formatDate((c as any).created_at || (c as any).fecha)}</td>
                       <td className="p-4 font-mono font-bold text-blue-600 dark:text-blue-400">#{(c as any).sale?.numero || c.sale_id?.slice(0, 8)}</td>
                       <td className="p-4 font-bold text-slate-900 dark:text-white">{(c as any).vendedor?.nombre || (c as any).vendedor_nombre || "Vendedor"}</td>
-                      <td className="p-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(Number(c.monto_base || 0))}</td>
-                      <td className="p-4 text-center font-mono font-bold text-slate-600 dark:text-slate-400">{c.porcentaje_aplicado || 1.5}%</td>
+                      <td className="p-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(Number((c as any).monto_base || 0))}</td>
+                      <td className="p-4 text-center font-mono font-bold text-slate-600 dark:text-slate-400">{(c as any).porcentaje_aplicado || 1.5}%</td>
                       <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">{formatPYG(Number(c.monto_comision || 0))}</td>
                       <td className="p-4 text-center">
                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
