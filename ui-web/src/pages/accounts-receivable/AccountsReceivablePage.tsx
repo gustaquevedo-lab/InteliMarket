@@ -320,142 +320,173 @@ export default function AccountsReceivablePage() {
   }
 
   return (
-    <div className="space-y-6 min-w-0 animate-fade-in-up">
-      {/* ── BANNER HERO EJECUTIVO CUENTAS POR COBRAR ─────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-6 sm:p-8 text-white shadow-xl border border-slate-700/50">
-        <div className="absolute right-0 top-0 -mt-8 -mr-8 w-80 h-80 rounded-full bg-emerald-500/15 blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-2">
+    <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-emerald-400 shadow-inner">
-                <ReceiptText className="w-7 h-7" />
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <ReceiptText className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
+                </span>
               </div>
               <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
-                  Créditos de Socios Extra Club & Cobranzas
-                </span>
-                <h1 className="text-2xl sm:text-lg sm:text-xl xl:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono tracking-tight truncate tracking-tight text-white">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    FINANZAS & TESORERÍA · CUENTAS POR COBRAR (AR) & AGING
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    {summary?.pendientes || 0} Facturas por Cobrar
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
                   Cuentas por Cobrar & Matriz Aging
                 </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Líneas de crédito a clientes, scoring crediticio por morosidad, seguimiento de vencimientos y planillas de cobranza
+                </p>
               </div>
             </div>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-xl font-medium">
-              Gestión de líneas de crédito a clientes, scoring crediticio, seguimiento de cuotas vencidas y planillas de cobranza.
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
+                💰 {formatPYG(summary?.total_pendiente || 0)} saldo pendiente
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
+                ⏱️ DSO: {summary?.dso != null ? `${summary.dso.toFixed(0)} días` : "—"}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => { setRefreshing(true); fetchData(); if (tab === "scoring") fetchScoring(); }}
+              disabled={refreshing}
+              className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 backdrop-blur-md transition shadow-sm"
+              title="Actualizar datos en vivo"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-400" : ""}`} />
+            </button>
+            <button
+              onClick={handleDownloadAgingPdf}
+              className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              <FileDown className="w-4 h-4 text-rose-400" />
+              <span>Aging PDF</span>
+            </button>
+            <button
+              onClick={handleDownloadAgingExcel}
+              className="px-3.5 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+              <span>Aging Excel</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Pendiente</span>
+              <DollarSign className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(summary?.total_pendiente || 0)}
             </p>
+            <p className="text-[11px] text-slate-400">{summary?.pendientes || 0} facturas por cobrar</p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="bg-black/30 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
-                Total Cartera por Cobrar
-              </span>
-              <div className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-emerald-400 leading-tight">
-                {formatPYG(summary?.total_pendiente || 0)}
-              </div>
-              <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
-                {summary?.pendientes || 0} cuentas activas · DSO: {summary?.dso != null ? `${summary.dso.toFixed(0)}d` : "—"}
-              </span>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">DSO Promedio</span>
+              <TrendingUp className="w-4 h-4 text-purple-400" />
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+              {summary?.dso != null ? `${summary.dso.toFixed(0)}d` : "—"}
+            </p>
+            <p className="text-[11px] text-slate-400">Días venta pendientes</p>
+          </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => { setRefreshing(true); fetchData(); if (tab === "scoring") fetchScoring(); }}
-                disabled={refreshing}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 transition shadow-xs"
-                title="Actualizar datos en vivo"
-              >
-                <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-              </button>
-              <button onClick={handleDownloadAgingPdf} className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold transition flex items-center gap-2 shadow-xs">
-                <FileDown className="w-4 h-4 text-red-400" />
-                <span>Aging PDF</span>
-              </button>
-              <button onClick={handleDownloadAgingExcel} className="px-3.5 py-2.5 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-400/30 text-xs font-bold transition flex items-center gap-2 shadow-xs">
-                <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-                <span>Aging Excel</span>
-              </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Doc. Vencidos</span>
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {summary?.vencidos || 0}
+            </p>
+            <p className="text-[11px] text-rose-400 font-bold">En mora activa</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Monto Vencido</span>
+              <Clock className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-rose-400">
+              {formatPYG(summary?.monto_vencido || 0)}
+            </p>
+            <p className="text-[11px] text-slate-400">Cartera en riesgo</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Doc. Totales</span>
+              <FileText className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {docsTotal.toLocaleString("es-PY")}
+            </p>
+            <p className="text-[11px] text-slate-400">{summary?.pagados || 0} cancelados</p>
           </div>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
-        <div className="card p-4 border-amber-200/60 dark:border-amber-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Total Pendiente</span>
-            <DollarSign className="w-4 h-4 text-amber-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-amber-600 font-mono tracking-tight truncate">{formatPYG(summary?.total_pendiente || 0)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">{summary?.pendientes || 0} facturas por cobrar</span>
-        </div>
-
-        <div className="card p-4 border-purple-200/60 dark:border-purple-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">DSO (Plazo Medio)</span>
-            <TrendingUp className="w-4 h-4 text-purple-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-purple-600 font-mono tracking-tight truncate">{summary?.dso != null ? `${summary.dso.toFixed(0)} días` : "—"}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Días venta pendientes</span>
-        </div>
-
-        <div className="card p-4 border-red-200/60 dark:border-red-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Documentos Vencidos</span>
-            <AlertTriangle className="w-4 h-4 text-red-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-red-600 font-mono tracking-tight truncate">{summary?.vencidos || 0}</p>
-          <span className="text-xs text-gray-400 mt-1 block">En mora activa</span>
-        </div>
-
-        <div className="card p-4 border-red-200/60 dark:border-red-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Monto Vencido</span>
-            <Clock className="w-4 h-4 text-red-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-red-600 font-mono tracking-tight truncate">{formatPYG(summary?.monto_vencido || 0)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Cartera en riesgo</span>
-        </div>
-
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Documentos Totales</span>
-            <FileText className="w-4 h-4 text-primary" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-gray-900 dark:text-white font-mono tracking-tight truncate">{docsTotal.toLocaleString("es-PY")}</p>
-          <span className="text-xs text-gray-400 mt-1 block">{summary?.pagados || 0} ya cancelados</span>
-        </div>
-      </div>
-
-      {/* Tabs de Navegación */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {[
-            { key: "documentos", label: "Documentos por Cobrar", icon: ReceiptText, count: docsTotal },
-            { key: "aging", label: "Matriz de Aging (Antigüedad)", icon: BarChart2, count: aging?.por_clientes?.length },
-            { key: "scoring", label: "Scoring Crediticio & Riesgo", icon: ShieldCheck, count: scores.length },
-          ].map((t) => (
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { key: "documentos", label: "Documentos por Cobrar", icon: ReceiptText, count: docsTotal },
+          { key: "aging", label: "Matriz de Aging (Antigüedad)", icon: BarChart2, count: aging?.por_clientes?.length },
+          { key: "scoring", label: "Scoring Crediticio & Riesgo", icon: ShieldCheck, count: scores.length },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.key
+          return (
             <button
               key={t.key}
               onClick={() => setTab(t.key as TabType)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
-                ${tab === t.key
-                  ? "border-primary text-primary font-semibold"
-                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                }`}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
             >
-              <t.icon className="w-4 h-4" />
-              {t.label}
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
               {t.count !== undefined && t.count > 0 && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                  tab === t.key ? "bg-primary/10 text-primary" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                 }`}>
                   {t.count}
                 </span>
               )}
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {loading ? (

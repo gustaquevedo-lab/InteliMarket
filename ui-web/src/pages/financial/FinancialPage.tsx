@@ -317,148 +317,165 @@ export default function FinancialPage() {
   }
 
   return (
-    <div className="space-y-6 min-w-0 animate-fade-in-up">
-      {/* ── BANNER HERO EJECUTIVO CUENTAS POR PAGAR (AP) ─────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-6 sm:p-8 text-white shadow-xl border border-slate-700/50">
-        <div className="absolute right-0 top-0 -mt-8 -mr-8 w-80 h-80 rounded-full bg-amber-500/15 blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-2">
+    <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-amber-400 shadow-inner">
-                <Building2 className="w-7 h-7" />
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <Landmark className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
+                </span>
               </div>
               <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">
-                  Pasivos Comerciales & Lotes SIPAP
-                </span>
-                <h1 className="text-2xl sm:text-lg sm:text-xl xl:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono tracking-tight truncate tracking-tight text-white">
-                  Cuentas por Pagar & Tesorería
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    FINANZAS & TESORERÍA · GESTIÓN INTEGRAL & CASH FLOW
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    {cantFacturasPendientes} Facturas en Cartera
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Gestión Financiera & Tesorería
                 </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Pasivos comerciales, curvas de vencimiento, lotes de pago masivo SIPAP y proyección de flujo de caja a 90 días
+                </p>
               </div>
             </div>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-xl font-medium">
-              Gestión de pasivos con proveedores, curvas de vencimiento, lotes de pago bancario masivo (SIPAP/Bancos) y flujo de caja a 90 días.
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
+                💰 {formatPYG(totalDeudaAP)} deuda total
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                🛡️ {formatPYG(totalNotasCredito)} NC a favor
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => { setRefreshing(true); fetchAll(); }}
+              disabled={refreshing}
+              className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 backdrop-blur-md transition shadow-sm"
+              title="Actualizar datos en vivo"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-400" : ""}`} />
+            </button>
+            <button
+              onClick={handleExportPnl}
+              disabled={exportingPnl}
+              className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              {exportingPnl ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4 text-rose-400" />}
+              <span>PyG PDF</span>
+            </button>
+            <button
+              onClick={() => { setShowPaymentRunWizard(true); setRunStep(1); }}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-indigo-500/25"
+            >
+              <Layers className="w-4 h-4" />
+              <span>Nuevo Lote SIPAP</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Deuda Total (AP)</span>
+              <DollarSign className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(totalDeudaAP)}
             </p>
+            <p className="text-[11px] text-slate-400">{cantFacturasPendientes} facturas ({dashboard?.proveedores_con_deuda || aging.length || 70} prov.)</p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="bg-black/30 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
-                Pasivo Total a Proveedores
-              </span>
-              <div className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-amber-400 leading-tight">
-                {formatPYG(totalDeudaAP)}
-              </div>
-              <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
-                {cantFacturasPendientes} facturas por pagar
-              </span>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Deuda Vencida</span>
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {formatPYG(montoVencidoAP)}
+            </p>
+            <p className="text-[11px] text-rose-400 font-bold font-mono">{cantFacturasVencidas} facturas vencidas</p>
+          </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => { setRefreshing(true); fetchAll(); }}
-                disabled={refreshing}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 transition shadow-xs"
-                title="Actualizar datos en vivo"
-              >
-                <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-              </button>
-              <button
-                onClick={handleExportPnl}
-                disabled={exportingPnl}
-                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold transition flex items-center gap-2 shadow-xs"
-              >
-                {exportingPnl ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4 text-red-400" />}
-                <span>PyG PDF</span>
-              </button>
-              <button
-                onClick={() => { setShowPaymentRunWizard(true); setRunStep(1); }}
-                className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-black transition flex items-center gap-2 shadow-md shadow-primary/30"
-              >
-                <Layers className="w-4 h-4" />
-                <span>Nuevo Lote SIPAP</span>
-              </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Notas de Crédito</span>
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(totalNotasCredito)}
+            </p>
+            <p className="text-[11px] text-slate-400">{creditNotes.length} notas disponibles</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lotes Ejecutados</span>
+              <Layers className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {paymentRuns.length}
+            </p>
+            <p className="text-[11px] text-slate-400">Órdenes bancarias masivas</p>
           </div>
         </div>
       </div>
 
-{/* KPI Cards Ejecutivos */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="card p-5 border-amber-200/60 dark:border-amber-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Deuda Comercial Total (AP)</span>
-            <DollarSign className="w-4 h-4 text-amber-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-amber-600 font-mono">{formatPYG(totalDeudaAP)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">
-            {cantFacturasPendientes} facturas pendientes ({dashboard?.proveedores_con_deuda || aging.length || 70} proveedores)
-          </span>
-        </div>
-
-        <div className="card p-5 border-red-200/60 dark:border-red-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Deuda Vencida (En Mora)</span>
-            <AlertTriangle className="w-4 h-4 text-red-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-red-600 font-mono">{formatPYG(montoVencidoAP)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">
-            {cantFacturasVencidas} facturas vencidas
-          </span>
-        </div>
-
-        <div className="card p-5 border-emerald-200/60 dark:border-emerald-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Notas de Crédito a Favor</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-emerald-600 font-mono">{formatPYG(totalNotasCredito)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">
-            {creditNotes.length} notas de crédito disponibles
-          </span>
-        </div>
-
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Lotes de Pago Ejecutados</span>
-            <Layers className="w-4 h-4 text-primary" />
-          </div>
-          <p className="text-2xl font-extrabold text-gray-900 dark:text-white font-mono">{paymentRuns.length}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Órdenes bancarias masivas</span>
-        </div>
-      </div>
-
-      {/* Tabs de Navegación */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {[
-            { key: "dashboard", label: "Torre de Control AP", icon: BarChart3 },
-            { key: "ap", label: "Cuentas por Pagar (Facturas)", icon: Receipt, count: cantFacturasPendientes },
-            { key: "pagos", label: "Lotes de Pago (Payment Runs)", icon: Layers, count: paymentRuns.length },
-            { key: "cashflow", label: "Flujo de Caja (90 Días)", icon: TrendingUp },
-            { key: "presupuestos", label: "Presupuestos por Sector", icon: PiggyBank, count: budgets.length },
-          ].map((t) => (
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { key: "dashboard", label: "Torre de Control AP", icon: BarChart3 },
+          { key: "ap", label: "Cuentas por Pagar (Facturas)", icon: Receipt, count: cantFacturasPendientes },
+          { key: "pagos", label: "Lotes de Pago (Payment Runs)", icon: Layers, count: paymentRuns.length },
+          { key: "cashflow", label: "Flujo de Caja (90 Días)", icon: TrendingUp },
+          { key: "presupuestos", label: "Presupuestos por Sector", icon: PiggyBank, count: budgets.length },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.key
+          return (
             <button
               key={t.key}
               onClick={() => setTab(t.key as Tab)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
-                ${tab === t.key
-                  ? "border-primary text-primary font-semibold"
-                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                }`}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
             >
-              <t.icon className="w-4 h-4" />
-              {t.label}
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
               {t.count !== undefined && t.count > 0 && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                  tab === t.key ? "bg-primary/10 text-primary" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                 }`}>
                   {t.count}
                 </span>
               )}
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {loading ? (

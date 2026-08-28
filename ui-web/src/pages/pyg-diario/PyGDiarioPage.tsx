@@ -91,151 +91,179 @@ export default function PyGDiarioPage() {
   }, [deptData])
 
   return (
-    <div className="space-y-6 min-w-0 animate-fade-in-up">
-      {/* ── BANNER HERO EJECUTIVO PYG DIARIO ─────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-6 sm:p-8 text-white shadow-xl border border-slate-700/50">
-        <div className="absolute right-0 top-0 -mt-8 -mr-8 w-80 h-80 rounded-full bg-emerald-500/15 blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-2">
+    <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/90 text-white p-7 border border-emerald-500/20 shadow-2xl shadow-emerald-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-emerald-400 shadow-inner">
-                <BarChart3 className="w-7 h-7" />
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 border border-emerald-400/30 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                  <BarChart3 className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
+                </span>
               </div>
               <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
-                  Estado de Resultados P&L Retail
-                </span>
-                <h1 className="text-2xl sm:text-lg sm:text-xl xl:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono tracking-tight truncate tracking-tight text-white">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
+                    FINANZAS & CONTROL DE GESTIÓN · ESTADO DE RESULTADOS P&L RETAIL
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {totalPyG.ebitdaPct.toFixed(1)}% Margen EBITDA
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
                   PyG Diario por Departamento
                 </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Rentabilidad diaria por sección: ventas brutas, CMV, mermas reales de perecederos y margen EBITDA operativo
+                </p>
               </div>
             </div>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-xl font-medium">
-              Rentabilidad diaria por sección: ventas brutas, CMV, mermas reales de perecederos y margen EBITDA operativo.
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                💵 {formatPYG(totalPyG.ventas)} ventas del día
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-teal-300">
+                📈 EBITDA: {formatPYG(totalPyG.ebitda)} ({totalPyG.ebitdaPct.toFixed(1)}%)
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <div className="flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 py-2 text-xs">
+              <Calendar className="w-4 h-4 text-emerald-400" />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="bg-transparent text-xs font-mono font-bold text-white outline-none cursor-pointer"
+              />
+            </div>
+            <button
+              onClick={() => { loadData(); toast.success("Métricas Actualizadas", "Se recalcularon las ventas y costos del día.") }}
+              disabled={loading}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-emerald-500/25"
+            >
+              <RefreshCcw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              <span>Recalcular</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">1. Ventas Brutas</span>
+              <DollarSign className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-blue-300 truncate" title={formatPYG(totalPyG.ventas)}>
+              {formatPYG(totalPyG.ventas)}
             </p>
+            <p className="text-[11px] text-slate-400">Ingreso de cajas</p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="bg-black/30 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
-                EBITDA Diario Consolidado
-              </span>
-              <div className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-emerald-400 leading-tight">
-                {formatPYG(totalPyG.ebitda)}
-              </div>
-              <span className="text-[10px] font-mono text-emerald-400 block mt-0.5 font-bold">
-                {totalPyG.ebitdaPct.toFixed(1)}% margen sobre ventas
-              </span>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">2. Costo Mercadería</span>
+              <Package className="w-4 h-4 text-slate-400" />
             </div>
+            <p className="text-xl font-black font-mono tracking-tight text-slate-300 truncate" title={formatPYG(totalPyG.costo)}>
+              {formatPYG(totalPyG.costo)}
+            </p>
+            <p className="text-[11px] text-slate-400">CMV estimado</p>
+          </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-xs">
-                <Calendar className="w-4 h-4 text-emerald-400" />
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={e => setSelectedDate(e.target.value)}
-                  className="bg-transparent text-xs font-mono font-bold text-white outline-none cursor-pointer"
-                />
-              </div>
-              <button
-                onClick={() => toast.success("Métricas Actualizadas", "Se recalcularon las ventas y costos del día.")}
-                className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-black transition flex items-center gap-2 shadow-md shadow-primary/30"
-              >
-                <RefreshCcw className="w-4 h-4" />
-                <span>Recalcular</span>
-              </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">3. Margen Bruto</span>
+              <Percent className="w-4 h-4 text-purple-400" />
             </div>
+            <p className="text-xl font-black font-mono tracking-tight text-purple-300 truncate" title={formatPYG(totalPyG.margenBruto)}>
+              {formatPYG(totalPyG.margenBruto)}
+            </p>
+            <p className="text-[11px] text-purple-300 font-bold font-mono">{totalPyG.margenPct.toFixed(1)}% margen</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">4. Mermas del Día</span>
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-rose-400 truncate" title={formatPYG(totalPyG.merma)}>
+              {formatPYG(totalPyG.merma)}
+            </p>
+            <p className="text-[11px] text-slate-400">Frescos y roturas</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">5. Gastos Operativos</span>
+              <Zap className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-amber-400 truncate" title={formatPYG(totalPyG.gastos)}>
+              {formatPYG(totalPyG.gastos)}
+            </p>
+            <p className="text-[11px] text-slate-400">Caja chica y servicios</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">6. EBITDA Diario</span>
+              <TrendingUp className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-emerald-400 truncate" title={formatPYG(totalPyG.ebitda)}>
+              {formatPYG(totalPyG.ebitda)}
+            </p>
+            <p className="text-[11px] text-emerald-400 font-bold font-mono">{totalPyG.ebitdaPct.toFixed(1)}% ebitda</p>
           </div>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-        <div className="card p-4 border-blue-200/60 dark:border-blue-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">1. Ventas Brutas</span>
-            <DollarSign className="w-4 h-4 text-blue-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-blue-600 font-mono tracking-tight truncate" title={formatPYG(totalPyG.ventas)}>{formatPYG(totalPyG.ventas)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Ingreso de cajas</span>
-        </div>
-
-        <div className="card p-4 border-gray-200/60 dark:border-gray-700/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">2. Costo Mercadería</span>
-            <Package className="w-4 h-4 text-gray-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-gray-800 dark:text-gray-200 font-mono tracking-tight truncate" title={formatPYG(totalPyG.costo)}>{formatPYG(totalPyG.costo)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">CMV estimado</span>
-        </div>
-
-        <div className="card p-4 border-purple-200/60 dark:border-purple-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">3. Margen Bruto</span>
-            <Percent className="w-4 h-4 text-purple-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-purple-600 font-mono tracking-tight truncate" title={formatPYG(totalPyG.margenBruto)}>{formatPYG(totalPyG.margenBruto)}</p>
-          <span className="text-xs text-purple-500 font-bold mt-1 block font-mono">{totalPyG.margenPct.toFixed(1)}% margen</span>
-        </div>
-
-        <div className="card p-4 border-rose-200/60 dark:border-rose-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600">4. Mermas del Día</span>
-            <AlertTriangle className="w-4 h-4 text-rose-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-rose-600 font-mono tracking-tight truncate" title={formatPYG(totalPyG.merma)}>{formatPYG(totalPyG.merma)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Frescos y roturas</span>
-        </div>
-
-        <div className="card p-4 border-amber-200/60 dark:border-amber-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">5. Gastos Operativos</span>
-            <Zap className="w-4 h-4 text-amber-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-amber-600 font-mono tracking-tight truncate" title={formatPYG(totalPyG.gastos)}>{formatPYG(totalPyG.gastos)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Caja chica y servicios</span>
-        </div>
-
-        <div className="card p-4 border-emerald-200/60 dark:border-emerald-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">6. EBITDA Diario</span>
-            <TrendingUp className="w-4 h-4 text-emerald-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-emerald-600 font-mono tracking-tight truncate" title={formatPYG(totalPyG.ebitda)}>{formatPYG(totalPyG.ebitda)}</p>
-          <span className="text-xs text-emerald-600 font-bold mt-1 block font-mono">{totalPyG.ebitdaPct.toFixed(1)}% ebitda</span>
-        </div>
-      </div>
-
-      {/* Tabs de Navegación */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {[
-            { id: "dashboard", label: "Desglose por Departamento", icon: BarChart3, count: deptData.length },
-            { id: "analisis_margen", label: "Margen Real vs Teórico", icon: Percent },
-            { id: "gastos_directos", label: "Distribución de Gastos", icon: Zap },
-          ].map((t) => (
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "dashboard", label: "Desglose por Departamento", icon: BarChart3, count: deptData.length },
+          { id: "analisis_margen", label: "Margen Real vs Teórico", icon: Percent },
+          { id: "gastos_directos", label: "Distribución de Gastos", icon: Zap },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.id
+          return (
             <button
               key={t.id}
               onClick={() => setTab(t.id as Tab)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition ${
-                tab === t.id
-                  ? "border-primary text-primary font-semibold"
-                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
               }`}
             >
-              <t.icon className="w-4 h-4" />
-              {t.label}
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
               {t.count !== undefined && t.count > 0 && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                  tab === t.id ? "bg-primary/10 text-primary" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                 }`}>
                   {t.count}
                 </span>
               )}
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {/* TAB DESGLOSE POR DEPARTAMENTO */}

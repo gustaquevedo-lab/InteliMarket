@@ -440,167 +440,175 @@ export default function ExpensesPage() {
   const maxSector = dashboard ? Math.max(...dashboard.por_sector.map(s => s.total), 1) : 1
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* ── BANNER HERO EJECUTIVO GASTOS OPERATIVOS ─────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-6 sm:p-8 text-white shadow-xl border border-slate-700/50">
-        <div className="absolute right-0 top-0 -mt-8 -mr-8 w-80 h-80 rounded-full bg-rose-500/15 blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-2">
+    <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-rose-950/90 text-white p-7 border border-rose-500/20 shadow-2xl shadow-rose-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-rose-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-rose-400 shadow-inner">
-                <ReceiptIcon className="w-7 h-7" />
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-rose-600 to-pink-600 border border-rose-400/30 text-white flex items-center justify-center shadow-lg shadow-rose-500/25">
+                  <ReceiptIcon className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-slate-950"></span>
+                </span>
               </div>
               <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-rose-400">
-                  Control de Gastos & Cajas Chicas
-                </span>
-                <h1 className="text-2xl sm:text-lg sm:text-xl xl:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono tracking-tight truncate tracking-tight text-white">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-rose-400 uppercase bg-rose-500/10 px-2.5 py-0.5 rounded-md border border-rose-500/20">
+                    FINANZAS & TESORERÍA · GASTOS OPERATIVOS (OPEX) & FONDOS FIJOS
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                    {expenses.length} Comprobantes Registrados
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
                   Gastos Operativos & Fondos Fijos
                 </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Rendición de comprobantes por departamento (Carnicería, Panadería, Limpieza), autorización de desembolsos y arqueos de caja chica
+                </p>
               </div>
             </div>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-xl font-medium">
-              Rendición de comprobantes de caja chica por departamento (Carnicería, Panadería, Limpieza), autorización de desembolsos y arqueos de auditoría.
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-rose-300">
+                💸 {dashboard ? formatPYG(dashboard.total_periodo) : "—"} ejecutado
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                🐷 {formatPYG(totalFondosSaldoActual)} disponible en cajas chicas
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => {
+                setForm((f: any) => ({ ...f, fund_id: funds[0]?.id || "" }))
+                setShowForm(true)
+              }}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-rose-500/25"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Registrar Gasto</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Gasto Total (30d)</span>
+              <DollarSign className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {dashboard ? formatPYG(dashboard.total_periodo) : "—"}
+            </p>
+            <div className="flex items-center gap-2 text-xs">
+              {dashboard?.variacion_pct !== null && dashboard?.variacion_pct !== undefined ? (
+                <span className={`flex items-center font-bold font-mono ${dashboard.variacion_pct > 0 ? "text-rose-400" : "text-emerald-400"}`}>
+                  {dashboard.variacion_pct > 0 ? <TrendingUp className="w-3.5 h-3.5 mr-1" /> : <TrendingDown className="w-3.5 h-3.5 mr-1" />}
+                  {Math.abs(dashboard.variacion_pct).toFixed(1)}%
+                </span>
+              ) : null}
+              <span className="text-slate-400 text-[11px]">vs período anterior</span>
+            </div>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cajas Chicas (Saldo)</span>
+              <PiggyBank className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(totalFondosSaldoActual)}
+            </p>
+            <p className="text-[11px] text-slate-400 font-mono">
+              de {formatPYG(totalFondosAutorizado)} autorizados ({totalFondosAutorizado > 0 ? ((totalFondosSaldoActual / totalFondosAutorizado) * 100).toFixed(0) : 0}% disp.)
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="bg-black/30 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
-                Gasto Total del Período
-              </span>
-              <div className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-rose-400 leading-tight">
-                {dashboard ? formatPYG(dashboard.total_periodo) : "—"}
-              </div>
-              <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
-                {expenses.length} comprobantes registrados
-              </span>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Por Autorizar</span>
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(totalPendienteMonto)}
+            </p>
+            <p className="text-[11px] text-amber-400 font-bold font-mono">
+              {gastosPendientes.length} comprobante(s) en espera
+            </p>
+          </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => {
-                  setForm((f: any) => ({ ...f, fund_id: funds[0]?.id || "" }))
-                  setShowForm(true)
-                }}
-                className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-black transition flex items-center gap-2 shadow-md shadow-primary/30"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Registrar Gasto</span>
-              </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Arqueos Pendientes</span>
+              <Scale className="w-4 h-4 text-indigo-400" />
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {pendingCounts.length}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {pendingCounts.some(c => c.requiere_revision) ? (
+                <span className="text-rose-400 font-bold flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" /> Hay arqueos con desvío
+                </span>
+              ) : (
+                <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Fondos balanceados
+                </span>
+              )}
+            </p>
           </div>
         </div>
       </div>
 
-{/* COCKPIT HERO KPIS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Gasto del Período */}
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Gasto Total (30 Días)</span>
-            <DollarSign className="w-4 h-4 text-red-500" />
-          </div>
-          <p className="text-lg sm:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white font-mono tracking-tight truncate">
-            {dashboard ? formatPYG(dashboard.total_periodo) : "—"}
-          </p>
-          <div className="flex items-center gap-2 text-xs mt-1">
-            {dashboard?.variacion_pct !== null && dashboard?.variacion_pct !== undefined ? (
-              <span className={`flex items-center font-bold font-mono ${dashboard.variacion_pct > 0 ? "text-red-500" : "text-emerald-500"}`}>
-                {dashboard.variacion_pct > 0 ? <TrendingUp className="w-3.5 h-3.5 mr-1" /> : <TrendingDown className="w-3.5 h-3.5 mr-1" />}
-                {Math.abs(dashboard.variacion_pct).toFixed(1)}%
-              </span>
-            ) : null}
-            <span className="text-gray-400">vs período anterior</span>
-          </div>
-        </div>
-
-        {/* KPI 2: Fondos Fijos Disponibles */}
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Cajas Chicas (Saldo Real)</span>
-            <PiggyBank className="w-4 h-4 text-emerald-500" />
-          </div>
-          <p className="text-lg sm:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-emerald-600 dark:text-emerald-400 font-mono tracking-tight truncate">
-            {formatPYG(totalFondosSaldoActual)}
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-1">
-            <span>de <strong className="font-mono text-gray-600 dark:text-gray-300">{formatPYG(totalFondosAutorizado)}</strong> autorizados</span>
-            <span className="font-bold text-gray-700 dark:text-gray-300 font-mono">
-              {totalFondosAutorizado > 0 ? ((totalFondosSaldoActual / totalFondosAutorizado) * 100).toFixed(0) : 0}% disp.
-            </span>
-          </div>
-        </div>
-
-        {/* KPI 3: Gastos Pendientes de Aprobación */}
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Por Autorizar</span>
-            <AlertTriangle className="w-4 h-4 text-amber-500" />
-          </div>
-          <p className="text-lg sm:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-600 dark:text-amber-400 font-mono tracking-tight truncate">
-            {formatPYG(totalPendienteMonto)}
-          </p>
-          <span className="text-xs text-gray-400 mt-1 block">
-            <strong className="text-amber-600 font-bold font-mono">{gastosPendientes.length}</strong> comprobante(s) en espera
-          </span>
-        </div>
-
-        {/* KPI 4: Auditoría de Arqueos */}
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Arqueos Pendientes</span>
-            <Scale className="w-4 h-4 text-indigo-500" />
-          </div>
-          <p className="text-lg sm:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white font-mono tracking-tight truncate">
-            {pendingCounts.length}
-          </p>
-          <span className="text-xs text-gray-400 mt-1 block">
-            {pendingCounts.some(c => c.requiere_revision) ? (
-              <span className="text-red-500 font-bold flex items-center gap-1">
-                <AlertCircle className="w-3.5 h-3.5" /> Hay arqueos con desvío
-              </span>
-            ) : (
-              <span className="text-emerald-600 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Fondos balanceados
-              </span>
-            )}
-          </span>
-        </div>
-      </div>
-
-      {/* Tabs de Navegación */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {[
-            { k: "dashboard" as Tab, l: "Torre de Control", i: BarChart3 },
-            { k: "fondos" as Tab, l: "Fondos Fijos (Caja Chica)", i: PiggyBank, count: funds.length },
-            { k: "list" as Tab, l: "Comprobantes de Gasto", i: ReceiptIcon, count: expenses.length },
-            { k: "arqueos" as Tab, l: "Auditoría de Arqueos", i: Scale, count: pendingCounts.length },
-            { k: "sectores" as Tab, l: "Centros de Costo", i: Layers, count: costCenters.length },
-            { k: "categories" as Tab, l: "Categorías", i: Wallet, count: categories.length },
-          ].map((t) => (
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { k: "dashboard" as Tab, l: "Torre de Control", i: BarChart3 },
+          { k: "fondos" as Tab, l: "Fondos Fijos (Caja Chica)", i: PiggyBank, count: funds.length },
+          { k: "list" as Tab, l: "Comprobantes de Gasto", i: ReceiptIcon, count: expenses.length },
+          { k: "arqueos" as Tab, l: "Auditoría de Arqueos", i: Scale, count: pendingCounts.length },
+          { k: "sectores" as Tab, l: "Centros de Costo", i: Layers, count: costCenters.length },
+          { k: "categories" as Tab, l: "Categorías", i: Wallet, count: categories.length },
+        ].map((t) => {
+          const Icon = t.i
+          const active = tab === t.k
+          return (
             <button
               key={t.k}
               onClick={() => setTab(t.k)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
-                ${tab === t.k
-                  ? "border-primary text-primary font-semibold"
-                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                }`}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
             >
-              <t.i className="w-4 h-4" />
-              {t.l}
+              <Icon className="w-4 h-4" />
+              <span>{t.l}</span>
               {t.count !== undefined && t.count > 0 && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                  tab === t.k ? "bg-primary/10 text-primary" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                 }`}>
                   {t.count}
                 </span>
               )}
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {/* CONTENIDO DE TABS */}

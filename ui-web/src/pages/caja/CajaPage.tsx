@@ -484,157 +484,180 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
   }
 
   return (
-    <div className="space-y-6 min-w-0 animate-fade-in-up">
-      {/* ── BANNER HERO EJECUTIVO CAJAS & ARQUEO ─────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-6 sm:p-8 text-white shadow-xl border border-slate-700/50">
-        <div className="absolute right-0 top-0 -mt-8 -mr-8 w-80 h-80 rounded-full bg-blue-500/15 blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-2">
+    <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/90 text-white p-7 border border-emerald-500/20 shadow-2xl shadow-emerald-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-blue-400 shadow-inner">
-                <Banknote className="w-7 h-7" />
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 border border-emerald-400/30 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                  <Banknote className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
+                </span>
               </div>
               <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-blue-400">
-                  Línea de Cajas POS & Arqueo Ciego
-                </span>
-                <h1 className="text-2xl sm:text-lg sm:text-xl xl:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono tracking-tight truncate tracking-tight text-white">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
+                    FINANZAS & TESORERÍA · LÍNEA DE CAJAS & ARQUEO CIEGO
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {openSessionsCount} de {totalRegisters} Turnos Abiertos
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
                   Cajas, Turnos & Arqueo Físico
                 </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Arqueos ciegos multimoneda (₲, R$, USD), control de gavetas, sangrías automáticas y remesas selladas a bóveda
+                </p>
               </div>
             </div>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-xl font-medium">
-              Control de apertura y cierre de turnos, arqueos ciegos multimoneda (₲, R$, USD), cupones de lotes POS y entregas selladas a bóveda.
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                💵 {formatPYG(totalEfectivoEnGaveta)} en gavetas
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-purple-300">
+                💳 {formatPYG(totalCobradoTurno)} cobrado en turno
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={fetchData}
+              disabled={loading}
+              className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 backdrop-blur-md transition shadow-sm"
+              title="Actualizar datos en vivo"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-emerald-400" : ""}`} />
+            </button>
+            <button
+              onClick={handleExportArqueo}
+              disabled={exportingArqueo}
+              className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              {exportingArqueo ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4 text-emerald-400" />}
+              <span>Acta PDF</span>
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nueva Terminal</span>
+            </button>
+            <button
+              onClick={() => setShowOpenModal(true)}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-emerald-500/25"
+            >
+              <Wallet className="w-4 h-4" />
+              <span>Abrir Turno</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Terminales POS Activas</span>
+              <Store className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {openSessionsCount} <span className="text-xs text-slate-400 font-normal">/ {totalRegisters}</span>
             </p>
+            <p className="text-[11px] text-slate-400">Turnos operando en vivo</p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="bg-black/30 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
-                Efectivo en Gavetas
-              </span>
-              <div className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-emerald-400 leading-tight">
-                {formatPYG(totalEfectivoEnGaveta)}
-              </div>
-              <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
-                {openSessionsCount} turnos activos de {totalRegisters} terminales
-              </span>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Efectivo en Gavetas</span>
+              <DollarSign className="w-4 h-4 text-blue-400" />
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {formatPYG(totalEfectivoEnGaveta)}
+            </p>
+            <p className="text-[11px] text-slate-400 font-mono">Fondo inicial: {formatPYG(totalApertura)}</p>
+          </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={fetchData}
-                disabled={loading}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 transition shadow-xs"
-                title="Actualizar datos en vivo"
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              </button>
-              <button
-                onClick={handleExportArqueo}
-                disabled={exportingArqueo}
-                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold transition flex items-center gap-2 shadow-xs"
-              >
-                {exportingArqueo ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4 text-primary" />}
-                <span>Acta PDF</span>
-              </button>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold transition flex items-center gap-2 shadow-xs"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Nueva Terminal</span>
-              </button>
-              <button
-                onClick={() => setShowOpenModal(true)}
-                className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-black transition flex items-center gap-2 shadow-md shadow-primary/30"
-              >
-                <Wallet className="w-4 h-4" />
-                <span>Abrir Turno</span>
-              </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ventas Cobradas (Turno)</span>
+              <TrendingUp className="w-4 h-4 text-purple-400" />
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+              {formatPYG(totalCobradoTurno)}
+            </p>
+            <p className="text-[11px] text-slate-400">Multimoneda & Tarjetas</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Custodia a Bóveda</span>
+              <ShieldAlert className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {pendingHandoffs.length}
+            </p>
+            <p className="text-[11px] text-amber-400 font-bold">Requieren firma de supervisor</p>
           </div>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-4 border-emerald-200/60 dark:border-emerald-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Terminales POS Activas</span>
-            <Store className="w-4 h-4 text-emerald-500" />
-          </div>
-          <p className="text-lg sm:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-emerald-600 font-mono tracking-tight truncate">{openSessionsCount} <span className="text-xs text-gray-400 font-normal">/ {totalRegisters}</span></p>
-          <span className="text-xs text-gray-400 mt-1 block">Turnos operando en vivo</span>
-        </div>
-
-        <div className="card p-4 border-blue-200/60 dark:border-blue-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Efectivo en Gavetas</span>
-            <DollarSign className="w-4 h-4 text-blue-500" />
-          </div>
-          <p className="text-lg sm:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-blue-600 font-mono tracking-tight truncate">{formatPYG(totalEfectivoEnGaveta)}</p>
-          <span className="text-xs text-gray-400 mt-1 block font-mono">Fondo inicial: {formatPYG(totalApertura)}</span>
-        </div>
-
-        <div className="card p-4 border-purple-200/60 dark:border-purple-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">Ventas Cobradas (Turno)</span>
-            <TrendingUp className="w-4 h-4 text-purple-500" />
-          </div>
-          <p className="text-lg sm:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-purple-600 font-mono tracking-tight truncate">{formatPYG(totalCobradoTurno)}</p>
-          <span className="text-xs text-gray-400 mt-1 block font-mono">Multimoneda & Tarjetas</span>
-        </div>
-
-        <div className="card p-4 border-amber-200/60 dark:border-amber-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Custodia a Bóveda</span>
-            <ShieldAlert className="w-4 h-4 text-amber-500" />
-          </div>
-          <p className="text-lg sm:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-600 font-mono tracking-tight truncate">{pendingHandoffs.length}</p>
-          <span className="text-xs text-amber-600 font-bold mt-1 block">Requieren firma de supervisor</span>
-        </div>
-      </div>
-
-      {/* Tabs de Navegación */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {[
-            { key: "registers", label: "Línea de Cajas & Terminales", icon: Store, count: totalRegisters },
-            { key: "sessions", label: "Turnos Abiertos en Vivo", icon: Activity, count: openSessionsCount },
-            { key: "entregas", label: "Entregas a Bóveda", icon: ShieldCheck, count: pendingHandoffs.length },
-            { key: "historial", label: "Historial de Arqueos & Cierres", icon: Clock },
-            { key: "cajeros", label: "Scorecard de Cajeros", icon: Users },
-          ].map((t) => (
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { key: "registers", label: "Línea de Cajas & Terminales", icon: Store, count: totalRegisters },
+          { key: "sessions", label: "Turnos Abiertos en Vivo", icon: Activity, count: openSessionsCount },
+          { key: "entregas", label: "Entregas a Bóveda", icon: ShieldCheck, count: pendingHandoffs.length },
+          { key: "historial", label: "Historial de Arqueos & Cierres", icon: Clock },
+          { key: "cajeros", label: "Scorecard de Cajeros", icon: Users },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = activeTab === t.key
+          return (
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key as any)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition ${
-                activeTab === t.key
-                  ? "border-primary text-primary font-semibold"
-                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
               }`}
             >
-              <t.icon className="w-4 h-4" />
-              {t.label}
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
               {t.count !== undefined && t.count > 0 && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                  activeTab === t.key ? "bg-primary/10 text-primary" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                 }`}>
                   {t.count}
                 </span>
               )}
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {/* Buscador Rápido */}
       <div className="relative">
-        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
         <input
           type="text"
-          className="input-field pl-10 text-xs"
+          className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs outline-none text-slate-900 dark:text-white"
           placeholder="Buscar por nombre de caja, código, cajero o fecha..."
           value={search}
           onChange={e => setSearch(e.target.value)}

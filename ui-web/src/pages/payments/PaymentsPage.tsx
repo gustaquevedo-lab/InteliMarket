@@ -265,159 +265,186 @@ export default function PaymentsPage() {
   }
 
   return (
-    <div className="space-y-6 min-w-0 animate-fade-in-up">
-      {/* ── BANNER HERO EJECUTIVO CUENTAS POR PAGAR (AP) ─────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-6 sm:p-8 text-white shadow-xl border border-slate-700/50">
-        <div className="absolute right-0 top-0 -mt-8 -mr-8 w-80 h-80 rounded-full bg-rose-500/15 blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-2">
+    <div className="space-y-6 min-w-0 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-rose-950/90 text-white p-7 border border-rose-500/20 shadow-2xl shadow-rose-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-rose-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-rose-400 shadow-inner">
-                <Building2 className="w-7 h-7" />
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-rose-600 to-orange-600 border border-rose-400/30 text-white flex items-center justify-center shadow-lg shadow-rose-500/25">
+                  <Building2 className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-slate-950"></span>
+                </span>
               </div>
               <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-rose-400">
-                  Pasivos Comerciales & Proveedores
-                </span>
-                <h1 className="text-2xl sm:text-lg sm:text-xl xl:text-xl 2xl:text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono tracking-tight truncate tracking-tight text-white">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-rose-400 uppercase bg-rose-500/10 px-2.5 py-0.5 rounded-md border border-rose-500/20">
+                    FINANZAS & TESORERÍA · CUENTAS POR PAGAR (AP) & PASIVOS
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                    {analytics.totalFacturas} Facturas por Pagar
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
                   Cuentas por Pagar & Vencimientos
                 </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Control de facturas comerciales, matriz de antigüedad de saldos (Aging AP), lotes de pago masivo SIPAP y optimización de capital de trabajo
+                </p>
               </div>
             </div>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-xl font-medium">
-              Control de facturas a proveedores, matriz de antigüedad de saldos (Aging AP), lotes de pago masivo (SIPAP) y cálculo de DPO.
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-rose-300">
+                💰 {formatPYG(analytics.totalDeuda)} deuda total
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
+                ⚠️ {analytics.vencidasCount} vencidas ({formatPYG(analytics.vencidasMonto)})
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={loadData}
+              disabled={loading}
+              className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 backdrop-blur-md transition shadow-sm"
+              title="Actualizar datos en vivo"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-rose-400" : ""}`} />
+            </button>
+            <button
+              onClick={() => api.financial.downloadApAgingPdf()}
+              className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              <Download className="w-4 h-4 text-rose-400" />
+              <span>Aging PDF</span>
+            </button>
+            {selectedInvoices.length > 0 && (
+              <button
+                onClick={() => setShowPaymentRunModal(true)}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-rose-500/25 animate-pulse"
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Pagar Selección ({selectedInvoices.length})</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Deuda Total</span>
+              <DollarSign className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-rose-400 truncate" title={formatPYG(analytics.totalDeuda)}>
+              {formatPYG(analytics.totalDeuda)}
             </p>
+            <p className="text-[11px] text-slate-400 font-mono">{analytics.totalFacturas} facturas</p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="bg-black/30 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
-                Deuda Total a Proveedores
-              </span>
-              <div className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-rose-400 leading-tight">
-                {formatPYG(analytics.totalDeuda)}
-              </div>
-              <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
-                {analytics.totalFacturas} facturas · {analytics.proveedoresConDeuda} proveedores con saldo
-              </span>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Vencidas</span>
+              <AlertTriangle className="w-4 h-4 text-red-400" />
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-red-400">
+              {analytics.vencidasCount}
+            </p>
+            <p className="text-[11px] text-red-400 font-mono font-bold">{formatPYG(analytics.vencidasMonto)}</p>
+          </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={loadData}
-                disabled={loading}
-                className="p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 transition shadow-xs"
-                title="Actualizar datos en vivo"
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              </button>
-              <button
-                onClick={() => api.financial.downloadApAgingPdf()}
-                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold transition flex items-center gap-2 shadow-xs"
-              >
-                <Download className="w-4 h-4 text-red-400" />
-                <span>Aging PDF</span>
-              </button>
-              {selectedInvoices.length > 0 && (
-                <button
-                  onClick={() => setShowPaymentRunModal(true)}
-                  className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black transition flex items-center gap-2 shadow-md shadow-rose-600/30 animate-pulse"
-                >
-                  <CreditCard className="w-4 h-4" />
-                  <span>Pagar Selección ({selectedInvoices.length})</span>
-                </button>
-              )}
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Vencen ≤ 30d</span>
+              <Clock className="w-4 h-4 text-amber-400" />
             </div>
+            <p className="text-xl font-black font-mono tracking-tight text-amber-400 truncate" title={formatPYG(analytics.porVencer30Monto)}>
+              {formatPYG(analytics.porVencer30Monto)}
+            </p>
+            <p className="text-[11px] text-slate-400">Próximo vencimiento</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">31 - 60 Días</span>
+              <Calendar className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-blue-300 truncate" title={formatPYG(analytics.porVencer60Monto)}>
+              {formatPYG(analytics.porVencer60Monto)}
+            </p>
+            <p className="text-[11px] text-slate-400">Mediano plazo</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Proveedores Deuda</span>
+              <Building2 className="w-4 h-4 text-purple-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+              {analytics.proveedoresConDeuda}
+            </p>
+            <p className="text-[11px] text-slate-400">Cuentas corrientes</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lotes de Pago</span>
+              <Layers className="w-4 h-4 text-indigo-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {paymentRuns.length}
+            </p>
+            <p className="text-[11px] text-slate-400">Órdenes masivas</p>
           </div>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-        <div className="card p-4 border-rose-200/60 dark:border-rose-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600">Deuda Total</span>
-            <DollarSign className="w-4 h-4 text-rose-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-rose-600 font-mono tracking-tight truncate" title={formatPYG(analytics.totalDeuda)}>{formatPYG(analytics.totalDeuda)}</p>
-          <span className="text-xs text-gray-400 mt-1 block font-mono">{analytics.totalFacturas} facturas</span>
-        </div>
-
-        <div className="card p-4 border-red-200/60 dark:border-red-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Vencidas</span>
-            <AlertTriangle className="w-4 h-4 text-red-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-red-600 font-mono tracking-tight">{analytics.vencidasCount}</p>
-          <span className="text-xs text-red-600 font-bold mt-1 block font-mono">{formatPYG(analytics.vencidasMonto)}</span>
-        </div>
-
-        <div className="card p-4 border-amber-200/60 dark:border-amber-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Vencen ≤ 30 Días</span>
-            <Clock className="w-4 h-4 text-amber-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-amber-600 font-mono tracking-tight truncate" title={formatPYG(analytics.porVencer30Monto)}>{formatPYG(analytics.porVencer30Monto)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Próximo vencimiento</span>
-        </div>
-
-        <div className="card p-4 border-blue-200/60 dark:border-blue-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Vencen 31 - 60 Días</span>
-            <Calendar className="w-4 h-4 text-blue-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-blue-600 font-mono tracking-tight truncate" title={formatPYG(analytics.porVencer60Monto)}>{formatPYG(analytics.porVencer60Monto)}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Mediano plazo</span>
-        </div>
-
-        <div className="card p-4 border-purple-200/60 dark:border-purple-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">Proveedores c/ Deuda</span>
-            <Building2 className="w-4 h-4 text-purple-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-purple-600 font-mono tracking-tight">{analytics.proveedoresConDeuda}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Cuentas corrientes</span>
-        </div>
-
-        <div className="card p-4 border-indigo-200/60 dark:border-indigo-900/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">Lotes de Pago</span>
-            <Layers className="w-4 h-4 text-indigo-500" />
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black text-indigo-600 font-mono tracking-tight">{paymentRuns.length}</p>
-          <span className="text-xs text-gray-400 mt-1 block">Órdenes masivas</span>
-        </div>
-      </div>
-
-      {/* Tabs de Navegación */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
-          {[
-            { id: "facturas", label: "Facturas por Pagar", icon: FileText, count: invoices.length },
-            { id: "aging", label: "Matriz Aging por Proveedor", icon: Calendar, count: supplierAging.length },
-            { id: "lotes", label: "Lotes de Pago (Payment Runs)", icon: Layers, count: paymentRuns.length },
-          ].map((t) => (
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "facturas", label: "Facturas por Pagar", icon: FileText, count: invoices.length },
+          { id: "aging", label: "Matriz Aging por Proveedor", icon: Calendar, count: supplierAging.length },
+          { id: "lotes", label: "Lotes de Pago (Payment Runs)", icon: Layers, count: paymentRuns.length },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.id
+          return (
             <button
               key={t.id}
               onClick={() => setTab(t.id as ApTab)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition ${
-                tab === t.id
-                  ? "border-primary text-primary font-semibold"
-                  : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
               }`}
             >
-              <t.icon className="w-4 h-4" />
-              {t.label}
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
               {t.count !== undefined && t.count > 0 && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                  tab === t.id ? "bg-primary/10 text-primary" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
                 }`}>
                   {t.count}
                 </span>
               )}
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {tab === "facturas" && (
