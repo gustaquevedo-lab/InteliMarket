@@ -8,7 +8,7 @@ import {
   Usb, ArrowDownRight, CornerDownLeft, ArrowRightLeft, CornerRightDown,
   Maximize2, Eye, Image as ImageIcon, ZoomIn, LogOut, Lock, Unlock,
   Coins, HelpCircle, Package, Flame, ShoppingBag, LayoutGrid, ListFilter,
-  Layers, Tag, Boxes, Radio, Activity, ShieldAlert, ArrowUpRight, Sliders, UserPlus, Sparkle, RotateCcw, ExternalLink
+  Layers, Tag, Boxes, Radio, Activity, ShieldAlert, ArrowUpRight, Sliders, UserPlus, Sparkle, RotateCcw, ExternalLink, Smartphone
 } from "lucide-react"
 import { api, type Product, type Customer, type Sale, type Warehouse, API_ORIGIN, COMPANY_ID } from "../../api"
 import { useAuth } from "../../context/AuthContext"
