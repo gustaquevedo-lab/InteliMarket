@@ -87,116 +87,148 @@ export default function ExecutiveReportPage() {
   }, [fetchPlData])
 
   return (
-    <div className="space-y-6">
-      {/* ── HEADER ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/20">
-              <TrendingUp className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight">
-                  Reporte Gerencial C-Level & Estado de Resultados (P&L)
-                </h1>
-                <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Base de Datos Conectada
+  return (
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* ── LUXURY COMMAND DECK HEADER ── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <TrendingUp className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
                 </span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Estado de resultados integral para Extra Supermercado S.A. (RUC 80150377-9)
-              </p>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    DIRECCIÓN EJECUTIVA · C-LEVEL
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    P&L Consolidado en Tiempo Real
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Reportes Gerenciales & Estado de Resultados (P&L)
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Estado de resultados integral, márgenes de contribución, OpEx y utilidad neta de Extra Supermercado S.A.
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (RUC 80092451-2)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                📈 EBITDA 11.9% ({formatPYG(pl.ebitda)})
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-purple-300">
+                💰 Utilidad Neta {formatPYG(pl.utilidad_neta)}
+              </span>
             </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchPlData}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm transition"
-          >
-            <RefreshCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            Sincronizar
-          </button>
-          <button
-            onClick={() => toast.success("P&L Exportado", "Se generó el estado de resultados consolidado en formato Excel")}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-xl shadow-sm transition"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            Exportar P&L
-          </button>
+          <div className="flex items-center gap-2.5 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={fetchPlData}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl border border-slate-700 bg-slate-800/80 text-xs font-bold text-slate-200 hover:bg-slate-700 transition cursor-pointer shadow-sm disabled:opacity-50"
+            >
+              <RefreshCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              Sincronizar
+            </button>
+            <button
+              onClick={() => toast.success("P&L Exportado", "Se generó el estado de resultados consolidado en formato Excel")}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white text-xs font-black shadow-lg shadow-indigo-500/25 transition cursor-pointer active:scale-95"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Exportar P&L
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ── KPI CARDS ESTILIZADAS CON ESTÉTICA OFICIAL ── */}
+      {/* ── KPI CARDS ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Facturación Neta */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Ventas Netas Mensuales</span>
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+        {/* KPI 1 */}
+        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+          <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-500 absolute top-0 left-0" />
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Ventas Netas Mensuales</span>
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-blue-600 dark:text-blue-400 font-mono tracking-tight">
+          <p className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400">
             {formatPYG(pl.ventas_brutas)}
           </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>CMV Ponderado: <strong className="text-gray-700 dark:text-gray-200 font-mono">76.0%</strong></span>
+          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span>CMV Ponderado: <strong className="text-slate-700 dark:text-slate-200 font-mono">76.0%</strong></span>
             <span className="text-blue-600 font-bold font-mono">100% Facturación</span>
           </div>
         </div>
 
-        {/* KPI 2: Margen Bruto Comercial */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Margen Bruto Comercial</span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+        {/* KPI 2 */}
+        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+          <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500 absolute top-0 left-0" />
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Margen Bruto Comercial</span>
+            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
               <Percent className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
+          <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
             {formatPYG(pl.margen_bruto)}
           </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Rentabilidad Bruta: <strong className="text-gray-700 dark:text-gray-200 font-mono">24.0%</strong></span>
+          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span>Rentabilidad Bruta: <strong className="text-slate-700 dark:text-slate-200 font-mono">24.0%</strong></span>
             <span className="text-emerald-600 font-bold font-mono">En Rango Meta</span>
           </div>
         </div>
 
-        {/* KPI 3: EBITDA Operativo */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">EBITDA Operativo</span>
-            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+        {/* KPI 3 */}
+        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+          <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-500 absolute top-0 left-0" />
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">EBITDA Operativo</span>
+            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-purple-600 dark:text-purple-400 font-mono tracking-tight">
+          <p className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
             {formatPYG(pl.ebitda)}
           </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Margen EBITDA: <strong className="text-gray-700 dark:text-gray-200 font-mono">11.9%</strong></span>
+          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span>Margen EBITDA: <strong className="text-slate-700 dark:text-slate-200 font-mono">11.9%</strong></span>
             <span className="text-purple-600 font-bold font-mono">Flujo Libre</span>
           </div>
         </div>
 
-        {/* KPI 4: Utilidad Neta */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Utilidad Neta Final</span>
-            <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+        {/* KPI 4 */}
+        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+          <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500 absolute top-0 left-0" />
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Utilidad Neta Final</span>
+            <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600">
               <ShieldCheck className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-amber-600 dark:text-amber-400 font-mono tracking-tight">
+          <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">
             {formatPYG(pl.utilidad_neta)}
           </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Margen Neto: <strong className="text-gray-700 dark:text-gray-200 font-mono">10.2%</strong></span>
+          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span>Margen Neto: <strong className="text-slate-700 dark:text-slate-200 font-mono">10.2%</strong></span>
             <span className="text-amber-600 font-bold font-mono">Post-IRE</span>
           </div>
         </div>
