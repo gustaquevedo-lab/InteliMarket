@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react"
 import {
   Sparkles, TrendingUp, ArrowUpRight, ArrowDownRight, DollarSign, Percent,
-  Search, RefreshCcw, Save, Loader2, Check, AlertTriangle, Filter, Tag, CheckCircle2
+  Search, RefreshCcw, Save, Loader2, Check, AlertTriangle, Filter, Tag, CheckCircle2,
+  Sliders, ArrowRight, X, Eye
 } from "lucide-react"
 import { api, type Product } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -13,7 +14,7 @@ export default function SmartPricingPage() {
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState("")
   const [filterMargen, setFilterMargen] = useState<"ALL" | "LOW" | "HEALTHY" | "HIGH">("ALL")
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [selectedProduct, setSelectedProduct] = useState<any | null>(null)
   const [newPrice, setNewPrice] = useState<number>(0)
   const [updating, setUpdating] = useState(false)
 
@@ -72,7 +73,7 @@ export default function SmartPricingPage() {
     try {
       await api.products.update(selectedProduct.id, { precio_venta: newPrice, precio: newPrice })
       setProducts(prev => prev.map(p => p.id === selectedProduct.id ? { ...p, precio: newPrice, precio_venta: newPrice } : p))
-      toast.success("¡Precio Actualizado en DB!", `El precio de ${selectedProduct.nombre} ha cambiado a ${formatPYG(newPrice)}.`)
+      toast.success("¡Precio Actualizado!", `El precio de ${selectedProduct.nombre} ha cambiado a ${formatPYG(newPrice)}.`)
       setSelectedProduct(null)
     } catch (err: any) {
       toast.error("Error al actualizar precio", err.message)
@@ -84,250 +85,317 @@ export default function SmartPricingPage() {
   // KPIs
   const totalProducts = productsWithMargin.length
   const lowMarginCount = productsWithMargin.filter(p => p.margenPct < 15).length
+  const healthyMarginCount = productsWithMargin.filter(p => p.margenPct >= 15 && p.margenPct <= 30).length
+  const highMarginCount = productsWithMargin.filter(p => p.margenPct > 30).length
   const avgMargin = totalProducts > 0 ? productsWithMargin.reduce((acc, p) => acc + p.margenPct, 0) / totalProducts : 24.0
 
   return (
-    <div className="space-y-6">
-      {/* ── HEADER ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
-              <Sparkles className="w-7 h-7 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              Smart Pricing & Optimización de Márgenes
-            </h1>
-            <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Catálogo Real ({totalProducts} SKUs)
-            </span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Cálculo de márgenes brutos, detección de precios desactualizados y ajuste en tiempo real
-          </p>
-        </div>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/90 text-white p-7 border border-emerald-500/20 shadow-2xl shadow-emerald-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchProducts}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm transition"
-          >
-            <RefreshCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            Sincronizar Catálogo
-          </button>
-        </div>
-      </div>
-
-      {/* ── KPI CARDS ESTILIZADAS ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Productos Analizados */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Productos Analizados</span>
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-              <Tag className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-blue-600 dark:text-blue-400 font-mono tracking-tight">
-            {totalProducts} SKUs
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Base: <strong className="text-gray-700 dark:text-gray-200 font-mono">cad_produto</strong></span>
-            <span className="text-blue-600 font-bold font-mono">100% Real</span>
-          </div>
-        </div>
-
-        {/* KPI 2: Margen Promedio */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Margen Promedio Comercial</span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
-              <Percent className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
-            {avgMargin.toFixed(1)}%
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Meta Supermercado: <strong className="text-gray-700 dark:text-gray-200 font-mono">22-25%</strong></span>
-            <span className="text-emerald-600 font-bold font-mono">En Rango</span>
-          </div>
-        </div>
-
-        {/* KPI 3: Alertas de Bajo Margen */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Alertas Bajo Margen (&lt;15%)</span>
-            <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-rose-600 dark:text-rose-400 font-mono tracking-tight">
-            {lowMarginCount} alertas
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Acción: <strong className="text-gray-700 dark:text-gray-200 font-mono">Revisar Precios</strong></span>
-            <span className="text-rose-600 font-bold font-mono">Prioritario</span>
-          </div>
-        </div>
-
-        {/* KPI 4: Estado Algoritmo */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Motor de Reglas</span>
-            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-purple-600 dark:text-purple-400 font-mono tracking-tight">
-            Activo
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Redondeo Cajas: <strong className="text-gray-700 dark:text-gray-200 font-mono">50 Gs. DNIT</strong></span>
-            <span className="text-purple-600 font-bold font-mono">Sincronizado</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ── TABLA DE PRODUCTOS Y AJUSTE DE PRECIOS ── */}
-      <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2 flex-1 max-w-md">
-            <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Buscar por SKU o descripción..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-gray-900 dark:text-white outline-none focus:border-emerald-500"
-              />
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 border border-emerald-400/30 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                  <Sparkles className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
+                    INTELIGENCIA DE PRECIOS · RETAIL & MÁRGENES
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Margen Promedio: {avgMargin.toFixed(1)}%
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Smart Pricing & Optimización de Márgenes
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Auditoría en tiempo real de rentabilidad bruta por SKU, detección de precios desfasados y ajuste dinámico
+                </p>
+              </div>
             </div>
 
-            <select
-              value={filterMargen}
-              onChange={e => setFilterMargen(e.target.value as any)}
-              className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-gray-900 dark:text-white outline-none focus:border-emerald-500 font-bold"
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                📦 {totalProducts} SKUs analizados
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-rose-400">
+                ⚠️ {lowMarginCount} SKUs con margen &lt; 15%
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={fetchProducts}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
             >
-              <option value="ALL">Todos los Márgenes</option>
-              <option value="LOW">Bajo Margen (&lt;15%)</option>
-              <option value="HEALTHY">Margen Saludable (15-30%)</option>
-              <option value="HIGH">Alto Margen (&gt;30%)</option>
-            </select>
+              <RefreshCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              Sincronizar Catálogo
+            </button>
           </div>
-
-          <span className="text-xs font-mono font-bold text-gray-400">
-            Mostrando {filteredProducts.length} de {productsWithMargin.length} productos
-          </span>
         </div>
 
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Promedio</span>
+              <span className="text-[10px] font-bold text-emerald-400">Bruto</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {avgMargin.toFixed(1)}%
+            </p>
+            <p className="text-[11px] text-slate-400">Promedio ponderado del catálogo</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Crítico (&lt;15%)</span>
+              <span className="text-[10px] font-bold text-rose-400">Alerta</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {lowMarginCount} <span className="text-sm font-semibold text-slate-400">SKUs</span>
+            </p>
+            <p className="text-[11px] text-slate-400">Requieren remarcación urgente</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Saludable (15-30%)</span>
+              <span className="text-[10px] font-bold text-blue-400">Óptimo</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {healthyMarginCount} <span className="text-sm font-semibold text-slate-400">SKUs</span>
+            </p>
+            <p className="text-[11px] text-slate-400">Equilibrio volumen/rentabilidad</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Alto (&gt;30%)</span>
+              <span className="text-[10px] font-mono text-purple-400">Premium</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+              {highMarginCount} <span className="text-sm font-semibold text-slate-400">SKUs</span>
+            </p>
+            <p className="text-[11px] text-slate-400">Productos generadores de ganancia</p>
+          </div>
+        </div>
+      </div>
+
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "ALL", label: "Todos los SKUs", count: totalProducts },
+          { id: "LOW", label: "Margen Crítico (<15%)", count: lowMarginCount, color: "text-rose-500" },
+          { id: "HEALTHY", label: "Margen Saludable (15-30%)", count: healthyMarginCount },
+          { id: "HIGH", label: "Margen Alto (>30%)", count: highMarginCount },
+        ].map((t) => {
+          const active = filterMargen === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setFilterMargen(t.id as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <span>{t.label}</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                active ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+              }`}>
+                {t.count}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* 🔍 BARRA DE HERRAMIENTAS & BUSCADOR */}
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por nombre de producto, SKU o código de barra..."
+            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+        </div>
+      </div>
+
+      {/* 📊 TABLA DE SMART PRICING */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-gray-50/50 dark:bg-slate-750/50 text-gray-500 dark:text-gray-400 uppercase text-[10px] font-bold border-b border-gray-100 dark:border-slate-700">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
               <tr>
-                <th className="p-3 font-mono">SKU</th>
-                <th className="p-3">Descripción del Producto</th>
-                <th className="p-3 text-right">Costo Unitario</th>
-                <th className="p-3 text-right">Precio de Venta</th>
-                <th className="p-3 text-right">Margen Bruto</th>
-                <th className="p-3 text-center">Estado Margen</th>
-                <th className="p-3 text-right">Acción</th>
+                <th className="p-4">Producto / SKU</th>
+                <th className="p-4 text-right">Costo Estimado</th>
+                <th className="p-4 text-right">Precio Venta</th>
+                <th className="p-4 text-right">Margen (₲)</th>
+                <th className="p-4 text-center">Margen (%)</th>
+                <th className="p-4 text-center">Diagnóstico</th>
+                <th className="p-4 text-center">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-slate-700/60">
-              {filteredProducts.map(p => (
-                <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-slate-750/50">
-                  <td className="p-3 font-mono text-gray-500 text-[11px]">{p.sku || "—"}</td>
-                  <td className="p-3 font-bold text-gray-900 dark:text-white">{p.nombre}</td>
-                  <td className="p-3 text-right font-mono text-gray-500">{formatPYG(p.costoCalculado)}</td>
-                  <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">{formatPYG(p.precioCalculado)}</td>
-                  <td className="p-3 text-right font-mono font-black">
-                    <span className={p.margenPct < 15 ? "text-rose-600" : p.margenPct > 30 ? "text-emerald-600" : "text-blue-600"}>
-                      {p.margenPct.toFixed(1)}% ({formatPYG(p.margenGs)})
-                    </span>
-                  </td>
-                  <td className="p-3 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      p.margenPct < 15
-                        ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
-                        : p.margenPct > 30
-                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                        : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                    }`}>
-                      {p.margenPct < 15 ? "BAJO MARGEN" : p.margenPct > 30 ? "ALTO MARGEN" : "SALUDABLE"}
-                    </span>
-                  </td>
-                  <td className="p-3 text-right">
-                    <button
-                      onClick={() => {
-                        setSelectedProduct(p)
-                        setNewPrice(p.precioCalculado)
-                      }}
-                      className="px-2.5 py-1 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition"
-                    >
-                      Ajustar Precio
-                    </button>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="p-12 text-center text-slate-400">
+                    <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-emerald-500" />
+                    <span>Analizando márgenes de rentabilidad...</span>
                   </td>
                 </tr>
-              ))}
+              ) : filteredProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-12 text-center text-slate-400">
+                    No se encontraron productos coincidentes.
+                  </td>
+                </tr>
+              ) : (
+                filteredProducts.map(p => {
+                  const isLow = p.margenPct < 15
+                  const isHealthy = p.margenPct >= 15 && p.margenPct <= 30
+                  const isHigh = p.margenPct > 30
+
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="p-4">
+                        <p className="font-bold text-slate-900 dark:text-white max-w-[240px] truncate">{p.nombre}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{p.sku || p.codigo_barra || `SKU-${p.id.slice(0, 6)}`}</p>
+                      </td>
+                      <td className="p-4 text-right font-mono text-slate-500 text-[11px]">
+                        {formatPYG(p.costoCalculado)}
+                      </td>
+                      <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white">
+                        {formatPYG(p.precioCalculado)}
+                      </td>
+                      <td className="p-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                        {formatPYG(p.margenGs)}
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black font-mono ${
+                          isLow
+                            ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+                            : isHealthy
+                            ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                            : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                        }`}>
+                          {p.margenPct.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className={`text-[10px] font-bold ${
+                          isLow ? "text-rose-500" : isHealthy ? "text-blue-500" : "text-emerald-500"
+                        }`}>
+                          {isLow ? "Crítico / Ajustar" : isHealthy ? "Saludable" : "Alta Rentabilidad"}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <button
+                          onClick={() => {
+                            setSelectedProduct(p)
+                            setNewPrice(p.precioCalculado)
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 font-bold text-[11px] transition shadow-xs"
+                        >
+                          Ajustar Precio
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* ── MODAL: AJUSTAR PRECIO ── */}
+      {/* ── MODAL: SIMULADOR & AJUSTE DE PRECIO ── */}
       {selectedProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-              <h3 className="text-base font-black text-gray-900 dark:text-white">Ajustar Precio de Venta</h3>
-              <button onClick={() => setSelectedProduct(null)} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700">
-                ✕
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center font-bold">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Ajustar Precio Inteligente</h3>
+                  <p className="text-xs text-slate-400 truncate max-w-[200px]">{selectedProduct.nombre}</p>
+                </div>
+              </div>
+              <button onClick={() => setSelectedProduct(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3">
-              <p className="text-xs font-bold text-gray-800 dark:text-gray-200">{selectedProduct.nombre}</p>
-              <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-750 flex items-center justify-between text-xs font-mono">
-                <span className="text-gray-500">Costo Actual:</span>
-                <span className="font-bold">{formatPYG(Number(selectedProduct.costo_promedio ?? selectedProduct.ultimo_costo ?? 0))}</span>
+            <div className="space-y-3 text-xs">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-2">
+                <div className="flex justify-between"><span className="text-slate-400">Costo Base:</span><span className="font-mono font-bold text-slate-900 dark:text-white">{formatPYG(selectedProduct.costoCalculado)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Precio Actual:</span><span className="font-mono text-slate-500">{formatPYG(selectedProduct.precioCalculado)} ({selectedProduct.margenPct.toFixed(1)}% margen)</span></div>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">Nuevo Precio de Venta (Gs.) *</label>
+                <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Nuevo Precio de Venta (₲)</label>
                 <input
                   type="number"
-                  step="50"
                   value={newPrice}
-                  onChange={e => setNewPrice(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white outline-none focus:border-emerald-500 font-mono font-bold"
+                  onChange={e => setNewPrice(Number(e.target.value) || 0)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 text-base font-mono font-black text-emerald-600 dark:text-emerald-400 outline-none"
                 />
               </div>
 
-              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs flex items-center justify-between">
-                <span className="text-emerald-800 dark:text-emerald-300 font-medium">Margen Resultante:</span>
-                <span className="font-mono font-black text-emerald-700 dark:text-emerald-400 text-sm">
-                  {newPrice > 0 ? (((newPrice - Number(selectedProduct.costo_promedio ?? selectedProduct.ultimo_costo ?? 0)) / newPrice) * 100).toFixed(1) : "0.0"}%
-                </span>
-              </div>
+              {/* Preview de Margen Simulado */}
+              {newPrice > 0 && (
+                <div className="p-4 bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase">Margen Simulado:</span>
+                    <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                      {(((newPrice - selectedProduct.costoCalculado) / newPrice) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-emerald-700/80 dark:text-emerald-300/80">
+                    <span>Ganancia Bruta:</span>
+                    <span className="font-mono font-bold">{formatPYG(newPrice - selectedProduct.costoCalculado)} /un</span>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-700">
-              <button
-                type="button"
-                onClick={() => setSelectedProduct(null)}
-                className="px-4 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-xl"
-              >
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setSelectedProduct(null)} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
                 Cancelar
               </button>
               <button
-                type="button"
                 onClick={handleUpdatePrice}
-                disabled={updating}
-                className="px-5 py-2 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition disabled:opacity-50 flex items-center gap-1.5"
+                disabled={updating || newPrice <= 0}
+                className="px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md shadow-emerald-500/25 flex items-center gap-1.5 transition"
               >
                 {updating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                Guardar en Base de Datos
+                <span>Guardar Nuevo Precio</span>
               </button>
             </div>
           </div>

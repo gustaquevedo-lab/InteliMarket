@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from "react"
 import {
   Search, RotateCcw, Eye, Loader2, CheckCircle, XCircle, X,
   DollarSign, Clock, Undo2, Check, RefreshCw, PackageCheck, AlertCircle,
-  FileText, Plus, Building2, Tag, Truck
+  FileText, Plus, Building2, Tag, Truck, ArrowUpRight, ShieldCheck,
+  AlertTriangle, Filter, ChevronRight
 } from "lucide-react"
 import { api, type ReturnType, type ReturnItemType, type Sale, type Warehouse } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -57,7 +58,7 @@ const CONDICION_LABELS: Record<string, string> = {
 const STATUS_META: Record<string, { label: string; class: string }> = {
   pendiente: { label: "Pendiente RMA", class: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" },
   aprobado:  { label: "Aprobada (Stock Rest.)", class: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" },
-  rechazado: { label: "Rechazada", class: "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20" },
+  rechazado: { label: "Rechazada", class: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20" },
 }
 
 export default function ReturnsPage() {
@@ -67,7 +68,7 @@ export default function ReturnsPage() {
   // Pestaña Principal
   const [mainTab, setMainTab] = useState<"customer_returns" | "supplier_credit_notes" | "supplier_returns">("customer_returns")
 
-  // Estado: Devoluciones Clientes (ven_devolucao)
+  // Estado: Devoluciones Clientes
   const [returns, setReturns] = useState<ReturnType[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -76,14 +77,14 @@ export default function ReturnsPage() {
   const [filterStatus, setFilterStatus] = useState<string>("todos")
   const [loadingReturns, setLoadingReturns] = useState(true)
 
-  // Estado: Notas de Crédito Proveedores (fin_recepcao_nota_credito)
+  // Estado: Notas de Crédito Proveedores
   const [creditNotes, setCreditNotes] = useState<SupplierCreditNote[]>([])
   const [ncSearch, setNcSearch] = useState("")
   const [ncFilterMotivo, setNcFilterMotivo] = useState("todos")
   const [loadingNc, setLoadingNc] = useState(true)
   const [viewingNc, setViewingNc] = useState<SupplierCreditNote | null>(null)
 
-  // Estado: Devoluciones a Proveedores (est_devolucao_fornecedor)
+  // Estado: Devoluciones a Proveedores
   const [supplierReturns, setSupplierReturns] = useState<SupplierReturn[]>([])
   const [supRetSearch, setSupRetSearch] = useState("")
   const [loadingSupRet, setLoadingSupRet] = useState(true)
@@ -371,285 +372,164 @@ export default function ReturnsPage() {
   ).slice(0, 6)
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* ── HEADER OPERATIVO ──────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-5">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
-              <RotateCcw className="w-7 h-7 text-red-600 dark:text-red-400 shrink-0" />
-              Devoluciones & Notas de Crédito
-            </h1>
-            <span className="px-3 py-1 rounded-full text-xs font-black bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-              RMA Clientes · Proveedores Nemuha
-            </span>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-rose-950/90 text-white p-7 border border-rose-500/20 shadow-2xl shadow-rose-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-rose-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-pink-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-rose-600 to-pink-500 border border-rose-400/30 text-white flex items-center justify-center shadow-lg shadow-rose-500/25">
+                  <RotateCcw className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-rose-400 uppercase bg-rose-500/10 px-2.5 py-0.5 rounded-md border border-rose-500/20">
+                    GESTIÓN DE MERMAS & NOTAS DE CRÉDITO
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                    RMA Clientes & NC Nemuha ERP
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Devoluciones & Notas de Crédito
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Auditoría de mercadería devuelta, control de RMA, reposición a góndola y notas de crédito a favor
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-rose-400">
+                🔄 {returns.length} devoluciones registradas
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                💰 {creditNotes.length} NC a favor proveedores
+              </span>
+            </div>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Control de devoluciones de clientes, reintegros a inventario y notas de crédito de proveedores sincronizadas desde Nemuha ERP.
-          </p>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Recargar
+            </button>
+
+            {mainTab === "customer_returns" && (
+              <button
+                onClick={() => setShowCreate(true)}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-rose-600 to-pink-500 hover:from-rose-500 hover:to-pink-400 transition shadow-lg shadow-rose-500/25 flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Nueva Devolución
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Acciones Rápidas */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={handleRefresh}
-            className="p-2 text-gray-400 hover:text-primary rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
-            title="Recargar datos"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-          </button>
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {mainTab === "customer_returns" ? "Total Devuelto Clientes" : "Crédito a Favor Total"}
+              </span>
+              <span className="text-[10px] font-bold text-rose-400">Total</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {formatPYG(mainTab === "customer_returns" ? returnKpis.montoTotal : ncKpis.montoTotal)}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {mainTab === "customer_returns" ? `${returnKpis.total} solicitudes en cartera` : `${ncKpis.total} notas registradas`}
+            </p>
+          </div>
 
-          {mainTab === "customer_returns" && (
-            <button
-              onClick={() => setShowCreate(true)}
-              className="btn bg-primary text-white font-extrabold text-xs flex items-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:opacity-90"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Nueva Devolución</span>
-            </button>
-          )}
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {mainTab === "customer_returns" ? "Pendientes RMA" : "Proveedores con NC"}
+              </span>
+              <span className="text-[10px] font-bold text-amber-400">Revisión</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {mainTab === "customer_returns" ? returnKpis.pendientes : ncKpis.proveedoresUnicos}
+            </p>
+            <p className="text-[11px] text-slate-400">Requieren firma o aplicación</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {mainTab === "customer_returns" ? "Stock Restaurado" : "Promedio por Nota"}
+              </span>
+              <span className="text-[10px] font-bold text-emerald-400">Repuesto</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {mainTab === "customer_returns" ? returnKpis.aprobadas : formatPYG(ncKpis.avgMonto)}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {mainTab === "customer_returns" ? `${formatPYG(returnKpis.montoAprobado)} reingresado` : "Ticket promedio NC"}
+            </p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {mainTab === "customer_returns" ? "Rechazadas" : "Sincronización Nemuha"}
+              </span>
+              <span className="text-[10px] font-mono text-cyan-400">Auditado</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-cyan-300">
+              {mainTab === "customer_returns" ? returnKpis.rechazadas : "100% OK"}
+            </p>
+            <p className="text-[11px] text-slate-400">Sin impacto contable negativo</p>
+          </div>
         </div>
       </div>
 
-      {/* ── KPIS CONSOLIDADOS (SEGÚN LA PESTAÑA ACTIVA) ──────────────────────── */}
-      {mainTab === "customer_returns" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Total Devoluciones Clientes
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-                <DollarSign className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-gray-900 dark:text-white mt-2">
-              {formatPYG(returnKpis.montoTotal)}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              {returnKpis.total} solicitudes en cartera
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                Pendientes de RMA
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                <Clock className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-amber-500 mt-2">
-              {returnKpis.pendientes}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Requieren revisión y firma
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Stock Restaurado
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                <PackageCheck className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-emerald-600 dark:text-emerald-400 mt-2">
-              {returnKpis.aprobadas}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1 font-mono">
-              {formatPYG(returnKpis.montoAprobado)} reintegrado
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-red-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Rechazadas / Sin Efecto
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-red-500/10 text-red-600 flex items-center justify-center">
-                <AlertCircle className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-red-600 dark:text-red-400 mt-2">
-              {returnKpis.rechazadas}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Mercadería no admitida
-            </p>
-          </div>
-        </div>
-      )}
-
-      {mainTab === "supplier_credit_notes" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Total Crédito a Favor
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                <DollarSign className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-emerald-600 dark:text-emerald-400 mt-2">
-              {formatPYG(ncKpis.montoTotal)}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              {ncKpis.total} notas de crédito registradas
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Proveedores con NC
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-                <Building2 className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-gray-900 dark:text-white mt-2">
-              {ncKpis.proveedoresUnicos}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Empresas proveedoras
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Promedio por Nota
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
-                <Tag className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-purple-600 dark:text-purple-400 mt-2">
-              {formatPYG(ncKpis.avgMonto)}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Monto promedio liquidado
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-cyan-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Estado Sincronización
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-600 flex items-center justify-center">
-                <CheckCircle className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-cyan-600 dark:text-cyan-400 mt-2">
-              100%
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Conectado a Nemuha ERP
-            </p>
-          </div>
-        </div>
-      )}
-
-      {mainTab === "supplier_returns" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Total Devuelto a Proveedores
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
-                <DollarSign className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-amber-600 dark:text-amber-400 mt-2">
-              {formatPYG(supRetKpis.montoTotal)}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              {supRetKpis.total} devoluciones físicas
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Proveedores Afectados
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-                <Building2 className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-gray-900 dark:text-white mt-2">
-              {supRetKpis.proveedoresUnicos}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Cuentas con RMA proveedor
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Origen de Devolución
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
-                <Truck className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-purple-600 dark:text-purple-400 mt-2">
-              Vencidos / Mermas
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Reclamos por canje o crédito
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Integración Nemuha
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                <CheckCircle className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-emerald-600 dark:text-emerald-400 mt-2">
-              Sincronizado
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Tabla est_devolucao_fornecedor
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* ── SELECTOR DE SECCIÓN PRINCIPAL (TABS OPERATIVAS) ────────────────── */}
-      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 pb-2 overflow-x-auto no-scrollbar">
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { id: "customer_returns", label: "Devoluciones de Clientes (RMA)", icon: RotateCcw, count: returns.length },
           { id: "supplier_credit_notes", label: "Notas de Crédito Proveedores", icon: Building2, count: creditNotes.length },
           { id: "supplier_returns", label: "Devoluciones a Proveedores", icon: Truck, count: supplierReturns.length },
         ].map((t) => {
+          const Icon = t.icon
           const active = mainTab === t.id
           return (
             <button
               key={t.id}
               onClick={() => setMainTab(t.id as any)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
                 active
-                  ? "bg-primary text-white shadow-sm"
-                  : "bg-white dark:bg-slate-900 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-800 hover:bg-gray-50"
+                  ? "bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
               }`}
             >
-              <t.icon className="w-4 h-4" />
+              <Icon className="w-4 h-4" />
               <span>{t.label}</span>
               {t.count !== undefined && (
-                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${active ? "bg-white/20 text-white" : "bg-gray-100 dark:bg-slate-800 text-gray-500"}`}>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
                   {t.count}
                 </span>
               )}
@@ -658,71 +538,69 @@ export default function ReturnsPage() {
         })}
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          CONTENIDO PESTAÑA 1: DEVOLUCIONES DE CLIENTES (RMA)
-      ═══════════════════════════════════════════════════════════════════════ */}
+      {/* ══════════════════════ TAB 1: DEVOLUCIONES CLIENTES ══════════════════════ */}
       {mainTab === "customer_returns" && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-            {[
-              { id: "todos", label: "Todas", count: returns.length },
-              { id: "pendiente", label: "Pendientes RMA", count: returnKpis.pendientes },
-              { id: "aprobado", label: "Aprobadas", count: returnKpis.aprobadas },
-              { id: "rechazado", label: "Rechazadas", count: returnKpis.rechazadas },
-            ].map(st => (
-              <button
-                key={st.id}
-                onClick={() => setFilterStatus(st.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  filterStatus === st.id
-                    ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-extrabold"
-                    : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200"
-                }`}
-              >
-                {st.label} ({st.count})
-              </button>
-            ))}
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3 w-4 h-4 text-gray-400 top-2.5" />
+              <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar por Nº devolución, Nº venta, RUC/CI o cliente..."
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary text-gray-900 dark:text-white"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+              {[
+                { id: "todos", label: "Todas", count: returns.length },
+                { id: "pendiente", label: "Pendientes", count: returnKpis.pendientes },
+                { id: "aprobado", label: "Aprobadas", count: returnKpis.aprobadas },
+                { id: "rechazado", label: "Rechazadas", count: returnKpis.rechazadas },
+              ].map(st => (
+                <button
+                  key={st.id}
+                  onClick={() => setFilterStatus(st.id)}
+                  className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all ${
+                    filterStatus === st.id
+                      ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm"
+                      : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                  }`}
+                >
+                  {st.label} ({st.count})
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-gray-400 border-b border-gray-200 dark:border-gray-800">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="p-3.5">Nº Devolución</th>
-                    <th className="p-3.5">Fecha</th>
-                    <th className="p-3.5">Venta Origen</th>
-                    <th className="p-3.5">Cliente</th>
-                    <th className="p-3.5">Motivo Principal</th>
-                    <th className="p-3.5 text-right">Monto Devuelto</th>
-                    <th className="p-3.5 text-center">Estado</th>
-                    <th className="p-3.5 text-center">Acciones</th>
+                    <th className="p-4">Nº Devolución</th>
+                    <th className="p-4">Fecha</th>
+                    <th className="p-4">Venta Origen</th>
+                    <th className="p-4">Cliente</th>
+                    <th className="p-4">Motivo Principal</th>
+                    <th className="p-4 text-right">Monto Devuelto</th>
+                    <th className="p-4 text-center">Estado</th>
+                    <th className="p-4 text-center">Acciones</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                   {loadingReturns ? (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center text-gray-400">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-primary" />
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-rose-500" />
                         <span>Cargando devoluciones de clientes...</span>
                       </td>
                     </tr>
                   ) : filteredReturns.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center text-gray-400">
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
                         No se encontraron solicitudes de devolución coincidentes.
                       </td>
                     </tr>
@@ -732,44 +610,44 @@ export default function ReturnsPage() {
                       const custName = r.customer?.razon_social || r.customer_name || "Cliente General"
 
                       return (
-                        <tr key={r.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                          <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
+                        <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
                             <div className="flex items-center gap-1.5">
-                              <RotateCcw className="w-3.5 h-3.5 text-primary" />
+                              <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
                               <span>{r.numero}</span>
                             </div>
                           </td>
-                          <td className="p-3.5 text-gray-500 font-mono text-[11px]">
+                          <td className="p-4 text-slate-500 font-mono text-[11px]">
                             {r.fecha ? formatDate(r.fecha) : "—"}
                           </td>
-                          <td className="p-3.5 font-mono font-bold text-blue-600 dark:text-blue-400">
+                          <td className="p-4 font-mono font-bold text-blue-600 dark:text-blue-400">
                             #{saleNum}
                           </td>
-                          <td className="p-3.5 font-bold text-gray-800 dark:text-gray-200 max-w-[180px] truncate">
+                          <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[180px] truncate">
                             {custName}
                           </td>
-                          <td className="p-3.5 text-gray-600 dark:text-gray-300">
+                          <td className="p-4 text-slate-600 dark:text-slate-300">
                             <span className="font-semibold">{motivoLabel(r.motivo || "otro")}</span>
                             {r.motivo_detalle && (
-                              <p className="text-[10px] text-gray-400 truncate max-w-[150px]">{r.motivo_detalle}</p>
+                              <p className="text-[10px] text-slate-400 truncate max-w-[150px]">{r.motivo_detalle}</p>
                             )}
                           </td>
-                          <td className="p-3.5 text-right font-mono font-black text-gray-900 dark:text-white">
+                          <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white">
                             {formatPYG(Number(r.total || 0))}
                           </td>
-                          <td className="p-3.5 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${STATUS_META[r.estado || "pendiente"]?.class || ""}`}>
+                          <td className="p-4 text-center">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${STATUS_META[r.estado || "pendiente"]?.class || ""}`}>
                               {STATUS_META[r.estado || "pendiente"]?.label || r.estado}
                             </span>
                           </td>
-                          <td className="p-3.5 text-center">
+                          <td className="p-4 text-center">
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 onClick={() => handleViewReturn(r)}
-                                className="p-1.5 text-gray-400 hover:text-primary rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800"
+                                className="p-2 text-slate-400 hover:text-rose-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                                 title="Ver Detalle RMA"
                               >
-                                <Eye className="w-3.5 h-3.5" />
+                                <Eye className="w-4 h-4" />
                               </button>
 
                               {r.estado === "pendiente" && (
@@ -777,7 +655,7 @@ export default function ReturnsPage() {
                                   <button
                                     onClick={() => handleApprove(r)}
                                     disabled={processing === r.id}
-                                    className="px-2 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs flex items-center gap-1"
+                                    className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1 transition"
                                     title="Aprobar & Restaurar Stock"
                                   >
                                     {processing === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
@@ -786,7 +664,7 @@ export default function ReturnsPage() {
                                   <button
                                     onClick={() => setRejectModal(r)}
                                     disabled={processing === r.id}
-                                    className="px-2 py-1 rounded-lg text-[11px] font-bold bg-red-50 dark:bg-red-950/30 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-800 flex items-center gap-1"
+                                    className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-rose-50 dark:bg-rose-950/30 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/40 border border-rose-200 dark:border-rose-800 flex items-center gap-1 transition"
                                     title="Rechazar"
                                   >
                                     <XCircle className="w-3 h-3" />
@@ -807,20 +685,18 @@ export default function ReturnsPage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          CONTENIDO PESTAÑA 2: NOTAS DE CRÉDITO DE PROVEEDORES (NEMUHA ERP)
-      ═══════════════════════════════════════════════════════════════════════ */}
+      {/* ══════════════════════ TAB 2: NC PROVEEDORES ══════════════════════ */}
       {mainTab === "supplier_credit_notes" && (
         <div className="space-y-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3 w-4 h-4 text-gray-400 top-2.5" />
+              <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
               <input
                 type="text"
                 value={ncSearch}
                 onChange={(e) => setNcSearch(e.target.value)}
                 placeholder="Buscar por Nº de NC, Proveedor, Factura afectada u observaciones..."
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary text-gray-900 dark:text-white"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
             </div>
 
@@ -828,7 +704,7 @@ export default function ReturnsPage() {
               <select
                 value={ncFilterMotivo}
                 onChange={(e) => setNcFilterMotivo(e.target.value)}
-                className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-300 outline-none"
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
               >
                 <option value="todos">Todos los Motivos ({creditNotes.length})</option>
                 {ncMotivosList.map(m => (
@@ -838,70 +714,70 @@ export default function ReturnsPage() {
             </div>
           </div>
 
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-gray-400 border-b border-gray-200 dark:border-gray-800">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="p-3.5">Nº Nota de Crédito</th>
-                    <th className="p-3.5">Fecha</th>
-                    <th className="p-3.5">Proveedor</th>
-                    <th className="p-3.5">Factura Origen</th>
-                    <th className="p-3.5">Concepto / Motivo</th>
-                    <th className="p-3.5 text-right">Monto Acreditado</th>
-                    <th className="p-3.5 text-center">Acciones</th>
+                    <th className="p-4">Nº Nota de Crédito</th>
+                    <th className="p-4">Fecha</th>
+                    <th className="p-4">Proveedor</th>
+                    <th className="p-4">Factura Origen</th>
+                    <th className="p-4">Concepto / Motivo</th>
+                    <th className="p-4 text-right">Monto Acreditado</th>
+                    <th className="p-4 text-center">Acciones</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                   {loadingNc ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-400">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-primary" />
+                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-rose-500" />
                         <span>Cargando notas de crédito de proveedores...</span>
                       </td>
                     </tr>
                   ) : filteredCreditNotes.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-400">
-                        No se encontraron notas de crédito de proveedores coincidentes.
+                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                        No se encontraron notas de crédito de proveedores.
                       </td>
                     </tr>
                   ) : (
                     filteredCreditNotes.map((nc) => (
-                      <tr key={nc.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
+                      <tr key={nc.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
                           <div className="flex items-center gap-1.5">
                             <FileText className="w-3.5 h-3.5 text-emerald-600" />
                             <span>{nc.numero || "NC-" + nc.id.slice(0, 8)}</span>
                           </div>
                         </td>
-                        <td className="p-3.5 text-gray-500 font-mono text-[11px]">
+                        <td className="p-4 text-slate-500 font-mono text-[11px]">
                           {nc.fecha ? formatDate(nc.fecha) : "—"}
                         </td>
-                        <td className="p-3.5 font-bold text-gray-800 dark:text-gray-200 max-w-[200px] truncate">
+                        <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
                           {nc.supplier_nombre || "Proveedor"}
                         </td>
-                        <td className="p-3.5 font-mono text-gray-500 text-[11px]">
+                        <td className="p-4 font-mono text-slate-500 text-[11px]">
                           {nc.numero_factura_origen ? `#${nc.numero_factura_origen}` : "—"}
                         </td>
-                        <td className="p-3.5 text-gray-600 dark:text-gray-300">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        <td className="p-4 text-slate-600 dark:text-slate-300">
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                             {(nc.motivo || "CREDITO").replace(/_/g, " ")}
                           </span>
                           {nc.observaciones && (
-                            <p className="text-[10px] text-gray-400 truncate max-w-[180px] mt-0.5">{nc.observaciones}</p>
+                            <p className="text-[10px] text-slate-400 truncate max-w-[180px] mt-0.5">{nc.observaciones}</p>
                           )}
                         </td>
-                        <td className="p-3.5 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">
+                        <td className="p-4 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">
                           {formatPYG(Number(nc.monto || 0))}
                         </td>
-                        <td className="p-3.5 text-center">
+                        <td className="p-4 text-center">
                           <button
                             onClick={() => setViewingNc(nc)}
-                            className="p-1.5 text-gray-400 hover:text-emerald-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800"
+                            className="p-2 text-slate-400 hover:text-emerald-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                             title="Ver Detalle NC"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            <Eye className="w-4 h-4" />
                           </button>
                         </td>
                       </tr>
@@ -914,83 +790,81 @@ export default function ReturnsPage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          CONTENIDO PESTAÑA 3: DEVOLUCIONES A PROVEEDORES (NEMUHA ERP)
-      ═══════════════════════════════════════════════════════════════════════ */}
+      {/* ══════════════════════ TAB 3: DEVOLUCIONES PROVEEDORES ══════════════════════ */}
       {mainTab === "supplier_returns" && (
         <div className="space-y-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3 w-4 h-4 text-gray-400 top-2.5" />
+              <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
               <input
                 type="text"
                 value={supRetSearch}
                 onChange={(e) => setSupRetSearch(e.target.value)}
-                placeholder="Buscar por Proveedor, Nº Nota de Crédito, Factura afectada u observaciones..."
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary text-gray-900 dark:text-white"
+                placeholder="Buscar por Proveedor, Nº Nota de Crédito o Factura..."
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
             </div>
           </div>
 
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-gray-400 border-b border-gray-200 dark:border-gray-800">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="p-3.5">Nº Nota de Crédito</th>
-                    <th className="p-3.5">Fecha Devolución</th>
-                    <th className="p-3.5">Proveedor</th>
-                    <th className="p-3.5">Factura Afectada</th>
-                    <th className="p-3.5">Observaciones / Motivo</th>
-                    <th className="p-3.5 text-right">Monto Devuelto</th>
-                    <th className="p-3.5 text-center">Acciones</th>
+                    <th className="p-4">Nº Nota de Crédito</th>
+                    <th className="p-4">Fecha Devolución</th>
+                    <th className="p-4">Proveedor</th>
+                    <th className="p-4">Factura Afectada</th>
+                    <th className="p-4">Observaciones / Motivo</th>
+                    <th className="p-4 text-right">Monto Devuelto</th>
+                    <th className="p-4 text-center">Acciones</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                   {loadingSupRet ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-400">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-primary" />
+                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-rose-500" />
                         <span>Cargando devoluciones a proveedores...</span>
                       </td>
                     </tr>
                   ) : filteredSupplierReturns.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-400">
-                        No se encontraron devoluciones a proveedores coincidentes.
+                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                        No se encontraron devoluciones a proveedores.
                       </td>
                     </tr>
                   ) : (
                     filteredSupplierReturns.map((sr) => (
-                      <tr key={sr.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
+                      <tr key={sr.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
                           <div className="flex items-center gap-1.5">
                             <Truck className="w-3.5 h-3.5 text-amber-600" />
                             <span>{sr.numero_nota_credito || "DEV-" + sr.id.slice(0, 8)}</span>
                           </div>
                         </td>
-                        <td className="p-3.5 text-gray-500 font-mono text-[11px]">
+                        <td className="p-4 text-slate-500 font-mono text-[11px]">
                           {sr.fecha ? formatDate(sr.fecha) : "—"}
                         </td>
-                        <td className="p-3.5 font-bold text-gray-800 dark:text-gray-200 max-w-[200px] truncate">
+                        <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
                           {sr.supplier_nombre || "Proveedor"}
                         </td>
-                        <td className="p-3.5 font-mono text-gray-500 text-[11px]">
+                        <td className="p-4 font-mono text-slate-500 text-[11px]">
                           {sr.numero_factura_origen ? `#${sr.numero_factura_origen}` : "—"}
                         </td>
-                        <td className="p-3.5 text-gray-600 dark:text-gray-300 max-w-[220px] truncate">
+                        <td className="p-4 text-slate-600 dark:text-slate-300 max-w-[220px] truncate">
                           {sr.observaciones || "Devolución física a proveedor"}
                         </td>
-                        <td className="p-3.5 text-right font-mono font-black text-amber-600 dark:text-amber-400">
+                        <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">
                           {formatPYG(Number(sr.monto || 0))}
                         </td>
-                        <td className="p-3.5 text-center">
+                        <td className="p-4 text-center">
                           <button
                             onClick={() => setViewingSupRet(sr)}
-                            className="p-1.5 text-gray-400 hover:text-amber-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800"
+                            className="p-2 text-slate-400 hover:text-amber-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                             title="Ver Detalle"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            <Eye className="w-4 h-4" />
                           </button>
                         </td>
                       </tr>
@@ -1003,52 +877,51 @@ export default function ReturnsPage() {
         </div>
       )}
 
-      {/* ── MODAL: REGISTRAR DEVOLUCIÓN CLIENTE ───────────────────────────── */}
+      {/* ── MODAL: REGISTRAR DEVOLUCIÓN CLIENTE ── */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="card max-w-2xl w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up my-8">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
-                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Registrar Devolución de Mercadería</h3>
-                <p className="text-xs text-gray-400">Seleccioná el comprobante de venta origen y los productos a reintegrar</p>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Registrar Devolución de Mercadería</h3>
+                <p className="text-xs text-slate-400">Seleccioná el comprobante de venta origen y los productos a reintegrar</p>
               </div>
-              <button onClick={() => { setShowCreate(false); resetCreateForm() }} className="p-1 text-gray-400 hover:text-gray-600">
+              <button onClick={() => { setShowCreate(false); resetCreateForm() }} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="space-y-4 text-xs">
-              {/* Selección de Venta */}
               <div>
-                <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Comprobante de Venta Origen *</label>
+                <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Comprobante de Venta Origen *</label>
                 {selectedSaleId ? (
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
                     <div>
-                      <span className="font-bold text-gray-900 dark:text-white">
+                      <span className="font-bold text-slate-900 dark:text-white">
                         Venta #{sales.find(s => s.id === selectedSaleId)?.numero || selectedSaleId.slice(0, 8)}
                       </span>
-                      <p className="text-[11px] text-gray-400 font-mono">
+                      <p className="text-[11px] text-slate-400 font-mono">
                         Cliente: {sales.find(s => s.id === selectedSaleId)?.customer?.razon_social || (sales.find(s => s.id === selectedSaleId) as any)?.customer_name || "Consumidor Final"} · Total: {formatPYG(Number(sales.find(s => s.id === selectedSaleId)?.total || 0))}
                       </p>
                     </div>
                     <button
                       onClick={() => { setSelectedSaleId(""); setSaleItems([]); setSelectedItems({}) }}
-                      className="text-red-500 hover:text-red-700 font-bold"
+                      className="text-rose-500 hover:text-rose-700 font-bold"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
                 ) : (
                   <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+                    <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                     <input
                       value={saleSearch}
                       onChange={e => setSaleSearch(e.target.value)}
                       placeholder="Buscar por Nº comprobante, RUC o cliente..."
-                      className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-9 pr-4 py-2.5 text-xs text-slate-900 dark:text-white"
                     />
                     {saleSearch && (
-                      <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl z-20 max-h-44 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-20 max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
                         {filteredSalesForModal.map(s => (
                           <button
                             key={s.id}
@@ -1057,11 +930,11 @@ export default function ReturnsPage() {
                               setSaleSearch("")
                               handleLoadSaleItems(s.id)
                             }}
-                            className="w-full p-2.5 text-left hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center justify-between"
+                            className="w-full p-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between"
                           >
                             <div>
                               <p className="font-bold text-xs">Venta #{s.numero || s.id.slice(0, 8)}</p>
-                              <p className="text-[10px] text-gray-400 font-mono">{s.customer?.razon_social || (s as any).customer_name || "Consumidor"} · RUC {s.customer?.ruc || (s as any).customer_ruc || "—"}</p>
+                              <p className="text-[10px] text-slate-400 font-mono">{s.customer?.razon_social || (s as any).customer_name || "Consumidor"} · RUC {s.customer?.ruc || (s as any).customer_ruc || "—"}</p>
                             </div>
                             <span className="font-mono font-bold text-emerald-600 text-xs">{formatPYG(Number(s.total || 0))}</span>
                           </button>
@@ -1072,30 +945,29 @@ export default function ReturnsPage() {
                 )}
               </div>
 
-              {/* Items de la Venta */}
               {saleItems.length > 0 && (
                 <div>
-                  <label className="block font-black uppercase text-[10px] text-gray-400 mb-1.5">Ítems a Devolver & Condición Física</label>
-                  <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                  <label className="block font-black uppercase text-[10px] text-slate-400 mb-1.5">Ítems a Devolver & Condición Física</label>
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden max-h-48 overflow-y-auto">
                     <table className="w-full text-xs">
-                      <thead className="bg-gray-50 dark:bg-slate-800 uppercase text-[9px] font-black text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                      <thead className="bg-slate-50 dark:bg-slate-800 uppercase text-[9px] font-black text-slate-400 border-b border-slate-200 dark:border-slate-800">
                         <tr>
-                          <th className="p-2">Producto</th>
-                          <th className="p-2 text-center w-24">Cant. Dev.</th>
-                          <th className="p-2 text-center w-36">Condición</th>
-                          <th className="p-2 text-right">Subtotal</th>
+                          <th className="p-2.5">Producto</th>
+                          <th className="p-2.5 text-center w-24">Cant. Dev.</th>
+                          <th className="p-2.5 text-center w-36">Condición</th>
+                          <th className="p-2.5 text-right">Subtotal</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60 font-medium">
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                         {saleItems.map((item: any) => {
                           const sel = selectedItems[item.id] || { cantidad: 0, condicion: "buen_estado", motivo_detalle: "" }
                           return (
-                            <tr key={item.id} className="hover:bg-gray-50/50">
-                              <td className="p-2">
+                            <tr key={item.id} className="hover:bg-slate-50/50">
+                              <td className="p-2.5">
                                 <p className="font-bold">{item.product_name || item.descripcion || "Producto"}</p>
-                                <p className="text-[10px] text-gray-400 font-mono">Comprado: {item.cantidad} un. @ {formatPYG(item.precio_unitario)}</p>
+                                <p className="text-[10px] text-slate-400 font-mono">Comprado: {item.cantidad} un. @ {formatPYG(item.precio_unitario)}</p>
                               </td>
-                              <td className="p-2 text-center">
+                              <td className="p-2.5 text-center">
                                 <input
                                   type="number"
                                   min={0}
@@ -1105,24 +977,24 @@ export default function ReturnsPage() {
                                     ...prev,
                                     [item.id]: { ...prev[item.id], cantidad: Math.min(item.cantidad, Math.max(0, parseInt(e.target.value) || 0)) }
                                   }))}
-                                  className="w-16 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-lg p-1 text-center font-mono font-bold text-xs"
+                                  className="w-16 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 text-center font-mono font-bold text-xs"
                                 />
                               </td>
-                              <td className="p-2">
+                              <td className="p-2.5">
                                 <select
                                   value={sel.condicion}
                                   onChange={e => setSelectedItems(prev => ({
                                     ...prev,
                                     [item.id]: { ...prev[item.id], condicion: e.target.value }
                                   }))}
-                                  className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-lg p-1 text-[11px] font-bold"
+                                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 text-[11px] font-bold"
                                 >
                                   {Object.entries(CONDICION_LABELS).map(([k, v]) => (
                                     <option key={k} value={k}>{v}</option>
                                   ))}
                                 </select>
                               </td>
-                              <td className="p-2 text-right font-mono font-bold text-gray-900 dark:text-white">
+                              <td className="p-2.5 text-right font-mono font-bold text-slate-900 dark:text-white">
                                 {formatPYG(sel.cantidad * item.precio_unitario)}
                               </td>
                             </tr>
@@ -1134,14 +1006,13 @@ export default function ReturnsPage() {
                 </div>
               )}
 
-              {/* Motivo & Observaciones */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Motivo Principal *</label>
+                  <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Motivo Principal *</label>
                   <select
                     value={motivo}
                     onChange={e => setMotivo(e.target.value)}
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 text-xs font-bold"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-bold"
                   >
                     <option value="">Seleccionar motivo...</option>
                     {motivos.map(m => (
@@ -1151,29 +1022,29 @@ export default function ReturnsPage() {
                 </div>
 
                 <div>
-                  <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Observaciones / Auditoría</label>
+                  <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Observaciones / Auditoría</label>
                   <input
                     type="text"
                     value={motivoDetalle}
                     onChange={e => setMotivoDetalle(e.target.value)}
                     placeholder="Detalle adicional..."
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 text-xs font-medium"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-medium"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
               <button
                 onClick={() => { setShowCreate(false); resetCreateForm() }}
-                className="btn bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 font-bold text-xs px-4 py-2 rounded-xl"
+                className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleCreateReturn}
                 disabled={creating}
-                className="btn bg-primary text-white font-extrabold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm hover:opacity-90"
+                className="px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-rose-500/20 transition"
               >
                 {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
                 <span>{creating ? "Registrando..." : "Registrar Devolución"}</span>
@@ -1183,106 +1054,92 @@ export default function ReturnsPage() {
         </div>
       )}
 
-      {/* ── MODAL: VER DETALLE DEVOLUCIÓN CLIENTE ─────────────────────────── */}
+      {/* ── MODAL: VER DETALLE DEVOLUCIÓN CLIENTE ── */}
       {viewingReturn && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="card max-w-lg w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up my-8">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
-                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Devolución Nº {viewingReturn.numero}</h3>
-                <p className="text-xs text-gray-400 font-mono">Venta Origen: #{(viewingReturn as any).sale?.numero || viewingReturn.sale_id?.slice(0, 8)}</p>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Devolución Nº {viewingReturn.numero}</h3>
+                <p className="text-xs text-slate-400 font-mono">Venta Origen: #{(viewingReturn as any).sale?.numero || viewingReturn.sale_id?.slice(0, 8)}</p>
               </div>
-              <button onClick={() => setViewingReturn(null)} className="p-1 text-gray-400 hover:text-gray-600">
+              <button onClick={() => setViewingReturn(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="space-y-3 text-xs">
-              <div className="flex items-center justify-between">
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${STATUS_META[viewingReturn.estado || "pendiente"]?.class || ""}`}>
-                  {STATUS_META[viewingReturn.estado || "pendiente"]?.label || viewingReturn.estado}
-                </span>
-                <span className="text-gray-500 font-mono">{formatDate(viewingReturn.fecha)}</span>
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-1.5">
+                <div className="flex justify-between"><span className="text-slate-400">Cliente:</span><strong className="text-slate-900 dark:text-white">{(viewingReturn as any).customer?.razon_social || (viewingReturn as any).customer_name || "Cliente General"}</strong></div>
+                <div className="flex justify-between"><span className="text-slate-400">Motivo:</span><span className="font-bold text-rose-500">{motivoLabel(viewingReturn.motivo || "otro")}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Estado:</span><span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${STATUS_META[viewingReturn.estado || "pendiente"]?.class}`}>{STATUS_META[viewingReturn.estado || "pendiente"]?.label}</span></div>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Cliente:</span>
-                  <span className="font-bold text-gray-900 dark:text-white">{(viewingReturn as any).customer?.razon_social || "Consumidor Final"}</span>
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Productos Reintegrados</span>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {returnItems.map((item, idx) => (
+                    <div key={idx} className="py-2.5 flex justify-between">
+                      <div>
+                        <p className="font-bold text-slate-900 dark:text-white">{(item as any).product_name || (item as any).descripcion || "Producto"}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{item.cantidad ?? 1} un. · Condición: {condicionLabel(item.condicion || "buen_estado")}</p>
+                      </div>
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">{formatPYG(Number(item.total || ((item.cantidad || 0) * (item.precio_unitario || 0)) || 0))}</span>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Motivo:</span>
-                  <span className="font-bold text-gray-900 dark:text-white">{motivoLabel(viewingReturn.motivo || "otro")}</span>
-                </div>
-                {viewingReturn.motivo_detalle && (
-                  <div className="flex justify-between text-gray-500 italic">
-                    <span>Detalle:</span>
-                    <span>"{viewingReturn.motivo_detalle}"</span>
+              </div>
+
+              <div className="flex justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-sm font-black">
+                <span>Total Reintegrado:</span>
+                <span className="font-mono text-rose-600 dark:text-rose-400">{formatPYG(Number(viewingReturn.total || 0))}</span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button onClick={() => setViewingReturn(null)} className="px-5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: VER NOTA DE CRÉDITO PROVEEDOR ── */}
+      {viewingNc && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-emerald-600" />
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Nota de Crédito {viewingNc.numero}</h3>
+              </div>
+              <button onClick={() => setViewingNc(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-1.5">
+                <div className="flex justify-between"><span className="text-slate-400">Proveedor:</span><strong className="text-slate-900 dark:text-white">{viewingNc.supplier_nombre}</strong></div>
+                <div className="flex justify-between"><span className="text-slate-400">Factura Afectada:</span><span className="font-mono text-slate-700 dark:text-slate-300">#{viewingNc.numero_factura_origen || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Fecha:</span><span className="font-mono text-slate-700 dark:text-slate-300">{formatDate(viewingNc.fecha)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Motivo:</span><span className="font-bold text-emerald-600">{viewingNc.motivo}</span></div>
+                {viewingNc.observaciones && (
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700 text-slate-500 italic">
+                    "{viewingNc.observaciones}"
                   </div>
                 )}
               </div>
 
-              {viewingReturn.estado === "aprobado" && (
-                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
-                  <CheckCircle className="w-4 h-4 shrink-0" />
-                  <span className="text-xs font-semibold">Stock restaurado y disponible en inventario.</span>
-                </div>
-              )}
-
-              {/* Items */}
-              <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead className="bg-gray-50 dark:bg-slate-800 uppercase text-[9px] font-black text-gray-400 border-b border-gray-200 dark:border-gray-800">
-                    <tr>
-                      <th className="p-2.5">Producto</th>
-                      <th className="p-2.5 text-center">Condición</th>
-                      <th className="p-2.5 text-right">Cant.</th>
-                      <th className="p-2.5 text-right">P. Unitario</th>
-                      <th className="p-2.5 text-right">Subtotal</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
-                    {returnItems.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="p-4 text-center text-gray-400">
-                          <Loader2 className="w-4 h-4 animate-spin mx-auto mb-1 text-primary" />
-                          <span>Cargando detalle de ítems devueltos...</span>
-                        </td>
-                      </tr>
-                    ) : (
-                      returnItems.map((i: any) => (
-                        <tr key={i.id} className="hover:bg-gray-50/50">
-                          <td className="p-2.5">
-                            <p className="font-bold text-gray-900 dark:text-white">
-                              {i.product_name || i.descripcion || (i.producto && i.producto.nombre) || "Producto Registrado"}
-                            </p>
-                            <p className="text-[10px] text-gray-400 font-mono">
-                              {i.product_sku ? `SKU: ${i.product_sku}` : (i.product_id ? `ID: ${String(i.product_id).slice(0, 8)}` : "")}
-                            </p>
-                          </td>
-                          <td className="p-2.5 text-center">
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300">
-                              {condicionLabel(i.condicion || "buen_estado")}
-                            </span>
-                          </td>
-                          <td className="p-2.5 text-right font-mono font-bold">{Number(i.cantidad || 0)}</td>
-                          <td className="p-2.5 text-right font-mono text-gray-500">{formatPYG(Number(i.precio_unitario || 0))}</td>
-                          <td className="p-2.5 text-right font-mono font-black text-gray-900 dark:text-white">{formatPYG(Number(i.total || (i.cantidad * i.precio_unitario) || 0))}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex justify-between items-center pt-2 font-bold text-sm">
-                <span>Total Reintegrado:</span>
-                <span className="font-mono font-black text-primary text-base">{formatPYG(viewingReturn.total || 0)}</span>
+              <div className="flex justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-sm font-black">
+                <span>Monto a Favor:</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(Number(viewingNc.monto || 0))}</span>
               </div>
             </div>
 
-            <div className="flex justify-end pt-3 border-t border-gray-100 dark:border-gray-800">
-              <button onClick={() => setViewingReturn(null)} className="btn bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 text-xs px-4 py-2 rounded-xl font-bold">
+            <div className="pt-2 flex justify-end">
+              <button onClick={() => setViewingNc(null)} className="px-5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
                 Cerrar
               </button>
             </div>
@@ -1290,145 +1147,35 @@ export default function ReturnsPage() {
         </div>
       )}
 
-      {/* ── MODAL: VER DETALLE NOTA DE CRÉDITO PROVEEDOR ──────────────────── */}
-      {viewingNc && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="card max-w-md w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up my-8">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-              <div>
-                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Nota de Crédito Nº {viewingNc.numero}</h3>
-                <p className="text-xs text-gray-400 font-mono">Proveedor: {viewingNc.supplier_nombre}</p>
-              </div>
-              <button onClick={() => setViewingNc(null)} className="p-1 text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Fecha Emisión:</span>
-                  <span className="font-mono font-bold text-gray-900 dark:text-white">{formatDate(viewingNc.fecha)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Motivo / Concepto:</span>
-                  <span className="font-bold text-blue-600 dark:text-blue-400">{(viewingNc.motivo || "CREDITO").replace(/_/g, " ")}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Factura Afectada:</span>
-                  <span className="font-mono text-gray-700 dark:text-gray-300">{viewingNc.numero_factura_origen ? `#${viewingNc.numero_factura_origen}` : "Sin factura específica"}</span>
-                </div>
-                <div className="flex justify-between items-center pt-2 border-t border-gray-200 dark:border-gray-700">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Monto Acreditado:</span>
-                  <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-base">{formatPYG(Number(viewingNc.monto || 0))}</span>
-                </div>
-              </div>
-
-              {viewingNc.observaciones && (
-                <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-gray-700/50 text-gray-600 dark:text-gray-300">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Observaciones / Detalle:</span>
-                  <p className="italic">"{viewingNc.observaciones}"</p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end pt-3 border-t border-gray-100 dark:border-gray-800">
-              <button onClick={() => setViewingNc(null)} className="btn bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 text-xs px-4 py-2 rounded-xl font-bold">
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── MODAL: VER DETALLE DEVOLUCIÓN A PROVEEDOR ──────────────────────── */}
-      {viewingSupRet && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="card max-w-md w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up my-8">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-              <div>
-                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Devolución a Proveedor</h3>
-                <p className="text-xs text-gray-400 font-mono">Proveedor: {viewingSupRet.supplier_nombre}</p>
-              </div>
-              <button onClick={() => setViewingSupRet(null)} className="p-1 text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Nota de Crédito Vinculada:</span>
-                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{viewingSupRet.numero_nota_credito || "Pendiente"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Fecha Devolución:</span>
-                  <span className="font-mono font-bold text-gray-900 dark:text-white">{formatDate(viewingSupRet.fecha)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Factura Afectada:</span>
-                  <span className="font-mono text-gray-700 dark:text-gray-300">{viewingSupRet.numero_factura_origen ? `#${viewingSupRet.numero_factura_origen}` : "Sin factura específica"}</span>
-                </div>
-                <div className="flex justify-between items-center pt-2 border-t border-gray-200 dark:border-gray-700">
-                  <span className="text-gray-400 font-bold uppercase text-[10px]">Monto Devuelto:</span>
-                  <span className="font-mono font-black text-amber-600 dark:text-amber-400 text-base">{formatPYG(Number(viewingSupRet.monto || 0))}</span>
-                </div>
-              </div>
-
-              {viewingSupRet.observaciones && (
-                <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-gray-700/50 text-gray-600 dark:text-gray-300">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Observaciones / Motivo:</span>
-                  <p className="italic">"{viewingSupRet.observaciones}"</p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end pt-3 border-t border-gray-100 dark:border-gray-800">
-              <button onClick={() => setViewingSupRet(null)} className="btn bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 text-xs px-4 py-2 rounded-xl font-bold">
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── MODAL: RECHAZAR DEVOLUCIÓN CLIENTE ────────────────────────────── */}
+      {/* ── MODAL: RECHAZAR DEVOLUCIÓN ── */}
       {rejectModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="card max-w-sm w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-red-100 dark:bg-red-900/30 text-red-600">
-              <XCircle className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Rechazar Solicitud de Devolución</h3>
-              <p className="text-xs text-gray-400">Devolución {rejectModal.numero}</p>
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2.5 text-rose-600">
+              <AlertCircle className="w-6 h-6 shrink-0" />
+              <div>
+                <h3 className="font-black text-base text-slate-900 dark:text-white">Rechazar Devolución {rejectModal.numero}</h3>
+                <p className="text-[11px] text-slate-400">La mercadería no reingresará al stock comercial</p>
+              </div>
             </div>
 
             <div>
-              <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Motivo del Rechazo *</label>
+              <label className="text-[10px] font-bold text-slate-400 mb-1 block">Motivo del Rechazo *</label>
               <textarea
                 value={rejectReason}
                 onChange={e => setRejectReason(e.target.value)}
-                placeholder="Explicación del rechazo comercial..."
+                placeholder="Ej: Embalaje abierto, daño causado por el cliente..."
                 rows={3}
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs outline-none focus:border-red-500"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs outline-none focus:border-rose-500 text-slate-900 dark:text-white"
               />
             </div>
 
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={() => { setRejectModal(null); setRejectReason("") }}
-                className="btn bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 font-bold text-xs flex-1 py-2 rounded-xl"
-              >
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => { setRejectModal(null); setRejectReason("") }} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
                 Cancelar
               </button>
-              <button
-                onClick={handleReject}
-                disabled={processing === rejectModal.id}
-                className="btn bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-sm"
-              >
-                {processing === rejectModal.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
-                <span>Rechazar</span>
+              <button onClick={handleReject} disabled={!rejectReason.trim()} className="px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-md shadow-rose-600/20 transition">
+                Confirmar Rechazo
               </button>
             </div>
           </div>

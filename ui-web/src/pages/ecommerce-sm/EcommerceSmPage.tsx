@@ -1,16 +1,16 @@
-import { useState, useEffect } from "react"
-import { ShoppingCart, Package, MapPin, ClipboardList, CreditCard, Smartphone, Store, Truck, Clock, TrendingUp, CheckCircle, XCircle, Eye, Search, Loader2, ChevronRight, AlertCircle, User, Phone, Mail, Map as MapIcon, DollarSign, Calendar, Filter, Download, Zap, BarChart3, List, Scan, Gift } from "lucide-react"
-import { useToast } from "../../hooks/useToast"
+import React, { useState, useEffect } from "react"
+import {
+  ShoppingCart, Package, MapPin, ClipboardList, CreditCard, Smartphone, Store,
+  Truck, Clock, TrendingUp, CheckCircle, XCircle, Eye, Search, Loader2,
+  ChevronRight, AlertCircle, User, Phone, Mail, Map as MapIcon, DollarSign,
+  Calendar, Filter, Download, Zap, BarChart3, List, Scan, Gift, Sparkles,
+  RefreshCw, CheckCircle2, ShieldCheck, ArrowUpRight
+} from "lucide-react"
+import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
 import { api } from "../../api"
 
 type Tab = "dashboard" | "orders" | "catalog" | "picking" | "config"
-
-const DUMMY_BRANCHES = [
-  { id: "b001", name: "Suc. Central" },
-  { id: "b002", name: "Suc. Shopping" },
-  { id: "b003", name: "Suc. Centro" },
-]
 
 const DUMMY_PRODUCTS = [
   { id: "p1", name: "Arroz Tipo 1 5kg", price: 28500, stock: 45, aisle: "Pasillo 3", category: "Almacén", image: "🍚" },
@@ -28,12 +28,12 @@ const DUMMY_PRODUCTS = [
 ]
 
 const DUMMY_ORDERS = [
-  { id: "o1", order_number: "ECOMM-250604-0001", customer_name: "María González", customer_phone: "0981 123 456", order_type: "pickup", status: "confirmed", total: 128500, items_count: 4, branch_id: "b001", branch_name: "Suc. Central", pickup_slot: "18:00-20:00", created_at: "2026-06-04T10:30:00" },
-  { id: "o2", order_number: "ECOMM-250604-0002", customer_name: "Carlos Benítez", customer_phone: "0982 789 012", order_type: "delivery", status: "preparing", total: 87500, items_count: 3, branch_id: "b001", branch_name: "Suc. Central", delivery_address: "Avda. España 1234", created_at: "2026-06-04T11:00:00" },
-  { id: "o3", order_number: "ECOMM-250604-0003", customer_name: "Ana Martínez", customer_phone: "0983 456 789", order_type: "pickup", status: "ready", total: 234000, items_count: 7, branch_id: "b002", branch_name: "Suc. Shopping", pickup_slot: "16:00-18:00", created_at: "2026-06-04T09:15:00" },
-  { id: "o4", order_number: "ECOMM-250604-0004", customer_name: "Pedro Ramírez", customer_phone: "0984 567 890", order_type: "delivery", status: "in_transit", total: 56200, items_count: 2, branch_id: "b001", branch_name: "Suc. Central", delivery_address: "Calle Palma 567", created_at: "2026-06-04T08:00:00" },
-  { id: "o5", order_number: "ECOMM-250604-0005", customer_name: "Laura Villalba", customer_phone: "0985 678 901", order_type: "pickup", status: "delivered", total: 195000, items_count: 5, branch_id: "b003", branch_name: "Suc. Centro", pickup_slot: "10:00-12:00", created_at: "2026-06-04T07:00:00" },
-  { id: "o6", order_number: "ECOMM-250604-0006", customer_name: "Roberto Acosta", customer_phone: "0986 789 012", order_type: "delivery", status: "pending", total: 73500, items_count: 3, branch_id: "b002", branch_name: "Suc. Shopping", delivery_address: "Avda. San Martín 890", created_at: "2026-06-04T12:00:00" },
+  { id: "o1", order_number: "ECOMM-250604-0001", customer_name: "María González", customer_phone: "0981 123 456", order_type: "pickup", status: "confirmed", total: 128500, items_count: 4, branch_name: "Suc. Central", pickup_slot: "18:00-20:00", created_at: "2026-06-04T10:30:00" },
+  { id: "o2", order_number: "ECOMM-250604-0002", customer_name: "Carlos Benítez", customer_phone: "0982 789 012", order_type: "delivery", status: "preparing", total: 87500, items_count: 3, branch_name: "Suc. Central", delivery_address: "Avda. España 1234", created_at: "2026-06-04T11:00:00" },
+  { id: "o3", order_number: "ECOMM-250604-0003", customer_name: "Ana Martínez", customer_phone: "0983 456 789", order_type: "pickup", status: "ready", total: 234000, items_count: 7, branch_name: "Suc. Shopping", pickup_slot: "16:00-18:00", created_at: "2026-06-04T09:15:00" },
+  { id: "o4", order_number: "ECOMM-250604-0004", customer_name: "Pedro Ramírez", customer_phone: "0984 567 890", order_type: "delivery", status: "in_transit", total: 56200, items_count: 2, branch_name: "Suc. Central", delivery_address: "Calle Palma 567", created_at: "2026-06-04T08:00:00" },
+  { id: "o5", order_number: "ECOMM-250604-0005", customer_name: "Laura Villalba", customer_phone: "0985 678 901", order_type: "pickup", status: "delivered", total: 195000, items_count: 5, branch_name: "Suc. Centro", pickup_slot: "10:00-12:00", created_at: "2026-06-04T07:00:00" },
+  { id: "o6", order_number: "ECOMM-250604-0006", customer_name: "Roberto Acosta", customer_phone: "0986 789 012", order_type: "delivery", status: "pending", total: 73500, items_count: 3, branch_name: "Suc. Shopping", delivery_address: "Avda. San Martín 890", created_at: "2026-06-04T12:00:00" },
 ]
 
 const DUMMY_DASHBOARD = {
@@ -59,15 +59,14 @@ const DUMMY_DASHBOARD = {
   picking_in_progress: 1,
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
-  pending: { label: "Pendiente", color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400", icon: Clock },
-  confirmed: { label: "Confirmado", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400", icon: CheckCircle },
-  preparing: { label: "Preparando", color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400", icon: Package },
-  ready: { label: "Listo", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", icon: Gift },
-  picked_up: { label: "Retirado", color: "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400", icon: CheckCircle },
-  in_transit: { label: "En Camino", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400", icon: Truck },
-  delivered: { label: "Entregado", color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400", icon: CheckCircle },
-  cancelled: { label: "Cancelado", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400", icon: XCircle },
+const STATUS_CONFIG: Record<string, { label: string; class: string; icon: any }> = {
+  pending:    { label: "Pendiente",  class: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20", icon: Clock },
+  confirmed:  { label: "Confirmado", class: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20", icon: CheckCircle },
+  preparing:  { label: "Preparando", class: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20", icon: Package },
+  ready:      { label: "Listo Retiro", class: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20", icon: Gift },
+  in_transit: { label: "En Camino",  class: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20", icon: Truck },
+  delivered:  { label: "Entregado",  class: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20", icon: CheckCircle },
+  cancelled:  { label: "Cancelado",  class: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20", icon: XCircle },
 }
 
 const DUMMY_PICKING = [
@@ -81,10 +80,10 @@ const DUMMY_PICKING = [
 ]
 
 const DUMMY_DELIVERY_ZONES = [
-  { id: "z1", name: "Centro", base_price: 5000, price_per_km: 1500, free_from_amount: 150000, estimated_minutes: 20 },
-  { id: "z2", name: "Zona Norte", base_price: 8000, price_per_km: 2000, free_from_amount: 200000, estimated_minutes: 35 },
-  { id: "z3", name: "Zona Sur", base_price: 10000, price_per_km: 2500, free_from_amount: 250000, estimated_minutes: 40 },
-  { id: "z4", name: "San Lorenzo", base_price: 12000, price_per_km: 2000, free_from_amount: 300000, estimated_minutes: 45 },
+  { id: "z1", name: "Centro Santa Teresa", base_price: 5000, price_per_km: 1500, free_from_amount: 150000, estimated_minutes: 20 },
+  { id: "z2", name: "Zona Norte / Ycuá Satí", base_price: 8000, price_per_km: 2000, free_from_amount: 200000, estimated_minutes: 35 },
+  { id: "z3", name: "Zona Sur / Villa Morra", base_price: 10000, price_per_km: 2500, free_from_amount: 250000, estimated_minutes: 40 },
+  { id: "z4", name: "San Lorenzo / Luque", base_price: 12000, price_per_km: 2000, free_from_amount: 300000, estimated_minutes: 45 },
 ]
 
 const DUMMY_SLOTS = [
@@ -92,24 +91,28 @@ const DUMMY_SLOTS = [
   { id: "s2", branch_name: "Suc. Central", slot_date: "2026-06-04", start_time: "10:00", end_time: "12:00", max_orders: 10, current_orders: 9, available: 1 },
   { id: "s3", branch_name: "Suc. Central", slot_date: "2026-06-04", start_time: "14:00", end_time: "16:00", max_orders: 10, current_orders: 4, available: 6 },
   { id: "s4", branch_name: "Suc. Central", slot_date: "2026-06-04", start_time: "16:00", end_time: "18:00", max_orders: 10, current_orders: 2, available: 8 },
-  { id: "s5", branch_name: "Suc. Shopping", slot_date: "2026-06-04", start_time: "09:00", end_time: "12:00", max_orders: 8, current_orders: 5, available: 3 },
-  { id: "s6", branch_name: "Suc. Shopping", slot_date: "2026-06-04", start_time: "15:00", end_time: "18:00", max_orders: 8, current_orders: 1, available: 7 },
 ]
 
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending
   const Icon = cfg.icon
-  return <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${cfg.color}`}><Icon className="w-3 h-3" />{cfg.label}</span>
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${cfg.class}`}>
+      <Icon className="w-3 h-3" />
+      {cfg.label}
+    </span>
+  )
 }
 
 export default function EcommerceSmPage() {
+  const toast = useToast()
   const [tab, setTab] = useState<Tab>("dashboard")
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [orderFilter, setOrderFilter] = useState<string>("all")
   const [search, setSearch] = useState("")
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [showOrderDetail, setShowOrderDetail] = useState(false)
-  const toast = useToast()
+  const [refreshing, setRefreshing] = useState(false)
 
   const [dashboard, setDashboard] = useState<any>(DUMMY_DASHBOARD)
   const [orders, setOrders] = useState<any[]>(DUMMY_ORDERS)
@@ -135,6 +138,12 @@ export default function EcommerceSmPage() {
 
   useEffect(() => { fetchAll() }, [tab])
 
+  const handleManualRefresh = async () => {
+    setRefreshing(true)
+    await fetchAll()
+    setRefreshing(false)
+  }
+
   const filteredOrders = orders.filter(o => {
     if (orderFilter !== "all" && o.status !== orderFilter) return false
     if (search && !o.customer_name.toLowerCase().includes(search.toLowerCase()) && !o.order_number.toLowerCase().includes(search.toLowerCase())) return false
@@ -148,481 +157,445 @@ export default function EcommerceSmPage() {
 
   const categories = [...new Set(catalogProducts.map(p => p.category))]
 
-  const tabs: { k: Tab; l: string; i: any }[] = [
-    { k: "dashboard", l: "Dashboard", i: BarChart3 },
-    { k: "orders", l: "Órdenes", i: ShoppingCart },
-    { k: "catalog", l: "Catálogo", i: List },
-    { k: "picking", l: "Picking", i: Scan },
-    { k: "config", l: "Config.", i: Package },
+  const tabs = [
+    { k: "dashboard" as Tab, l: "Dashboard Ejecutivo", i: BarChart3 },
+    { k: "orders" as Tab, l: "Órdenes Online", i: ShoppingCart },
+    { k: "catalog" as Tab, l: "Góndola Digital", i: List },
+    { k: "picking" as Tab, l: "Picking & Packing", i: Scan },
+    { k: "config" as Tab, l: "Zonas & Slots", i: Package },
   ]
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-600 p-8 sm:p-12 shadow-2xl">
-        <div className="absolute top-0 right-0 -mt-16 -mr-16 w-80 h-80 bg-white opacity-10 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-0 left-0 -mb-16 -ml-16 w-56 h-56 bg-emerald-300 opacity-20 rounded-full blur-2xl"></div>
-        <div className="relative z-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 text-white text-xs font-bold tracking-wider uppercase mb-4 backdrop-blur-sm border border-white/10">
-            <ShoppingCart className="w-4 h-4" />
-            Fase 7 — Omnicanal
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950/90 text-white p-7 border border-teal-500/20 shadow-2xl shadow-teal-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-teal-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-teal-600 to-cyan-500 border border-teal-400/30 text-white flex items-center justify-center shadow-lg shadow-teal-500/25">
+                  <ShoppingCart className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-teal-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-teal-400 uppercase bg-teal-500/10 px-2.5 py-0.5 rounded-md border border-teal-500/20">
+                    CANAL DIGITAL · CLICK & COLLECT & DELIVERY
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                    {dashboard?.total_orders_today ?? 0} Órdenes Hoy ({formatPYG(dashboard?.total_revenue_today ?? 0)})
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  E-Commerce & Tienda Digital Supermercado
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Recepción de compras web/app, armado por pasillo (Picking & Packing) y control de flota de reparto
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-teal-300">
+                🛍️ {dashboard?.pickup_vs_delivery?.pickup ?? 0} Pickup Retiro
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-cyan-300">
+                🚚 {dashboard?.pickup_vs_delivery?.delivery ?? 0} Delivery Express
+              </span>
+            </div>
           </div>
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
-            <div>
-              <h1 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight drop-shadow-md">
-                E-commerce
-              </h1>
-              <p className="text-emerald-50 text-lg mt-3 font-medium max-w-xl opacity-90">
-                Tienda online con Click & Collect, Delivery, picking en tienda y pagos integrados
-              </p>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={handleManualRefresh}
+              disabled={refreshing}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Recargar
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ventas Web Hoy</span>
+              <span className="text-[10px] font-bold text-teal-400">Canal</span>
             </div>
-            <div className="flex gap-3">
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 p-3 rounded-2xl text-center min-w-[100px]">
-                <p className="text-white text-xs font-semibold uppercase tracking-wider opacity-80">Hoy</p>
-                <p className="text-white text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">{dashboard?.total_orders_today ?? 0}</p>
-              </div>
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 p-3 rounded-2xl text-center min-w-[100px]">
-                <p className="text-white text-xs font-semibold uppercase tracking-wider opacity-80">Semana</p>
-                <p className="text-white text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate">{dashboard?.total_orders_week ?? 0}</p>
-              </div>
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 p-3 rounded-2xl text-center min-w-[100px]">
-                <p className="text-white text-xs font-semibold uppercase tracking-wider opacity-80">Gs Prom.</p>
-                <p className="text-white text-lg font-bold">{formatPYG(dashboard?.avg_order_value ?? 0)}</p>
-              </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-teal-400">
+              {formatPYG(dashboard?.total_revenue_today ?? 0)}
+            </p>
+            <p className="text-[11px] text-slate-400">{dashboard?.total_orders_today ?? 0} tickets emitidos</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pendientes de Armado</span>
+              <span className="text-[10px] font-bold text-amber-400">Picking</span>
             </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {dashboard?.picking_pending ?? 0} <span className="text-sm font-semibold text-slate-400">pedidos</span>
+            </p>
+            <p className="text-[11px] text-slate-400">Requieren colecta en pasillo</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">En Ruta / Delivery</span>
+              <span className="text-[10px] font-bold text-cyan-400">Tránsito</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-cyan-300">
+              {dashboard?.in_transit_orders ?? 0} <span className="text-sm font-semibold text-slate-400">motos</span>
+            </p>
+            <p className="text-[11px] text-slate-400">Entregas en curso</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ticket Promedio Online</span>
+              <span className="text-[10px] font-mono text-emerald-400">AOV</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(dashboard?.avg_order_value ?? 0)}
+            </p>
+            <p className="text-[11px] text-slate-400">Monto medio por carrito</p>
           </div>
         </div>
       </div>
 
-      <div className="flex gap-1.5 bg-gray-100/50 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-1.5 w-full overflow-x-auto scrollbar-hide shadow-inner">
-        {tabs.map(t => (
-          <button key={t.k} onClick={() => setTab(t.k)}
-            className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 whitespace-nowrap relative overflow-hidden ${
-              tab === t.k
-                ? "bg-white dark:bg-slate-700 text-primary dark:text-blue-400 shadow-md ring-1 ring-black/5 dark:ring-white/10 scale-100"
-                : "text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200/50 dark:hover:bg-slate-700/50 hover:scale-[1.02]"
-            }`}>
-            {tab === t.k && <div className="absolute inset-0 bg-gradient-to-r from-primary/10 to-transparent opacity-50" />}
-            <t.i className={`w-3.5 h-3.5 relative z-10 ${tab === t.k ? "scale-110" : ""}`} />
-            <span className="relative z-10">{t.l}</span>
-          </button>
-        ))}
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {tabs.map(t => {
+          const Icon = t.i
+          const active = tab === t.k
+          return (
+            <button
+              key={t.k}
+              onClick={() => setTab(t.k)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.l}</span>
+            </button>
+          )
+        })}
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-      ) : (
-        <>
-          {tab === "dashboard" && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-                {[
-                  { icon: Clock, label: "Pendientes", value: dashboard?.pending_orders ?? 0, color: "text-yellow-500" },
-                  { icon: Package, label: "Preparando", value: dashboard?.preparing_orders ?? 0, color: "text-indigo-500" },
-                  { icon: Gift, label: "Listos", value: dashboard?.ready_orders ?? 0, color: "text-emerald-500" },
-                  { icon: Truck, label: "En Camino", value: dashboard?.in_transit_orders ?? 0, color: "text-orange-500" },
-                  { icon: CheckCircle, label: "Hoy Entreg.", value: dashboard?.delivered_today ?? 0, color: "text-green-500" },
-                  { icon: ClipboardList, label: "Picking Pend.", value: dashboard?.picking_pending ?? 0, color: "text-rose-500" },
-                  { icon: Zap, label: "Picking Prog.", value: dashboard?.picking_in_progress ?? 0, color: "text-violet-500" },
-                  { icon: DollarSign, label: "Gs Hoy", value: formatPYG(dashboard?.total_revenue_today ?? 0), color: "text-primary" },
-                ].map((s, i) => (
-                  <div key={i} className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 shadow-sm text-center">
-                    <s.icon className={`w-5 h-5 mx-auto mb-1 ${s.color}`} />
-                    <p className="text-lg font-bold">{typeof s.value === "number" ? s.value : s.value}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{s.label}</p>
+      {/* ══════════════════════ SUBTABS ══════════════════════ */}
+      {tab === "dashboard" && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3">
+              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-teal-500" />
+                Órdenes Digitales Recientes
+              </h3>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                {dashboard?.recent_orders?.slice(0, 5).map((o: any) => (
+                  <div
+                    key={o.id}
+                    className="flex items-center justify-between py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl px-2 transition cursor-pointer"
+                    onClick={() => { setSelectedOrder(o); setShowOrderDetail(true) }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-2xl flex items-center justify-center ${o.order_type === "pickup" ? "bg-blue-500/10 text-blue-600" : "bg-orange-500/10 text-orange-600"}`}>
+                        {o.order_type === "pickup" ? <Store className="w-4 h-4" /> : <Truck className="w-4 h-4" />}
+                      </div>
+                      <div>
+                        <p className="font-bold text-xs text-slate-900 dark:text-white">{o.customer_name}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{o.order_number} · {o.branch_name}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <StatusBadge status={o.status} />
+                      <span className="font-mono font-black text-xs text-slate-900 dark:text-white">{formatPYG(o.total)}</span>
+                      <ChevronRight className="w-4 h-4 text-slate-400" />
+                    </div>
                   </div>
                 ))}
               </div>
+            </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="lg:col-span-2 bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-5 shadow-sm">
-                  <h3 className="font-bold text-base mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-primary" />Órdenes Recientes</h3>
-                  <div className="space-y-2">
-                    {dashboard?.recent_orders?.slice(0, 5).map((o: any) => (
-                      <div key={o.id} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors cursor-pointer border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
-                        onClick={() => { setSelectedOrder(o); setShowOrderDetail(true) }}>
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base ${o.order_type === "pickup" ? "bg-blue-100 dark:bg-blue-900/30" : "bg-orange-100 dark:bg-orange-900/30"}`}>
-                            {o.order_type === "pickup" ? <Store className="w-4 h-4 text-blue-600" /> : <Truck className="w-4 h-4 text-orange-600" />}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-semibold text-sm truncate">{o.customer_name}</p>
-                            <p className="text-xs text-gray-400 truncate">{o.order_number} · {o.branch_name}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          <StatusBadge status={o.status} />
-                          <span className="text-sm font-bold">{formatPYG(o.total)}</span>
-                          <ChevronRight className="w-4 h-4 text-gray-300" />
-                        </div>
-                      </div>
-                    ))}
+            <div className="space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3">
+                <h3 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <ShoppingCart className="w-4 h-4 text-teal-500" />
+                  Pickup vs. Delivery Express
+                </h3>
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between text-slate-500"><span className="font-bold">🛍️ Retiro en Tienda</span><strong className="font-mono">{dashboard?.pickup_vs_delivery?.pickup ?? 0}</strong></div>
+                  <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${((dashboard?.pickup_vs_delivery?.pickup ?? 0) / ((dashboard?.pickup_vs_delivery?.pickup ?? 0) + (dashboard?.pickup_vs_delivery?.delivery ?? 0) || 1)) * 100}%` }} />
                   </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-5 shadow-sm">
-                    <h3 className="font-bold text-sm mb-3 flex items-center gap-2"><ShoppingCart className="w-4 h-4 text-primary" />Pickup vs Delivery</h3>
-                    <div className="flex items-center gap-4">
-                      <div className="flex-1">
-                        <div className="flex justify-between text-xs text-gray-500 mb-1"><span>🛍️ Pickup</span><span className="font-bold">{(dashboard?.pickup_vs_delivery?.pickup ?? 0)}</span></div>
-                        <div className="h-2.5 bg-gray-200 dark:bg-slate-600 rounded-full overflow-hidden">
-                          <div className="h-full bg-blue-500 rounded-full" style={{ width: `${((dashboard?.pickup_vs_delivery?.pickup ?? 0) / ((dashboard?.pickup_vs_delivery?.pickup ?? 0) + (dashboard?.pickup_vs_delivery?.delivery ?? 0) || 1)) * 100}%` }}></div>
-                        </div>
-                        <div className="flex justify-between text-xs text-gray-500 mt-2"><span>🚚 Delivery</span><span className="font-bold">{(dashboard?.pickup_vs_delivery?.delivery ?? 0)}</span></div>
-                        <div className="h-2.5 bg-gray-200 dark:bg-slate-600 rounded-full overflow-hidden">
-                          <div className="h-full bg-orange-500 rounded-full" style={{ width: `${((dashboard?.pickup_vs_delivery?.delivery ?? 0) / ((dashboard?.pickup_vs_delivery?.pickup ?? 0) + (dashboard?.pickup_vs_delivery?.delivery ?? 0) || 1)) * 100}%` }}></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-5 shadow-sm">
-                    <h3 className="font-bold text-sm mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-primary" />Top Productos</h3>
-                    <div className="space-y-2">
-                      {dashboard?.top_products?.map((p: any, i: number) => (
-                        <div key={i} className="flex items-center gap-2 text-sm">
-                          <span className="w-5 h-5 rounded-full bg-gray-100 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-gray-500">{i + 1}</span>
-                          <span className="flex-1 truncate">{p.product_name}</span>
-                          <span className="font-bold text-xs">{p.total_quantity} un</span>
-                        </div>
-                      ))}
-                    </div>
+                  <div className="flex justify-between text-slate-500 pt-1"><span className="font-bold">🚚 Delivery con Moto</span><strong className="font-mono">{dashboard?.pickup_vs_delivery?.delivery ?? 0}</strong></div>
+                  <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-orange-500 rounded-full" style={{ width: `${((dashboard?.pickup_vs_delivery?.delivery ?? 0) / ((dashboard?.pickup_vs_delivery?.pickup ?? 0) + (dashboard?.pickup_vs_delivery?.delivery ?? 0) || 1)) * 100}%` }} />
                   </div>
                 </div>
               </div>
-            </div>
-          )}
 
-          {tab === "orders" && (
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2 items-center">
-                <div className="relative flex-1 min-w-[200px] max-w-xs">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar orden..." className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none" />
-                </div>
-                <div className="flex gap-1.5 flex-wrap">
-                  {["all", "pending", "confirmed", "preparing", "ready", "in_transit", "delivered", "cancelled"].map(s => (
-                    <button key={s} onClick={() => setOrderFilter(s)}
-                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                        orderFilter === s
-                          ? "bg-primary text-white shadow-md"
-                          : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200"
-                      }`}>
-                      {s === "all" ? "Todas" : (STATUS_CONFIG[s]?.label ?? s)}
-                    </button>
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3">
+                <h3 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-teal-500" />
+                  Top Productos Vendidos Online
+                </h3>
+                <div className="space-y-2 text-xs">
+                  {dashboard?.top_products?.map((p: any, i: number) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-500">{i + 1}</span>
+                      <span className="flex-1 truncate font-medium text-slate-800 dark:text-slate-200">{p.product_name}</span>
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">{p.total_quantity} un</span>
+                    </div>
                   ))}
                 </div>
               </div>
-
-              <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-slate-800/50">
-                        <th className="text-left py-3.5 px-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">Orden</th>
-                        <th className="text-left py-3.5 px-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">Cliente</th>
-                        <th className="text-left py-3.5 px-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">Tipo</th>
-                        <th className="text-left py-3.5 px-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">Estado</th>
-                        <th className="text-left py-3.5 px-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">Sucursal</th>
-                        <th className="text-right py-3.5 px-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">Total</th>
-                        <th className="text-center py-3.5 px-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredOrders.map((o, i) => (
-                        <tr key={o.id} className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30 transition-colors">
-                          <td className="py-3.5 px-4">
-                            <p className="font-medium text-xs text-gray-500">{o.order_number}</p>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-blue-500 flex items-center justify-center text-white text-xs font-bold">
-                                {o.customer_name.charAt(0)}
-                              </div>
-                              <div>
-                                <p className="font-semibold text-sm">{o.customer_name}</p>
-                                <p className="text-xs text-gray-400">{o.customer_phone}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <span className={`inline-flex items-center gap-1 text-xs font-bold ${o.order_type === "pickup" ? "text-blue-600" : "text-orange-600"}`}>
-                              {o.order_type === "pickup" ? <Store className="w-3 h-3" /> : <Truck className="w-3 h-3" />}
-                              {o.order_type === "pickup" ? "Pickup" : "Delivery"}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4"><StatusBadge status={o.status} /></td>
-                          <td className="py-3.5 px-4 text-sm">{o.branch_name}</td>
-                          <td className="py-3.5 px-4 text-right font-bold">{formatPYG(o.total)}</td>
-                          <td className="py-3.5 px-4 text-center">
-                            <button onClick={() => { setSelectedOrder(o); setShowOrderDetail(true) }}
-                              className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400 hover:bg-primary hover:text-white text-xs font-bold transition-all">
-                              <Eye className="w-3.5 h-3.5 inline mr-1" />Ver
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {showOrderDetail && selectedOrder && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowOrderDetail(false)}>
-                  <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center justify-between mb-5">
-                      <div>
-                        <h3 className="text-lg font-bold">{selectedOrder.order_number}</h3>
-                        <p className="text-xs text-gray-400">{new Date(selectedOrder.created_at).toLocaleString("es-PY")}</p>
-                      </div>
-                      <StatusBadge status={selectedOrder.status} />
-                    </div>
-
-                    <div className="flex items-center gap-3 mb-5 p-3 bg-gray-50 dark:bg-slate-700/50 rounded-xl">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-blue-500 flex items-center justify-center text-white font-bold text-sm">
-                        {selectedOrder.customer_name.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="font-semibold">{selectedOrder.customer_name}</p>
-                        <p className="text-xs text-gray-400 flex items-center gap-1"><Phone className="w-3 h-3" />{selectedOrder.customer_phone}</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 mb-5">
-                      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
-                        <p className="text-xs text-gray-500">Tipo</p>
-                        <p className="font-bold text-sm flex items-center gap-1">{selectedOrder.order_type === "pickup" ? <Store className="w-3.5 h-3.5" /> : <Truck className="w-3.5 h-3.5" />}
-                          {selectedOrder.order_type === "pickup" ? "Recoger en tienda" : "Delivery"}</p>
-                      </div>
-                      <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
-                        <p className="text-xs text-gray-500">Total</p>
-                        <p className="font-bold text-sm">{formatPYG(selectedOrder.total)}</p>
-                      </div>
-                    </div>
-
-                    {selectedOrder.pickup_slot && (
-                      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl mb-4 flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-yellow-600" />
-                        <span className="text-sm">Retiro: <strong>{selectedOrder.pickup_slot}</strong> · {selectedOrder.branch_name}</span>
-                      </div>
-                    )}
-
-                    {selectedOrder.delivery_address && (
-                      <div className="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-xl mb-4 flex items-center gap-2">
-                        <MapIcon className="w-4 h-4 text-orange-600" />
-                        <span className="text-sm">Entrega: <strong>{selectedOrder.delivery_address}</strong></span>
-                      </div>
-                    )}
-
-                    <div className="p-3 bg-gray-50 dark:bg-slate-700/50 rounded-xl flex justify-between text-sm mb-5">
-                      <span className="text-gray-500">{selectedOrder.items_count} productos</span>
-                      <span className="font-bold">{selectedOrder.branch_name}</span>
-                    </div>
-
-                    <div className="flex gap-2">
-                      {selectedOrder.status === "confirmed" && (
-                        <button onClick={() => toast.success("Orden enviada a preparación")} className="flex-1 btn-primary text-sm">Iniciar Preparación</button>
-                      )}
-                      {selectedOrder.status === "preparing" && (
-                        <button onClick={() => toast.success("Orden marcada como lista")} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium py-2">Marcar Listo</button>
-                      )}
-                      <button onClick={() => setShowOrderDetail(false)} className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-200">Cerrar</button>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
-          )}
+          </div>
+        </div>
+      )}
 
-          {tab === "catalog" && (
-            <div className="space-y-4">
-              <div className="flex gap-2 flex-wrap">
-                <button onClick={() => setCatalogCategory("all")}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${catalogCategory === "all" ? "bg-primary text-white shadow-md" : "bg-gray-100 dark:bg-slate-800 text-gray-600 hover:bg-gray-200"}`}>
-                  Todos ({catalogProducts.length})
+      {tab === "orders" && (
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Buscar por cliente o número de orden web..."
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-900 dark:text-white outline-none"
+              />
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {["all", "pending", "confirmed", "preparing", "ready", "in_transit", "delivered"].map(s => (
+                <button
+                  key={s}
+                  onClick={() => setOrderFilter(s)}
+                  className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all ${
+                    orderFilter === s
+                      ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm"
+                      : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                  }`}
+                >
+                  {s === "all" ? "Todas" : (STATUS_CONFIG[s]?.label ?? s)}
                 </button>
-                {categories.map(c => (
-                  <button key={c} onClick={() => setCatalogCategory(c)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${catalogCategory === c ? "bg-primary text-white shadow-md" : "bg-gray-100 dark:bg-slate-800 text-gray-600 hover:bg-gray-200"}`}>
-                    {c} ({catalogProducts.filter(p => p.category === c).length})
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {filteredCatalog.map((p, i) => (
-                  <div key={i} className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all group">
-                    <div className="text-5xl mb-3 text-center">{p.image}</div>
-                    <h3 className="font-bold text-sm mb-1 truncate">{p.name}</h3>
-                    <p className="text-xs text-gray-400 mb-1">{p.category} · {p.aisle}</p>
-                    <div className="flex items-center justify-between mt-3">
-                      <p className="font-extrabold text-lg text-primary">{formatPYG(p.price)}</p>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${p.stock > 20 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
-                        {p.stock} un
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              ))}
             </div>
-          )}
+          </div>
 
-          {tab === "picking" && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {pickingLists.map((pl, i) => (
-                  <div key={pl.id}
-                    className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-5 shadow-sm cursor-pointer hover:shadow-md transition-all"
-                    onClick={() => { setSelectedPicking(pl); setShowPickingDetail(true) }}>
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <p className="font-bold text-sm">{pl.order_number}</p>
-                        <p className="text-xs text-gray-400">{pl.customer_name}</p>
-                      </div>
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                        pl.status === "in_progress" ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400" :
-                        pl.status === "completed" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
-                        "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                      }`}>
-                        {pl.status === "in_progress" ? "🔄 En Progreso" : pl.status === "completed" ? "✅ Completado" : "⏳ Pendiente"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm mb-3">
-                      <span className="text-gray-500"><Store className="w-3.5 h-3.5 inline mr-1" />{pl.branch_name}</span>
-                      {pl.assigned_to && <span className="text-gray-500"><User className="w-3.5 h-3.5 inline mr-1" />{pl.assigned_to}</span>}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-3 bg-gray-200 dark:bg-slate-600 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-primary transition-all" style={{ width: `${pl.total_items > 0 ? (pl.picked_items / pl.total_items) * 100 : 0}%` }}></div>
-                      </div>
-                      <span className="text-xs font-bold shrink-0">{pl.picked_items}/{pl.total_items}</span>
-                    </div>
-                  </div>
-                ))}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-4">Orden Web</th>
+                    <th className="p-4">Cliente</th>
+                    <th className="p-4">Modalidad</th>
+                    <th className="p-4 text-center">Estado</th>
+                    <th className="p-4">Sucursal</th>
+                    <th className="p-4 text-right">Total</th>
+                    <th className="p-4 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {filteredOrders.map((o) => (
+                    <tr key={o.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                      <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">{o.order_number}</td>
+                      <td className="p-4">
+                        <p className="font-bold text-slate-900 dark:text-white">{o.customer_name}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{o.customer_phone}</p>
+                      </td>
+                      <td className="p-4">
+                        <span className={`inline-flex items-center gap-1 font-bold ${o.order_type === "pickup" ? "text-blue-500" : "text-orange-500"}`}>
+                          {o.order_type === "pickup" ? <Store className="w-3.5 h-3.5" /> : <Truck className="w-3.5 h-3.5" />}
+                          {o.order_type === "pickup" ? "Pickup" : "Delivery"}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center"><StatusBadge status={o.status} /></td>
+                      <td className="p-4 text-slate-500">{o.branch_name}</td>
+                      <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white">{formatPYG(o.total)}</td>
+                      <td className="p-4 text-center">
+                        <button
+                          onClick={() => { setSelectedOrder(o); setShowOrderDetail(true) }}
+                          className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-teal-50 hover:text-teal-600 dark:hover:bg-teal-950/40 font-bold transition"
+                        >
+                          <Eye className="w-3.5 h-3.5 inline mr-1" />Ver
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: VER DETALLE DE ORDEN ── */}
+      {showOrderDetail && selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm" onClick={() => setShowOrderDetail(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white">{selectedOrder.order_number}</h3>
+                <p className="text-[11px] text-slate-400 font-mono">{new Date(selectedOrder.created_at).toLocaleString("es-PY")}</p>
               </div>
+              <StatusBadge status={selectedOrder.status} />
+            </div>
 
-              {showPickingDetail && selectedPicking && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowPickingDetail(false)}>
-                  <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center justify-between mb-5">
-                      <div>
-                        <h3 className="text-lg font-bold">Picking: {selectedPicking.order_number}</h3>
-                        <p className="text-sm text-gray-500">{selectedPicking.customer_name} · {selectedPicking.branch_name}</p>
-                      </div>
-                      <span className="text-sm font-bold">{selectedPicking.picked_items}/{selectedPicking.total_items}</span>
-                    </div>
-
-                    <div className="w-full h-3 bg-gray-200 dark:bg-slate-600 rounded-full overflow-hidden mb-6">
-                      <div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-primary transition-all" style={{ width: `${selectedPicking.total_items > 0 ? (selectedPicking.picked_items / selectedPicking.total_items) * 100 : 0}%` }}></div>
-                    </div>
-
-                    <div className="space-y-2">
-                      {(selectedPicking.items || []).map((item: any, idx: number) => (
-                        <div key={idx} className={`p-3 rounded-xl border transition-all ${item.scanned ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700/30" : item.status === "partial" ? "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-700/30" : "bg-gray-50 dark:bg-slate-700/50 border-gray-200 dark:border-gray-700"}`}>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm ${item.scanned ? "bg-green-200 text-green-700" : item.status === "partial" ? "bg-yellow-200 text-yellow-700" : "bg-gray-200 text-gray-500"}`}>
-                                {item.scanned ? "✓" : item.status === "partial" ? "◐" : "○"}
-                              </div>
-                              <div>
-                                <p className="font-semibold text-sm">{item.product_name}</p>
-                                <p className="text-xs text-gray-400">{item.aisle_location}</p>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-bold text-sm">{item.picked_quantity}/{item.quantity}</p>
-                              <button onClick={(e) => { e.stopPropagation(); toast.success(`${item.product_name} escaneado!`) }}
-                                className="text-xs text-primary hover:underline font-semibold">Escanear</button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex gap-2 mt-6">
-                      {selectedPicking.status === "pending" && (
-                        <button onClick={() => { toast.success("Picking asignado") }} className="flex-1 btn-primary text-sm">Asignar a Empleado</button>
-                      )}
-                      {selectedPicking.status === "in_progress" && (
-                        <button onClick={() => { toast.success("Picking completado!") }} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium py-2">Completar Picking</button>
-                      )}
-                      <button onClick={() => setShowPickingDetail(false)} className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400 text-sm font-medium">Cerrar</button>
-                    </div>
-                  </div>
-                </div>
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-2 text-xs">
+              <div className="flex justify-between"><span className="text-slate-400">Cliente:</span><strong className="text-slate-900 dark:text-white">{selectedOrder.customer_name}</strong></div>
+              <div className="flex justify-between"><span className="text-slate-400">Teléfono:</span><span className="font-mono text-slate-700 dark:text-slate-300">{selectedOrder.customer_phone}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Modalidad:</span><span className="font-bold uppercase text-teal-600">{selectedOrder.order_type}</span></div>
+              {selectedOrder.delivery_address && (
+                <div className="flex justify-between"><span className="text-slate-400">Dirección:</span><span className="text-slate-700 dark:text-slate-300">{selectedOrder.delivery_address}</span></div>
               )}
             </div>
-          )}
 
-          {tab === "config" && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-5 shadow-sm">
-                  <h3 className="font-bold text-base mb-4 flex items-center gap-2"><MapPin className="w-4 h-4 text-primary" />Zonas de Delivery</h3>
-                  <div className="space-y-3">
-                    {deliveryZones.map((z, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-slate-700/50 rounded-xl border border-gray-200/50 dark:border-gray-700/30">
-                        <div>
-                          <p className="font-semibold text-sm">{z.name}</p>
-                          <p className="text-xs text-gray-400">{z.estimated_minutes} min estimados</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-bold text-sm">Gs {formatPYG(z.base_price)} + {formatPYG(z.price_per_km)}/km</p>
-                          <p className="text-xs text-gray-400">Gratis desde {formatPYG(z.free_from_amount)}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-5 shadow-sm">
-                  <h3 className="font-bold text-base mb-4 flex items-center gap-2"><Calendar className="w-4 h-4 text-primary" />Slots de Pickup — Hoy</h3>
-                  <div className="space-y-2">
-                    {pickupSlots.slice(0, 4).map((s, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 rounded-xl border border-gray-200/50 dark:border-gray-700/30">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-sm font-bold text-blue-600">
-                            {s.start_time}
-                          </div>
-                          <div>
-                            <p className="font-semibold text-sm">{s.branch_name}</p>
-                            <p className="text-xs text-gray-400">{s.start_time} - {s.end_time}</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className={`font-bold text-sm ${s.available <= 2 ? "text-red-500" : s.available <= 5 ? "text-yellow-500" : "text-green-500"}`}>
-                            {s.available} libres
-                          </p>
-                          <p className="text-xs text-gray-400">de {s.max_orders}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-5 shadow-sm">
-                <h3 className="font-bold text-base mb-4 flex items-center gap-2"><CreditCard className="w-4 h-4 text-primary" />Métodos de Pago</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[
-                    { name: "Pagopar", icon: "💳", active: true },
-                    { name: "Kuapay", icon: "📱", active: true },
-                    { name: "Bancard", icon: "🏦", active: true },
-                    { name: "SPI/QR", icon: "📲", active: true },
-                    { name: "Delivery POS", icon: "🖨️", active: true, desc: "POS inalámbrico contra entrega" },
-                    { name: "Efectivo", icon: "💰", active: true, desc: "Solo pickup" },
-                  ].map((m, i) => (
-                    <div key={i} className={`p-3 rounded-xl border text-center ${m.active ? "bg-gray-50 dark:bg-slate-700/50 border-gray-200 dark:border-gray-700" : "bg-gray-100 dark:bg-slate-800 border-gray-200 dark:border-gray-700 opacity-50"}`}>
-                      <span className="text-2xl block mb-1">{m.icon}</span>
-                      <p className="font-bold text-sm">{m.name}</p>
-                      {m.desc && <p className="text-[10px] text-gray-400 mt-0.5">{m.desc}</p>}
-                    </div>
-                  ))}
-                </div>
-              </div>
+            <div className="flex justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-sm font-black">
+              <span>Total Pedido:</span>
+              <span className="font-mono text-teal-600 dark:text-teal-400">{formatPYG(selectedOrder.total)}</span>
             </div>
-          )}
-        </>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowOrderDetail(false)} className="px-5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "catalog" && (
+        <div className="space-y-4">
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => setCatalogCategory("all")}
+              className={`px-3 py-1.5 rounded-2xl text-xs font-bold transition-all ${
+                catalogCategory === "all" ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "bg-slate-100 dark:bg-slate-800 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Todos ({catalogProducts.length})
+            </button>
+            {categories.map(c => (
+              <button
+                key={c}
+                onClick={() => setCatalogCategory(c)}
+                className={`px-3 py-1.5 rounded-2xl text-xs font-bold transition-all ${
+                  catalogCategory === c ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "bg-slate-100 dark:bg-slate-800 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {c} ({catalogProducts.filter(p => p.category === c).length})
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {filteredCatalog.map((p, i) => (
+              <div key={i} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-2">
+                <div className="text-4xl text-center py-2">{p.image}</div>
+                <h4 className="font-extrabold text-sm text-slate-900 dark:text-white truncate">{p.name}</h4>
+                <p className="text-[11px] text-slate-400">{p.category} · {p.aisle}</p>
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <span className="font-mono font-black text-sm text-teal-600 dark:text-teal-400">{formatPYG(p.price)}</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600">{p.stock} un</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "picking" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {pickingLists.map((pl) => (
+              <div
+                key={pl.id}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3 cursor-pointer hover:border-teal-500 transition"
+                onClick={() => { setSelectedPicking(pl); setShowPickingDetail(true) }}
+              >
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">{pl.order_number}</h4>
+                    <p className="text-xs text-slate-400">{pl.customer_name}</p>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/10 text-purple-600 border border-purple-500/20">
+                    {pl.status === "in_progress" ? "🔄 En Colecta" : "⏳ Pendiente"}
+                  </span>
+                </div>
+                <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-teal-500 rounded-full" style={{ width: `${pl.total_items > 0 ? (pl.picked_items / pl.total_items) * 100 : 0}%` }} />
+                </div>
+                <div className="flex justify-between text-xs text-slate-500 font-mono">
+                  <span>Progreso: {pl.picked_items} / {pl.total_items} ítems</span>
+                  <span>{pl.branch_name}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "config" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3">
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-teal-500" />
+              Zonas de Reparto & Tarifas Delivery
+            </h3>
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {deliveryZones.map((z, i) => (
+                <div key={i} className="py-3 flex justify-between items-center text-xs">
+                  <div>
+                    <p className="font-bold text-slate-900 dark:text-white">{z.name}</p>
+                    <p className="text-[10px] text-slate-400">{z.estimated_minutes} min tiempo estimado</p>
+                  </div>
+                  <div className="text-right font-mono">
+                    <p className="font-bold text-teal-600">{formatPYG(z.base_price)} base</p>
+                    <p className="text-[10px] text-slate-400">Gratis &gt; {formatPYG(z.free_from_amount)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3">
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-teal-500" />
+              Franjas de Retiro (Pickup Slots)
+            </h3>
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {pickupSlots.map((s, i) => (
+                <div key={i} className="py-3 flex justify-between items-center text-xs">
+                  <div>
+                    <p className="font-bold text-slate-900 dark:text-white">{s.start_time} - {s.end_time}</p>
+                    <p className="text-[10px] text-slate-400">{s.branch_name}</p>
+                  </div>
+                  <span className="font-mono font-bold text-emerald-600">{s.available} cupos libres</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

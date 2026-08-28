@@ -3,7 +3,9 @@ import {
   Search, Plus, Eye, X, Loader2, CheckCircle,
   XCircle, Truck, FileText, Check, Ban,
   ShoppingCart, Clock, RefreshCw,
-  TrendingUp, DollarSign, User, Award, RotateCcw, Receipt
+  TrendingUp, DollarSign, User, Award, RotateCcw, Receipt,
+  FileSpreadsheet, ArrowUpRight, Sparkles, Filter, ChevronRight,
+  ShieldCheck, AlertTriangle
 } from "lucide-react"
 import { api, type SalesOrder, type Quote, type Customer, type Product } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -15,29 +17,29 @@ import { formatPYG, formatDate } from "../../utils/format"
    METADATOS DE ESTADOS (ESTILO FACTURACIÓN)
 ═══════════════════════════════════════════════════════════════════════ */
 const ORDER_STATUS_META: Record<string, { label: string; class: string }> = {
-  borrador:             { label: "Borrador",          class: "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700" },
+  borrador:             { label: "Borrador",          class: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700" },
   pendiente_aprobacion: { label: "Pend. Aprobación",  class: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" },
   aprobado:             { label: "Aprobado",          class: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20" },
   en_preparacion:       { label: "En Preparación",    class: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20" },
   listo:                { label: "Listo para Despacho", class: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20" },
   facturado:            { label: "Facturado",         class: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" },
   completado:           { label: "Completado",        class: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" },
-  cancelado:            { label: "Cancelado",         class: "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20" },
-  rechazado:            { label: "Rechazado",         class: "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20" },
+  cancelado:            { label: "Cancelado",         class: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20" },
+  rechazado:            { label: "Rechazado",         class: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20" },
 }
 
 const QUOTE_STATUS_META: Record<string, { label: string; class: string }> = {
   vigente:    { label: "Vigente",    class: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" },
   aceptada:   { label: "Aceptada",   class: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20" },
-  rechazada:  { label: "Rechazada",  class: "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20" },
-  expirada:   { label: "Expirada",   class: "bg-gray-100 dark:bg-slate-800 text-gray-400 border border-gray-200 dark:border-gray-700" },
+  rechazada:  { label: "Rechazada",  class: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20" },
+  expirada:   { label: "Expirada",   class: "bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700" },
   convertida: { label: "Convertida", class: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20" },
 }
 
 const PRIORITY_BADGES: Record<string, { label: string; class: string }> = {
   normal:  { label: "Normal",  class: "text-blue-600 bg-blue-500/10 border border-blue-500/20" },
   alta:    { label: "Alta",    class: "text-amber-600 bg-amber-500/10 border border-amber-500/20" },
-  urgente: { label: "Urgente", class: "text-red-600 bg-red-500/10 border border-red-500/20" },
+  urgente: { label: "Urgente", class: "text-rose-600 bg-rose-500/10 border border-rose-500/20" },
 }
 
 export default function PedidosCotizacionesPage() {
@@ -216,783 +218,306 @@ export default function PedidosCotizacionesPage() {
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════
-     MODAL CREAR PEDIDO
-  ═══════════════════════════════════════════════════════════════════ */
-  function CreateOrderModal() {
-    const [selectedCust, setSelectedCust] = useState<Customer | null>(null)
-    const [custSearch, setCustSearch] = useState("")
-    const [prioridad, setPrioridad] = useState("normal")
-    const [condicion, setCondicion] = useState("contado")
-    const [fechaEntrega, setFechaEntrega] = useState("")
-    const [observaciones, setObservaciones] = useState("")
-    const [items, setItems] = useState<Array<{ product_id: string; nombre: string; cantidad: number; precio_unitario: number; iva_tasa: number }>>([])
-    const [prodSearch, setProdSearch] = useState("")
-    const [saving, setSaving] = useState(false)
-
-    const filtCusts = customers.filter(c => !custSearch || (c.razon_social || "").toLowerCase().includes(custSearch.toLowerCase()) || (c.ruc || "").includes(custSearch)).slice(0, 5)
-    const filtProds = products.filter(p => !prodSearch || (p.nombre || "").toLowerCase().includes(prodSearch.toLowerCase()) || (p.codigo_barra || (p as any).codigo || "").includes(prodSearch)).slice(0, 6)
-
-    const subtotal = items.reduce((acc, i) => acc + i.cantidad * i.precio_unitario, 0)
-
-    const handleSubmit = async () => {
-      if (!selectedCust) { toast.error("Error", "Seleccioná un cliente comercial"); return }
-      if (items.length === 0) { toast.error("Error", "Agregá al menos un producto"); return }
-      setSaving(true)
-      try {
-        await api.salesOrders.create({
-          customer_id: selectedCust.id,
-          prioridad,
-          condicion,
-          fecha_entrega_estimada: fechaEntrega || undefined,
-          observaciones,
-          items: items.map(i => ({
-            product_id: i.product_id,
-            cantidad: i.cantidad,
-            precio_unitario: i.precio_unitario,
-            iva_tasa: i.iva_tasa,
-          })),
-        })
-        toast.success("Pedido emitido", "El pedido de venta fue registrado con éxito")
-        setShowCreateOrder(false)
-        fetchOrders()
-      } catch (err: any) {
-        toast.error("Error", err?.message || "No se pudo crear el pedido")
-      } finally {
-        setSaving(false)
-      }
-    }
-
-    return (
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-        <div className="card max-w-2xl w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up my-8">
-          <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-            <div>
-              <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Nuevo Pedido de Venta</h3>
-              <p className="text-xs text-gray-400">Emisión de orden comercial y reserva de mercadería</p>
-            </div>
-            <button onClick={() => setShowCreateOrder(false)} className="p-1 text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="space-y-3 text-xs">
-            <div>
-              <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Cliente *</label>
-              {selectedCust ? (
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700">
-                  <div className="flex-1">
-                    <p className="font-bold text-gray-900 dark:text-white">{selectedCust.razon_social}</p>
-                    <p className="text-[11px] text-gray-400 font-mono">RUC: {selectedCust.ruc}</p>
-                  </div>
-                  <button onClick={() => setSelectedCust(null)} className="text-red-500 hover:text-red-700">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
-                  <input
-                    value={custSearch}
-                    onChange={e => setCustSearch(e.target.value)}
-                    placeholder="Buscar cliente por Razón Social o RUC..."
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary"
-                  />
-                  {custSearch && (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl z-20 max-h-40 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
-                      {filtCusts.map(c => (
-                        <button
-                          key={c.id}
-                          onClick={() => { setSelectedCust(c); setCustSearch("") }}
-                          className="w-full p-2 text-left hover:bg-gray-50 dark:hover:bg-slate-700 flex justify-between"
-                        >
-                          <span className="font-bold text-xs">{c.razon_social}</span>
-                          <span className="font-mono text-gray-400 text-[11px]">{c.ruc}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Prioridad</label>
-                <select value={prioridad} onChange={e => setPrioridad(e.target.value)} className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 text-xs font-bold">
-                  <option value="normal">Normal</option>
-                  <option value="alta">Alta</option>
-                  <option value="urgente">Urgente</option>
-                </select>
-              </div>
-              <div>
-                <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Condición</label>
-                <select value={condicion} onChange={e => setCondicion(e.target.value)} className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 text-xs font-bold">
-                  <option value="contado">Contado</option>
-                  <option value="credito">Crédito</option>
-                </select>
-              </div>
-              <div>
-                <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Fecha Entrega</label>
-                <input type="date" value={fechaEntrega} onChange={e => setFechaEntrega(e.target.value)} className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 text-xs font-mono" />
-              </div>
-            </div>
-
-            <div>
-              <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Productos *</label>
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
-                <input
-                  value={prodSearch}
-                  onChange={e => setProdSearch(e.target.value)}
-                  placeholder="Buscar producto por nombre o código..."
-                  className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary"
-                />
-                {prodSearch && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl z-20 max-h-40 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
-                    {filtProds.map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          setItems(prev => {
-                            const ex = prev.find(i => i.product_id === p.id)
-                            if (ex) return prev.map(i => i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i)
-                            return [...prev, { product_id: p.id, nombre: p.nombre, cantidad: 1, precio_unitario: p.precio || 0, iva_tasa: (p as any).iva_tasa || 10 }]
-                          })
-                          setProdSearch("")
-                        }}
-                        className="w-full p-2 text-left hover:bg-gray-50 dark:hover:bg-slate-700 flex justify-between"
-                      >
-                        <span className="font-bold text-xs">{p.nombre}</span>
-                        <span className="font-mono font-bold text-emerald-600 text-xs">{formatPYG(p.precio || 0)}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {items.length > 0 && (
-                <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto">
-                  {items.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2 p-2 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700">
-                      <div className="flex-1">
-                        <p className="font-bold text-xs">{item.nombre}</p>
-                        <p className="text-[10px] text-gray-400 font-mono">{formatPYG(item.precio_unitario)} c/u</p>
-                      </div>
-                      <input
-                        type="number"
-                        min={1}
-                        value={item.cantidad}
-                        onChange={e => setItems(prev => prev.map((i, k) => k === idx ? { ...i, cantidad: parseInt(e.target.value) || 1 } : i))}
-                        className="w-14 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-700 rounded-lg p-1 text-center font-mono font-bold text-xs"
-                      />
-                      <span className="font-mono font-bold text-xs min-w-[80px] text-right">{formatPYG(item.cantidad * item.precio_unitario)}</span>
-                      <button onClick={() => setItems(prev => prev.filter((_, k) => k !== idx))} className="text-red-400 hover:text-red-600">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-gray-800 font-bold">
-                    <span>Total:</span>
-                    <span className="font-mono text-primary font-black text-sm">{formatPYG(subtotal)}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Observaciones</label>
-              <textarea
-                value={observaciones}
-                onChange={e => setObservaciones(e.target.value)}
-                placeholder="Instrucciones de entrega..."
-                rows={2}
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 text-xs outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
-            <button onClick={() => setShowCreateOrder(false)} className="btn bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 font-bold text-xs px-4 py-2 rounded-xl">
-              Cancelar
-            </button>
-            <button onClick={handleSubmit} disabled={saving} className="btn bg-primary text-white font-extrabold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm">
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-              <span>{saving ? "Emitiendo..." : "Emitir Pedido"}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  /* ═══════════════════════════════════════════════════════════════════
-     MODAL CREAR COTIZACIÓN
-  ═══════════════════════════════════════════════════════════════════ */
-  function CreateQuoteModal() {
-    const [selectedCust, setSelectedCust] = useState<Customer | null>(null)
-    const [custSearch, setCustSearch] = useState("")
-    const [validoHasta, setValidoHasta] = useState("")
-    const [observaciones, setObservaciones] = useState("")
-    const [items, setItems] = useState<Array<{ product_id: string; nombre: string; cantidad: number; precio_unitario: number }>>([])
-    const [prodSearch, setProdSearch] = useState("")
-    const [saving, setSaving] = useState(false)
-
-    const filtCusts = customers.filter(c => !custSearch || (c.razon_social || "").toLowerCase().includes(custSearch.toLowerCase()) || (c.ruc || "").includes(custSearch)).slice(0, 5)
-    const filtProds = products.filter(p => !prodSearch || (p.nombre || "").toLowerCase().includes(prodSearch.toLowerCase()) || (p.codigo_barra || (p as any).codigo || "").includes(prodSearch)).slice(0, 6)
-
-    const subtotal = items.reduce((acc, i) => acc + i.cantidad * i.precio_unitario, 0)
-
-    const handleSubmit = async () => {
-      if (!selectedCust) { toast.error("Error", "Seleccioná un cliente para la cotización"); return }
-      if (items.length === 0) { toast.error("Error", "Agregá al menos un producto"); return }
-      setSaving(true)
-      try {
-        await api.quotes.create({
-          customer_id: selectedCust.id,
-          valido_hasta: validoHasta || undefined,
-          observaciones,
-          items: items.map(i => ({
-            product_id: i.product_id,
-            cantidad: i.cantidad,
-            precio_unitario: i.precio_unitario,
-          })),
-        })
-        toast.success("Cotización creada", "La propuesta comercial fue generada")
-        setShowCreateQuote(false)
-        fetchQuotes()
-      } catch (err: any) {
-        toast.error("Error", err?.message || "No se pudo crear la cotización")
-      } finally {
-        setSaving(false)
-      }
-    }
-
-    return (
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-        <div className="card max-w-2xl w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up my-8">
-          <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-            <div>
-              <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Nueva Cotización Comercial</h3>
-              <p className="text-xs text-gray-400">Propuesta de precios con validez temporal</p>
-            </div>
-            <button onClick={() => setShowCreateQuote(false)} className="p-1 text-gray-400 hover:text-gray-600">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="space-y-3 text-xs">
-            <div>
-              <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Cliente *</label>
-              {selectedCust ? (
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700">
-                  <div className="flex-1">
-                    <p className="font-bold text-gray-900 dark:text-white">{selectedCust.razon_social}</p>
-                    <p className="text-[11px] text-gray-400 font-mono">RUC: {selectedCust.ruc}</p>
-                  </div>
-                  <button onClick={() => setSelectedCust(null)} className="text-red-500 hover:text-red-700">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
-                  <input
-                    value={custSearch}
-                    onChange={e => setCustSearch(e.target.value)}
-                    placeholder="Buscar cliente por Razón Social o RUC..."
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary"
-                  />
-                  {custSearch && (
-                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl z-20 max-h-40 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
-                      {filtCusts.map(c => (
-                        <button
-                          key={c.id}
-                          onClick={() => { setSelectedCust(c); setCustSearch("") }}
-                          className="w-full p-2 text-left hover:bg-gray-50 dark:hover:bg-slate-700 flex justify-between"
-                        >
-                          <span className="font-bold text-xs">{c.razon_social}</span>
-                          <span className="font-mono text-gray-400 text-[11px]">{c.ruc}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Válida Hasta</label>
-              <input type="date" value={validoHasta} onChange={e => setValidoHasta(e.target.value)} className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 text-xs font-mono" />
-            </div>
-
-            <div>
-              <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Productos Cotizados *</label>
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
-                <input
-                  value={prodSearch}
-                  onChange={e => setProdSearch(e.target.value)}
-                  placeholder="Buscar producto..."
-                  className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary"
-                />
-                {prodSearch && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl z-20 max-h-40 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
-                    {filtProds.map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          setItems(prev => {
-                            const ex = prev.find(i => i.product_id === p.id)
-                            if (ex) return prev.map(i => i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i)
-                            return [...prev, { product_id: p.id, nombre: p.nombre, cantidad: 1, precio_unitario: p.precio || 0 }]
-                          })
-                          setProdSearch("")
-                        }}
-                        className="w-full p-2 text-left hover:bg-gray-50 dark:hover:bg-slate-700 flex justify-between"
-                      >
-                        <span className="font-bold text-xs">{p.nombre}</span>
-                        <span className="font-mono font-bold text-emerald-600 text-xs">{formatPYG(p.precio || 0)}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {items.length > 0 && (
-                <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto">
-                  {items.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2 p-2 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700">
-                      <div className="flex-1">
-                        <p className="font-bold text-xs">{item.nombre}</p>
-                        <p className="text-[10px] text-gray-400 font-mono">{formatPYG(item.precio_unitario)} c/u</p>
-                      </div>
-                      <input
-                        type="number"
-                        min={1}
-                        value={item.cantidad}
-                        onChange={e => setItems(prev => prev.map((i, k) => k === idx ? { ...i, cantidad: parseInt(e.target.value) || 1 } : i))}
-                        className="w-14 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-700 rounded-lg p-1 text-center font-mono font-bold text-xs"
-                      />
-                      <span className="font-mono font-bold text-xs min-w-[80px] text-right">{formatPYG(item.cantidad * item.precio_unitario)}</span>
-                      <button onClick={() => setItems(prev => prev.filter((_, k) => k !== idx))} className="text-red-400 hover:text-red-600">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-gray-800 font-bold">
-                    <span>Total Cotizado:</span>
-                    <span className="font-mono text-emerald-600 font-black text-sm">{formatPYG(subtotal)}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Observaciones</label>
-              <textarea
-                value={observaciones}
-                onChange={e => setObservaciones(e.target.value)}
-                placeholder="Condiciones de pago y entrega..."
-                rows={2}
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2 text-xs outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
-            <button onClick={() => setShowCreateQuote(false)} className="btn bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 font-bold text-xs px-4 py-2 rounded-xl">
-              Cancelar
-            </button>
-            <button onClick={handleSubmit} disabled={saving} className="btn bg-emerald-600 text-white font-extrabold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm hover:bg-emerald-500">
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-              <span>{saving ? "Guardando..." : "Crear Cotización"}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  /* ═══════════════════════════════════════════════════════════════════
-     RENDER PRINCIPAL (ESTRUCTURA IDÉNTICA A SALESPAGE)
-  ═══════════════════════════════════════════════════════════════════ */
   return (
-    <div className="space-y-6 pb-12">
-      {/* ── HEADER OPERATIVO ──────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-5">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
-              <FileText className="w-7 h-7 text-blue-600 dark:text-blue-400 shrink-0" />
-              Pedidos & Cotizaciones
-            </h1>
-            <span className="px-3 py-1 rounded-full text-xs font-black bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-              Ventas Mayoristas & Distribución
-            </span>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950/90 text-white p-7 border border-amber-500/20 shadow-2xl shadow-amber-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-500 border border-amber-400/30 text-white flex items-center justify-center shadow-lg shadow-amber-500/25">
+                  <FileSpreadsheet className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20">
+                    GESTIÓN COMERCIAL · PEDIDOS & PRESUPUESTOS
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    {tab === "orders" ? `${orderKpi.pendientes} Pedidos Pendientes` : `${quoteKpi.vigentes} Cotizaciones Vigentes`}
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Pedidos & Cotizaciones Comerciales
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Emisión de órdenes de venta, reserva de stock, cotizaciones formales y conversión a factura oficial
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Ventas Mayoristas & Salón)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-400">
+                📦 {orders.length} pedidos totales
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-orange-300">
+                📋 {quotes.length} cotizaciones registradas
+              </span>
+            </div>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Gestión comercial de órdenes de venta, cotizaciones comerciales y seguimiento de despacho.
-          </p>
-        </div>
 
-        {/* Acciones Rápidas */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={handleManualRefresh}
-            className="p-2 text-gray-400 hover:text-primary rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
-            title="Recargar datos"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-          </button>
-
-          {tab === "orders" ? (
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
             <button
-              onClick={() => setShowCreateOrder(true)}
-              className="btn bg-primary text-white font-extrabold text-xs flex items-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:opacity-90"
+              onClick={handleManualRefresh}
+              disabled={refreshing}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
             >
-              <Plus className="w-4 h-4" />
-              <span>Nuevo Pedido</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Recargar
             </button>
-          ) : (
-            <>
+
+            {tab === "orders" ? (
               <button
-                onClick={handleExpireQuotes}
-                className="btn bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 font-bold text-xs flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-gray-50"
-              >
-                <Clock className="w-4 h-4 text-primary" />
-                <span>Expirar Vencidas</span>
-              </button>
-              <button
-                onClick={() => setShowCreateQuote(true)}
-                className="btn bg-emerald-600 text-white font-extrabold text-xs flex items-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:bg-emerald-500"
+                onClick={() => setShowCreateOrder(true)}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-orange-300 hover:from-amber-300 hover:to-orange-200 transition shadow-lg shadow-amber-500/25 flex items-center gap-2"
               >
                 <Plus className="w-4 h-4" />
-                <span>Nueva Cotización</span>
+                Nuevo Pedido
               </button>
-            </>
-          )}
+            ) : (
+              <button
+                onClick={() => setShowCreateQuote(true)}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-orange-300 hover:from-amber-300 hover:to-orange-200 transition shadow-lg shadow-amber-500/25 flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Nueva Cotización
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {tab === "orders" ? "Monto Pedidos Activos" : "Monto Cotizado Activo"}
+              </span>
+              <span className="text-[10px] font-bold text-amber-400">Total</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(tab === "orders" ? orderKpi.monto : quoteKpi.monto)}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {tab === "orders" ? `${orderKpi.total} pedidos registrados` : `${quoteKpi.total} presupuestos`}
+            </p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {tab === "orders" ? "Pendientes Aprobación" : "Cotizaciones Vigentes"}
+              </span>
+              <span className="text-[10px] font-bold text-orange-400">Atención</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-orange-400">
+              {tab === "orders" ? orderKpi.pendientes : quoteKpi.vigentes}
+            </p>
+            <p className="text-[11px] text-slate-400">Requieren gestión comercial</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {tab === "orders" ? "En Preparación / Despacho" : "Aceptadas / Convertidas"}
+              </span>
+              <span className="text-[10px] font-bold text-blue-400">Flujo</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {tab === "orders" ? orderKpi.en_curso : quoteKpi.aceptadas}
+            </p>
+            <p className="text-[11px] text-slate-400">En ruta de facturación</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {tab === "orders" ? "Completados / Facturados" : "Tasa de Conversión"}
+              </span>
+              <span className="text-[10px] font-mono text-emerald-400">Cierre</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {tab === "orders" ? orderKpi.completados : `${quoteKpi.total > 0 ? Math.round((quoteKpi.aceptadas / quoteKpi.total) * 100) : 0}%`}
+            </p>
+            <p className="text-[11px] text-slate-400">Efectividad de cierre</p>
+          </div>
         </div>
       </div>
 
-      {/* ── KPIS CONSOLIDADOS (ESTILO SALESPAGE) ──────────────────────────────── */}
-      {tab === "orders" ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Monto en Cartera
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-                <DollarSign className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-gray-900 dark:text-white mt-2">
-              {formatPYG(orderKpi.monto)}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              {orderKpi.total} órdenes registradas
-            </p>
-          </div>
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        <button
+          onClick={() => setTab("orders")}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+            tab === "orders"
+              ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+              : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+          }`}
+        >
+          <ShoppingCart className="w-4 h-4" />
+          <span>Pedidos de Venta</span>
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+            tab === "orders" ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+          }`}>
+            {orders.length}
+          </span>
+        </button>
 
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                Pendientes Aprobación
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                <Clock className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-amber-500 mt-2">
-              {orderKpi.pendientes}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Requieren autorización comercial
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                En Preparación / Despacho
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
-                <Truck className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-purple-600 dark:text-purple-400 mt-2">
-              {orderKpi.en_curso}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              En proceso de picking o entrega
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Completados & Facturados
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                <CheckCircle className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-emerald-600 dark:text-emerald-400 mt-2">
-              {orderKpi.completados}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              {orderKpi.cancelados} pedidos cancelados
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Volumen Cotizado
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                <DollarSign className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-gray-900 dark:text-white mt-2">
-              {formatPYG(quoteKpi.monto)}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              {quoteKpi.total} cotizaciones emitidas
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Cotizaciones Vigentes
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                <Clock className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-emerald-600 dark:text-emerald-400 mt-2">
-              {quoteKpi.vigentes}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Precios válidos actualmente
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Aceptadas / Convertidas
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-                <TrendingUp className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-blue-600 dark:text-blue-400 mt-2">
-              {quoteKpi.aceptadas}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Cerradas exitosamente
-            </p>
-          </div>
-
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-red-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-                Expiradas / Rechazadas
-              </span>
-              <div className="w-8 h-8 rounded-xl bg-red-500/10 text-red-600 flex items-center justify-center">
-                <Ban className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="font-mono font-black text-2xl text-red-600 dark:text-red-400 mt-2">
-              {quoteKpi.rechazadas}
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              No concretadas
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* ── NAVEGACIÓN POR PESTAÑAS (TABS OPERATIVAS) ───────────────────────── */}
-      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 pb-2 overflow-x-auto no-scrollbar">
-        {[
-          { id: "orders", label: "Pedidos de Venta", icon: ShoppingCart, count: orders.length },
-          { id: "quotes", label: "Cotizaciones Comerciales", icon: FileText, count: quotes.length },
-        ].map((t) => {
-          const active = tab === t.id
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id as any)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${
-                active
-                  ? "bg-primary text-white shadow-sm"
-                  : "bg-white dark:bg-slate-900 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-800 hover:bg-gray-50"
-              }`}
-            >
-              <t.icon className="w-4 h-4" />
-              <span>{t.label}</span>
-              {t.count !== undefined && (
-                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${active ? "bg-white/20 text-white" : "bg-gray-100 dark:bg-slate-800 text-gray-500"}`}>
-                  {t.count}
-                </span>
-              )}
-            </button>
-          )
-        })}
+        <button
+          onClick={() => setTab("quotes")}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+            tab === "quotes"
+              ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+              : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>Cotizaciones & Presupuestos</span>
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+            tab === "quotes" ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+          }`}>
+            {quotes.length}
+          </span>
+        </button>
       </div>
 
-      {/* ── CONTENIDO: PEDIDOS ────────────────────────────────────────────── */}
+      {/* ══════════════════════ TAB 1: PEDIDOS DE VENTA ══════════════════════ */}
       {tab === "orders" && (
         <div className="space-y-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3 w-4 h-4 text-gray-400 top-2.5" />
+              <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
               <input
                 type="text"
                 value={orderSearch}
-                onChange={(e) => setOrderSearch(e.target.value)}
-                placeholder="Buscar por Nº pedido, RUC/CI o nombre del cliente..."
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary text-gray-900 dark:text-white"
+                onChange={e => setOrderSearch(e.target.value)}
+                placeholder="Buscar pedido por número, cliente o RUC..."
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <select
                 value={orderFilterEstado}
-                onChange={(e) => setOrderFilterEstado(e.target.value)}
-                className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-300 outline-none"
+                onChange={e => setOrderFilterEstado(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
               >
                 <option value="todos">Todos los Estados</option>
-                <option value="borrador">Borrador</option>
                 <option value="pendiente_aprobacion">Pendiente Aprobación</option>
                 <option value="aprobado">Aprobado</option>
                 <option value="en_preparacion">En Preparación</option>
                 <option value="listo">Listo</option>
                 <option value="facturado">Facturado</option>
-                <option value="completado">Completado</option>
                 <option value="cancelado">Cancelado</option>
               </select>
 
               <select
                 value={orderFilterPrioridad}
-                onChange={(e) => setOrderFilterPrioridad(e.target.value)}
-                className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-300 outline-none"
+                onChange={e => setOrderFilterPrioridad(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
               >
                 <option value="todos">Todas las Prioridades</option>
                 <option value="normal">Normal</option>
                 <option value="alta">Alta</option>
                 <option value="urgente">Urgente</option>
               </select>
+
+              <button
+                onClick={fetchOrders}
+                className="p-2.5 text-slate-400 hover:text-amber-500 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-sm"
+              >
+                <RefreshCw className={`w-4 h-4 ${ordersLoading ? "animate-spin" : ""}`} />
+              </button>
             </div>
           </div>
 
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-gray-400 border-b border-gray-200 dark:border-gray-800">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="p-3.5">Nº Pedido</th>
-                    <th className="p-3.5">Fecha</th>
-                    <th className="p-3.5">Cliente</th>
-                    <th className="p-3.5">RUC / C.I.</th>
-                    <th className="p-3.5 text-center">Prioridad</th>
-                    <th className="p-3.5 text-center">Condición</th>
-                    <th className="p-3.5 text-right">Monto Total</th>
-                    <th className="p-3.5 text-center">Estado</th>
-                    <th className="p-3.5 text-center">Acciones</th>
+                    <th className="p-4">Nº Pedido</th>
+                    <th className="p-4">Fecha</th>
+                    <th className="p-4">Cliente</th>
+                    <th className="p-4">RUC</th>
+                    <th className="p-4 text-center">Prioridad</th>
+                    <th className="p-4 text-center">Estado</th>
+                    <th className="p-4 text-right">Total</th>
+                    <th className="p-4 text-center">Acciones</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                   {ordersLoading ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-gray-400">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-primary" />
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" />
                         <span>Cargando pedidos...</span>
                       </td>
                     </tr>
                   ) : filteredOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-gray-400">
-                        No se encontraron pedidos coincidentes.
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        No se encontraron pedidos de venta.
                       </td>
                     </tr>
                   ) : (
-                    filteredOrders.map(order => (
-                      <tr key={order.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 font-mono font-bold text-primary">
-                          {order.numero}
+                    filteredOrders.map(o => (
+                      <tr key={o.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
+                          {o.numero || `PED-${o.id.slice(-6)}`}
                         </td>
-                        <td className="p-3.5 text-gray-500 font-mono text-[11px]">
-                          {order.fecha ? formatDate(order.fecha) : "—"}
+                        <td className="p-4 text-slate-500 font-mono text-[11px]">
+                          {formatDate(o.created_at)}
                         </td>
-                        <td className="p-3.5 font-bold text-gray-800 dark:text-gray-200 max-w-[180px] truncate">
-                          {order.customer?.razon_social || "Cliente General"}
+                        <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
+                          {o.customer?.razon_social || "Consumidor"}
                         </td>
-                        <td className="p-3.5 font-mono text-gray-500 text-[11px]">
-                          {order.customer?.ruc || "—"}
+                        <td className="p-4 font-mono text-slate-500 text-[11px]">
+                          {o.customer?.ruc || "-"}
                         </td>
-                        <td className="p-3.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${PRIORITY_BADGES[order.prioridad || "normal"]?.class || ""}`}>
-                            {PRIORITY_BADGES[order.prioridad || "normal"]?.label || order.prioridad}
+                        <td className="p-4 text-center">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${PRIORITY_BADGES[o.prioridad || "normal"]?.class}`}>
+                            {PRIORITY_BADGES[o.prioridad || "normal"]?.label}
                           </span>
                         </td>
-                        <td className="p-3.5 text-center capitalize text-gray-600 dark:text-gray-300">
-                          {order.condicion || "contado"}
-                        </td>
-                        <td className="p-3.5 text-right font-mono font-black text-gray-900 dark:text-white">
-                          {formatPYG(order.total || 0)}
-                        </td>
-                        <td className="p-3.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${ORDER_STATUS_META[order.estado || "borrador"]?.class || ""}`}>
-                            {ORDER_STATUS_META[order.estado || "borrador"]?.label || order.estado}
+                        <td className="p-4 text-center">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${ORDER_STATUS_META[o.estado || "borrador"]?.class || ""}`}>
+                            {ORDER_STATUS_META[o.estado || "borrador"]?.label || o.estado}
                           </span>
                         </td>
-                        <td className="p-3.5 text-center">
+                        <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white">
+                          {formatPYG(o.total || 0)}
+                        </td>
+                        <td className="p-4 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
-                              onClick={() => setViewingOrder(order)}
-                              className="p-1.5 text-gray-400 hover:text-primary rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800"
-                              title="Ver Detalle"
+                              onClick={() => setViewingOrder(o)}
+                              className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-xl transition"
+                              title="Ver detalle"
                             >
-                              <Eye className="w-3.5 h-3.5" />
+                              <Eye className="w-4 h-4" />
                             </button>
-
-                            {order.estado === "pendiente_aprobacion" && (
+                            {o.estado === "pendiente_aprobacion" && (
                               <button
-                                onClick={() => handleApproveOrder(order)}
-                                className="px-2 py-1 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-xs flex items-center gap-1"
-                                title="Aprobar Pedido"
+                                onClick={() => handleApproveOrder(o)}
+                                className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-xl transition"
+                                title="Aprobar pedido"
                               >
-                                <Check className="w-3 h-3" />
-                                <span>Aprobar</span>
-                              </button>
-                            )}
-
-                            {order.estado === "aprobado" && (
-                              <button
-                                onClick={() => handleOrderStatusChange(order, "en_preparacion")}
-                                className="px-2 py-1 rounded-lg text-[11px] font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-xs flex items-center gap-1"
-                                title="Pasar a Preparación"
-                              >
-                                <Truck className="w-3 h-3" />
-                                <span>Preparar</span>
-                              </button>
-                            )}
-
-                            {order.estado === "en_preparacion" && (
-                              <button
-                                onClick={() => handleOrderStatusChange(order, "listo")}
-                                className="px-2 py-1 rounded-lg text-[11px] font-bold bg-cyan-600 hover:bg-cyan-700 text-white shadow-xs flex items-center gap-1"
-                                title="Marcar como Listo"
-                              >
-                                <CheckCircle className="w-3 h-3" />
-                                <span>Listo</span>
+                                <Check className="w-4 h-4" />
                               </button>
                             )}
                           </div>
@@ -1007,123 +532,119 @@ export default function PedidosCotizacionesPage() {
         </div>
       )}
 
-      {/* ── CONTENIDO: COTIZACIONES ────────────────────────────────────────── */}
+      {/* ══════════════════════ TAB 2: COTIZACIONES ══════════════════════ */}
       {tab === "quotes" && (
         <div className="space-y-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3 w-4 h-4 text-gray-400 top-2.5" />
+              <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
               <input
                 type="text"
                 value={quoteSearch}
-                onChange={(e) => setQuoteSearch(e.target.value)}
-                placeholder="Buscar por Nº cotización, RUC/CI o cliente..."
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary text-gray-900 dark:text-white"
+                onChange={e => setQuoteSearch(e.target.value)}
+                placeholder="Buscar cotización por número o cliente..."
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
 
-            <select
-              value={quoteFilterEstado}
-              onChange={(e) => setQuoteFilterEstado(e.target.value)}
-              className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-300 outline-none"
-            >
-              <option value="todos">Todos los Estados</option>
-              <option value="vigente">Vigente</option>
-              <option value="aceptada">Aceptada</option>
-              <option value="convertida">Convertida</option>
-              <option value="rechazada">Rechazada</option>
-              <option value="expirada">Expirada</option>
-            </select>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={quoteFilterEstado}
+                onChange={e => setQuoteFilterEstado(e.target.value)}
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+              >
+                <option value="todos">Todos los Estados</option>
+                <option value="vigente">Vigente</option>
+                <option value="aceptada">Aceptada</option>
+                <option value="convertida">Convertida</option>
+                <option value="rechazada">Rechazada</option>
+                <option value="expirada">Expirada</option>
+              </select>
+
+              <button
+                onClick={handleExpireQuotes}
+                className="px-3.5 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+              >
+                Depurar Vencidas
+              </button>
+
+              <button
+                onClick={fetchQuotes}
+                className="p-2.5 text-slate-400 hover:text-amber-500 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-sm"
+              >
+                <RefreshCw className={`w-4 h-4 ${quotesLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
           </div>
 
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-gray-400 border-b border-gray-200 dark:border-gray-800">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="p-3.5">Nº Cotización</th>
-                    <th className="p-3.5">Fecha</th>
-                    <th className="p-3.5">Cliente</th>
-                    <th className="p-3.5">RUC / C.I.</th>
-                    <th className="p-3.5">Validez</th>
-                    <th className="p-3.5 text-right">Monto Total</th>
-                    <th className="p-3.5 text-center">Estado</th>
-                    <th className="p-3.5 text-center">Acciones</th>
+                    <th className="p-4">Nº Cotización</th>
+                    <th className="p-4">Fecha Emisión</th>
+                    <th className="p-4">Cliente</th>
+                    <th className="p-4">Válida Hasta</th>
+                    <th className="p-4 text-center">Estado</th>
+                    <th className="p-4 text-right">Total</th>
+                    <th className="p-4 text-center">Acciones</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                   {quotesLoading ? (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center text-gray-400">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-emerald-600" />
+                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" />
                         <span>Cargando cotizaciones...</span>
                       </td>
                     </tr>
                   ) : filteredQuotes.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center text-gray-400">
-                        No se encontraron cotizaciones coincidentes.
+                      <td colSpan={7} className="p-12 text-center text-slate-400">
+                        No se encontraron cotizaciones comerciales.
                       </td>
                     </tr>
                   ) : (
-                    filteredQuotes.map(quote => (
-                      <tr key={quote.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 font-mono font-bold text-emerald-600">
-                          {quote.numero}
+                    filteredQuotes.map(q => (
+                      <tr key={q.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="p-4 font-mono font-bold text-slate-900 dark:text-white">
+                          {q.numero || `COT-${q.id.slice(-6)}`}
                         </td>
-                        <td className="p-3.5 text-gray-500 font-mono text-[11px]">
-                          {quote.fecha ? formatDate(quote.fecha) : "—"}
+                        <td className="p-4 text-slate-500 font-mono text-[11px]">
+                          {formatDate(q.created_at)}
                         </td>
-                        <td className="p-3.5 font-bold text-gray-800 dark:text-gray-200 max-w-[180px] truncate">
-                          {quote.customer?.razon_social || "Cliente Mayorista"}
+                        <td className="p-4 font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate">
+                          {q.customer?.razon_social || "Consumidor"}
                         </td>
-                        <td className="p-3.5 font-mono text-gray-500 text-[11px]">
-                          {quote.customer?.ruc || "—"}
+                        <td className="p-4 font-mono text-slate-500 text-[11px]">
+                          {q.valido_hasta ? formatDate(q.valido_hasta) : "Sin vencimiento"}
                         </td>
-                        <td className="p-3.5 font-mono text-[11px]">
-                          {quote.valido_hasta ? (
-                            <span className={new Date(quote.valido_hasta) < new Date() ? "text-red-500 font-bold" : "text-gray-600 dark:text-gray-300"}>
-                              {formatDate(quote.valido_hasta)}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400">Sin límite</span>
-                          )}
-                        </td>
-                        <td className="p-3.5 text-right font-mono font-black text-gray-900 dark:text-white">
-                          {formatPYG(quote.total || 0)}
-                        </td>
-                        <td className="p-3.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${QUOTE_STATUS_META[quote.estado || "vigente"]?.class || ""}`}>
-                            {QUOTE_STATUS_META[quote.estado || "vigente"]?.label || quote.estado}
+                        <td className="p-4 text-center">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${QUOTE_STATUS_META[q.estado || "vigente"]?.class || ""}`}>
+                            {QUOTE_STATUS_META[q.estado || "vigente"]?.label || q.estado}
                           </span>
                         </td>
-                        <td className="p-3.5 text-center">
+                        <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white">
+                          {formatPYG(q.total || 0)}
+                        </td>
+                        <td className="p-4 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
-                              onClick={() => setViewingQuote(quote)}
-                              className="p-1.5 text-gray-400 hover:text-emerald-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800"
-                              title="Ver Detalle"
+                              onClick={() => setViewingQuote(q)}
+                              className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-xl transition"
+                              title="Ver detalle"
                             >
-                              <Eye className="w-3.5 h-3.5" />
+                              <Eye className="w-4 h-4" />
                             </button>
-
-                            {quote.estado === "vigente" && (
-                              <>
-                                <button
-                                  onClick={() => handleQuoteStatus(quote.id, "aceptada")}
-                                  className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20"
-                                  title="Aceptar"
-                                >
-                                  <CheckCircle className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => handleQuoteStatus(quote.id, "rechazada")}
-                                  className="p-1.5 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20"
-                                  title="Rechazar"
-                                >
-                                  <XCircle className="w-3.5 h-3.5" />
-                                </button>
-                              </>
+                            {q.estado === "vigente" && (
+                              <button
+                                onClick={() => handleQuoteStatus(q.id, "aceptada")}
+                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-xl transition"
+                                title="Marcar como Aceptada"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
                             )}
                           </div>
                         </td>
@@ -1137,141 +658,438 @@ export default function PedidosCotizacionesPage() {
         </div>
       )}
 
-      {/* ── MODALES ── */}
-      {showCreateOrder && <CreateOrderModal />}
-      {showCreateQuote && <CreateQuoteModal />}
+      {/* ── MODAL CREAR PEDIDO ── */}
+      {showCreateOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Nuevo Pedido de Venta</h3>
+                <p className="text-xs text-slate-400">Emisión de orden comercial y reserva de mercadería</p>
+              </div>
+              <button onClick={() => setShowCreateOrder(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Formulario de pedido */}
+            <OrderForm customers={customers} products={products} onClose={() => setShowCreateOrder(false)} onCreated={fetchOrders} />
+          </div>
+        </div>
+      )}
 
-      {/* Detalle Pedido */}
+      {/* ── MODAL CREAR COTIZACIÓN ── */}
+      {showCreateQuote && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Nueva Cotización Comercial</h3>
+                <p className="text-xs text-slate-400">Propuesta de precios con validez temporal</p>
+              </div>
+              <button onClick={() => setShowCreateQuote(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <QuoteForm customers={customers} products={products} onClose={() => setShowCreateQuote(false)} onCreated={fetchQuotes} />
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL VER PEDIDO ── */}
       {viewingOrder && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="card max-w-lg w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up my-8">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
-                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Pedido Nº {viewingOrder.numero}</h3>
-                <p className="text-xs text-gray-400">{viewingOrder.customer?.razon_social || "Cliente"}</p>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Detalle de Pedido {viewingOrder.numero}</h3>
+                <p className="text-xs text-slate-400">Estado: {ORDER_STATUS_META[viewingOrder.estado || "borrador"]?.label || viewingOrder.estado}</p>
               </div>
-              <button onClick={() => setViewingOrder(null)} className="p-1 text-gray-400 hover:text-gray-600">
+              <button onClick={() => setViewingOrder(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="space-y-3 text-xs">
-              <div className="flex items-center gap-2">
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${ORDER_STATUS_META[viewingOrder.estado || "borrador"]?.class || ""}`}>
-                  {ORDER_STATUS_META[viewingOrder.estado || "borrador"]?.label || viewingOrder.estado}
-                </span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${PRIORITY_BADGES[viewingOrder.prioridad || "normal"]?.class || ""}`}>
-                  Prioridad {PRIORITY_BADGES[viewingOrder.prioridad || "normal"]?.label || viewingOrder.prioridad}
-                </span>
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/70 rounded-2xl space-y-1">
+                <div className="flex justify-between"><span className="text-slate-400">Cliente:</span><strong className="text-slate-900 dark:text-white">{viewingOrder.customer?.razon_social || "Consumidor"}</strong></div>
+                <div className="flex justify-between"><span className="text-slate-400">RUC:</span><span className="font-mono text-slate-700 dark:text-slate-300">{viewingOrder.customer?.ruc || "-"}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Prioridad:</span><span className="font-bold uppercase text-amber-500">{viewingOrder.prioridad}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Condición:</span><span className="font-bold uppercase text-blue-500">{viewingOrder.condicion}</span></div>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 grid grid-cols-2 gap-3">
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Condición</span>
-                  <p className="font-bold text-gray-900 dark:text-white capitalize">{viewingOrder.condicion || "Contado"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Moneda</span>
-                  <p className="font-bold text-gray-900 dark:text-white">{viewingOrder.moneda || "PYG (₲)"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Fecha</span>
-                  <p className="font-bold text-gray-900 dark:text-white">{viewingOrder.fecha ? formatDate(viewingOrder.fecha) : "—"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Total</span>
-                  <p className="font-mono font-black text-base text-primary">{formatPYG(viewingOrder.total || 0)}</p>
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Productos Solicitados</span>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {(viewingOrder.items || []).map((i, idx) => (
+                    <div key={idx} className="py-2 flex justify-between">
+                      <div>
+                        <p className="font-bold text-slate-900 dark:text-white">{(i as any).product?.nombre || (i as any).producto?.nombre || (i as any).nombre || "Producto"}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{i.cantidad} un. x {formatPYG(i.precio_unitario || 0)}</p>
+                      </div>
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">{formatPYG((i.cantidad || 0) * (i.precio_unitario || 0))}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              {viewingOrder.observaciones && (
-                <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-gray-700/50 text-gray-500 italic">
-                  "{viewingOrder.observaciones}"
-                </div>
-              )}
+              <div className="flex justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-sm font-black">
+                <span>Total Pedido:</span>
+                <span className="font-mono text-amber-500">{formatPYG(viewingOrder.total || 0)}</span>
+              </div>
             </div>
 
-            <div className="flex justify-end pt-3 border-t border-gray-100 dark:border-gray-800">
-              <button onClick={() => setViewingOrder(null)} className="btn bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 text-xs px-4 py-2 rounded-xl font-bold">
+            <div className="pt-2 flex justify-end gap-2">
+              <button onClick={() => setViewingOrder(null)} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs font-bold">
                 Cerrar
               </button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
 
-      {/* Detalle Cotización */}
-      {viewingQuote && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="card max-w-lg w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up my-8">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-              <div>
-                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">Cotización Nº {viewingQuote.numero}</h3>
-                <p className="text-xs text-gray-400">{viewingQuote.customer?.razon_social || "Cliente"}</p>
-              </div>
-              <button onClick={() => setViewingQuote(null)} className="p-1 text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
+function OrderForm({ customers, products, onClose, onCreated }: any) {
+  const toast = useToast()
+  const [selectedCust, setSelectedCust] = useState<Customer | null>(null)
+  const [custSearch, setCustSearch] = useState("")
+  const [prioridad, setPrioridad] = useState("normal")
+  const [condicion, setCondicion] = useState("contado")
+  const [fechaEntrega, setFechaEntrega] = useState("")
+  const [observaciones, setObservaciones] = useState("")
+  const [items, setItems] = useState<Array<{ product_id: string; nombre: string; cantidad: number; precio_unitario: number; iva_tasa: number }>>([])
+  const [prodSearch, setProdSearch] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  const filtCusts = customers.filter((c: any) => !custSearch || (c.razon_social || "").toLowerCase().includes(custSearch.toLowerCase()) || (c.ruc || "").includes(custSearch)).slice(0, 5)
+  const filtProds = products.filter((p: any) => !prodSearch || (p.nombre || "").toLowerCase().includes(prodSearch.toLowerCase()) || (p.codigo_barra || (p as any).codigo || "").includes(prodSearch)).slice(0, 6)
+
+  const subtotal = items.reduce((acc, i) => acc + i.cantidad * i.precio_unitario, 0)
+
+  const handleSubmit = async () => {
+    if (!selectedCust) { toast.error("Error", "Seleccioná un cliente comercial"); return }
+    if (items.length === 0) { toast.error("Error", "Agregá al menos un producto"); return }
+    setSaving(true)
+    try {
+      await api.salesOrders.create({
+        customer_id: selectedCust.id,
+        prioridad,
+        condicion,
+        fecha_entrega_estimada: fechaEntrega || undefined,
+        observaciones,
+        items: items.map(i => ({
+          product_id: i.product_id,
+          cantidad: i.cantidad,
+          precio_unitario: i.precio_unitario,
+          iva_tasa: i.iva_tasa,
+        })),
+      })
+      toast.success("Pedido emitido", "El pedido de venta fue registrado con éxito")
+      onClose()
+      onCreated()
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudo crear el pedido")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3 text-xs">
+      <div>
+        <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Cliente *</label>
+        {selectedCust ? (
+          <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+            <div className="flex-1">
+              <p className="font-bold text-slate-900 dark:text-white">{selectedCust.razon_social}</p>
+              <p className="text-[11px] text-slate-400 font-mono">RUC: {selectedCust.ruc}</p>
             </div>
-
-            <div className="space-y-3 text-xs">
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${QUOTE_STATUS_META[viewingQuote.estado || "vigente"]?.class || ""}`}>
-                {QUOTE_STATUS_META[viewingQuote.estado || "vigente"]?.label || viewingQuote.estado}
-              </span>
-
-              <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 grid grid-cols-2 gap-3">
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Válida Hasta</span>
-                  <p className="font-bold text-gray-900 dark:text-white">{viewingQuote.valido_hasta ? formatDate(viewingQuote.valido_hasta) : "Sin límite"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Moneda</span>
-                  <p className="font-bold text-gray-900 dark:text-white">{viewingQuote.moneda || "PYG (₲)"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Fecha Emisión</span>
-                  <p className="font-bold text-gray-900 dark:text-white">{viewingQuote.fecha ? formatDate(viewingQuote.fecha) : "—"}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">Total Cotizado</span>
-                  <p className="font-mono font-black text-base text-emerald-600">{formatPYG(viewingQuote.total || 0)}</p>
-                </div>
+            <button onClick={() => setSelectedCust(null)} className="text-rose-500 hover:text-rose-700">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+            <input
+              value={custSearch}
+              onChange={e => setCustSearch(e.target.value)}
+              placeholder="Buscar cliente por Razón Social o RUC..."
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-9 pr-4 py-2.5 text-xs text-slate-900 dark:text-white"
+            />
+            {custSearch && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-20 max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                {filtCusts.map((c: any) => (
+                  <button
+                    key={c.id}
+                    onClick={() => { setSelectedCust(c); setCustSearch("") }}
+                    className="w-full p-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex justify-between"
+                  >
+                    <span className="font-bold text-xs">{c.razon_social}</span>
+                    <span className="font-mono text-slate-400 text-[11px]">{c.ruc}</span>
+                  </button>
+                ))}
               </div>
+            )}
+          </div>
+        )}
+      </div>
 
-              {viewingQuote.observaciones && (
-                <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-gray-700/50 text-gray-500 italic">
-                  "{viewingQuote.observaciones}"
-                </div>
-              )}
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Prioridad</label>
+          <select value={prioridad} onChange={e => setPrioridad(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-bold">
+            <option value="normal">Normal</option>
+            <option value="alta">Alta</option>
+            <option value="urgente">Urgente</option>
+          </select>
+        </div>
+        <div>
+          <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Condición</label>
+          <select value={condicion} onChange={e => setCondicion(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-bold">
+            <option value="contado">Contado</option>
+            <option value="credito">Crédito</option>
+          </select>
+        </div>
+        <div>
+          <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Fecha Entrega</label>
+          <input type="date" value={fechaEntrega} onChange={e => setFechaEntrega(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-mono" />
+        </div>
+      </div>
 
-              {viewingQuote.estado === "vigente" && (
-                <div className="flex items-center gap-2 pt-2">
-                  <button
-                    onClick={() => { handleQuoteStatus(viewingQuote.id, "aceptada"); setViewingQuote(null) }}
-                    className="flex-1 btn bg-emerald-600 text-white text-xs py-2 rounded-xl font-bold flex items-center justify-center gap-1.5"
-                  >
-                    <CheckCircle className="w-4 h-4" />
-                    <span>Aceptar Cotización</span>
-                  </button>
-                  <button
-                    onClick={() => { handleQuoteStatus(viewingQuote.id, "rechazada"); setViewingQuote(null) }}
-                    className="flex-1 btn bg-red-50 dark:bg-red-950/30 text-red-600 text-xs py-2 rounded-xl font-bold flex items-center justify-center gap-1.5 border border-red-200 dark:border-red-900"
-                  >
-                    <XCircle className="w-4 h-4" />
-                    <span>Rechazar</span>
-                  </button>
-                </div>
-              )}
+      <div>
+        <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Productos *</label>
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+          <input
+            value={prodSearch}
+            onChange={e => setProdSearch(e.target.value)}
+            placeholder="Buscar producto por nombre o código..."
+            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-9 pr-4 py-2.5 text-xs text-slate-900 dark:text-white"
+          />
+          {prodSearch && (
+            <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-20 max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+              {filtProds.map((p: any) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setItems(prev => {
+                      const ex = prev.find(i => i.product_id === p.id)
+                      if (ex) return prev.map(i => i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i)
+                      return [...prev, { product_id: p.id, nombre: p.nombre, cantidad: 1, precio_unitario: p.precio || 0, iva_tasa: (p as any).iva_tasa || 10 }]
+                    })
+                    setProdSearch("")
+                  }}
+                  className="w-full p-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex justify-between"
+                >
+                  <span className="font-bold text-xs">{p.nombre}</span>
+                  <span className="font-mono font-bold text-emerald-600 text-xs">{formatPYG(p.precio || 0)}</span>
+                </button>
+              ))}
             </div>
+          )}
+        </div>
 
-            <div className="flex justify-end pt-3 border-t border-gray-100 dark:border-gray-800">
-              <button onClick={() => setViewingQuote(null)} className="btn bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 text-xs px-4 py-2 rounded-xl font-bold">
-                Cerrar
-              </button>
+        {items.length > 0 && (
+          <div className="mt-3 space-y-2 max-h-40 overflow-y-auto">
+            {items.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-2 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+                <div className="flex-1">
+                  <p className="font-bold text-xs">{item.nombre}</p>
+                  <p className="text-[10px] text-slate-400 font-mono">{formatPYG(item.precio_unitario)} c/u</p>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  value={item.cantidad}
+                  onChange={e => setItems(prev => prev.map((i, k) => k === idx ? { ...i, cantidad: parseInt(e.target.value) || 1 } : i))}
+                  className="w-16 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-1.5 text-center font-mono font-bold text-xs"
+                />
+                <span className="font-mono font-bold text-xs min-w-[80px] text-right">{formatPYG(item.cantidad * item.precio_unitario)}</span>
+                <button onClick={() => setItems(prev => prev.filter((_, k) => k !== idx))} className="text-rose-400 hover:text-rose-600 p-1">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+            <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800 font-bold">
+              <span>Total Estimado:</span>
+              <span className="font-mono text-amber-500 font-black text-sm">{formatPYG(subtotal)}</span>
             </div>
           </div>
+        )}
+      </div>
+
+      <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+        <button onClick={onClose} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
+          Cancelar
+        </button>
+        <button onClick={handleSubmit} disabled={saving} className="px-5 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+          <span>{saving ? "Emitiendo..." : "Emitir Pedido"}</span>
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function QuoteForm({ customers, products, onClose, onCreated }: any) {
+  const toast = useToast()
+  const [selectedCust, setSelectedCust] = useState<Customer | null>(null)
+  const [custSearch, setCustSearch] = useState("")
+  const [validoHasta, setValidoHasta] = useState("")
+  const [observaciones, setObservaciones] = useState("")
+  const [items, setItems] = useState<Array<{ product_id: string; nombre: string; cantidad: number; precio_unitario: number }>>([])
+  const [prodSearch, setProdSearch] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  const filtCusts = customers.filter((c: any) => !custSearch || (c.razon_social || "").toLowerCase().includes(custSearch.toLowerCase()) || (c.ruc || "").includes(custSearch)).slice(0, 5)
+  const filtProds = products.filter((p: any) => !prodSearch || (p.nombre || "").toLowerCase().includes(prodSearch.toLowerCase()) || (p.codigo_barra || (p as any).codigo || "").includes(prodSearch)).slice(0, 6)
+
+  const subtotal = items.reduce((acc, i) => acc + i.cantidad * i.precio_unitario, 0)
+
+  const handleSubmit = async () => {
+    if (!selectedCust) { toast.error("Error", "Seleccioná un cliente"); return }
+    if (items.length === 0) { toast.error("Error", "Agregá al menos un producto"); return }
+    setSaving(true)
+    try {
+      await api.quotes.create({
+        customer_id: selectedCust.id,
+        valido_hasta: validoHasta || undefined,
+        observaciones,
+        items: items.map(i => ({
+          product_id: i.product_id,
+          cantidad: i.cantidad,
+          precio_unitario: i.precio_unitario,
+        })),
+      })
+      toast.success("Cotización creada", "La propuesta comercial fue generada")
+      onClose()
+      onCreated()
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudo crear la cotización")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3 text-xs">
+      <div>
+        <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Cliente *</label>
+        {selectedCust ? (
+          <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+            <div className="flex-1">
+              <p className="font-bold text-slate-900 dark:text-white">{selectedCust.razon_social}</p>
+              <p className="text-[11px] text-slate-400 font-mono">RUC: {selectedCust.ruc}</p>
+            </div>
+            <button onClick={() => setSelectedCust(null)} className="text-rose-500 hover:text-rose-700">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+            <input
+              value={custSearch}
+              onChange={e => setCustSearch(e.target.value)}
+              placeholder="Buscar cliente..."
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-9 pr-4 py-2.5 text-xs text-slate-900 dark:text-white"
+            />
+            {custSearch && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-20 max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                {filtCusts.map((c: any) => (
+                  <button
+                    key={c.id}
+                    onClick={() => { setSelectedCust(c); setCustSearch("") }}
+                    className="w-full p-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex justify-between"
+                  >
+                    <span className="font-bold text-xs">{c.razon_social}</span>
+                    <span className="font-mono text-slate-400 text-[11px]">{c.ruc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Válida Hasta</label>
+        <input type="date" value={validoHasta} onChange={e => setValidoHasta(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-2.5 text-xs font-mono" />
+      </div>
+
+      <div>
+        <label className="block font-black uppercase text-[10px] text-slate-400 mb-1">Productos Cotizados *</label>
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+          <input
+            value={prodSearch}
+            onChange={e => setProdSearch(e.target.value)}
+            placeholder="Buscar producto..."
+            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-9 pr-4 py-2.5 text-xs text-slate-900 dark:text-white"
+          />
+          {prodSearch && (
+            <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-20 max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+              {filtProds.map((p: any) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setItems(prev => {
+                      const ex = prev.find(i => i.product_id === p.id)
+                      if (ex) return prev.map(i => i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i)
+                      return [...prev, { product_id: p.id, nombre: p.nombre, cantidad: 1, precio_unitario: p.precio || 0 }]
+                    })
+                    setProdSearch("")
+                  }}
+                  className="w-full p-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex justify-between"
+                >
+                  <span className="font-bold text-xs">{p.nombre}</span>
+                  <span className="font-mono font-bold text-emerald-600 text-xs">{formatPYG(p.precio || 0)}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+
+        {items.length > 0 && (
+          <div className="mt-3 space-y-2 max-h-40 overflow-y-auto">
+            {items.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-2 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+                <div className="flex-1">
+                  <p className="font-bold text-xs">{item.nombre}</p>
+                  <p className="text-[10px] text-slate-400 font-mono">{formatPYG(item.precio_unitario)} c/u</p>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  value={item.cantidad}
+                  onChange={e => setItems(prev => prev.map((i, k) => k === idx ? { ...i, cantidad: parseInt(e.target.value) || 1 } : i))}
+                  className="w-16 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-1.5 text-center font-mono font-bold text-xs"
+                />
+                <span className="font-mono font-bold text-xs min-w-[80px] text-right">{formatPYG(item.cantidad * item.precio_unitario)}</span>
+                <button onClick={() => setItems(prev => prev.filter((_, k) => k !== idx))} className="text-rose-400 hover:text-rose-600 p-1">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+            <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800 font-bold">
+              <span>Total Cotizado:</span>
+              <span className="font-mono text-amber-500 font-black text-sm">{formatPYG(subtotal)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+        <button onClick={onClose} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">
+          Cancelar
+        </button>
+        <button onClick={handleSubmit} disabled={saving} className="px-5 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+          <span>{saving ? "Creando..." : "Crear Cotización"}</span>
+        </button>
+      </div>
     </div>
   )
 }

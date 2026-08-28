@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react"
 import {
   DollarSign, Plus, Search, Loader2, X, CheckCircle, Clock,
   Percent, Users, RefreshCw, Check, AlertCircle, Edit, Trash2,
-  TrendingUp, Award, FileText, Zap, ChevronRight
+  TrendingUp, Award, FileText, Zap, ChevronRight, Sparkles, Filter
 } from "lucide-react"
 import { api, type CommissionRule, type SalesCommission, type TenantUser } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -96,7 +96,6 @@ export default function CommissionsPage() {
     setRefreshing(false)
   }
 
-  // Cálculo Masivo de Comisiones del Período
   const handleCalculateBatch = async () => {
     setCalculating(true)
     try {
@@ -118,274 +117,170 @@ export default function CommissionsPage() {
   const kpis = useMemo(() => {
     const totalComisiones = commissions.reduce((sum, c) => sum + Number(c.monto_comision || 0), 0)
     const pendientePago = commissions.filter(c => c.estado !== "pagada").reduce((sum, c) => sum + Number(c.monto_comision || 0), 0)
-    const totalOperaciones = commissions.length
-    const reglasActivas = rules.filter(r => r.activo !== false).length
-    return { totalComisiones, pendientePago, totalOperaciones, reglasActivas }
-  }, [commissions, rules])
+    const pagadas = commissions.filter(c => c.estado === "pagada").reduce((sum, c) => sum + Number(c.monto_comision || 0), 0)
+    const vendedoresActivos = summary.filter(s => s.total_comisiones > 0).length
 
-  // Filtrado de Comisiones
-  const filteredCommissions = useMemo(() => {
-    return commissions.filter(c => {
-      const s = search.toLowerCase().trim()
-      const matchSearch = !s ||
-        (c.vendedor_nombre || "").toLowerCase().includes(s) ||
-        (c.sale_numero || "").toLowerCase().includes(s) ||
-        (c.rule_nombre || "").toLowerCase().includes(s)
+    return { totalComisiones, pendientePago, pagadas, vendedoresActivos }
+  }, [commissions, summary])
 
-      const matchStatus = statusFilter === "todos" || c.estado === statusFilter
-      return matchSearch && matchStatus
-    })
-  }, [commissions, search, statusFilter])
-
-  // Filtrado de Reglas
-  const filteredRules = useMemo(() => {
-    return rules.filter(r => {
-      const s = search.toLowerCase().trim()
-      return !s ||
-        (r.nombre || "").toLowerCase().includes(s) ||
-        (r.vendedor_nombre || "").toLowerCase().includes(s) ||
-        (r.tipo || "").toLowerCase().includes(s)
-    })
-  }, [rules, search])
-
-  // Acciones Reglas
-  const openNewRule = () => {
-    setEditingRule(null)
-    setRuleForm(emptyRuleForm)
-    setShowRuleModal(true)
-  }
-
-  const openEditRule = (r: CommissionRule) => {
-    setEditingRule(r)
-    setRuleForm({
-      nombre: r.nombre || "",
-      tipo: r.tipo || "porcentaje",
-      vendedor_id: r.vendedor_id || "",
-      porcentaje: r.porcentaje !== undefined ? Number(r.porcentaje) : 1.5,
-      aplica_a: r.aplica_a || "total",
-      monto_minimo: r.monto_minimo ? Number(r.monto_minimo) : null,
-      monto_maximo: r.monto_maximo ? Number(r.monto_maximo) : null,
-      valido_desde: r.valido_desde || "",
-      valido_hasta: r.valido_hasta || "",
-    })
-    setShowRuleModal(true)
-  }
-
-  const handleSaveRule = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!ruleForm.nombre.trim()) {
-      toast.error("Error", "El nombre de la regla es obligatorio")
-      return
-    }
-    setSavingRule(true)
+  const handlePayCommission = async (id: string) => {
+    setPayingId(id)
     try {
-      const payload: any = {
-        nombre: ruleForm.nombre,
-        tipo: ruleForm.tipo,
-        porcentaje: Number(ruleForm.porcentaje || 0),
-        aplica_a: ruleForm.aplica_a,
-        vendedor_id: ruleForm.vendedor_id || undefined,
-        monto_minimo: ruleForm.monto_minimo || undefined,
-        monto_maximo: ruleForm.monto_maximo || undefined,
-        valido_desde: ruleForm.valido_desde || undefined,
-        valido_hasta: ruleForm.valido_hasta || undefined,
-      }
-
-      if (editingRule) {
-        await api.commissions.rules.update(editingRule.id, payload)
-        toast.success("Regla actualizada", "El esquema de comisión fue modificado")
-      } else {
-        await api.commissions.rules.create(payload)
-        toast.success("Regla creada", "El nuevo esquema de comisión está activo")
-      }
-      setShowRuleModal(false)
-      setEditingRule(null)
-      fetchData()
-    } catch (err: any) {
-      toast.error("Error", err?.message || "No se pudo guardar la regla")
-    } finally {
-      setSavingRule(false)
-    }
-  }
-
-  const handleDeleteRule = async (r: CommissionRule) => {
-    const ok = await confirm({
-      title: "Eliminar Esquema de Comisión",
-      message: `¿Estás seguro de que deseas eliminar la regla "${r.nombre}"?`,
-      confirmText: "Eliminar",
-      variant: "danger",
-    })
-    if (!ok) return
-    try {
-      await api.commissions.rules.delete(r.id)
-      toast.success("Regla eliminada", `La regla "${r.nombre}" fue eliminada`)
+      await api.commissions.pay(id)
+      toast.success("Comisión Pagada", "Se registró el pago de la comisión")
       fetchData()
     } catch {
-      toast.error("Error", "No se pudo eliminar la regla de comisión")
-    }
-  }
-
-  const handlePayCommission = async (c: SalesCommission) => {
-    const ok = await confirm({
-      title: "Pagar Comisión",
-      message: `¿Confirmar el pago de ${formatPYG(Number(c.monto_comision))} al asesor "${c.vendedor_nombre || 'General'}" por la venta #${c.sale_numero || c.sale_id?.slice(0, 8)}?`,
-      confirmText: "Confirmar Pago",
-      variant: "info",
-    })
-    if (!ok) return
-    setPayingId(c.id)
-    try {
-      await api.commissions.pay(c.id)
-      toast.success("Comisión Pagada", `Comisión de ${formatPYG(Number(c.monto_comision))} liquidada con éxito`)
-      fetchData()
-    } catch {
-      toast.error("Error", "No se pudo procesar el pago de la comisión")
+      toast.error("Error", "No se pudo registrar el pago")
     } finally {
       setPayingId(null)
     }
   }
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* ── HEADER OPERATIVO ──────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-5">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate text-gray-900 dark:text-white flex items-center gap-3">
-              <Percent className="w-7 h-7 text-amber-600 dark:text-amber-400 shrink-0" />
-              Gestión de Comisiones
-            </h1>
-            <span className="px-3 py-1 rounded-full text-xs font-black bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-              Rendimiento & Liquidación Comercial
-            </span>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950/90 text-white p-7 border border-amber-500/20 shadow-2xl shadow-amber-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-500 border border-amber-400/30 text-white flex items-center justify-center shadow-lg shadow-amber-500/25">
+                  <Award className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20">
+                    INCENTIVOS & METAS · COMISIONES DE VENTA
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    {kpis.vendedoresActivos} Vendedores / Cajeros con Comisión
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Comisiones por Ventas & Rendimiento
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Reglas de incentivos, liquidación automática por ticket y control de comisiones pendientes de pago
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-400">
+                💰 Pendiente: {formatPYG(kpis.pendientePago)}
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                ✅ Pagadas: {formatPYG(kpis.pagadas)}
+              </span>
+            </div>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Cálculo de incentivos de ventas, esquemas de comisiones por mostrador y control de pagos a la fuerza comercial.
-          </p>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Recargar
+            </button>
+
+            <button
+              onClick={handleCalculateBatch}
+              disabled={calculating}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-orange-300 hover:from-amber-300 hover:to-orange-200 transition shadow-lg shadow-amber-500/25 flex items-center gap-2"
+            >
+              {calculating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              Liquidar Período
+            </button>
+          </div>
         </div>
 
-        {/* Acciones Rápidas */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={handleRefresh}
-            className="p-2 text-gray-400 hover:text-primary rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
-            title="Recargar datos"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-          </button>
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Comisiones</span>
+              <span className="text-[10px] font-bold text-amber-400">Generado</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(kpis.totalComisiones)}
+            </p>
+            <p className="text-[11px] text-slate-400">Histórico de incentivos</p>
+          </div>
 
-          <button
-            onClick={handleCalculateBatch}
-            disabled={calculating}
-            className="btn bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-800 font-bold text-xs flex items-center gap-1.5 px-3 py-2 rounded-xl shadow-xs hover:bg-gray-50 dark:hover:bg-slate-800"
-            title="Calcular comisiones de ventas confirmadas"
-          >
-            {calculating ? <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" /> : <Zap className="w-3.5 h-3.5 text-amber-500" />}
-            <span>Calcular Período</span>
-          </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pendiente de Pago</span>
+              <span className="text-[10px] font-bold text-rose-400">A liquidar</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {formatPYG(kpis.pendientePago)}
+            </p>
+            <p className="text-[11px] text-slate-400">A liquidar a vendedores</p>
+          </div>
 
-          <button
-            onClick={openNewRule}
-            className="btn bg-primary text-white font-extrabold text-xs flex items-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:opacity-90"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nueva Regla</span>
-          </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Comisiones Pagadas</span>
+              <span className="text-[10px] font-bold text-emerald-400">Cancelado</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(kpis.pagadas)}
+            </p>
+            <p className="text-[11px] text-slate-400">Pagos completados</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Vendedores Activos</span>
+              <span className="text-[10px] font-mono text-blue-400">Equipo</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {kpis.vendedoresActivos}
+            </p>
+            <p className="text-[11px] text-slate-400">Cajeros y comisionistas</p>
+          </div>
         </div>
       </div>
 
-      {/* ── HERO KPIS CONSOLIDADOS ────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-purple-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-              Total Comisiones
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="font-mono font-black text-2xl text-gray-900 dark:text-white mt-2">
-            {formatPYG(kpis.totalComisiones)}
-          </div>
-          <p className="text-[11px] text-gray-400 mt-1">
-            {kpis.totalOperaciones} ventas comisionadas
-          </p>
-        </div>
-
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-amber-500/30 border-l-4 border-l-amber-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
-              Pendientes de Liquidación
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
-              <Clock className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="font-mono font-black text-2xl text-amber-600 dark:text-amber-400 mt-2">
-            {formatPYG(kpis.pendientePago)}
-          </div>
-          <p className="text-[11px] text-gray-400 mt-1">
-            Comisiones calculadas por pagar
-          </p>
-        </div>
-
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-blue-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-              Asesores Comerciales
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-              <Users className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="font-mono font-black text-2xl text-blue-600 dark:text-blue-400 mt-2">
-            {summary.length || 1}
-          </div>
-          <p className="text-[11px] text-gray-400 mt-1">
-            Personal con comisiones asignadas
-          </p>
-        </div>
-
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 border-l-4 border-l-emerald-500 rounded-2xl shadow-xs hover:-translate-y-0.5 transition-transform">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
-              Reglas Activas
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-              <Percent className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="font-mono font-black text-2xl text-emerald-600 dark:text-emerald-400 mt-2">
-            {kpis.reglasActivas}
-          </div>
-          <p className="text-[11px] text-gray-400 mt-1">
-            Esquemas de comisión vigentes
-          </p>
-        </div>
-      </div>
-
-      {/* ── PESTAÑAS OPERATIVAS ────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 pb-2 overflow-x-auto no-scrollbar">
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
-          { id: "summary", label: "Resumen por Asesor", icon: Award, count: summary.length },
-          { id: "commissions", label: "Libro de Comisiones", icon: FileText, count: commissions.length },
-          { id: "rules", label: "Esquemas & Reglas", icon: Percent, count: rules.length },
+          { id: "summary", label: "Resumen por Vendedor / Cajero", icon: Users, count: summary.length },
+          { id: "commissions", label: "Historial de Comisiones", icon: FileText, count: commissions.length },
+          { id: "rules", label: "Reglas de Comisión", icon: Percent, count: rules.length },
         ].map((t) => {
+          const Icon = t.icon
           const active = activeTab === t.id
           return (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id as any)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
                 active
-                  ? "bg-primary text-white shadow-sm"
-                  : "bg-white dark:bg-slate-900 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-800 hover:bg-gray-50"
+                  ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
               }`}
             >
-              <t.icon className="w-4 h-4" />
+              <Icon className="w-4 h-4" />
               <span>{t.label}</span>
-              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${active ? "bg-white/20 text-white" : "bg-gray-100 dark:bg-slate-800 text-gray-500"}`}>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                active ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+              }`}>
                 {t.count}
               </span>
             </button>
@@ -393,454 +288,176 @@ export default function CommissionsPage() {
         })}
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          PESTAÑA 1: RESUMEN POR ASESOR COMERCIAL (RANKING)
-      ═══════════════════════════════════════════════════════════════════════ */}
+      {/* ══════════════════════ TAB 1: RESUMEN POR VENDEDOR ══════════════════════ */}
       {activeTab === "summary" && (
-        <div className="space-y-4">
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-gray-400 border-b border-gray-200 dark:border-gray-800">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="p-4">Vendedor / Cajero</th>
+                  <th className="p-4 text-center">Operaciones</th>
+                  <th className="p-4 text-right">Total Ventas (₲)</th>
+                  <th className="p-4 text-right">Comisión Acumulada</th>
+                  <th className="p-4 text-right">Pendiente Pago</th>
+                  <th className="p-4 text-center">Rendimiento</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                {loading ? (
                   <tr>
-                    <th className="p-3.5">Asesor Comercial / Vendedor</th>
-                    <th className="p-3.5 text-center">Operaciones</th>
-                    <th className="p-3.5 text-right">Total Facturado</th>
-                    <th className="p-3.5 text-right">Comisiones Totales</th>
-                    <th className="p-3.5 text-right">Pendiente Liquidación</th>
-                    <th className="p-3.5 text-center">Acciones</th>
+                    <td colSpan={6} className="p-12 text-center text-slate-400">
+                      <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" />
+                      <span>Cargando comisiones por vendedor...</span>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-gray-400">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-primary" />
-                        <span>Cargando resumen de comisiones...</span>
+                ) : summary.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-12 text-center text-slate-400">
+                      No hay datos de comisiones acumuladas.
+                    </td>
+                  </tr>
+                ) : (
+                  summary.map((s, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="p-4 font-bold text-slate-900 dark:text-white">
+                        {s.vendedor_nombre || "Vendedor General"}
+                      </td>
+                      <td className="p-4 text-center font-mono text-slate-600 dark:text-slate-300">
+                        {s.cantidad_operaciones}
+                      </td>
+                      <td className="p-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
+                        {formatPYG(s.total_ventas)}
+                      </td>
+                      <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">
+                        {formatPYG(s.total_comisiones)}
+                      </td>
+                      <td className="p-4 text-right font-mono font-black text-rose-600 dark:text-rose-400">
+                        {formatPYG(s.pendiente_pago)}
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                          {s.total_ventas > 0 ? `${((s.total_comisiones / s.total_ventas) * 100).toFixed(1)}% tasa efec.` : "—"}
+                        </span>
                       </td>
                     </tr>
-                  ) : summary.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-gray-400">
-                        No hay comisiones calculadas aún. Hacé clic en "Calcular Período" para liquidar las ventas confirmadas.
-                      </td>
-                    </tr>
-                  ) : (
-                    summary.map((s, idx) => (
-                      <tr key={s.vendedor_id || idx} className="hover:bg-gray-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 font-bold text-gray-900 dark:text-white">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-purple-50 dark:bg-purple-950/40 text-purple-600 flex items-center justify-center font-bold text-xs">
-                              {idx + 1}
-                            </div>
-                            <div>
-                              <p className="font-extrabold text-xs">{s.vendedor_nombre || "Vendedor General"}</p>
-                              <p className="text-[10px] text-gray-400 font-mono">Fuerza de Ventas</p>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="p-3.5 text-center font-mono font-bold text-gray-700 dark:text-gray-300">
-                          {s.cantidad_operaciones}
-                        </td>
-
-                        <td className="p-3.5 text-right font-mono font-bold text-gray-900 dark:text-white">
-                          {formatPYG(s.total_ventas)}
-                        </td>
-
-                        <td className="p-3.5 text-right font-mono font-black text-purple-600 dark:text-purple-400">
-                          {formatPYG(s.total_comisiones)}
-                        </td>
-
-                        <td className="p-3.5 text-right font-mono font-black text-amber-600 dark:text-amber-400">
-                          {formatPYG(s.pendiente_pago)}
-                        </td>
-
-                        <td className="p-3.5 text-center">
-                          <button
-                            onClick={() => {
-                              setActiveTab("commissions")
-                              setSearch(s.vendedor_nombre || "")
-                            }}
-                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-primary hover:text-white transition-all flex items-center gap-1 mx-auto"
-                          >
-                            <span>Ver Detalle</span>
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          PESTAÑA 2: LIBRO DE COMISIONES (DETALLE DE VENTAS)
-      ═══════════════════════════════════════════════════════════════════════ */}
+      {/* ══════════════════════ TAB 2: HISTORIAL DE COMISIONES ══════════════════════ */}
       {activeTab === "commissions" && (
-        <div className="space-y-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 w-4 h-4 text-gray-400 top-2.5" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por Vendedor, Nº Comprobante de Venta o Regla..."
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary text-gray-900 dark:text-white"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-300 outline-none"
-              >
-                <option value="todos">Todos los Estados</option>
-                <option value="calculada">Pendientes / Calculadas</option>
-                <option value="pagada">Pagadas</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-gray-400 border-b border-gray-200 dark:border-gray-800">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="p-4">Fecha</th>
+                  <th className="p-4">Comprobante</th>
+                  <th className="p-4">Vendedor</th>
+                  <th className="p-4 text-right">Venta Base</th>
+                  <th className="p-4 text-center">Tasa</th>
+                  <th className="p-4 text-right">Comisión</th>
+                  <th className="p-4 text-center">Estado</th>
+                  <th className="p-4 text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                {loading ? (
                   <tr>
-                    <th className="p-3.5">Comprobante Venta</th>
-                    <th className="p-3.5">Fecha</th>
-                    <th className="p-3.5">Asesor Comercial</th>
-                    <th className="p-3.5">Esquema / Regla</th>
-                    <th className="p-3.5 text-right">Base Venta</th>
-                    <th className="p-3.5 text-center">% Com.</th>
-                    <th className="p-3.5 text-right">Comisión Ganada</th>
-                    <th className="p-3.5 text-center">Estado</th>
-                    <th className="p-3.5 text-center">Acciones</th>
+                    <td colSpan={8} className="p-12 text-center text-slate-400">
+                      <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" />
+                      <span>Cargando historial de comisiones...</span>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={9} className="p-8 text-center text-gray-400">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-primary" />
-                        <span>Cargando libro de comisiones...</span>
+                ) : commissions.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-12 text-center text-slate-400">
+                      No hay comisiones registradas.
+                    </td>
+                  </tr>
+                ) : (
+                  commissions.map((c) => (
+                    <tr key={c.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="p-4 text-slate-500 font-mono text-[11px]">{formatDate((c as any).created_at || (c as any).fecha)}</td>
+                      <td className="p-4 font-mono font-bold text-blue-600 dark:text-blue-400">#{(c as any).sale?.numero || c.sale_id?.slice(0, 8)}</td>
+                      <td className="p-4 font-bold text-slate-900 dark:text-white">{(c as any).vendedor?.nombre || (c as any).vendedor_nombre || "Vendedor"}</td>
+                      <td className="p-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">{formatPYG(Number(c.monto_base || 0))}</td>
+                      <td className="p-4 text-center font-mono font-bold text-slate-600 dark:text-slate-400">{c.porcentaje_aplicado || 1.5}%</td>
+                      <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">{formatPYG(Number(c.monto_comision || 0))}</td>
+                      <td className="p-4 text-center">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                          c.estado === "pagada"
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                        }`}>
+                          {c.estado === "pagada" ? "Pagada" : "Pendiente"}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        {c.estado !== "pagada" && (
+                          <button
+                            onClick={() => handlePayCommission(c.id)}
+                            disabled={payingId === c.id}
+                            className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow-sm transition"
+                          >
+                            {payingId === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Pagar"}
+                          </button>
+                        )}
                       </td>
                     </tr>
-                  ) : filteredCommissions.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="p-8 text-center text-gray-400">
-                        No se encontraron registros de comisiones coincidentes.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredCommissions.map((c) => {
-                      const isPaid = c.estado === "pagada"
-                      return (
-                        <tr key={c.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                          <td className="p-3.5 font-mono font-bold text-blue-600 dark:text-blue-400">
-                            #{c.sale_numero || c.sale_id?.slice(0, 8) || "—"}
-                          </td>
-
-                          <td className="p-3.5 text-gray-500 font-mono text-[11px]">
-                            {c.created_at ? formatDate(c.created_at) : "—"}
-                          </td>
-
-                          <td className="p-3.5 font-bold text-gray-900 dark:text-white">
-                            {c.vendedor_nombre || "Vendedor General"}
-                          </td>
-
-                          <td className="p-3.5 text-gray-600 dark:text-gray-300 max-w-[160px] truncate">
-                            {c.rule_nombre || "Comisión General"}
-                          </td>
-
-                          <td className="p-3.5 text-right font-mono font-bold text-gray-900 dark:text-white">
-                            {formatPYG(Number(c.base_calculo || 0))}
-                          </td>
-
-                          <td className="p-3.5 text-center font-mono font-bold text-purple-600 dark:text-purple-400">
-                            {Number(c.porcentaje || 0).toFixed(1)}%
-                          </td>
-
-                          <td className="p-3.5 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
-                            {formatPYG(Number(c.monto_comision || 0))}
-                          </td>
-
-                          <td className="p-3.5 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${isPaid ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"}`}>
-                              {isPaid ? "Pagada" : "Calculada"}
-                            </span>
-                          </td>
-
-                          <td className="p-3.5 text-center">
-                            {!isPaid && (
-                              <button
-                                onClick={() => handlePayCommission(c)}
-                                disabled={payingId === c.id}
-                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs flex items-center gap-1 mx-auto"
-                                title="Liquidar / Pagar comisión"
-                              >
-                                {payingId === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                                <span>Pagar</span>
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          PESTAÑA 3: ESQUEMAS & REGLAS DE COMISIÓN
-      ═══════════════════════════════════════════════════════════════════════ */}
+      {/* ══════════════════════ TAB 3: REGLAS DE COMISIÓN ══════════════════════ */}
       {activeTab === "rules" && (
         <div className="space-y-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 w-4 h-4 text-gray-400 top-2.5" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por nombre de regla o asesor..."
-                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-2 text-xs font-medium outline-none focus:border-primary text-gray-900 dark:text-white"
-              />
-            </div>
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+            <button
+              onClick={() => { setEditingRule(null); setRuleForm(emptyRuleForm); setShowRuleModal(true) }}
+              className="px-5 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs flex items-center gap-2 shadow-md shadow-amber-500/20"
+            >
+              <Plus className="w-4 h-4" />
+              Nueva Regla de Comisión
+            </button>
           </div>
 
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-gray-400 border-b border-gray-200 dark:border-gray-800">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="p-3.5">Nombre del Esquema</th>
-                    <th className="p-3.5">Asesor Asignado</th>
-                    <th className="p-3.5">Tipo de Cálculo</th>
-                    <th className="p-3.5 text-center">% Comisión</th>
-                    <th className="p-3.5">Rango de Montos</th>
-                    <th className="p-3.5 text-center">Estado</th>
-                    <th className="p-3.5 text-center">Acciones</th>
+                    <th className="p-4">Regla</th>
+                    <th className="p-4">Vendedor / Alcance</th>
+                    <th className="p-4 text-center">Tipo</th>
+                    <th className="p-4 text-right">Porcentaje</th>
+                    <th className="p-4 text-center">Estado</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-400">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-primary" />
-                        <span>Cargando reglas de comisiones...</span>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {rules.map((r) => (
+                    <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                      <td className="p-4 font-bold text-slate-900 dark:text-white">{r.nombre}</td>
+                      <td className="p-4 text-slate-500">{r.vendedor_id ? "Vendedor Asignado" : "General (Todos los cajeros)"}</td>
+                      <td className="p-4 text-center uppercase text-[10px] font-mono">{r.tipo}</td>
+                      <td className="p-4 text-right font-mono font-black text-amber-600 dark:text-amber-400">{r.porcentaje}%</td>
+                      <td className="p-4 text-center">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600">Activa</span>
                       </td>
                     </tr>
-                  ) : filteredRules.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-400">
-                        No hay esquemas de comisión configurados. Creá uno con el botón "+ Nueva Regla".
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredRules.map((r) => (
-                      <tr key={r.id} className="hover:bg-gray-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3.5 font-bold text-gray-900 dark:text-white">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                              <Percent className="w-3.5 h-3.5" />
-                            </div>
-                            <span>{r.nombre}</span>
-                          </div>
-                        </td>
-
-                        <td className="p-3.5 font-semibold text-gray-700 dark:text-gray-300">
-                          {r.vendedor_nombre || "Aplica a Todos (General)"}
-                        </td>
-
-                        <td className="p-3.5">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
-                            {r.tipo === "porcentaje" ? "Porcentaje s/ Venta" : r.tipo}
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 text-center font-mono font-black text-purple-600 dark:text-purple-400 text-sm">
-                          {Number(r.porcentaje || 0).toFixed(1)}%
-                        </td>
-
-                        <td className="p-3.5 text-gray-500 font-mono text-[11px]">
-                          {r.monto_minimo || r.monto_maximo ? (
-                            <span>{r.monto_minimo ? formatPYG(Number(r.monto_minimo)) : "Gs. 0"} — {r.monto_maximo ? formatPYG(Number(r.monto_maximo)) : "Sin límite"}</span>
-                          ) : (
-                            <span>Sin límite de monto</span>
-                          )}
-                        </td>
-
-                        <td className="p-3.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${r.activo !== false ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" : "bg-gray-100 text-gray-500"}`}>
-                            {r.activo !== false ? "Activo" : "Inactivo"}
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => openEditRule(r)}
-                              className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800"
-                              title="Editar Regla"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteRule(r)}
-                              className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800"
-                              title="Eliminar Regla"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── MODAL: CREAR / EDITAR REGLA DE COMISIÓN ────────────────────────── */}
-      {showRuleModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="card max-w-lg w-full p-6 space-y-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 shadow-2xl rounded-2xl animate-fade-in-up my-8">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-              <div>
-                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">
-                  {editingRule ? "Editar Esquema de Comisión" : "Nuevo Esquema de Comisión"}
-                </h3>
-                <p className="text-xs text-gray-400">Definí los criterios de incentivación comercial</p>
-              </div>
-              <button onClick={() => setShowRuleModal(false)} className="p-1 text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveRule} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Nombre del Esquema / Regla *</label>
-                <input
-                  type="text"
-                  required
-                  value={ruleForm.nombre}
-                  onChange={e => setRuleForm({ ...ruleForm, nombre: e.target.value })}
-                  placeholder="Ej: Comisión Mostrador General (1.5%)"
-                  className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs font-bold outline-none focus:border-primary"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Porcentaje de Comisión (%) *</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min={0}
-                    max={100}
-                    required
-                    value={ruleForm.porcentaje ?? ""}
-                    onChange={e => setRuleForm({ ...ruleForm, porcentaje: parseFloat(e.target.value) || 0 })}
-                    placeholder="1.5"
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs font-mono font-bold outline-none focus:border-primary"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Asesor / Vendedor Específico</label>
-                  <select
-                    value={ruleForm.vendedor_id}
-                    onChange={e => setRuleForm({ ...ruleForm, vendedor_id: e.target.value })}
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs font-bold outline-none"
-                  >
-                    <option value="">Aplica a Todos (General)</option>
-                    {users.map(u => (
-                      <option key={u.id} value={u.id}>{u.nombre}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Monto Mínimo Venta (PYG)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={ruleForm.monto_minimo ?? ""}
-                    onChange={e => setRuleForm({ ...ruleForm, monto_minimo: parseFloat(e.target.value) || null })}
-                    placeholder="Sin mínimo"
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-primary"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Monto Máximo Venta (PYG)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={ruleForm.monto_maximo ?? ""}
-                    onChange={e => setRuleForm({ ...ruleForm, monto_maximo: parseFloat(e.target.value) || null })}
-                    placeholder="Sin límite"
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs font-mono outline-none focus:border-primary"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Válido Desde</label>
-                  <input
-                    type="date"
-                    value={ruleForm.valido_desde}
-                    onChange={e => setRuleForm({ ...ruleForm, valido_desde: e.target.value })}
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs outline-none focus:border-primary"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-black uppercase text-[10px] text-gray-400 mb-1">Válido Hasta</label>
-                  <input
-                    type="date"
-                    value={ruleForm.valido_hasta}
-                    onChange={e => setRuleForm({ ...ruleForm, valido_hasta: e.target.value })}
-                    className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs outline-none focus:border-primary"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
-                <button
-                  type="button"
-                  onClick={() => setShowRuleModal(false)}
-                  className="btn bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 font-bold text-xs px-4 py-2 rounded-xl"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingRule}
-                  className="btn bg-primary text-white font-extrabold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm hover:opacity-90"
-                >
-                  {savingRule ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
-                  <span>{editingRule ? "Guardar Cambios" : "Crear Esquema"}</span>
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
