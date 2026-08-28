@@ -654,7 +654,7 @@ export default function POSPage() {
   // visible salvo en Efectivo); con 2+ activos, cada linea no-efectivo
   // muestra su propio campo de monto para dividir el cobro -- eso ES el
   // pago mixto, sin pantalla aparte.
-  const [activeMethods, setActiveMethods] = useState<Set<"cash" | "bancard" | "dinelco" | "qr" | "extra_club">>(new Set(["cash"]))
+  const [activeMethods, setActiveMethods] = useState<Set<"cash" | "bancard" | "dinelco" | "qr" | "extra_club" | "plugpay_pix" | "plugpay_credito">>(new Set(["cash"]))
   const isMultiPayment = activeMethods.size > 1
   // Por defecto un tap en un medio de pago REEMPLAZA la seleccion (un solo
   // medio activo a la vez, como espera cualquier cajero). Antes cada tap
@@ -663,19 +663,19 @@ export default function POSPage() {
   // forma obvia de volver atras. El pago dividido en varios medios sigue
   // existiendo, pero ahora requiere prender "Pago mixto" a proposito.
   const [allowMixedPayment, setAllowMixedPayment] = useState(false)
-  const toggleActiveMethod = (m: "cash" | "bancard" | "dinelco" | "qr" | "extra_club") => {
+  const toggleActiveMethod = (m: "cash" | "bancard" | "dinelco" | "qr" | "extra_club" | "plugpay_pix" | "plugpay_credito") => {
     setActiveMethods(prev => {
       if (!allowMixedPayment) {
         return new Set([m])
       }
-      const next = new Set(prev)
+      const next = new Set(prev as any)
       if (next.has(m)) {
         if (next.size === 1) return prev
         next.delete(m)
       } else {
         next.add(m)
       }
-      return next
+      return next as any
     })
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
@@ -3648,15 +3648,15 @@ export default function POSPage() {
         }
         if (activeMethods.has("qr")) {
           const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) {
-            if (plugpayEnabled && plugpayMethod === "pix") {
-              out.push({ forma_pago: "PLUGPAY_PIX", monto, moneda: "PYG" })
-            } else if (plugpayEnabled && plugpayMethod === "parcelado") {
-              out.push({ forma_pago: "PLUGPAY_CREDITO", monto, moneda: "PYG" })
-            } else {
-              out.push({ forma_pago: "QR", monto, moneda: "PYG" })
-            }
-          }
+          if (monto > 0) out.push({ forma_pago: "QR", monto, moneda: "PYG" })
+        }
+        if (activeMethods.has("plugpay_pix")) {
+          const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (monto > 0) out.push({ forma_pago: "PLUGPAY_PIX", monto, moneda: "PYG" })
+        }
+        if (activeMethods.has("plugpay_credito")) {
+          const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (monto > 0) out.push({ forma_pago: "PLUGPAY_CREDITO", monto, moneda: "PYG" })
         }
         if (activeMethods.has("extra_club")) {
           const monto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
@@ -5975,6 +5975,8 @@ export default function POSPage() {
                   { id: "bancard", key: "2", label: "Bancard", icon: CreditCard, show: isEnabled("BANCARD") },
                   { id: "dinelco", key: "3", label: "Dinelco", icon: CreditCard, show: isEnabled("DINELCO") },
                   { id: "qr", key: "4", label: "QR / Pix", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
+                  { id: "plugpay_pix", key: "6", label: "PIX (PlugPay)", icon: Smartphone, show: plugpayEnabled },
+                  { id: "plugpay_credito", key: "7", label: "Crédito Brasil", icon: CreditCard, show: plugpayEnabled },
                   { id: "extra_club", key: "5", label: "Extra Club", icon: Star, show: isEnabled("EXTRA_CLUB") },
                 ]
 
@@ -6436,312 +6438,345 @@ export default function POSPage() {
                 </div>
               )}
 
-              {/* 4. QR ZIMPLE / PIX */}
+              {/* 4. QR ZIMPLE (Bancard) */}
               {activeMethods.has("qr") && (
                 <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center">
-                  {plugpayEnabled && (
-                    <div className="flex gap-1.5 mb-4 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 w-full shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => { setPlugpayMethod("zimple"); resetBancardFlow(); }}
-                        className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-black uppercase transition cursor-pointer ${plugpayMethod === "zimple" ? "bg-purple-600 text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-850"}`}
-                      >
-                        QR Zimple
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setPlugpayMethod("pix"); resetBancardFlow(); }}
-                        className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-black uppercase transition cursor-pointer ${plugpayMethod === "pix" ? "bg-orange-600 text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-850"}`}
-                      >
-                        PIX (BRL)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setPlugpayMethod("parcelado"); resetBancardFlow(); }}
-                        className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-black uppercase transition cursor-pointer ${plugpayMethod === "parcelado" ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-850"}`}
-                      >
-                        Crédito Brasil
-                      </button>
+                  <div className="w-36 h-36 bg-white rounded-xl p-2 flex items-center justify-center shadow-lg mb-2">
+                    <QrCode className="w-32 h-32 text-slate-900" />
+                  </div>
+                  <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple</div>
+                  {!isMultiPayment ? (
+                    <div className="text-xs font-posMono tabular-nums font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      {formatPYG(totalPyg)} (R$ {totalBrl})
                     </div>
-                  )}
-
-                  {/* SUB-TAB: BANCARD QR ZIMPLE */}
-                  {(plugpayMethod === "zimple" || !plugpayEnabled) && (
-                    <>
-                      <div className="w-36 h-36 bg-white rounded-xl p-2 flex items-center justify-center shadow-lg mb-2">
-                        <QrCode className="w-32 h-32 text-slate-900" />
-                      </div>
-                      <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple</div>
-                      {!isMultiPayment ? (
-                        <div className="text-xs font-posMono tabular-nums font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
-                          {formatPYG(totalPyg)} (R$ {totalBrl})
-                        </div>
-                      ) : (
-                        <div className="w-full mt-1.5">
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
-                          <div className="flex gap-1">
-                            <input
-                              ref={mixedQrPygInputRef}
-                              type="text"
-                              value={mixedQrPyg}
-                              onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
-                              onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedQrPyg)}
-                              onFocus={(e) => e.target.select()}
-                              placeholder="0"
-                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
-                            />
-                            <button
-                              type="button"
-                              title="Completar con el resto"
-                              onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
-                              className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
-                            >
-                              Resto
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {!activePosConfig.bancardIp && (
-                        <div className="w-full mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300">
-                          No hay IP de terminal configurada para esta caja.{" "}
-                          <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
-                        </div>
-                      )}
-
-                      {bancardQrState !== "aprobada" && (
+                  ) : (
+                    <div className="w-full mt-1.5">
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                      <div className="flex gap-1">
+                        <input
+                          ref={mixedQrPygInputRef}
+                          type="text"
+                          value={mixedQrPyg}
+                          onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                          onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedQrPyg)}
+                          onFocus={(e) => e.target.select()}
+                          placeholder="0"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
+                        />
                         <button
                           type="button"
-                          onClick={handleBancardQR}
-                          disabled={!activePosConfig.bancardIp || bancardQrState === "esperando"}
-                          className="w-full mt-2 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
+                          title="Completar con el resto"
+                          onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                          className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
                         >
-                          {bancardQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
-                          <span>{bancardQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR"}</span>
+                          Resto
                         </button>
-                      )}
-
-                      {bancardQrState === "aprobada" && bancardQrResult && (
-                        <div className="w-full mt-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5 text-left">
-                          <div className="font-black">✓ {bancardQrResult.mensajeDisplay || "Pago Exitoso"}</div>
-                          {bancardQrResult.nombreTarjeta && <div>{bancardQrResult.nombreTarjeta}</div>}
-                          {bancardQrResult.nombreCliente && <div>{bancardQrResult.nombreCliente}</div>}
-                          <div className="font-posMono tabular-nums">Autorización {bancardQrResult.codigoAutorizacion} · Boleta {bancardQrResult.nroBoleta}</div>
-                        </div>
-                      )}
-
-                      {bancardQrState === "error_rechazo" && (
-                        <div className="w-full mt-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
-                          <div className="font-black">✕ {bancardQrError}</div>
-                          <button type="button" onClick={handleBancardQR} className="text-[11px] font-bold underline cursor-pointer">Reintentar</button>
-                        </div>
-                      )}
-
-                      {bancardQrState === "error_conexion" && (
-                        <div className="w-full mt-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
-                          <div className="font-black">⚠ {bancardQrError}</div>
-                          <button type="button" onClick={handleBancardQR} className="text-[11px] font-bold underline cursor-pointer mr-3">Reintentar conexión</button>
-                          <label className="flex items-center gap-1.5 text-[11px] font-bold cursor-pointer mt-1">
-                            <input type="checkbox" checked={bancardQrManualConfirm} onChange={(e) => setBancardQrManualConfirm(e.target.checked)} className="w-3.5 h-3.5" />
-                            Confirmo que cobré por QR fuera del sistema
-                          </label>
-                        </div>
-                      )}
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                        Presente la pantalla al cliente para el escaneo directo.
-                      </span>
-                    </>
-                  )}
-
-                  {/* SUB-TAB: PLUGPAY PIX */}
-                  {plugpayEnabled && plugpayMethod === "pix" && (
-                    <div className="w-full space-y-3">
-                      <div className="flex flex-col items-center">
-                        {plugpayState === "esperando" && plugpayResult?.qrCodeStringImage ? (
-                          <div className="w-36 h-36 bg-white rounded-xl p-2 flex items-center justify-center shadow-lg mb-2">
-                            <img src={`data:image/png;base64,${plugpayResult.qrCodeStringImage}`} className="w-32 h-32" alt="PIX QR" />
-                          </div>
-                        ) : (
-                          <div className="w-36 h-36 bg-white rounded-xl p-2 flex items-center justify-center shadow-lg mb-2">
-                            <QrCode className="w-32 h-32 text-orange-600" />
-                          </div>
-                        )}
-                        <div className="font-bold text-xs text-slate-900 dark:text-white">PIX Brasil (PlugPay)</div>
-                        {plugpayBrlValue && (
-                          <div className="text-xs font-posMono font-black text-orange-600 mt-0.5">
-                            Valor Venta: R$ {plugpayBrlValue.toFixed(2)}
-                          </div>
-                        )}
                       </div>
-
-                      {plugpayState === "idle" && (
-                        <div className="space-y-2 text-left">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">CPF del Cliente Brasileño (sólo números):</label>
-                            <input
-                              type="text"
-                              value={plugpayCpf}
-                              onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                              placeholder="Ej: 52998224725"
-                              className="w-full mt-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs outline-none focus:border-orange-500 text-center text-slate-950 dark:text-white"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handlePlugpayPix}
-                            className="w-full py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded-lg transition cursor-pointer"
-                          >
-                            Generar QR PIX
-                          </button>
-                        </div>
-                      )}
-
-                      {plugpayState === "esperando" && (
-                        <div className="space-y-2 text-center">
-                          <div className="flex items-center justify-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-                            <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
-                            <span>Esperando confirmación de pago de PlugPay...</span>
-                          </div>
-                          {plugpayResult?.qrCodeCopiaCola && (
-                            <div className="text-[10px] p-2 bg-slate-100 dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800 break-all font-mono select-all text-slate-600 dark:text-slate-350 text-left max-h-16 overflow-y-auto">
-                              {plugpayResult.qrCodeCopiaCola}
-                            </div>
-                          )}
-                          <button
-                            type="button"
-                            onClick={resetBancardFlow}
-                            className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
-                          >
-                            Cancelar Operación
-                          </button>
-                        </div>
-                      )}
-
-                      {plugpayState === "aprobada" && (
-                        <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
-                          <div className="font-black">✓ Transacción PIX Aprobada</div>
-                          <div>ID Transacción: {plugpayResult?.IdTransacao}</div>
-                          <div className="font-posMono">Ref: {plugpayResult?.referenciaInterna?.slice(0, 12)}...</div>
-                        </div>
-                      )}
-
-                      {plugpayState === "error" && (
-                        <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 text-left space-y-1.5">
-                          <div className="font-black">✕ Error PIX: {plugpayError}</div>
-                          <button type="button" onClick={handlePlugpayPix} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
-                        </div>
-                      )}
                     </div>
                   )}
 
-                  {/* SUB-TAB: PLUGPAY CRÉDITO PARCELADO */}
-                  {plugpayEnabled && plugpayMethod === "parcelado" && (
-                    <div className="w-full space-y-3">
-                      <div className="flex flex-col items-center">
+                  {!activePosConfig.bancardIp && (
+                    <div className="w-full mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300">
+                      No hay IP de terminal configurada para esta caja.{" "}
+                      <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                    </div>
+                  )}
+
+                  {bancardQrState !== "aprobada" && (
+                    <button
+                      type="button"
+                      onClick={handleBancardQR}
+                      disabled={!activePosConfig.bancardIp || bancardQrState === "esperando"}
+                      className="w-full mt-2 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer"
+                    >
+                      {bancardQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+                      <span>{bancardQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR"}</span>
+                    </button>
+                  )}
+
+                  {bancardQrState === "aprobada" && bancardQrResult && (
+                    <div className="w-full mt-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 space-y-0.5 text-left">
+                      <div className="font-black">✓ {bancardQrResult.mensajeDisplay || "Pago Exitoso"}</div>
+                      {bancardQrResult.nombreTarjeta && <div>{bancardQrResult.nombreTarjeta}</div>}
+                      {bancardQrResult.nombreCliente && <div>{bancardQrResult.nombreCliente}</div>}
+                      <div className="font-posMono tabular-nums">Autorización {bancardQrResult.codigoAutorizacion} · Boleta {bancardQrResult.nroBoleta}</div>
+                    </div>
+                  )}
+
+                  {bancardQrState === "error_rechazo" && (
+                    <div className="w-full mt-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                      <div className="font-black">✕ {bancardQrError}</div>
+                      <button type="button" onClick={handleBancardQR} className="text-[11px] font-bold underline cursor-pointer">Reintentar</button>
+                    </div>
+                  )}
+
+                  {bancardQrState === "error_conexion" && (
+                    <div className="w-full mt-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/40 text-[11px] text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
+                      <div className="font-black">⚠ {bancardQrError}</div>
+                      <button type="button" onClick={handleBancardQR} className="text-[11px] font-bold underline cursor-pointer mr-3">Reintentar conexión</button>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold cursor-pointer mt-1">
+                        <input type="checkbox" checked={bancardQrManualConfirm} onChange={(e) => setBancardQrManualConfirm(e.target.checked)} className="w-3.5 h-3.5" />
+                        Confirmo que cobré por QR fuera del sistema
+                      </label>
+                    </div>
+                  )}
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                    Presente la pantalla al cliente para el escaneo directo.
+                  </span>
+                </div>
+              )}
+
+              {/* 5. PIX BRASIL (PlugPay) */}
+              {activeMethods.has("plugpay_pix") && (
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center w-full">
+                  <div className="w-full space-y-3">
+                    <div className="flex flex-col items-center">
+                      {plugpayState === "esperando" && plugpayResult?.qrCodeStringImage ? (
                         <div className="w-36 h-36 bg-white rounded-xl p-2 flex items-center justify-center shadow-lg mb-2">
-                          <CreditCard className="w-32 h-32 text-blue-600" />
+                          <img src={`data:image/png;base64,${plugpayResult.qrCodeStringImage}`} className="w-32 h-32" alt="PIX QR" />
                         </div>
-                        <div className="font-bold text-xs text-slate-900 dark:text-white">Crédito Parcelado (Brasil)</div>
-                        {plugpayBrlValue && (
-                          <div className="text-xs font-posMono font-black text-blue-600 mt-0.5">
-                            Valor Venta BRL: R$ {plugpayBrlValue.toFixed(2)}
-                          </div>
-                        )}
-                      </div>
-
-                      {plugpayState === "idle" && (
-                        <div className="space-y-2 text-left">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">CPF del Cliente Brasileño (sólo números):</label>
-                            <input
-                              type="text"
-                              value={plugpayCpf}
-                              onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                              placeholder="Ej: 52998224725"
-                              className="w-full mt-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs outline-none focus:border-blue-500 text-center text-slate-950 dark:text-white"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">WhatsApp / Celular del Cliente (con código de área):</label>
-                            <input
-                              type="text"
-                              value={plugpayPhone}
-                              onChange={(e) => setPlugpayPhone(e.target.value.replace(/\D/g, ""))}
-                              placeholder="Ej: 48999999999"
-                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs outline-none focus:border-blue-500 text-center text-slate-950 dark:text-white"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Cantidad de Cuotas (Parcelas):</label>
-                            <select
-                              value={plugpayCuotas}
-                              onChange={(e) => setPlugpayCuotas(Number(e.target.value))}
-                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs outline-none focus:border-blue-500 text-slate-950 dark:text-white font-bold"
-                            >
-                              {[1, 2, 3, 4, 5, 6, 9, 12, 18, 24].map((c) => (
-                                <option key={c} value={c}>
-                                  {c === 1 ? "1 pago directo" : `${c} cuotas (parcelas)`}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handlePlugpayParcelado}
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition cursor-pointer"
-                          >
-                            Iniciar Crédito Parcelado
-                          </button>
+                      ) : (
+                        <div className="w-36 h-36 bg-white rounded-xl p-2 flex items-center justify-center shadow-lg mb-2">
+                          <QrCode className="w-32 h-32 text-orange-600" />
                         </div>
                       )}
-
-                      {plugpayState === "esperando" && (
-                        <div className="space-y-2 text-center flex flex-col items-center">
-                          <div className="flex items-center justify-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-                            <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                            <span>Esperando que el cliente complete el pago en Reales...</span>
-                          </div>
-                          {plugpayResult?.UrlPaymentForm && (
-                            <div className="w-full space-y-2 mt-2">
-                              <a
-                                href={plugpayResult.UrlPaymentForm}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer"
-                              >
-                                Abrir Checkout de Tarjeta <ExternalLink className="w-3.5 h-3.5" />
-                              </a>
-                              <div className="text-[10px] text-slate-500">
-                                Copie el link y envíelo por WhatsApp o ábralo en el navegador para que el cliente ingrese su tarjeta.
-                              </div>
-                            </div>
-                          )}
-                          <button
-                            type="button"
-                            onClick={resetBancardFlow}
-                            className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer mt-3"
-                          >
-                            Cancelar Operación
-                          </button>
+                      <div className="font-bold text-xs text-slate-900 dark:text-white">PIX Brasil (PlugPay)</div>
+                      {plugpayBrlValue ? (
+                        <div className="text-xs font-posMono font-black text-orange-600 mt-0.5">
+                          Valor Venta: R$ {plugpayBrlValue.toFixed(2)}
                         </div>
-                      )}
-
-                      {plugpayState === "aprobada" && (
-                        <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
-                          <div className="font-black">✓ Crédito Parcelado Aprobado</div>
-                          <div>ID Transacción: {plugpayResult?.IdTransacao}</div>
-                          <div className="font-posMono">Ref: {plugpayResult?.referenciaInterna?.slice(0, 12)}...</div>
-                        </div>
-                      )}
-
-                      {plugpayState === "error" && (
-                        <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 text-left space-y-1.5">
-                          <div className="font-black">✕ Error Crédito: {plugpayError}</div>
-                          <button type="button" onClick={handlePlugpayParcelado} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                      ) : (
+                        <div className="text-xs font-posMono font-black text-orange-600 mt-0.5">
+                          Gs. {formatPYG(isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}
                         </div>
                       )}
                     </div>
-                  )}
+
+                    {isMultiPayment && plugpayState === "idle" && (
+                      <div className="w-full text-left">
+                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                        <div className="flex gap-1">
+                          <input
+                            ref={mixedQrPygInputRef}
+                            type="text"
+                            value={mixedQrPyg}
+                            onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                            onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedQrPyg)}
+                            onFocus={(e) => e.target.select()}
+                            placeholder="0"
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
+                          />
+                          <button
+                            type="button"
+                            title="Completar con el resto"
+                            onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                            className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                          >
+                            Resto
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {plugpayState === "idle" && (
+                      <div className="space-y-2 text-left">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">CPF del Cliente Brasileño (sólo números):</label>
+                          <input
+                            type="text"
+                            value={plugpayCpf}
+                            onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                            placeholder="Ej: 52998224725"
+                            className="w-full mt-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs outline-none focus:border-orange-500 text-center text-slate-950 dark:text-white"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handlePlugpayPix}
+                          className="w-full py-2.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-black rounded-lg transition cursor-pointer"
+                        >
+                          Generar QR PIX
+                        </button>
+                      </div>
+                    )}
+
+                    {plugpayState === "esperando" && (
+                      <div className="space-y-2 text-center">
+                        <div className="flex items-center justify-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                          <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
+                          <span>Esperando confirmación de pago de PlugPay...</span>
+                        </div>
+                        {plugpayResult?.qrCodeCopiaCola && (
+                          <div className="text-[10px] p-2 bg-slate-100 dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800 break-all font-mono select-all text-slate-600 dark:text-slate-350 text-left max-h-16 overflow-y-auto">
+                            {plugpayResult.qrCodeCopiaCola}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={resetBancardFlow}
+                          className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
+                        >
+                          Cancelar Operación
+                        </button>
+                      </div>
+                    )}
+
+                    {plugpayState === "aprobada" && (
+                      <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
+                        <div className="font-black">✓ Transacción PIX Aprobada</div>
+                        <div>ID Transacción: {plugpayResult?.IdTransacao}</div>
+                        <div className="font-posMono">Ref: {plugpayResult?.referenciaInterna?.slice(0, 12)}...</div>
+                      </div>
+                    )}
+
+                    {plugpayState === "error" && (
+                      <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 text-left space-y-1.5">
+                        <div className="font-black">✕ Error PIX: {plugpayError}</div>
+                        <button type="button" onClick={handlePlugpayPix} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 6. CRÉDITO BRASIL (PlugPay) */}
+              {activeMethods.has("plugpay_credito") && (
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center w-full">
+                  <div className="w-full space-y-3">
+                    <div className="flex flex-col items-center">
+                      <div className="w-36 h-36 bg-white rounded-xl p-2 flex items-center justify-center shadow-lg mb-2">
+                        <CreditCard className="w-32 h-32 text-blue-600" />
+                      </div>
+                      <div className="font-bold text-xs text-slate-900 dark:text-white">Crédito Brasil (PlugPay)</div>
+                      {plugpayBrlValue ? (
+                        <div className="text-xs font-posMono font-black text-blue-600 mt-0.5">
+                          Valor Venta BRL: R$ {plugpayBrlValue.toFixed(2)}
+                        </div>
+                      ) : (
+                        <div className="text-xs font-posMono font-black text-blue-600 mt-0.5">
+                          Gs. {formatPYG(isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}
+                        </div>
+                      )}
+                    </div>
+
+                    {isMultiPayment && plugpayState === "idle" && (
+                      <div className="w-full text-left">
+                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                        <div className="flex gap-1">
+                          <input
+                            ref={mixedQrPygInputRef}
+                            type="text"
+                            value={mixedQrPyg}
+                            onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedQrPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                            onKeyDown={(e) => handleMixedFieldKeyDown(e, setMixedQrPyg)}
+                            onFocus={(e) => e.target.select()}
+                            placeholder="0"
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
+                          />
+                          <button
+                            type="button"
+                            title="Completar con el resto"
+                            onClick={() => setMixedQrPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                            className="px-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg cursor-pointer shrink-0"
+                          >
+                            Resto
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {plugpayState === "idle" && (
+                      <div className="space-y-2 text-left">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF del Cliente (sólo números):</label>
+                          <input
+                            type="text"
+                            value={plugpayCpf}
+                            onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                            placeholder="Ej: 52998224725"
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs outline-none focus:border-blue-500 text-center text-slate-950 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">WhatsApp / Celular del Cliente:</label>
+                          <input
+                            type="text"
+                            value={plugpayPhone}
+                            onChange={(e) => setPlugpayPhone(e.target.value.replace(/\D/g, ""))}
+                            placeholder="Ej: 48999999999"
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-xs outline-none focus:border-blue-500 text-center text-slate-950 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Cantidad de Cuotas (Parcelas):</label>
+                          <select
+                            value={plugpayCuotas}
+                            onChange={(e) => setPlugpayCuotas(Number(e.target.value))}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs outline-none focus:border-blue-500 text-slate-950 dark:text-white font-bold"
+                          >
+                            {[1, 2, 3, 4, 5, 6, 9, 12, 18, 24].map((c) => (
+                              <option key={c} value={c}>
+                                {c === 1 ? "1 pago directo" : `${c} cuotas (parcelas)`}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handlePlugpayParcelado}
+                          className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-lg transition cursor-pointer"
+                        >
+                          Iniciar Crédito Parcelado
+                        </button>
+                      </div>
+                    )}
+
+                    {plugpayState === "esperando" && (
+                      <div className="space-y-2 text-center flex flex-col items-center">
+                        <div className="flex items-center justify-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                          <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                          <span>Esperando que el cliente complete el pago en Reales...</span>
+                        </div>
+                        {plugpayResult?.UrlPaymentForm && (
+                          <div className="w-full space-y-2 mt-2">
+                            <a
+                              href={plugpayResult.UrlPaymentForm}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              Abrir Checkout de Tarjeta <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                            <div className="text-[10px] text-slate-500">
+                              Copie el link y envíelo por WhatsApp o ábralo en el navegador para que el cliente ingrese su tarjeta.
+                            </div>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={resetBancardFlow}
+                          className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer mt-3"
+                        >
+                          Cancelar Operación
+                        </button>
+                      </div>
+                    )}
+
+                    {plugpayState === "aprobada" && (
+                      <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
+                        <div className="font-black">✓ Crédito Parcelado Aprobado</div>
+                        <div>ID Transacción: {plugpayResult?.IdTransacao}</div>
+                        <div className="font-posMono">Ref: {plugpayResult?.referenciaInterna?.slice(0, 12)}...</div>
+                      </div>
+                    )}
+
+                    {plugpayState === "error" && (
+                      <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/40 text-[11px] text-rose-600 dark:text-rose-300 text-left space-y-1.5">
+                        <div className="font-black">✕ Error Crédito: {plugpayError}</div>
+                        <button type="button" onClick={handlePlugpayParcelado} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
