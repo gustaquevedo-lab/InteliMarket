@@ -177,109 +177,146 @@ export default function ScalesPage() {
 
   return (
     <div className="space-y-6">
-      {/* ── HEADER ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-teal-600 to-emerald-600 text-white shadow-lg shadow-teal-500/20">
-              <Scale className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight">
-                  Básculas & Balanzas de Supermercado
-                </h1>
-                <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-300 dark:border-teal-700 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
-                  Drivers Toledo / Balmak Activos
+      {/* ── LUXURY COMMAND DECK HEADER ── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/90 text-white p-7 border border-cyan-500/20 shadow-2xl shadow-cyan-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-600 to-teal-500 border border-cyan-400/30 text-white flex items-center justify-center shadow-lg shadow-cyan-500/25">
+                  <Scale className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-cyan-500 border-2 border-slate-950"></span>
                 </span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Pesaje continuo en checkout USB y sincronización de PLUs pesables para carnicería, panadería y fiambrería
-              </p>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase bg-cyan-500/10 px-2.5 py-0.5 rounded-md border border-cyan-500/20">
+                    HARDWARE · BÁSCULAS & BALANZAS
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    Drivers Toledo / Systel / Balmak Activos
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Básculas & Balanzas de Supermercado
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Pesaje continuo en checkout USB y sincronización de PLUs pesables para carnicería, panadería y fiambrería
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado Matriz
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-cyan-300">
+                ⚖️ 6 Balanzas de Mostrador + 10 Checkouts
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                ⚡ Web Serial API 9600 Baudios
+              </span>
             </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={startUsbSerialTest}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-black text-white bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 rounded-xl shadow-md shadow-teal-500/25 transition"
-          >
-            <Usb className="w-3.5 h-3.5" />
-            Test Balanza USB Checkout
-          </button>
+          <div className="flex items-center gap-2.5 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={syncAllPLU}
+              disabled={syncingPlu}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl border border-slate-700 bg-slate-800/80 text-xs font-bold text-slate-200 hover:bg-slate-700 transition cursor-pointer shadow-sm disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncingPlu ? "animate-spin" : ""}`} />
+              Sincronizar PLUs
+            </button>
+            <button
+              onClick={startUsbSerialTest}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white text-xs font-black shadow-lg shadow-cyan-500/25 transition cursor-pointer active:scale-95"
+            >
+              <Usb className="w-4 h-4" />
+              Test Balanza USB Checkout
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ── KPI CARDS ESTILIZADAS CON ESTÉTICA OFICIAL ── */}
+      {/* ── KPI CARDS ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Balanzas Registradas */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Balanzas de Mostrador</span>
-            <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400">
+        {/* KPI 1 */}
+        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+          <div className="h-1 w-full bg-gradient-to-r from-cyan-500 to-teal-500 absolute top-0 left-0" />
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Balanzas Mostrador</span>
+            <div className="p-2 rounded-xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600">
               <Scale className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-teal-600 dark:text-teal-400 font-mono tracking-tight">
+          <p className="text-2xl font-black font-mono text-cyan-600 dark:text-cyan-400">
             6 balanzas
           </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Modelos: <strong className="text-gray-700 dark:text-gray-200 font-mono">Toledo P03 / Balmak</strong></span>
-            <span className="text-teal-600 font-bold font-mono">Etiquetadoras</span>
+          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span>Modelos: <strong className="text-slate-700 dark:text-slate-200 font-mono">Toledo P03 / Systel</strong></span>
+            <span className="text-cyan-600 font-bold font-mono">Etiquetadoras</span>
           </div>
         </div>
 
-        {/* KPI 2: Balanzas de Checkout */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Checkouts con Balanza</span>
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+        {/* KPI 2 */}
+        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+          <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-500 absolute top-0 left-0" />
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Checkouts Balanza</span>
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600">
               <Usb className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-blue-600 dark:text-blue-400 font-mono tracking-tight">
+          <p className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400">
             10 Cajas POS
           </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Protocolo: <strong className="text-gray-700 dark:text-gray-200 font-mono">Web Serial 9600</strong></span>
-            <span className="text-blue-600 font-bold font-mono flex items-center gap-0.5">
-              <TrendingUp className="w-3.5 h-3.5" /> 0ms Latencia
-            </span>
+          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span>Protocolo: <strong className="text-slate-700 dark:text-slate-200 font-mono">Web Serial 9600</strong></span>
+            <span className="text-blue-600 font-bold font-mono">0ms Latencia</span>
           </div>
         </div>
 
-        {/* KPI 3: PLUs Pesables */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Catálogo PLU Pesable</span>
-            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+        {/* KPI 3 */}
+        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+          <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-500 absolute top-0 left-0" />
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Catálogo PLU Pesable</span>
+            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600">
               <Weight className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-purple-600 dark:text-purple-400 font-mono tracking-tight">
+          <p className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
             342 ítems
           </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Secciones: <strong className="text-gray-700 dark:text-gray-200 font-mono">Carnes, Fiambres, Frutas</strong></span>
+          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span>Secciones: <strong className="text-slate-700 dark:text-slate-200 font-mono">Carnes, Fiambres</strong></span>
             <span className="text-purple-600 font-bold font-mono">Sincronizado</span>
           </div>
         </div>
 
-        {/* KPI 4: Formato Código de Barras */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Prefijo EAN Embebido</span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+        {/* KPI 4 */}
+        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+          <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500 absolute top-0 left-0" />
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Prefijo EAN Embebido</span>
+            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
-            20 / 21
+          <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+            Prefijo 20 / 21
           </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Formato: <strong className="text-gray-700 dark:text-gray-200 font-mono">20PPPPPVVVVVC</strong></span>
+          <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span>Formato: <strong className="text-slate-700 dark:text-slate-200 font-mono">20PPPPPVVVVVC</strong></span>
             <span className="text-emerald-600 font-bold font-mono">Auto-lectura</span>
           </div>
         </div>
