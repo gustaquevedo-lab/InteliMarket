@@ -132,9 +132,40 @@ export class ErrorBoundary extends Component<Props, State> {
     ].filter(Boolean).join("\n")
   }
 
-  private handleCopyReport = () => {
+  private handleCopyReport = async () => {
     const text = this.generateReportText()
-    navigator.clipboard.writeText(text)
+    let copiedSuccess = false
+
+    // 1. Intento con Clipboard API (entornos HTTPS / SecureContext)
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+        copiedSuccess = true
+      }
+    } catch (err) {
+      console.warn("[ErrorBoundary] navigator.clipboard falló, intentando fallback:", err)
+    }
+
+    // 2. Fallback universal con textarea (entornos HTTP / Safari / Red Local)
+    if (!copiedSuccess) {
+      try {
+        const textarea = document.createElement("textarea")
+        textarea.value = text
+        textarea.style.position = "fixed"
+        textarea.style.left = "-9999px"
+        textarea.style.top = "-9999px"
+        textarea.style.opacity = "0"
+        textarea.setAttribute("readonly", "")
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        copiedSuccess = document.execCommand("copy")
+        document.body.removeChild(textarea)
+      } catch (fallbackErr) {
+        console.error("[ErrorBoundary] Fallback de copia también falló:", fallbackErr)
+      }
+    }
+
     this.setState({ copied: true })
     setTimeout(() => this.setState({ copied: false }), 3000)
   }

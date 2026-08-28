@@ -78,9 +78,32 @@ function ToastContainer() {
   const { toasts, removeToast } = useToast()
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
-  const handleCopyToast = (toast: Toast) => {
+  const handleCopyToast = async (toast: Toast) => {
     const text = `🚨 [Error InteliMarket]\n• Título: ${toast.title}\n• Detalle: ${toast.message || ""}\n• Contexto: ${toast.errorDetails || "N/A"}\n• Ruta: ${window.location.pathname}\n• Fecha: ${new Date().toLocaleString("es-PY")}`
-    navigator.clipboard.writeText(text)
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        throw new Error("fallback")
+      }
+    } catch {
+      try {
+        const textarea = document.createElement("textarea")
+        textarea.value = text
+        textarea.style.position = "fixed"
+        textarea.style.left = "-9999px"
+        textarea.style.top = "-9999px"
+        textarea.style.opacity = "0"
+        textarea.setAttribute("readonly", "")
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        document.execCommand("copy")
+        document.body.removeChild(textarea)
+      } catch (err) {
+        console.error("Toast copy failed", err)
+      }
+    }
     setCopiedId(toast.id)
     setTimeout(() => setCopiedId(null), 2500)
   }

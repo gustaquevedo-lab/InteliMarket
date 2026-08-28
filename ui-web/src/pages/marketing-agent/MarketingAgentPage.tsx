@@ -6,7 +6,7 @@ import {
   Zap, HeartHandshake, Eye, MessageCircle, BarChart3, Filter,
   Layers, Check, X, ChevronRight, ThumbsUp, ShoppingCart, Percent,
   Monitor, ImagePlus, Pencil, Trash2, ArrowUp, ArrowDown, Loader2,
-  Activity
+  Activity, MessageSquare
 } from "lucide-react"
 import { api, type KioskBanner } from "../../api"
 import { useToast } from "../../context/ToastContext"
