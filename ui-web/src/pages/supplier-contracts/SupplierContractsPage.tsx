@@ -357,84 +357,179 @@ export default function SupplierContractsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
-              Contratos & Acuerdos con Proveedores
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 uppercase">
-              Negociaciones B2B & Rebates
-            </span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Gestión integral de condiciones comerciales pactadas con proveedores: acuerdos marco de precios, escalas de rebate por volumen de compra, cláusulas de exclusividad, alertas de renovación y actas de negociación.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={fetchAll} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
-            <RefreshCw className="w-3.5 h-3.5" /><span>Actualizar</span>
-          </button>
-          <button onClick={() => setShowNegModal(true)} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-900/50">
-            <KanbanSquare className="w-3.5 h-3.5" /><span>Nueva Negociación</span>
-          </button>
-          <button onClick={() => { setEditingAgreement(null); setForm(defaultForm()); setFormStep(1); setShowForm(true) }} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5">
-            <Plus className="w-3.5 h-3.5" /><span>Nuevo Acuerdo Comercial</span>
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950/90 text-white p-7 border border-amber-500/20 shadow-2xl shadow-amber-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* BANNER EXPLICATIVO */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/30 border border-violet-200 dark:border-violet-900/40 flex items-start gap-3 text-xs text-violet-900 dark:text-violet-300">
-        <Sparkles className="w-5 h-5 text-violet-600 shrink-0 mt-0.5" />
-        <div>
-          <p className="font-extrabold uppercase text-[11px] tracking-wider text-violet-950 dark:text-violet-200 mb-0.5">
-            Control de Rentabilidad en Compras & Retornos por Volumen (Rebates)
-          </p>
-          <p className="text-violet-800 dark:text-violet-400 leading-relaxed">
-            Cada acuerdo comercial define las reglas del juego con tus proveedores: lista de precios congelados por contrato, plazos de pago preferenciales, umbrales de compra para cobro de rebates anuales o semestrales y penalizaciones por quiebre de stock. El sistema audita automáticamente si las órdenes de compra emitidas cumplen los precios y volúmenes pactados.
-          </p>
-        </div>
-      </div>
-
-      {/* KPIs EJECUTIVOS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          { label: "Contratos Vigentes", val: analytics.activos, color: "text-emerald-600", icon: CheckCircle2 },
-          { label: "Por Vencer (< 30d)", val: analytics.porVencer, color: analytics.porVencer > 0 ? "text-amber-600" : "text-gray-500", icon: AlertTriangle },
-          { label: "Vencidos", val: analytics.vencidos, color: analytics.vencidos > 0 ? "text-red-600" : "text-gray-500", icon: XCircle },
-          { label: "Proveedores c/ Acuerdo", val: `${analytics.proveedoresConContrato} / ${suppliers.length}`, color: "text-blue-600", icon: Building2 },
-          { label: "Rebates Acumulados", val: formatPYG(analytics.rebatesMonto), color: "text-purple-600", icon: DollarSign },
-          { label: "Cumplimiento Metas", val: `${analytics.cumplimientoGlobal}%`, color: "text-indigo-600", icon: Target },
-        ].map((kpi) => (
-          <div key={kpi.label} className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-bold text-gray-400 uppercase leading-tight">{kpi.label}</span>
-              <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-600 to-purple-600 border border-amber-400/30 text-white flex items-center justify-center shadow-lg shadow-amber-500/25">
+                  <FileSignature className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20">
+                    ABASTECIMIENTO B2B · CONTRATOS MARCO & REBATES POR VOLUMEN
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    {analytics.activos} Acuerdos Vigentes
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Contratos & Acuerdos con Proveedores
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Precios marco congelados, escalones de rebate por volumen de compra y actas de negociación
+                </p>
+              </div>
             </div>
-            <p className={`text-base font-black font-mono ${kpi.color}`}>{kpi.val}</p>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
+                🤝 {analytics.proveedoresConContrato} de {suppliers.length} proveedores con contrato
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                💰 {formatPYG(analytics.rebatesMonto)} rebates acumulados
+              </span>
+            </div>
           </div>
-        ))}
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => setShowNegModal(true)}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-violet-300 hover:text-white bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <KanbanSquare className="w-3.5 h-3.5" />
+              Nueva Negociación
+            </button>
+
+            <button
+              onClick={() => { setEditingAgreement(null); setForm(defaultForm()); setFormStep(1); setShowForm(true) }}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-600 to-purple-600 hover:from-amber-500 hover:to-purple-500 transition shadow-lg shadow-amber-500/25 flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo Acuerdo
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Vigentes</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {analytics.activos}
+            </p>
+            <p className="text-[11px] text-slate-400">Contratos activos</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Por Vencer</span>
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {analytics.porVencer}
+            </p>
+            <p className="text-[11px] text-slate-400">&lt; 30 días restantes</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Vencidos</span>
+              <XCircle className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {analytics.vencidos}
+            </p>
+            <p className="text-[11px] text-slate-400">Requieren renovación</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Proveedores</span>
+              <Building2 className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {analytics.proveedoresConContrato} / {suppliers.length}
+            </p>
+            <p className="text-[11px] text-slate-400">Bajo acuerdo marco</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Rebates</span>
+              <DollarSign className="w-4 h-4 text-purple-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-purple-300">
+              {formatPYG(analytics.rebatesMonto)}
+            </p>
+            <p className="text-[11px] text-slate-400">Retornos acumulados</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cumplimiento</span>
+              <Target className="w-4 h-4 text-indigo-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {analytics.cumplimientoGlobal}%
+            </p>
+            <p className="text-[11px] text-slate-400">Metas de volumen</p>
+          </div>
+        </div>
       </div>
 
-      {/* TABS DE NAVEGACIÓN */}
-      <div className="border-b border-gray-200 dark:border-slate-800">
-        <div className="flex gap-1 overflow-x-auto">
-          {[
-            { id: "dashboard", label: "Resumen Ejecutivo" },
-            { id: "contratos", label: `Acuerdos Vigentes (${contracts.length})` },
-            { id: "rebates", label: `Rebates & Retornos (${rebates.length})` },
-            { id: "negociaciones", label: `Minutas & Negociación (${negotiations.length})` },
-            { id: "cumplimiento", label: "Metas de Volumen" },
-          ].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id as Tab)}
-              className={`pb-3 px-4 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${tab === t.id ? "border-purple-600 text-purple-600 dark:text-purple-400" : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"}`}>
-              {t.label}
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "dashboard", label: "Resumen Ejecutivo", icon: FileSignature },
+          { id: "contratos", label: `Acuerdos Vigentes`, count: contracts.length, icon: Layers },
+          { id: "rebates", label: `Rebates & Retornos`, count: rebates.length, icon: Percent },
+          { id: "negociaciones", label: `Minutas & Negociación`, count: negotiations.length, icon: KanbanSquare },
+          { id: "cumplimiento", label: "Metas de Volumen", icon: Target },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as Tab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              {t.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.count}
+                </span>
+              )}
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {/* TAB DASHBOARD */}

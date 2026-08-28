@@ -757,45 +757,124 @@ export default function PurchasesPage() {
   }, [filteredReturnsAndNC, pageReturns, pageSizeReturns])
 
   return (
-    <div className="space-y-6 pb-16 max-w-full overflow-hidden">
-      {/* ──────────────────────────────────────────────────────────────────────────
-          HEADER PRINCIPAL
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-800/90 p-6 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm">
-        <div>
-          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-indigo-500" /> Vertical Supermercado • Conector Legacy Nemuha
-            </span>
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">Extra Supermercado (Grupo Santa Teresa E.A.S.)</span>
+    <div className="space-y-6 animate-fade-in-up pb-16 max-w-full overflow-hidden">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-500 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <ShoppingCart className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    ABASTECIMIENTO ESTRATÉGICO · CONECTOR REAL NEMUHA
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    {orders.length.toLocaleString()} Órdenes de Compra
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Gestión de Compras & Abastecimiento
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Asistente IA por días de stock, demanda predictiva sobre 11.250 productos y 441 proveedores sincronizados
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
+                📦 {suppliers.length} proveedores homologados
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                💰 {formatPYG(totalComprasEsteMes)} compras del mes
+              </span>
+            </div>
           </div>
-          <h1 className="text-2xl font-extrabold text-gray-900 dark:text-white flex items-center gap-2.5">
-            <ShoppingCart className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
-            Gestión de Compras & Abastecimiento
-          </h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-3xl">
-            Asistente IA de compras por días de stock, cálculo de demanda predictiva sobre 11.250 productos de Supermercado, 4.447 órdenes y 441 proveedores reales de Nemuha.
-          </p>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => handleOpenReceiptModal()}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <Truck className="w-3.5 h-3.5 text-slate-400" />
+              Recepción en Muelle
+            </button>
+
+            <button
+              onClick={() => {
+                setTab("asistente_ia")
+                setSoloQuiebreIA(false)
+              }}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-500 hover:to-blue-400 transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
+            >
+              <Sparkles className="w-4 h-4" />
+              Nueva Orden IA
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            onClick={() => handleOpenReceiptModal()}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700/60 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-2 border border-slate-200 dark:border-slate-600"
-          >
-            <Truck className="w-4 h-4 text-slate-500" />
-            Recepción en Muelle
-          </button>
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Compras del Mes</span>
+              <DollarSign className="w-4 h-4 text-indigo-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {formatPYG(totalComprasEsteMes)}
+            </p>
+            <p className="text-[11px] text-slate-400">{ordersEsteMes.length.toLocaleString()} órdenes emitidas</p>
+          </div>
 
-          <button
-            onClick={() => {
-              setTab("asistente_ia")
-              setSoloQuiebreIA(false)
-            }}
-            className="btn-primary text-xs flex items-center gap-2 px-4 py-2 shadow-sm"
-          >
-            <Sparkles className="w-4 h-4" /> + Nueva Orden (Asistente IA)
-          </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">En Tránsito (30d)</span>
+              <Truck className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(montoEnTransito)}
+            </p>
+            <p className="text-[11px] text-slate-400">{ordenesEnTransito.length} OC en camino</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Riesgo Quiebre</span>
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {totalQuiebresInminentes + totalBajosStock}
+            </p>
+            <p className="text-[11px] text-slate-400">{totalQuiebresInminentes} quiebres + {totalBajosStock} bajo stock</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Proveedores Activos</span>
+              <Building2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {suppliers.length}
+            </p>
+            <p className="text-[11px] text-slate-400">100% Sincronizados de Nemuha</p>
+          </div>
         </div>
       </div>
 
@@ -803,17 +882,17 @@ export default function PurchasesPage() {
           BANNER DE ALERTA DE QUIEBRE PREVENTIVO
       ────────────────────────────────────────────────────────────────────────── */}
       {totalQuiebresInminentes > 0 && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-red-50 to-amber-50 dark:from-red-950/30 dark:to-amber-950/20 border border-red-200 dark:border-red-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="p-4 rounded-3xl bg-rose-500/10 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 shrink-0">
+            <div className="p-2.5 rounded-2xl bg-rose-500/20 text-rose-500 shrink-0">
               <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-red-950 dark:text-red-200 flex items-center gap-2">
-                Alerta de Stock Crítico: {totalQuiebresInminentes} producto(s) en quiebre inminente (&lt;3 días de stock)
+              <h4 className="text-xs font-black text-rose-600 dark:text-rose-300 uppercase tracking-wider">
+                Alerta de Stock Crítico: {totalQuiebresInminentes} producto(s) en quiebre inminente (&lt;3 días de cobertura)
               </h4>
-              <p className="text-xs text-red-700 dark:text-red-300 mt-0.5">
-                La rotación proyectada en góndola superará el stock físico antes de la próxima reposición.
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                La rotación proyectada en góndola superará el stock físico antes de la próxima entrega.
               </p>
             </div>
           </div>
@@ -823,74 +902,15 @@ export default function PurchasesPage() {
               setSoloQuiebreIA(true)
               setDiasCobertura(7)
             }}
-            className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-sm flex items-center gap-1.5 shrink-0 transition-colors"
+            className="px-4 py-2 rounded-2xl text-xs font-extrabold bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-500/20 flex items-center gap-1.5 shrink-0 transition"
           >
-            <Flame className="w-4 h-4" /> Armar Pedido de Emergencia (7 Días)
+            <Flame className="w-4 h-4" /> Armar Pedido Emergencia (7 Días)
           </button>
         </div>
       )}
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          HERO KPIS (TIPOGRAFÍA UNIFICADA MONOSPACE EXTRABOLD)
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Compras del Mes (Agosto)</span>
-            <DollarSign className="w-4 h-4 text-indigo-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-gray-900 dark:text-white font-mono">
-            {formatPYG(totalComprasEsteMes)}
-          </p>
-          <span className="text-xs text-gray-400 mt-1 block">
-            <strong className="text-gray-700 dark:text-gray-300 font-mono">{ordersEsteMes.length.toLocaleString()}</strong> órdenes emitidas este mes
-          </span>
-        </div>
-
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">En Tránsito Verificado (30d)</span>
-            <Truck className="w-4 h-4 text-amber-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-amber-600 dark:text-amber-400 font-mono">
-            {formatPYG(montoEnTransito)}
-          </p>
-          <span className="text-xs text-gray-400 mt-1 block">
-            <strong className="text-amber-600 font-mono font-bold">{ordenesEnTransito.length}</strong> OC activas en camino
-          </span>
-        </div>
-
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Riesgo de Quiebre de Stock</span>
-            <AlertTriangle className="w-4 h-4 text-red-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-red-600 dark:text-red-400 font-mono">
-            {totalQuiebresInminentes + totalBajosStock}
-          </p>
-          <span className="text-xs text-gray-400 mt-1 block">
-            <strong className="text-red-500 font-bold font-mono">{totalQuiebresInminentes}</strong> quiebres + <strong className="text-amber-500 font-bold font-mono">{totalBajosStock}</strong> stock bajo
-          </span>
-        </div>
-
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Proveedores Activos</span>
-            <Building2 className="w-4 h-4 text-emerald-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-            {suppliers.length}
-          </p>
-          <span className="text-xs text-gray-400 mt-1 block flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> 100% Sincronizados de Nemuha
-          </span>
-        </div>
-      </div>
-
-      {/* ──────────────────────────────────────────────────────────────────────────
-          PESTAÑAS DE NAVEGACIÓN SEGMENTADAS (CERO DESBORDES)
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="bg-slate-100/80 dark:bg-slate-800/60 p-1.5 rounded-2xl flex items-center gap-1.5 overflow-x-auto border border-slate-200/60 dark:border-slate-700/50">
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex items-center gap-1.5 overflow-x-auto shadow-sm">
         {[
           { id: "asistente_ia", label: "Asistente IA de Abastecimiento", icon: Sparkles, badge: totalQuiebresInminentes > 0 ? `${totalQuiebresInminentes}` : undefined },
           { id: "ordenes", label: "Órdenes de Compra (OC)", icon: ShoppingCart, count: orders.length },
@@ -910,22 +930,24 @@ export default function PurchasesPage() {
             <button
               key={t.id}
               onClick={() => setTab(t.id as MainTab)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
                 active
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-300 hover:bg-white/80 dark:hover:bg-slate-700/60"
+                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
               }`}
             >
-              <Icon className={`w-3.5 h-3.5 shrink-0 ${active ? "text-white" : "text-slate-400"}`} />
+              <Icon className={`w-4 h-4 shrink-0 ${active ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400"}`} />
               <span>{t.label}</span>
-              {t.badge && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-red-500 text-white">
-                  {t.badge}
+              {t.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.count}
                 </span>
               )}
-              {t.count !== undefined && !t.badge && (
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold font-mono ${active ? "bg-indigo-700 text-indigo-100" : "bg-slate-200/80 dark:bg-slate-700 text-slate-500"}`}>
-                  {t.count}
+              {t.badge && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white animate-pulse">
+                  {t.badge}
                 </span>
               )}
             </button>

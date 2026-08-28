@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import React, { useState, useEffect, useCallback, useMemo } from "react"
 import {
   Globe, UserPlus, Users, FileText, CheckCircle2, XCircle,
   ExternalLink, Loader2, RefreshCw, Shield, KeyRound, Building2,
-  Phone, Mail, Calendar, Eye, Search, AlertCircle, Info, Sparkles, Plus
+  Phone, Mail, Calendar, Eye, Search, AlertCircle, Info, Sparkles, Plus,
+  ArrowRight
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -45,7 +46,7 @@ export default function SupplierPortalHubPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [toast])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -88,223 +89,309 @@ export default function SupplierPortalHubPage() {
   }, [users, search])
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
-              Portal de Proveedores B2B
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 uppercase">
-              Autoservicio & Colaboración
-            </span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Administración de accesos externos para proveedores: emisión de credenciales, consulta de órdenes de compra confirmadas en línea y recepción de facturas electrónicas y certificados.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={loadData} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
-            <RefreshCw className="w-3.5 h-3.5" /><span>Actualizar</span>
-          </button>
-          <a href="/portal/proveedores/login" target="_blank" rel="noopener noreferrer"
-            className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/50">
-            <ExternalLink className="w-3.5 h-3.5" /><span>Abrir Portal Externo</span>
-          </a>
-          <button onClick={() => setTab("invitar")} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5">
-            <UserPlus className="w-3.5 h-3.5" /><span>Nuevo Acceso Proveedor</span>
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/90 text-white p-7 border border-cyan-500/20 shadow-2xl shadow-cyan-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* BANNER INFORMATIVO */}
-      <div className="p-4 rounded-2xl bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/40 flex items-start gap-3 text-xs text-purple-900 dark:text-purple-300">
-        <Info className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
-        <div>
-          <p className="font-extrabold uppercase text-[11px] tracking-wider text-purple-950 dark:text-purple-200 mb-0.5">
-            Autoservicio para Proveedores de InteliMarket
-          </p>
-          <p className="text-purple-800 dark:text-purple-400 leading-relaxed">
-            Al crearle un usuario a tu proveedor, éste podrá iniciar sesión en el portal externo para ver las órdenes de compra emitidas, confirmar fechas de entrega estimadas, consultar pagos/retenciones y subir facturas electrónicas XML/PDF sin intermediación telefónica ni por email.
-          </p>
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "Accesos Habilitados", val: users.length, color: "text-purple-600", icon: Users },
-          { label: "Usuarios Activos", val: users.filter(u => u.activo).length, color: "text-emerald-600", icon: CheckCircle2 },
-          { label: "Proveedores en Base", val: suppliers.length, color: "text-blue-600", icon: Building2 },
-          { label: "Documentos Subidos", val: documents.length, color: "text-amber-600", icon: FileText },
-        ].map((kpi) => (
-          <div key={kpi.label} className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-bold text-gray-400 uppercase leading-tight">{kpi.label}</span>
-              <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-600 border border-cyan-400/30 text-white flex items-center justify-center shadow-lg shadow-cyan-500/25">
+                  <Globe className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-cyan-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase bg-cyan-500/10 px-2.5 py-0.5 rounded-md border border-cyan-500/20">
+                    PORTAL B2B DE PROVEEDORES · AUTOSERVICIO & FACTURAS ELECTRÓNICAS
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    {users.filter(u => u.activo).length} Usuarios Activos
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Portal de Proveedores B2B
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Emisión de credenciales externas, consulta de órdenes de compra en línea y recepción de comprobantes
+                </p>
+              </div>
             </div>
-            <p className={`text-xl font-black font-mono ${kpi.color}`}>{kpi.val}</p>
-          </div>
-        ))}
-      </div>
 
-      {/* TABS */}
-      <div className="border-b border-gray-200 dark:border-slate-800">
-        <div className="flex gap-1 overflow-x-auto">
-          {[
-            { id: "usuarios", label: `Usuarios del Portal (${users.length})` },
-            { id: "documentos", label: `Documentos Recibidos (${documents.length})` },
-            { id: "invitar", label: "Emitir Nuevo Acceso" },
-          ].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id as HubTab)}
-              className={`pb-3 px-4 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${tab === t.id ? "border-purple-600 text-purple-600 dark:text-purple-400" : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"}`}>
-              {t.label}
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-cyan-300">
+                👥 {users.length} cuentas B2B configuradas
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                📄 {documents.length} documentos recibidos
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <a
+              href="/portal/proveedores/login"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-cyan-300 hover:text-white bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Abrir Portal Externo
+            </a>
+
+            <button
+              onClick={() => setTab("invitar")}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 transition shadow-lg shadow-cyan-500/25 flex items-center gap-2"
+            >
+              <UserPlus className="w-4 h-4" />
+              Nuevo Acceso
             </button>
-          ))}
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Accesos Totales</span>
+              <Users className="w-4 h-4 text-cyan-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-cyan-300">
+              {users.length}
+            </p>
+            <p className="text-[11px] text-slate-400">Cuentas creadas</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Activos en Portal</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {users.filter(u => u.activo).length}
+            </p>
+            <p className="text-[11px] text-slate-400">Con acceso habilitado</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Proveedores Base</span>
+              <Building2 className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {suppliers.length}
+            </p>
+            <p className="text-[11px] text-slate-400">Padrón de proveedores</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Documentos</span>
+              <FileText className="w-4 h-4 text-purple-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+              {documents.length}
+            </p>
+            <p className="text-[11px] text-slate-400">XML/PDF subidos</p>
+          </div>
         </div>
       </div>
 
-      {/* TAB USUARIOS */}
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "usuarios", label: `Usuarios del Portal`, count: users.length, icon: Users },
+          { id: "documentos", label: `Documentos Recibidos`, count: documents.length, icon: FileText },
+          { id: "invitar", label: "Emitir Nuevo Acceso", icon: UserPlus },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as HubTab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-cyan-600 dark:text-cyan-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              {t.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ══════════════════════ TAB 1: USUARIOS ══════════════════════ */}
       {tab === "usuarios" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div className="relative flex-1 max-w-sm">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Buscar por proveedor, nombre o email..."
-                className="input text-xs pl-8 w-full" />
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Buscar por proveedor, contacto o email..."
+                className="w-full pl-9 pr-3 py-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none text-slate-900 dark:text-white"
+              />
             </div>
-            <button onClick={() => setTab("invitar")} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5">
+            <button onClick={() => setTab("invitar")} className="px-4 py-2 rounded-2xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs flex items-center gap-1.5 transition">
               <Plus className="w-3.5 h-3.5" />Nuevo Acceso
             </button>
           </div>
 
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm overflow-hidden">
             {loading ? (
-              <div className="flex items-center justify-center py-16 text-gray-400 text-xs gap-2">
-                <Loader2 className="w-5 h-5 animate-spin" /> Cargando usuarios del portal...
+              <div className="flex items-center justify-center py-16 text-slate-400 text-xs gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-cyan-500" /> Cargando usuarios del portal...
               </div>
             ) : filteredUsers.length === 0 ? (
-              <div className="text-center py-16 text-gray-400 text-xs">
+              <div className="text-center py-16 text-slate-400 text-xs">
                 <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                <p className="font-bold text-sm text-gray-600 dark:text-gray-300">Sin usuarios de proveedores creados</p>
+                <p className="font-bold text-sm text-slate-700 dark:text-slate-300">Sin usuarios de proveedores creados</p>
                 <p className="mt-1 max-w-xs mx-auto">Emití credenciales para que tus proveedores ingresen al portal B2B y gestionen sus pedidos en tiempo real.</p>
-                <button onClick={() => setTab("invitar")} className="btn-primary text-xs px-4 py-2 mt-4 inline-flex items-center gap-1.5">
+                <button onClick={() => setTab("invitar")} className="px-4 py-2 mt-4 rounded-2xl bg-cyan-600 text-white font-bold text-xs inline-flex items-center gap-1.5">
                   <UserPlus className="w-3.5 h-3.5" />Emitir Primer Acceso
                 </button>
               </div>
             ) : (
-              <table className="w-full text-xs min-w-[700px]">
-                <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
-                  <tr>
-                    <th className="p-3.5 text-left">Proveedor Asociado</th>
-                    <th className="p-3.5 text-left">Contacto & Email</th>
-                    <th className="p-3.5 text-left">Cargo</th>
-                    <th className="p-3.5 text-left">Último Acceso</th>
-                    <th className="p-3.5 text-center">Estado</th>
-                    <th className="p-3.5 text-right">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
-                  {filteredUsers.map((u: any) => (
-                    <tr key={u.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
-                      <td className="p-3.5">
-                        <p className="font-extrabold text-gray-900 dark:text-white">{u.supplier_nombre || "Proveedor"}</p>
-                        <p className="text-[10px] text-gray-400 font-mono">ID: {u.supplier_id?.slice(0, 8)}...</p>
-                      </td>
-                      <td className="p-3.5">
-                        <p className="font-bold text-gray-800 dark:text-gray-200">{u.nombre}</p>
-                        <p className="text-[10px] text-gray-400 flex items-center gap-1"><Mail className="w-3 h-3" /> {u.email}</p>
-                        {u.telefono && <p className="text-[10px] text-gray-400 flex items-center gap-1"><Phone className="w-3 h-3" /> {u.telefono}</p>}
-                      </td>
-                      <td className="p-3.5 text-gray-600 dark:text-gray-300">{u.cargo || "Ejecutivo"}</td>
-                      <td className="p-3.5 text-gray-500 font-mono">
-                        {u.last_login ? formatDateTime(u.last_login) : "Nunca ingresó"}
-                      </td>
-                      <td className="p-3.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${u.activo ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40" : "text-gray-400 bg-gray-100 dark:bg-slate-800"}`}>
-                          {u.activo ? "Activo" : "Inactivo"}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-right">
-                        <button onClick={() => handleToggleUser(u.id)}
-                          className={`text-[10px] px-2.5 py-1 rounded-lg font-bold border transition ${u.activo ? "border-amber-200 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-400" : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:text-emerald-400"}`}>
-                          {u.activo ? "Desactivar" : "Activar"}
-                        </button>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[700px] text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="p-4">Proveedor Asociado</th>
+                      <th className="p-4">Contacto & Email</th>
+                      <th className="p-4">Cargo</th>
+                      <th className="p-4">Último Acceso</th>
+                      <th className="p-4 text-center">Estado</th>
+                      <th className="p-4 text-right">Acción</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                    {filteredUsers.map((u: any) => (
+                      <tr key={u.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                        <td className="p-4">
+                          <p className="font-extrabold text-slate-900 dark:text-white">{u.supplier_nombre || "Proveedor"}</p>
+                          <p className="text-[10px] text-slate-400 font-mono">ID: {u.supplier_id?.slice(0, 8)}...</p>
+                        </td>
+                        <td className="p-4">
+                          <p className="font-bold text-slate-800 dark:text-slate-200">{u.nombre}</p>
+                          <p className="text-[10px] text-slate-400 flex items-center gap-1"><Mail className="w-3 h-3" /> {u.email}</p>
+                          {u.telefono && <p className="text-[10px] text-slate-400 flex items-center gap-1"><Phone className="w-3 h-3" /> {u.telefono}</p>}
+                        </td>
+                        <td className="p-4 text-slate-600 dark:text-slate-300">{u.cargo || "Ejecutivo"}</td>
+                        <td className="p-4 text-slate-400 font-mono">
+                          {u.last_login ? formatDateTime(u.last_login) : "Nunca ingresó"}
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${u.activo ? "text-emerald-500 bg-emerald-500/10 border border-emerald-500/20" : "text-slate-400 bg-slate-100 dark:bg-slate-800"}`}>
+                            {u.activo ? "Activo" : "Inactivo"}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <button
+                            onClick={() => handleToggleUser(u.id)}
+                            className={`text-xs px-3 py-1 rounded-xl font-bold border transition ${u.activo ? "border-amber-500/30 text-amber-500 hover:bg-amber-500/10" : "border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10"}`}
+                          >
+                            {u.activo ? "Desactivar" : "Activar"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>
       )}
 
-      {/* TAB DOCUMENTOS */}
+      {/* ══════════════════════ TAB 2: DOCUMENTOS ══════════════════════ */}
       {tab === "documentos" && (
-        <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm overflow-hidden">
           {documents.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-xs">
+            <div className="text-center py-16 text-slate-400 text-xs">
               <FileText className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-bold text-sm text-gray-600 dark:text-gray-300">Sin documentos recibidos</p>
+              <p className="font-bold text-sm text-slate-700 dark:text-slate-300">Sin documentos recibidos</p>
               <p className="mt-1 max-w-xs mx-auto">Las facturas electrónicas XML/PDF y certificados cargados por los proveedores aparecerán aquí automáticamente.</p>
             </div>
           ) : (
-            <table className="w-full text-xs min-w-[700px]">
-              <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
-                <tr>
-                  <th className="p-3.5 text-left">Documento / Tipo</th>
-                  <th className="p-3.5 text-left">Proveedor</th>
-                  <th className="p-3.5 text-left">Fecha de Carga</th>
-                  <th className="p-3.5 text-center">Estado</th>
-                  <th className="p-3.5 text-right">Archivo</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
-                {documents.map((d: any) => (
-                  <tr key={d.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40">
-                    <td className="p-3.5">
-                      <p className="font-extrabold text-gray-900 dark:text-white">{d.nombre || d.filename}</p>
-                      <p className="text-[10px] text-gray-400 uppercase">{d.tipo}</p>
-                    </td>
-                    <td className="p-3.5 font-bold text-gray-800 dark:text-gray-200">{d.supplier_nombre}</td>
-                    <td className="p-3.5 text-gray-500 font-mono">{d.created_at ? formatDate(d.created_at) : "—"}</td>
-                    <td className="p-3.5 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${d.estado === "aprobado" ? "text-emerald-600 bg-emerald-50" : "text-blue-600 bg-blue-50"}`}>
-                        {d.estado || "recibido"}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-right">
-                      {d.file_url ? (
-                        <a href={d.file_url} target="_blank" rel="noopener noreferrer" className="btn-secondary text-[10px] px-2.5 py-1 inline-flex items-center gap-1">
-                          <Eye className="w-3 h-3" /> Ver
-                        </a>
-                      ) : <span className="text-gray-400">—</span>}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[700px] text-left">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-4">Documento / Tipo</th>
+                    <th className="p-4">Proveedor</th>
+                    <th className="p-4">Fecha de Carga</th>
+                    <th className="p-4 text-center">Estado</th>
+                    <th className="p-4 text-right">Archivo</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {documents.map((d: any) => (
+                    <tr key={d.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                      <td className="p-4">
+                        <p className="font-extrabold text-slate-900 dark:text-white">{d.nombre || d.filename}</p>
+                        <p className="text-[10px] text-slate-400 uppercase">{d.tipo}</p>
+                      </td>
+                      <td className="p-4 font-bold text-slate-800 dark:text-slate-200">{d.supplier_nombre}</td>
+                      <td className="p-4 text-slate-400 font-mono">{d.created_at ? formatDate(d.created_at) : "—"}</td>
+                      <td className="p-4 text-center">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${d.estado === "aprobado" ? "text-emerald-500 bg-emerald-500/10 border border-emerald-500/20" : "text-blue-500 bg-blue-500/10 border border-blue-500/20"}`}>
+                          {d.estado || "recibido"}
+                        </span>
+                      </td>
+                      <td className="p-4 text-right">
+                        {d.file_url ? (
+                          <a href={d.file_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1 rounded-xl text-xs font-bold text-cyan-600 bg-cyan-500/10 border border-cyan-500/20 inline-flex items-center gap-1 hover:bg-cyan-500/20">
+                            <Eye className="w-3 h-3" /> Ver
+                          </a>
+                        ) : <span className="text-slate-400">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
 
-      {/* TAB EMITIR NUEVO ACCESO */}
+      {/* ══════════════════════ TAB 3: EMITIR ACCESO ══════════════════════ */}
       {tab === "invitar" && (
-        <div className="card p-6 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs max-w-xl">
-          <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase mb-1 flex items-center gap-2">
-            <KeyRound className="w-5 h-5 text-purple-600" /> Emitir Credenciales de Acceso para Proveedor
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm max-w-xl">
+          <h2 className="font-extrabold text-base text-slate-900 dark:text-white uppercase mb-1 flex items-center gap-2">
+            <KeyRound className="w-5 h-5 text-cyan-500" /> Emitir Credenciales de Acceso para Proveedor
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-6">
+          <p className="text-xs text-slate-400 mb-6">
             El proveedor podrá iniciar sesión de inmediato con este correo y contraseña para gestionar órdenes de compra y documentos.
           </p>
 
           <form onSubmit={handleCreateUser} className="space-y-4 text-xs">
             <div>
-              <label className="label-sm">Proveedor Registrado *</label>
-              <select required className="input text-xs" value={userForm.supplier_id} onChange={e => setUserForm(f => ({ ...f, supplier_id: e.target.value }))}>
+              <label className="block text-slate-400 font-bold mb-1">Proveedor Registrado *</label>
+              <select required className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={userForm.supplier_id} onChange={e => setUserForm(f => ({ ...f, supplier_id: e.target.value }))}>
                 <option value="">Seleccionar proveedor de la lista...</option>
                 {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.razon_social || s.nombre} (RUC: {s.ruc})</option>)}
               </select>
@@ -312,34 +399,34 @@ export default function SupplierPortalHubPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label-sm">Nombre del Contacto *</label>
-                <input required className="input text-xs" value={userForm.nombre} onChange={e => setUserForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej: Juan González" />
+                <label className="block text-slate-400 font-bold mb-1">Nombre del Contacto *</label>
+                <input required className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-bold outline-none" value={userForm.nombre} onChange={e => setUserForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej: Juan González" />
               </div>
               <div>
-                <label className="label-sm">Cargo / Función</label>
-                <input className="input text-xs" value={userForm.cargo} onChange={e => setUserForm(f => ({ ...f, cargo: e.target.value }))} placeholder="Ej: Ejecutivo de Cuentas" />
+                <label className="block text-slate-400 font-bold mb-1">Cargo / Función</label>
+                <input className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none" value={userForm.cargo} onChange={e => setUserForm(f => ({ ...f, cargo: e.target.value }))} placeholder="Ej: Ejecutivo de Cuentas" />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label-sm">Email de Acceso *</label>
-                <input required type="email" className="input text-xs" value={userForm.email} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))} placeholder="ventas@proveedor.com.py" />
+                <label className="block text-slate-400 font-bold mb-1">Email de Acceso *</label>
+                <input required type="email" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none" value={userForm.email} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))} placeholder="ventas@proveedor.com.py" />
               </div>
               <div>
-                <label className="label-sm">Contraseña Temporal *</label>
-                <input required type="text" className="input text-xs font-mono" value={userForm.password} onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))} placeholder="Password123!" />
+                <label className="block text-slate-400 font-bold mb-1">Contraseña Temporal *</label>
+                <input required type="text" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono text-slate-900 dark:text-white outline-none" value={userForm.password} onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))} placeholder="Password123!" />
               </div>
             </div>
 
             <div>
-              <label className="label-sm">Teléfono / WhatsApp de Contacto</label>
-              <input className="input text-xs" value={userForm.telefono} onChange={e => setUserForm(f => ({ ...f, telefono: e.target.value }))} placeholder="0981 123456" />
+              <label className="block text-slate-400 font-bold mb-1">Teléfono / WhatsApp de Contacto</label>
+              <input className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none" value={userForm.telefono} onChange={e => setUserForm(f => ({ ...f, telefono: e.target.value }))} placeholder="0981 123456" />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-100 dark:border-slate-800">
-              <button type="button" onClick={() => setTab("usuarios")} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-              <button type="submit" disabled={savingUser} className="btn-primary text-xs px-5 py-2 flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700">
+            <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <button type="button" onClick={() => setTab("usuarios")} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">Cancelar</button>
+              <button type="submit" disabled={savingUser} className="px-5 py-2.5 rounded-2xl bg-cyan-600 hover:bg-cyan-700 text-white font-extrabold text-xs shadow-md shadow-cyan-500/20 flex items-center gap-1.5 transition">
                 {savingUser ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />} Emitir Acceso
               </button>
             </div>

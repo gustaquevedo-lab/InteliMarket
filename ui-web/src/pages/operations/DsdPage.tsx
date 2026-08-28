@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import React, { useState, useEffect, useCallback, useMemo } from "react"
 import {
   Truck, ClipboardList, PackageOpen, XCircle, Plus, Search, Loader2,
   CheckCircle2, AlertTriangle, Calendar, Clock, Thermometer, ShieldCheck,
   RefreshCw, Info, Building2, User, Phone, FileText, ArrowRight, ShieldAlert,
-  ChevronRight, Sparkles, Check, X
+  ChevronRight, Sparkles, Check, X, Layers
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -94,7 +94,7 @@ export default function DsdPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [toast])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -150,11 +150,14 @@ export default function DsdPage() {
         hora_inicio: new Date().toISOString(),
         estado: "en_proceso"
       }
-      const created = await api.dsd.receivings.create(payload)
-      toast.success("Recepción Iniciada", "Muelle habilitado para descarga y termometría.")
+      const res = await api.dsd.receivings.create(payload)
+      toast.success("Descarga Iniciada", "Se abrió el registro de recepción en andén.")
       setShowReceivingModal(false)
       loadData()
-      if (created?.id) loadReceivingDetails(created)
+      if (res?.id) {
+        loadReceivingDetails(res)
+        setTab("items")
+      }
     } catch (err: any) {
       toast.error("Error al iniciar recepción", err.message)
     } finally {
@@ -169,13 +172,12 @@ export default function DsdPage() {
     try {
       await api.dsd.receivings.items.create(selectedReceiving.id, {
         ...itemForm,
-        producto_id: itemForm.producto_id || undefined,
         cantidad_solicitada: parseFloat(itemForm.cantidad_solicitada) || 0,
         cantidad_recibida: parseFloat(itemForm.cantidad_recibida) || 0,
-        cantidad_aceptada: parseFloat(itemForm.cantidad_aceptada || itemForm.cantidad_recibida) || 0,
+        cantidad_aceptada: parseFloat(itemForm.cantidad_aceptada) || 0,
         temperatura_producto: parseFloat(itemForm.temperatura_producto) || 0,
       })
-      toast.success("Item Verificado", "Control térmico y de calidad registrado.")
+      toast.success("Item Inspeccionado", "Se registró el control del producto.")
       setShowItemModal(false)
       loadReceivingDetails(selectedReceiving)
     } catch (err: any) {
@@ -213,107 +215,201 @@ export default function DsdPage() {
   }, [suppliers])
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
-              Recepción Directa en Tienda (DSD)
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 uppercase">
-              Muelle & Cadena de Frío
-            </span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Control integral de entregas directas de proveedores en andén: inspección sanitaria, verificación de temperatura en descarga, cotejo ciego de bultos vs remito/OC y emisión de actas de rechazo con nota de crédito automática.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={loadData} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
-            <RefreshCw className="w-3.5 h-3.5" /><span>Actualizar</span>
-          </button>
-          <button onClick={() => setShowScheduleModal(true)} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5" /><span>Programar Arribo</span>
-          </button>
-          <button onClick={() => setShowReceivingModal(true)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5">
-            <Plus className="w-3.5 h-3.5" /><span>Nueva Recepción en Muelle</span>
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950/90 text-white p-7 border border-blue-500/20 shadow-2xl shadow-blue-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* BANNER EXPLICATIVO */}
-      <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/40 flex items-start gap-3 text-xs text-blue-900 dark:text-blue-300">
-        <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-        <div>
-          <p className="font-extrabold uppercase text-[11px] tracking-wider text-blue-950 dark:text-blue-200 mb-0.5">
-            Flujo de Recepción DSD (Direct Store Delivery)
-          </p>
-          <p className="text-blue-800 dark:text-blue-400 leading-relaxed">
-            1) <b>Programación:</b> Agendá la ventana horaria del camión y asignale muelle. 2) <b>Descarga:</b> Verificá temperatura ambiente del andén e iniciá la recepción con el N° de Remito. 3) <b>Control Térmico & Calidad:</b> Medí la temperatura interna de cada producto (lácteos 0-4°C, congelados -18°C). 4) <b>Rechazos:</b> Si un lote no cumple, registrá el rechazo y generá la constancia para la Nota de Crédito.
-          </p>
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          { label: "Programadas Hoy", val: dash.hoy_programadas ?? schedules.filter(s => s.fecha_programada === new Date().toISOString().split("T")[0]).length, color: "text-blue-600", icon: Calendar },
-          { label: "Descargas en Curso", val: dash.en_curso ?? receivings.filter(r => r.estado === "en_proceso").length, color: "text-amber-600", icon: Clock },
-          { label: "Completadas Hoy", val: dash.completadas_hoy ?? receivings.filter(r => r.estado === "completada").length, color: "text-emerald-600", icon: CheckCircle2 },
-          { label: "Bultos Recibidos", val: dash.bultos_recibidos_hoy ?? receivings.reduce((acc, r) => acc + (r.total_bultos_recibidos || 0), 0), color: "text-purple-600", icon: PackageOpen },
-          { label: "Bultos Rechazados", val: dash.bultos_rechazados_hoy ?? receivings.reduce((acc, r) => acc + (r.total_bultos_rechazados || 0), 0), color: "text-red-600", icon: XCircle },
-          { label: "Rechazos Temp.", val: dash.rechazos_temp ?? rejections.length, color: "text-rose-600", icon: Thermometer },
-        ].map((kpi) => (
-          <div key={kpi.label} className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-bold text-gray-400 uppercase leading-tight">{kpi.label}</span>
-              <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 border border-blue-400/30 text-white flex items-center justify-center shadow-lg shadow-blue-500/25">
+                  <Truck className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-blue-400 uppercase bg-blue-500/10 px-2.5 py-0.5 rounded-md border border-blue-500/20">
+                    RECEPCIÓN DIRECTA EN TIENDA · DIRECT STORE DELIVERY (DSD)
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                    4 Andenes de Descarga
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Recepción Directa en Tienda (DSD)
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Inspección sanitaria, control de cadena de frío en descarga, cotejo ciego de bultos y actas de rechazo con NC
+                </p>
+              </div>
             </div>
-            <p className={`text-lg font-black font-mono ${kpi.color}`}>{kpi.val}</p>
-          </div>
-        ))}
-      </div>
 
-      {/* TABS */}
-      <div className="border-b border-gray-200 dark:border-slate-800">
-        <div className="flex gap-1 overflow-x-auto">
-          {[
-            { id: "dashboard", label: "Dashboard & Muelles" },
-            { id: "programacion", label: `Programación Camiones (${schedules.length})` },
-            { id: "recepciones", label: `Recepciones en Andén (${receivings.length})` },
-            { id: "items", label: `Inspección de Items (${receivingItems.length})` },
-            { id: "rechazos", label: `Actas de Rechazo (${rejections.length})` },
-          ].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id as DsdTab)}
-              className={`pb-3 px-4 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${tab === t.id ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"}`}>
-              {t.label}
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-blue-300">
+                🚚 {schedules.length} camiones agendados
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                📦 {receivings.reduce((acc, r) => acc + (r.total_bultos_recibidos || 0), 0)} bultos recibidos hoy
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => setShowScheduleModal(true)}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <Calendar className="w-3.5 h-3.5 text-blue-400" />
+              Programar Arribo
             </button>
-          ))}
+
+            <button
+              onClick={() => setShowReceivingModal(true)}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-500 hover:from-blue-500 hover:to-indigo-400 transition shadow-lg shadow-blue-500/25 flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Nueva Recepción
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Programadas Hoy</span>
+              <Calendar className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {dash.hoy_programadas ?? schedules.filter(s => s.fecha_programada === new Date().toISOString().split("T")[0]).length}
+            </p>
+            <p className="text-[11px] text-slate-400">Camiones esperados</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">En Descarga</span>
+              <Clock className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {dash.en_curso ?? receivings.filter(r => r.estado === "en_proceso").length}
+            </p>
+            <p className="text-[11px] text-slate-400">En andén ahora</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Completadas Hoy</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {dash.completadas_hoy ?? receivings.filter(r => r.estado === "completada").length}
+            </p>
+            <p className="text-[11px] text-slate-400">Descargas cerradas</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Bultos Recibidos</span>
+              <PackageOpen className="w-4 h-4 text-purple-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+              {dash.bultos_recibidos_hoy ?? receivings.reduce((acc, r) => acc + (r.total_bultos_recibidos || 0), 0)}
+            </p>
+            <p className="text-[11px] text-slate-400">Cajas y unidades</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Bultos Rechazados</span>
+              <XCircle className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {dash.bultos_rechazados_hoy ?? receivings.reduce((acc, r) => acc + (r.total_bultos_rechazados || 0), 0)}
+            </p>
+            <p className="text-[11px] text-slate-400">Por inconformidad</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Rechazos Temp.</span>
+              <Thermometer className="w-4 h-4 text-cyan-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-cyan-300">
+              {dash.rechazos_temp ?? rejections.length}
+            </p>
+            <p className="text-[11px] text-slate-400">Ruptura cadena frío</p>
+          </div>
         </div>
       </div>
 
-      {/* TAB DASHBOARD */}
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "dashboard", label: "Dashboard & Muelles", icon: Truck },
+          { id: "programacion", label: `Programación Camiones`, count: schedules.length, icon: Calendar },
+          { id: "recepciones", label: `Recepciones en Andén`, count: receivings.length, icon: PackageOpen },
+          { id: "items", label: `Inspección de Items`, count: receivingItems.length, icon: ClipboardList },
+          { id: "rechazos", label: `Actas de Rechazo`, count: rejections.length, icon: XCircle },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as DsdTab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              {t.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ══════════════════════ TAB 1: DASHBOARD & MUELLES ══════════════════════ */}
       {tab === "dashboard" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Estado de Muelles */}
-          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs">
-            <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase mb-4 flex items-center gap-2">
-              <Truck className="w-4 h-4 text-blue-600" /> Estado de Andenes de Descarga
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
+              <Truck className="w-4 h-4 text-blue-500" /> Estado de Andenes de Descarga
             </h3>
             <div className="space-y-3">
               {MUELLES.map((muelle, idx) => {
                 const enCurso = receivings.find(r => r.estado === "en_proceso")
                 const ocupado = idx === 0 && enCurso
                 return (
-                  <div key={muelle} className={`p-3 rounded-2xl border flex items-center justify-between text-xs transition ${ocupado ? "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-900/50" : "bg-gray-50 dark:bg-slate-800/40 border-gray-200 dark:border-slate-700/60"}`}>
+                  <div key={muelle} className={`p-4 rounded-2xl border flex items-center justify-between text-xs transition ${ocupado ? "bg-amber-500/10 border-amber-500/30" : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800"}`}>
                     <div>
-                      <p className="font-extrabold text-gray-900 dark:text-white">{muelle}</p>
-                      <p className="text-[11px] text-gray-500 mt-0.5">
+                      <p className="font-extrabold text-slate-900 dark:text-white">{muelle}</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
                         {ocupado ? `Descargando Remito #${enCurso?.numero_remito || "S/N"} · Temp: ${enCurso?.temp_ambiente_descarga}°C` : "Disponible para descarga"}
                       </p>
                     </div>
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${ocupado ? "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300"}`}>
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${ocupado ? "bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30" : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30"}`}>
                       {ocupado ? "En Operación" : "Libre"}
                     </span>
                   </div>
@@ -322,18 +418,17 @@ export default function DsdPage() {
             </div>
           </div>
 
-          {/* Próximas Entregas Programadas */}
-          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-blue-600" /> Próximos Arribos
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-blue-500" /> Próximos Arribos Agendados
               </h3>
-              <button onClick={() => setShowScheduleModal(true)} className="btn-secondary text-[10px] px-2.5 py-1 flex items-center gap-1">
+              <button onClick={() => setShowScheduleModal(true)} className="px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Agendar
               </button>
             </div>
             {schedules.length === 0 ? (
-              <div className="text-center py-10 text-gray-400 text-xs">
+              <div className="text-center py-10 text-slate-400 text-xs">
                 <Truck className="w-8 h-8 mx-auto mb-2 opacity-40" />
                 <p>Sin camiones programados para hoy.</p>
                 <p className="mt-1">Agendá las ventanas de descarga de tus proveedores.</p>
@@ -341,16 +436,13 @@ export default function DsdPage() {
             ) : (
               <div className="space-y-2">
                 {schedules.slice(0, 5).map((s: any) => (
-                  <div key={s.id} className="p-3 bg-gray-50 dark:bg-slate-800/40 rounded-2xl border border-gray-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                  <div key={s.id} className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
                     <div>
-                      <p className="font-extrabold text-gray-900 dark:text-white">{supplierMap[s.proveedor_id] || "Proveedor Asignado"}</p>
-                      <p className="text-[10px] text-gray-400">OC: #{s.numero_oc || "S/N"} · {s.muelle} · {s.tipo_carga}</p>
-                      <p className="text-[10px] text-gray-500 mt-0.5">Chofer: {s.conductor || "—"} ({s.patente || "Sin chapa"})</p>
+                      <p className="font-extrabold text-slate-900 dark:text-white">{supplierMap[s.proveedor_id] || "Proveedor Asignado"}</p>
+                      <p className="text-[10px] text-slate-400">OC: #{s.numero_oc || "S/N"} · {s.muelle}</p>
+                      <p className="text-[10px] text-slate-500">Chofer: {s.conductor || "—"} ({s.patente || "Sin chapa"})</p>
                     </div>
-                    <div className="text-right">
-                      <span className="font-mono font-bold text-blue-600 dark:text-blue-400">{s.fecha_programada}</span>
-                      <p className="text-[10px] text-gray-400 mt-0.5">{s.total_bultos_estimado ? `${s.total_bultos_estimado} bultos` : ""}</p>
-                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-blue-500 bg-blue-500/10 border border-blue-500/20">{s.estado}</span>
                   </div>
                 ))}
               </div>
@@ -359,338 +451,232 @@ export default function DsdPage() {
         </div>
       )}
 
-      {/* TAB PROGRAMACIÓN */}
+      {/* ══════════════════════ TAB 2: PROGRAMACION CAMIONES ══════════════════════ */}
       {tab === "programacion" && (
-        <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
           {schedules.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-xs">
+            <div className="text-center py-16 text-slate-400 text-xs">
               <Calendar className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-bold text-sm text-gray-600 dark:text-gray-300">Sin programación de camiones</p>
-              <p className="mt-1 max-w-xs mx-auto">Programá la llegada de camiones con su proveedor, orden de compra, muelle asignado y datos del transportista.</p>
-              <button onClick={() => setShowScheduleModal(true)} className="btn-primary text-xs px-4 py-2 mt-4 inline-flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5" />Programar Primer Arribo
+              <p className="font-bold text-sm text-slate-700 dark:text-slate-300">Sin arribos programados</p>
+              <p className="mt-1">Agendá la llegada de camiones con muelle y ventana de descarga.</p>
+              <button onClick={() => setShowScheduleModal(true)} className="px-4 py-2 mt-4 rounded-2xl bg-blue-600 text-white font-bold text-xs inline-flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5" />Programar Arribo
               </button>
             </div>
           ) : (
-            <table className="w-full text-xs min-w-[700px]">
-              <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
-                <tr>
-                  <th className="p-3.5 text-left">Proveedor / OC</th>
-                  <th className="p-3.5 text-left">Fecha & Muelle</th>
-                  <th className="p-3.5 text-left">Tipo de Carga</th>
-                  <th className="p-3.5 text-left">Transportista / Chofer</th>
-                  <th className="p-3.5 text-right">Bultos / Peso</th>
-                  <th className="p-3.5 text-center">Estado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
-                {schedules.map((s: any) => (
-                  <tr key={s.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
-                    <td className="p-3.5">
-                      <p className="font-extrabold text-gray-900 dark:text-white">{supplierMap[s.proveedor_id] || "Proveedor Registrado"}</p>
-                      <p className="text-[10px] text-gray-400 font-mono">OC: #{s.numero_oc || "S/N"}</p>
-                    </td>
-                    <td className="p-3.5">
-                      <p className="font-bold text-gray-800 dark:text-gray-200">{s.fecha_programada}</p>
-                      <p className="text-[10px] text-gray-400">{s.muelle}</p>
-                    </td>
-                    <td className="p-3.5 text-gray-600 dark:text-gray-300 font-medium">{s.tipo_carga}</td>
-                    <td className="p-3.5">
-                      <p className="text-gray-800 dark:text-gray-200 font-bold">{s.transportista || s.conductor || "—"}</p>
-                      <p className="text-[10px] text-gray-400">Patente: {s.patente || "—"} · Tel: {s.conductor_telefono || "—"}</p>
-                    </td>
-                    <td className="p-3.5 text-right font-mono">
-                      <p className="font-bold">{s.total_bultos_estimado || "—"} bultos</p>
-                      <p className="text-[10px] text-gray-400">{s.total_peso_estimado_kg ? `${s.total_peso_estimado_kg} kg` : ""}</p>
-                    </td>
-                    <td className="p-3.5 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${s.estado === "completada" ? "text-emerald-600 bg-emerald-50" : s.estado === "en_proceso" ? "text-amber-600 bg-amber-50" : "text-blue-600 bg-blue-50"}`}>
-                        {s.estado || "programada"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      {/* TAB RECEPCIONES */}
-      {tab === "recepciones" && (
-        <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-          {receivings.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-xs">
-              <ClipboardList className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-bold text-sm text-gray-600 dark:text-gray-300">Sin recepciones registradas</p>
-              <p className="mt-1 max-w-xs mx-auto">Iniciá la recepción física en muelle con el Remito del transportista y control de temperatura de andén.</p>
-              <button onClick={() => setShowReceivingModal(true)} className="btn-primary text-xs px-4 py-2 mt-4 inline-flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5" />Iniciar Recepción
-              </button>
-            </div>
-          ) : (
-            <table className="w-full text-xs min-w-[700px]">
-              <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
-                <tr>
-                  <th className="p-3.5 text-left">Remito / Proveedor</th>
-                  <th className="p-3.5 text-left">Fecha & Hora</th>
-                  <th className="p-3.5 text-center">Temp. Andén</th>
-                  <th className="p-3.5 text-right">Bultos Recibidos</th>
-                  <th className="p-3.5 text-right">Bultos Rechazados</th>
-                  <th className="p-3.5 text-center">Estado</th>
-                  <th className="p-3.5 text-right">Acción</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
-                {receivings.map((r: any) => (
-                  <tr key={r.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
-                    <td className="p-3.5">
-                      <p className="font-extrabold text-gray-900 dark:text-white">Remito #{r.numero_remito || "S/N"}</p>
-                      <p className="text-[10px] text-gray-400">{supplierMap[r.proveedor_id] || "Proveedor"} · OC: #{r.numero_oc || "S/N"}</p>
-                    </td>
-                    <td className="p-3.5 font-mono text-gray-500">
-                      {r.fecha_recepcion ? formatDate(r.fecha_recepcion) : "—"}
-                    </td>
-                    <td className="p-3.5 text-center font-mono font-bold text-blue-600">
-                      {r.temp_ambiente_descarga ? `${r.temp_ambiente_descarga}°C` : "—"}
-                    </td>
-                    <td className="p-3.5 text-right font-mono font-bold text-gray-900 dark:text-white">
-                      {r.total_bultos_recibidos || 0}
-                    </td>
-                    <td className="p-3.5 text-right font-mono font-bold text-red-600">
-                      {r.total_bultos_rechazados || 0}
-                    </td>
-                    <td className="p-3.5 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${r.estado === "completada" ? "text-emerald-600 bg-emerald-50" : "text-amber-600 bg-amber-50"}`}>
-                        {r.estado || "en_proceso"}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-right">
-                      <button onClick={() => { loadReceivingDetails(r); setTab("items") }} className="btn-secondary text-[10px] px-2.5 py-1 inline-flex items-center gap-1">
-                        Inspeccionar <ArrowRight className="w-3 h-3" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      {/* TAB ITEMS DE RECEPCIÓN */}
-      {tab === "items" && (
-        <div className="space-y-4">
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl flex items-center justify-between flex-wrap gap-3">
-            <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase">Recepción Seleccionada</p>
-              <p className="font-extrabold text-sm text-gray-900 dark:text-white">
-                {selectedReceiving ? `Remito #${selectedReceiving.numero_remito} · ${supplierMap[selectedReceiving.proveedor_id] || "Proveedor"}` : "Seleccioná una recepción para auditar items"}
-              </p>
-            </div>
-            {selectedReceiving && (
-              <div className="flex items-center gap-2">
-                <button onClick={() => setShowRejectionModal(true)} className="btn-secondary text-xs px-3 py-1.5 text-red-600 border-red-200 dark:border-red-900/50 flex items-center gap-1.5">
-                  <ShieldAlert className="w-3.5 h-3.5" /> Registrar Rechazo
-                </button>
-                <button onClick={() => setShowItemModal(true)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5">
-                  <Plus className="w-3.5 h-3.5" /> Auditar Item
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-            {receivingItems.length === 0 ? (
-              <div className="text-center py-16 text-gray-400 text-xs">
-                <PackageOpen className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                <p className="font-bold text-sm text-gray-600 dark:text-gray-300">Sin items auditados en esta entrega</p>
-                <p className="mt-1">Registrá la inspección térmica y visual de cada producto del remito.</p>
-                {selectedReceiving && (
-                  <button onClick={() => setShowItemModal(true)} className="btn-primary text-xs px-4 py-2 mt-4 inline-flex items-center gap-1.5">
-                    <Plus className="w-3.5 h-3.5" />Auditar Primer Item
-                  </button>
-                )}
-              </div>
-            ) : (
-              <table className="w-full text-xs min-w-[700px]">
-                <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[750px] text-left">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="p-3.5 text-left">Producto / Lote</th>
-                    <th className="p-3.5 text-center">Temp. Medida</th>
-                    <th className="p-3.5 text-center">Conformidad Térmica</th>
-                    <th className="p-3.5 text-right">Cant. Recibida</th>
-                    <th className="p-3.5 text-right">Cant. Aceptada</th>
-                    <th className="p-3.5 text-left">Vencimiento</th>
-                    <th className="p-3.5 text-center">Inspección Visual</th>
+                    <th className="p-4">Proveedor / Chofer</th>
+                    <th className="p-4">Muelle & Carga</th>
+                    <th className="p-4 text-center">Bultos / Peso</th>
+                    <th className="p-4 text-center">Fecha Programada</th>
+                    <th className="p-4 text-center">Estado</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
-                  {receivingItems.map((it: any) => (
-                    <tr key={it.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40">
-                      <td className="p-3.5">
-                        <p className="font-extrabold text-gray-900 dark:text-white">{it.producto_id?.slice(0, 8) || "Item"}</p>
-                        <p className="text-[10px] text-gray-400 font-mono">Lote: {it.lote || "—"}</p>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {schedules.map((s: any) => (
+                    <tr key={s.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                      <td className="p-4">
+                        <p className="font-extrabold text-slate-900 dark:text-white">{supplierMap[s.proveedor_id] || "Proveedor Asignado"}</p>
+                        <p className="text-[10px] text-slate-400">{s.conductor || "Sin chofer"} · Chapa: {s.patente || "—"}</p>
                       </td>
-                      <td className="p-3.5 text-center font-mono font-bold text-blue-600">
-                        {it.temperatura_producto ? `${it.temperatura_producto}°C` : "—"}
+                      <td className="p-4">
+                        <p className="font-bold text-slate-700 dark:text-slate-300">{s.muelle}</p>
+                        <p className="text-[10px] text-slate-400">{s.tipo_carga}</p>
                       </td>
-                      <td className="p-3.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${it.temp_conforme !== false ? "text-emerald-600 bg-emerald-50" : "text-red-600 bg-red-50"}`}>
-                          {it.temp_conforme !== false ? "Conforme ✓" : "Fuera de Rango ✗"}
-                        </span>
+                      <td className="p-4 text-center font-mono font-bold text-slate-900 dark:text-white">
+                        {s.total_bultos_estimado || "—"} bultos · {s.total_peso_estimado_kg ? `${s.total_peso_estimado_kg} kg` : "—"}
                       </td>
-                      <td className="p-3.5 text-right font-mono font-bold">{it.cantidad_recibida}</td>
-                      <td className="p-3.5 text-right font-mono font-bold text-emerald-600">{it.cantidad_aceptada}</td>
-                      <td className="p-3.5 text-gray-500 font-mono">{it.fecha_vencimiento || "—"}</td>
-                      <td className="p-3.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${it.inspeccion_conforme !== false ? "text-emerald-600 bg-emerald-50" : "text-amber-600 bg-amber-50"}`}>
-                          {it.condicion_visual || "Óptima"}
-                        </span>
+                      <td className="p-4 text-center font-mono text-slate-500">{formatDate(s.fecha_programada)}</td>
+                      <td className="p-4 text-center">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase text-blue-500 bg-blue-500/10 border border-blue-500/20">{s.estado}</span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* TAB RECHAZOS */}
-      {tab === "rechazos" && (
-        <div className="space-y-3">
-          {rejections.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-xs card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl">
-              <CheckCircle2 className="w-10 h-10 mx-auto mb-3 opacity-40 text-emerald-500" />
-              <p className="font-bold text-sm text-emerald-600">Sin actas de rechazo registradas</p>
-              <p className="mt-1">Todas las entregas cumplen los estándares térmicos y sanitarios del supermercado.</p>
             </div>
-          ) : (
-            rejections.map((rej: any) => (
-              <div key={rej.id} className="card p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 rounded-2xl flex items-center justify-between gap-4 text-xs">
-                <div>
-                  <p className="font-extrabold text-red-900 dark:text-red-200">{rej.motivo}</p>
-                  <p className="text-red-700 dark:text-red-400 mt-0.5">Cant. Rechazada: {rej.cantidad_rechazada} · {rej.detalle || "Sin detalle"}</p>
-                  {rej.genera_nota_credito && (
-                    <span className="inline-block mt-1 text-[10px] font-black text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/40 px-2 py-0.5 rounded-full uppercase">
-                      Genera Nota de Crédito {rej.nota_credito_numero ? `#${rej.nota_credito_numero}` : ""}
-                    </span>
-                  )}
-                </div>
-                <div className="text-right">
-                  <span className="font-mono text-[10px] text-gray-400">{formatDate(rej.created_at)}</span>
-                  <p className="text-[10px] font-bold text-red-600 mt-1">Acta Registrada</p>
-                </div>
-              </div>
-            ))
           )}
         </div>
       )}
 
-      {/* MODAL PROGRAMAR ARRIBO */}
-      {showScheduleModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-lg border border-gray-200 dark:border-slate-800 p-6 space-y-4 max-h-[85vh] overflow-y-auto">
-            <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase">Programar Arribo de Camión</h2>
-            <form onSubmit={handleSaveSchedule} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <label className="label-sm">Proveedor *</label>
-                  <select className="input text-xs" value={scheduleForm.proveedor_id} onChange={e => setScheduleForm(f => ({ ...f, proveedor_id: e.target.value }))}>
-                    <option value="">Seleccioná un proveedor...</option>
-                    {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.razon_social || s.nombre} ({s.ruc})</option>)}
-                  </select>
+      {/* ══════════════════════ TAB 3: RECEPCIONES EN ANDEN ══════════════════════ */}
+      {tab === "recepciones" && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+          {receivings.length === 0 ? (
+            <div className="text-center py-16 text-slate-400 text-xs">
+              <PackageOpen className="w-10 h-10 mx-auto mb-3 opacity-40" />
+              <p className="font-bold text-sm text-slate-700 dark:text-slate-300">Sin recepciones registradas</p>
+              <p className="mt-1">Iniciá la descarga de un camión con control de temperatura.</p>
+              <button onClick={() => setShowReceivingModal(true)} className="px-4 py-2 mt-4 rounded-2xl bg-blue-600 text-white font-bold text-xs inline-flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5" />Nueva Recepción
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[750px] text-left">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-4">Remito / Proveedor</th>
+                    <th className="p-4 text-center">Temp. Andén</th>
+                    <th className="p-4 text-center">Bultos Recibidos</th>
+                    <th className="p-4 text-center">Bultos Rechazados</th>
+                    <th className="p-4 text-center">Estado</th>
+                    <th className="p-4 text-center">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {receivings.map((r: any) => (
+                    <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                      <td className="p-4">
+                        <p className="font-extrabold text-slate-900 dark:text-white">Remito #{r.numero_remito || "S/N"}</p>
+                        <p className="text-[10px] text-slate-400">{supplierMap[r.proveedor_id] || "Proveedor Directo"}</p>
+                      </td>
+                      <td className="p-4 text-center font-mono font-bold text-amber-500">{r.temp_ambiente_descarga ? `${r.temp_ambiente_descarga}°C` : "—"}</td>
+                      <td className="p-4 text-center font-mono font-bold text-emerald-500">{r.total_bultos_recibidos || 0}</td>
+                      <td className="p-4 text-center font-mono font-bold text-rose-500">{r.total_bultos_rechazados || 0}</td>
+                      <td className="p-4 text-center">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${r.estado === "completada" ? "text-emerald-500 bg-emerald-500/10 border border-emerald-500/20" : "text-amber-500 bg-amber-500/10 border border-amber-500/20"}`}>{r.estado}</span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <button onClick={() => { loadReceivingDetails(r); setTab("items") }} className="px-3 py-1.5 rounded-xl text-xs font-bold text-blue-600 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 transition">
+                          Inspeccionar
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════ TAB 4: INSPECCION DE ITEMS ══════════════════════ */}
+      {tab === "items" && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase">Inspección Térmica de Productos</h3>
+              <p className="text-[11px] text-slate-400">{selectedReceiving ? `Remito #${selectedReceiving.numero_remito}` : "Seleccioná una recepción para auditar productos"}</p>
+            </div>
+            {selectedReceiving && (
+              <div className="flex gap-2">
+                <button onClick={() => setShowRejectionModal(true)} className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-500 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition flex items-center gap-1">
+                  <XCircle className="w-3.5 h-3.5" /> Registrar Rechazo
+                </button>
+                <button onClick={() => setShowItemModal(true)} className="px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition flex items-center gap-1">
+                  <Plus className="w-3.5 h-3.5" /> Inspeccionar Item
+                </button>
+              </div>
+            )}
+          </div>
+          {receivingItems.length === 0 ? (
+            <div className="text-center py-12 text-slate-400 text-xs">
+              <ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <p>Sin items inspeccionados en esta descarga.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {receivingItems.map(item => (
+                <div key={item.id} className="p-4 flex items-center justify-between text-xs hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                  <div>
+                    <p className="font-extrabold text-slate-900 dark:text-white">{item.producto_id || "Producto"}</p>
+                    <p className="text-slate-400">Lote: {item.lote || "S/N"} · Vto: {item.fecha_vencimiento || "—"}</p>
+                  </div>
+                  <div className="text-right space-y-0.5">
+                    <p className="font-mono font-bold text-slate-900 dark:text-white">Recibido: {item.cantidad_recibida} u · Aceptado: {item.cantidad_aceptada} u</p>
+                    <p className="font-mono text-amber-500 font-bold">Temp: {item.temperatura_producto}°C ({item.temp_conforme ? "Conforme" : "Inconforme"})</p>
+                  </div>
                 </div>
-                <div><label className="label-sm">Número de OC</label><input className="input text-xs" value={scheduleForm.numero_oc} onChange={e => setScheduleForm(f => ({ ...f, numero_oc: e.target.value }))} placeholder="OC-4453" /></div>
-                <div><label className="label-sm">Fecha Programada *</label><input type="date" required className="input text-xs" value={scheduleForm.fecha_programada} onChange={e => setScheduleForm(f => ({ ...f, fecha_programada: e.target.value }))} /></div>
-                <div><label className="label-sm">Muelle Asignado</label>
-                  <select className="input text-xs" value={scheduleForm.muelle} onChange={e => setScheduleForm(f => ({ ...f, muelle: e.target.value }))}>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════ TAB 5: ACTAS DE RECHAZO ══════════════════════ */}
+      {tab === "rechazos" && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
+            <XCircle className="w-4 h-4 text-rose-500" /> Actas de Rechazo & Devolución en Andén
+          </h3>
+          {rejections.length === 0 ? (
+            <div className="text-center py-12 text-slate-400 text-xs">
+              <CheckCircle2 className="w-8 h-8 mx-auto mb-2 opacity-60 text-emerald-500" />
+              <p className="text-emerald-500 font-bold">Sin actas de rechazo pendientes.</p>
+              <p className="mt-1">Toda la mercadería recibida cumplió con las especificaciones de calidad y temperatura.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {rejections.map(rej => (
+                <div key={rej.id} className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-center justify-between text-xs">
+                  <div>
+                    <p className="font-extrabold text-rose-600 dark:text-rose-400">{rej.motivo}</p>
+                    <p className="text-slate-400 mt-0.5">{rej.detalle || "Sin observaciones adicionales"}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-mono font-bold text-rose-600">{rej.cantidad_rechazada} u rechazadas</p>
+                    {rej.genera_nota_credito && <span className="text-[10px] font-black text-amber-500 uppercase">Genera NC</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── MODAL PROGRAMAR ARRIBO ── */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800 p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+            <h2 className="font-extrabold text-base text-slate-900 dark:text-white uppercase flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-blue-500" /> Programar Arribo de Camión
+            </h2>
+            <form onSubmit={handleSaveSchedule} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Proveedor *</label>
+                <select required className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={scheduleForm.proveedor_id} onChange={e => setScheduleForm(f => ({ ...f, proveedor_id: e.target.value }))}>
+                  <option value="">Seleccioná un proveedor...</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.razon_social || s.nombre}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">N° Orden de Compra</label>
+                  <input className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={scheduleForm.numero_oc} onChange={e => setScheduleForm(f => ({ ...f, numero_oc: e.target.value }))} placeholder="OC-2026-001" />
+                </div>
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Fecha Programada</label>
+                  <input type="date" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={scheduleForm.fecha_programada} onChange={e => setScheduleForm(f => ({ ...f, fecha_programada: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Muelle Asignado</label>
+                  <select className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={scheduleForm.muelle} onChange={e => setScheduleForm(f => ({ ...f, muelle: e.target.value }))}>
                     {MUELLES.map(m => <option key={m}>{m}</option>)}
                   </select>
                 </div>
-                <div><label className="label-sm">Tipo de Carga</label>
-                  <select className="input text-xs" value={scheduleForm.tipo_carga} onChange={e => setScheduleForm(f => ({ ...f, tipo_carga: e.target.value }))}>
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Tipo de Carga</label>
+                  <select className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={scheduleForm.tipo_carga} onChange={e => setScheduleForm(f => ({ ...f, tipo_carga: e.target.value }))}>
                     {TIPOS_CARGA.map(t => <option key={t}>{t}</option>)}
                   </select>
                 </div>
-                <div><label className="label-sm">Transportista</label><input className="input text-xs" value={scheduleForm.transportista} onChange={e => setScheduleForm(f => ({ ...f, transportista: e.target.value }))} placeholder="Ej: Transportes del Este" /></div>
-                <div><label className="label-sm">Patente / Chapa</label><input className="input text-xs" value={scheduleForm.patente} onChange={e => setScheduleForm(f => ({ ...f, patente: e.target.value }))} placeholder="Ej: ABC 123" /></div>
-                <div><label className="label-sm">Chofer</label><input className="input text-xs" value={scheduleForm.conductor} onChange={e => setScheduleForm(f => ({ ...f, conductor: e.target.value }))} placeholder="Nombre completo" /></div>
-                <div><label className="label-sm">Teléfono Chofer</label><input className="input text-xs" value={scheduleForm.conductor_telefono} onChange={e => setScheduleForm(f => ({ ...f, conductor_telefono: e.target.value }))} placeholder="0981..." /></div>
-                <div><label className="label-sm">Bultos Estimados</label><input type="number" className="input text-xs" value={scheduleForm.total_bultos_estimado} onChange={e => setScheduleForm(f => ({ ...f, total_bultos_estimado: e.target.value }))} /></div>
-                <div><label className="label-sm">Peso Est. (kg)</label><input type="number" step="0.1" className="input text-xs" value={scheduleForm.total_peso_estimado_kg} onChange={e => setScheduleForm(f => ({ ...f, total_peso_estimado_kg: e.target.value }))} /></div>
-                <div className="col-span-2"><label className="label-sm">Notas</label><textarea className="input text-xs h-14" value={scheduleForm.notas} onChange={e => setScheduleForm(f => ({ ...f, notas: e.target.value }))} /></div>
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowScheduleModal(false)} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={savingSchedule} className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5">
-                  {savingSchedule ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calendar className="w-3.5 h-3.5" />} Programar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL NUEVA RECEPCIÓN EN MUELLE */}
-      {showReceivingModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-gray-200 dark:border-slate-800 p-6 space-y-4 max-h-[85vh] overflow-y-auto">
-            <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase">Iniciar Descarga en Muelle</h2>
-            <form onSubmit={handleSaveReceiving} className="space-y-3 text-xs">
-              <div>
-                <label className="label-sm">Proveedor *</label>
-                <select required className="input text-xs" value={receivingForm.proveedor_id} onChange={e => setReceivingForm(f => ({ ...f, proveedor_id: e.target.value }))}>
-                  <option value="">Seleccioná un proveedor...</option>
-                  {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.razon_social || s.nombre} ({s.ruc})</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="label-sm">N° Remito / Factura *</label><input required className="input text-xs" value={receivingForm.numero_remito} onChange={e => setReceivingForm(f => ({ ...f, numero_remito: e.target.value }))} placeholder="R-001-002-0034" /></div>
-                <div><label className="label-sm">N° de OC</label><input className="input text-xs" value={receivingForm.numero_oc} onChange={e => setReceivingForm(f => ({ ...f, numero_oc: e.target.value }))} placeholder="OC-4453" /></div>
-                <div><label className="label-sm">Total Bultos</label><input type="number" className="input text-xs" value={receivingForm.total_bultos_recibidos} onChange={e => setReceivingForm(f => ({ ...f, total_bultos_recibidos: e.target.value }))} placeholder="Ej: 120" /></div>
-                <div><label className="label-sm">Temp. Andén (°C)</label><input type="number" step="0.5" className="input text-xs" value={receivingForm.temp_ambiente_descarga} onChange={e => setReceivingForm(f => ({ ...f, temp_ambiente_descarga: e.target.value }))} placeholder="18" /></div>
-              </div>
-              <div><label className="label-sm">Observaciones</label><textarea className="input text-xs h-14" value={receivingForm.observaciones} onChange={e => setReceivingForm(f => ({ ...f, observaciones: e.target.value }))} placeholder="Condiciones del camión, precintos de seguridad, etc." /></div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowReceivingModal(false)} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={savingReceiving} className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5">
-                  {savingReceiving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Truck className="w-3.5 h-3.5" />} Iniciar Descarga
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL AUDITAR ITEM */}
-      {showItemModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-gray-200 dark:border-slate-800 p-6 space-y-4">
-            <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase">Control Térmico & Calidad de Item</h2>
-            <form onSubmit={handleSaveItem} className="space-y-3 text-xs">
-              <div><label className="label-sm">ID Producto / SKU *</label><input required className="input text-xs" value={itemForm.producto_id} onChange={e => setItemForm(f => ({ ...f, producto_id: e.target.value }))} placeholder="UUID o SKU del producto" /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="label-sm">Cant. Recibida *</label><input required type="number" step="0.1" className="input text-xs" value={itemForm.cantidad_recibida} onChange={e => setItemForm(f => ({ ...f, cantidad_recibida: e.target.value }))} /></div>
-                <div><label className="label-sm">Cant. Aceptada</label><input type="number" step="0.1" className="input text-xs" value={itemForm.cantidad_aceptada} onChange={e => setItemForm(f => ({ ...f, cantidad_aceptada: e.target.value }))} /></div>
-                <div><label className="label-sm">Temp. Producto (°C)</label><input type="number" step="0.1" className="input text-xs" value={itemForm.temperatura_producto} onChange={e => setItemForm(f => ({ ...f, temperatura_producto: e.target.value }))} /></div>
-                <div><label className="label-sm">Lote</label><input className="input text-xs" value={itemForm.lote} onChange={e => setItemForm(f => ({ ...f, lote: e.target.value }))} placeholder="L-20260817" /></div>
-                <div><label className="label-sm">Vencimiento</label><input type="date" className="input text-xs" value={itemForm.fecha_vencimiento} onChange={e => setItemForm(f => ({ ...f, fecha_vencimiento: e.target.value }))} /></div>
-                <div><label className="label-sm">Condición Visual</label>
-                  <select className="input text-xs" value={itemForm.condicion_visual} onChange={e => setItemForm(f => ({ ...f, condicion_visual: e.target.value }))}>
-                    <option value="optima">Óptima</option><option value="aceptable">Aceptable</option><option value="deteriorada">Deteriorada</option>
-                  </select>
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Chofer / Conductor</label>
+                  <input className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none" value={scheduleForm.conductor} onChange={e => setScheduleForm(f => ({ ...f, conductor: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Chapa / Patente</label>
+                  <input className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono text-slate-900 dark:text-white outline-none" value={scheduleForm.patente} onChange={e => setScheduleForm(f => ({ ...f, patente: e.target.value }))} />
                 </div>
               </div>
-              <div className="flex items-center gap-2 pt-1">
-                <input type="checkbox" id="temp_conf" checked={itemForm.temp_conforme} onChange={e => setItemForm(f => ({ ...f, temp_conforme: e.target.checked }))} />
-                <label htmlFor="temp_conf" className="font-bold text-gray-700 dark:text-gray-300">Temperatura Conforme a Norma Sanitaria</label>
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowItemModal(false)} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={savingItem} className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5">
-                  {savingItem ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Guardar Item
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button type="button" onClick={() => setShowScheduleModal(false)} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">Cancelar</button>
+                <button type="submit" disabled={savingSchedule} className="px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs shadow-md shadow-blue-500/20 flex items-center gap-1.5 transition">
+                  {savingSchedule ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calendar className="w-3.5 h-3.5" />}Agendar Arribo
                 </button>
               </div>
             </form>
@@ -698,31 +684,39 @@ export default function DsdPage() {
         </div>
       )}
 
-      {/* MODAL REGISTRAR RECHAZO */}
-      {showRejectionModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-gray-200 dark:border-slate-800 p-6 space-y-4">
-            <h2 className="font-extrabold text-base text-red-600 dark:text-red-400 uppercase">Registrar Acta de Rechazo en Muelle</h2>
-            <form onSubmit={handleSaveRejection} className="space-y-3 text-xs">
+      {/* ── MODAL NUEVA RECEPCIÓN ── */}
+      {showReceivingModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+            <h2 className="font-extrabold text-base text-slate-900 dark:text-white uppercase flex items-center gap-2">
+              <Plus className="w-5 h-5 text-blue-500" /> Iniciar Recepción en Andén
+            </h2>
+            <form onSubmit={handleSaveReceiving} className="space-y-3 text-xs">
               <div>
-                <label className="label-sm">Motivo del Rechazo *</label>
-                <select className="input text-xs" value={rejectionForm.motivo} onChange={e => setRejectionForm(f => ({ ...f, motivo: e.target.value }))}>
-                  {MOTIVOS_RECHAZO.map(m => <option key={m}>{m}</option>)}
+                <label className="block text-slate-400 font-bold mb-1">Proveedor *</label>
+                <select required className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={receivingForm.proveedor_id} onChange={e => setReceivingForm(f => ({ ...f, proveedor_id: e.target.value }))}>
+                  <option value="">Seleccioná un proveedor...</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.razon_social || s.nombre}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="label-sm">ID Producto</label><input className="input text-xs" value={rejectionForm.producto_id} onChange={e => setRejectionForm(f => ({ ...f, producto_id: e.target.value }))} placeholder="UUID del item" /></div>
-                <div><label className="label-sm">Cantidad Rechazada *</label><input required type="number" step="0.1" className="input text-xs" value={rejectionForm.cantidad_rechazada} onChange={e => setRejectionForm(f => ({ ...f, cantidad_rechazada: e.target.value }))} /></div>
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">N° Remito *</label>
+                  <input required className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={receivingForm.numero_remito} onChange={e => setReceivingForm(f => ({ ...f, numero_remito: e.target.value }))} placeholder="001-001-0001234" />
+                </div>
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Temp. Andén (°C)</label>
+                  <input type="number" step="0.1" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={receivingForm.temp_ambiente_descarga} onChange={e => setReceivingForm(f => ({ ...f, temp_ambiente_descarga: e.target.value }))} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-slate-400 font-bold mb-1">Total Bultos Recibidos</label>
+                  <input type="number" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={receivingForm.total_bultos_recibidos} onChange={e => setReceivingForm(f => ({ ...f, total_bultos_recibidos: e.target.value }))} />
+                </div>
               </div>
-              <div><label className="label-sm">Detalle / Justificación Técnica</label><textarea className="input text-xs h-16" value={rejectionForm.detalle} onChange={e => setRejectionForm(f => ({ ...f, detalle: e.target.value }))} placeholder="Ej: Producto llegó a 12°C cuando el máximo permitido es 4°C." /></div>
-              <div className="flex items-center gap-2 pt-1">
-                <input type="checkbox" id="nc" checked={rejectionForm.genera_nota_credito} onChange={e => setRejectionForm(f => ({ ...f, genera_nota_credito: e.target.checked }))} />
-                <label htmlFor="nc" className="font-bold text-gray-700 dark:text-gray-300">Generar Acta para Nota de Crédito</label>
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowRejectionModal(false)} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={savingRejection} className="btn-primary text-xs px-4 py-2 bg-red-600 hover:bg-red-700 flex items-center gap-1.5">
-                  {savingRejection ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />} Emitir Rechazo
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button type="button" onClick={() => setShowReceivingModal(false)} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">Cancelar</button>
+                <button type="submit" disabled={savingReceiving} className="px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs shadow-md shadow-blue-500/20 flex items-center gap-1.5 transition">
+                  {savingReceiving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Truck className="w-3.5 h-3.5" />}Iniciar Descarga
                 </button>
               </div>
             </form>
