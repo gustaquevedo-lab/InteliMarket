@@ -739,6 +739,20 @@ export default function POSPage() {
     setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null)
   }
 
+  // El terminal Bancard no tiene forma via API de forzar la limpieza de una
+  // transaccion que quedo "en proceso" (la documentacion oficial solo cubre
+  // anulacion de ventas YA aprobadas, no de una operacion colgada) -- la
+  // unica salida real es cancelarla a mano en la pantalla del propio
+  // terminal. "Reintentar" en la app SI funciona (manda el pedido de nuevo),
+  // pero el terminal lo va a seguir rechazando hasta que se cancele ahi.
+  const bancardErrorMessage = (rawMessage: string | undefined) => {
+    const msg = rawMessage || "El terminal rechazó la operación."
+    if (/en proceso|en curso/i.test(msg)) {
+      return `${msg} -- Cancelá la operación pendiente en la pantalla del propio terminal Bancard (no hace falta cerrar la app) y después tocá Reintentar.`
+    }
+    return msg
+  }
+
   const logBancardTxn = async (data: Record<string, any>) => {
     try {
       return await api.posTerminalTransactions.create({
@@ -786,7 +800,7 @@ export default function POSPage() {
     if (!res1.ok) {
       if (res1.status === 400 || res1.status === 500) {
         setBancardTxnState("error_rechazo")
-        setBancardTxnError(res1.body?.message || "El terminal rechazó la operación.")
+        setBancardTxnError(bancardErrorMessage(res1.body?.message))
         await logBancardTxn({
           tipo_operacion: posCardType === "debito" ? "venta_debito" : "venta_credito",
           exitosa: false, verificado_automaticamente: true, error_message: res1.body?.message,
@@ -810,7 +824,7 @@ export default function POSPage() {
     if (!res2.ok) {
       if (res2.status === 400 || res2.status === 500) {
         setBancardTxnState("error_rechazo")
-        setBancardTxnError(res2.body?.message || "El terminal rechazó la operación.")
+        setBancardTxnError(bancardErrorMessage(res2.body?.message))
         await logBancardTxn({
           tipo_operacion: posCardType === "debito" ? "venta_debito" : "venta_credito",
           exitosa: false, verificado_automaticamente: true, error_message: res2.body?.message,
@@ -868,7 +882,7 @@ export default function POSPage() {
     if (!res.ok) {
       if (res.status === 400 || res.status === 500) {
         setBancardQrState("error_rechazo")
-        setBancardQrError(res.body?.message || "El terminal rechazó la operación QR.")
+        setBancardQrError(bancardErrorMessage(res.body?.message))
         await logBancardTxn({
           tipo_operacion: "venta_qr", exitosa: false, verificado_automaticamente: true, error_message: res.body?.message,
           monto: montoQr, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res.body,
