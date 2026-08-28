@@ -87,7 +87,6 @@ export default function ExecutiveReportPage() {
   }, [fetchPlData])
 
   return (
-  return (
     <div className="space-y-6 animate-fade-in-up pb-16">
       {/* ── LUXURY COMMAND DECK HEADER ── */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
