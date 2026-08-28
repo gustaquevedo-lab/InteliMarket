@@ -121,20 +121,19 @@ export default function ProductividadPage() {
               <Trophy className="w-7 h-7 text-white" />
               <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-amber-400 border-2 border-slate-950 rounded-full animate-pulse" />
             </div>
-              <div>
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <span className="text-[10px] font-extrabold tracking-widest text-purple-400 uppercase bg-purple-500/10 px-2.5 py-0.5 rounded-md border border-purple-500/20">
-                    MÉTRICAS DE DESEMPEÑO & ESCANEO
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Conectado a Nómina SueldOK
-                  </span>
-                </div>
-                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
-                  Productividad de Cajas & Rendimiento
-                </h1>
+            <div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="text-[10px] font-extrabold tracking-widest text-purple-400 uppercase bg-purple-500/10 px-2.5 py-0.5 rounded-md border border-purple-500/20">
+                  MÉTRICAS DE DESEMPEÑO & ESCANEO
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Conectado a Nómina SueldOK
+                </span>
               </div>
+              <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                Productividad de Cajas & Rendimiento
+              </h1>
               <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl font-normal">
                 Extra Supermercado — Medición en tiempo real de velocidad de escaneo, precisión en arqueos, volumen de tickets y liquidación de bonos salariales.
               </p>

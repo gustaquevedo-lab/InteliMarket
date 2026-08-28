@@ -82,6 +82,7 @@ export default function SueldokPage() {
               <Building className="w-7 h-7 text-white" />
               <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-400 border-2 border-slate-950 rounded-full animate-pulse" />
             </div>
+            <div>
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2.5">
                   <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
