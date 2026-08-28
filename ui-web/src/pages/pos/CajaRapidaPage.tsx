@@ -748,7 +748,7 @@ export default function POSPage() {
   const bancardErrorMessage = (rawMessage: string | undefined) => {
     const msg = rawMessage || "El terminal rechazó la operación."
     if (/en proceso|en curso/i.test(msg)) {
-      return `${msg} -- Cancelá la operación pendiente en la pantalla del propio terminal Bancard (no hace falta cerrar la app) y después tocá Reintentar.`
+      return `${msg} -- Cancelá la operación pendiente en la pantalla del propio terminal Bancard (presionando la X o el botón rojo) y después tocá Reintentar.`
     }
     return msg
   }
@@ -790,9 +790,9 @@ export default function POSPage() {
     setBancardTxnResult(null)
     setShowBancardManualFallback(false)
 
-    const path1 = posCardType === "debito" ? "/pos/venta/debito" : "/pos/venta/credito"
-    const body1: any = { facturaNro }
-    if (posCardType === "credito") { body1.cuotas = 0; body1.plan = 0 }
+    // Venta Contado universal oficial (soporta débito y crédito sin discriminar con chip/contactless/banda)
+    const path1 = "/pos/venta-ux"
+    const body1: any = { facturaNro, monto: montoBancard }
     console.log(`[BANCARD-TRACE] paso1 -> ip=${ip} path=${path1} body=${JSON.stringify(body1)}`)
     const res1 = await electronAPI.bancardCall(ip, path1, body1, 90000)
     console.log(`[BANCARD-TRACE] paso1 <- ${JSON.stringify(res1)}`)
@@ -877,7 +877,7 @@ export default function POSPage() {
     setBancardQrResult(null)
     setBancardQrManualConfirm(false)
 
-    const res = await electronAPI.bancardCall(ip, "/pos/venta-qr", { facturaNro, monto: montoQr }, 120000)
+    const res = await electronAPI.bancardCall(ip, "/pos/venta-qr", { facturaNro, monto: montoQr, montoVuelto: 0 }, 180000)
 
     if (!res.ok) {
       if (res.status === 400 || res.status === 500) {
