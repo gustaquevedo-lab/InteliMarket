@@ -725,7 +725,24 @@ ipcMain.handle('pos:get-status', async () => {
   }
 })
 
-app.whenReady().then(createWindow)
+// Sin esto, un segundo doble-clic sobre el icono (o un relanzamiento
+// remoto mientras la app ya estaba corriendo) abria una SEGUNDA
+// instancia completa -- con su propio scale-bridge.exe peleando por el
+// mismo puerto COM/USB que el de la instancia original, dejando la
+// balanza "desconectada" en la ventana que el cajero realmente ve.
+// Ahora la segunda instancia se cierra sola y solo enfoca la primera.
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
+  })
+  app.whenReady().then(createWindow)
+}
 
 app.on('will-quit', () => {
   stopScaleReader()
