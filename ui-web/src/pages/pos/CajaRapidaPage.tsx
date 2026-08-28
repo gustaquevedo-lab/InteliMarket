@@ -692,6 +692,7 @@ export default function POSPage() {
   // Tarjetas POS Bancard & Dinelco vinculadas a la caja activa
   const [posTerminalId, setPosTerminalId] = useState(activePosConfig.bancardTerminalId)
   const [posCardType, setPosCardType] = useState<"debito" | "credito">("debito")
+  const [posCardCuotas, setPosCardCuotas] = useState<number>(1)
   const [posCardLote, setPosCardLote] = useState(activePosConfig.bancardLote)
   const [posCardCupon, setPosCardCupon] = useState("")
   const [posCardLast4, setPosCardLast4] = useState("")
@@ -735,7 +736,7 @@ export default function POSPage() {
   const [bancardQrLogId, setBancardQrLogId] = useState<string | null>(null)
 
   const resetBancardFlow = () => {
-    setBancardTxnState("idle"); setBancardTxnResult(null); setBancardTxnError(""); setShowBancardManualFallback(false); setBancardTxnLogId(null)
+    setBancardTxnState("idle"); setBancardTxnResult(null); setBancardTxnError(""); setShowBancardManualFallback(false); setBancardTxnLogId(null); setPosCardCuotas(1)
     setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null)
   }
 
@@ -767,7 +768,7 @@ export default function POSPage() {
   }
 
   const handleBancardCharge = async () => {
-    console.log(`[BANCARD-TRACE] Tarjeta handler invocado, bancardIp=${activePosConfig.bancardIp || "(vacio)"}`)
+    console.log(`[BANCARD-TRACE] Tarjeta handler invocado, bancardIp=${activePosConfig.bancardIp || "(vacio)"}, tipo=${posCardType}, cuotas=${posCardCuotas}`)
     const ip = activePosConfig.bancardIp
     if (!ip) {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
@@ -792,8 +793,13 @@ export default function POSPage() {
     setShowBancardManualFallback(false)
 
     // Venta Contado universal oficial (soporta débito y crédito sin discriminar con chip/contactless/banda)
+    // Si se seleccionó crédito en cuotas (>=2), envía cuotas y plan 1 según la sección 5.2 de Bancard
     const path1 = "/pos/venta-ux"
     const body1: any = { facturaNro, monto: montoBancard }
+    if (posCardType === "credito" && posCardCuotas > 1) {
+      body1.cuotas = posCardCuotas
+      body1.plan = 1
+    }
     console.log(`[BANCARD-TRACE] paso1 -> ip=${ip} path=${path1} body=${JSON.stringify(body1)}`)
     const res1 = await electronAPI.bancardCall(ip, path1, body1, 90000)
     console.log(`[BANCARD-TRACE] paso1 <- ${JSON.stringify(res1)}`)
@@ -803,7 +809,7 @@ export default function POSPage() {
         setBancardTxnState("error_rechazo")
         setBancardTxnError(bancardErrorMessage(res1.body?.message))
         await logBancardTxn({
-          tipo_operacion: posCardType === "debito" ? "venta_debito" : "venta_credito",
+          tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
           exitosa: false, verificado_automaticamente: true, error_message: res1.body?.message,
           monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res1.body,
         })
@@ -827,7 +833,7 @@ export default function POSPage() {
         setBancardTxnState("error_rechazo")
         setBancardTxnError(bancardErrorMessage(res2.body?.message))
         await logBancardTxn({
-          tipo_operacion: posCardType === "debito" ? "venta_debito" : "venta_credito",
+          tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
           exitosa: false, verificado_automaticamente: true, error_message: res2.body?.message,
           bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro), raw_response: res2.body,
         })
@@ -843,7 +849,7 @@ export default function POSPage() {
     setBancardTxnResult(result)
     setBancardTxnState("aprobada")
     const logged = await logBancardTxn({
-      tipo_operacion: posCardType === "debito" ? "venta_debito" : "venta_credito",
+      tipo_operacion: posCardType === "debito" ? "venta_debito" : (posCardCuotas > 1 ? `venta_credito_${posCardCuotas}cuotas` : "venta_credito"),
       exitosa: true, verificado_automaticamente: true,
       bin, nsu, monto: montoBancard, terminal_ip: ip, factura_nro_provisional: String(facturaNro),
       codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.codigoComercio,
@@ -5887,7 +5893,7 @@ export default function POSPage() {
                     <div className="flex gap-1.5">
                       <button
                         type="button"
-                        onClick={() => setPosCardType("debito")}
+                        onClick={() => { setPosCardType("debito"); setPosCardCuotas(1); }}
                         disabled={bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
                         className={`px-3 py-1 rounded-lg text-xs font-bold disabled:opacity-50 ${posCardType === "debito" ? "bg-blue-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"}`}
                       >
@@ -5903,6 +5909,25 @@ export default function POSPage() {
                       </button>
                     </div>
                   </div>
+
+                  {posCardType === "credito" && (
+                    <div className="flex items-center gap-1.5 p-2 bg-blue-50/60 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800/60">
+                      <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 uppercase shrink-0">Cuotas:</span>
+                      <div className="flex gap-1 flex-wrap">
+                        {[1, 2, 3, 6, 12, 18, 24].map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setPosCardCuotas(c)}
+                            disabled={bancardTxnState === "esperando_tarjeta" || bancardTxnState === "confirmando"}
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold transition-colors cursor-pointer ${posCardCuotas === c ? "bg-blue-600 text-white shadow-sm" : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-blue-400"}`}
+                          >
+                            {c === 1 ? "1 (Directo)" : `${c}x`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {isMultiPayment && (
                     <div>
