@@ -767,6 +767,7 @@ export default function POSPage() {
   }
 
   const handleBancardCharge = async () => {
+    console.log(`[BANCARD-TRACE] Tarjeta handler invocado, bancardIp=${activePosConfig.bancardIp || "(vacio)"}`)
     const ip = activePosConfig.bancardIp
     if (!ip) {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
@@ -855,6 +856,7 @@ export default function POSPage() {
   }
 
   const handleBancardQR = async () => {
+    console.log(`[BANCARD-TRACE] QR handler invocado, bancardIp=${activePosConfig.bancardIp || "(vacio)"}`)
     const ip = activePosConfig.bancardIp
     if (!ip) {
       toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Bancard para esta caja en \"Configurar Terminales POS\".")
@@ -877,7 +879,10 @@ export default function POSPage() {
     setBancardQrResult(null)
     setBancardQrManualConfirm(false)
 
-    const res = await electronAPI.bancardCall(ip, "/pos/venta-qr", { facturaNro, monto: montoQr, montoVuelto: 0 }, 180000)
+    const bodyQr = { facturaNro, monto: montoQr, montoVuelto: 0 }
+    console.log(`[BANCARD-TRACE] QR -> ip=${ip} path=/pos/venta-qr body=${JSON.stringify(bodyQr)}`)
+    const res = await electronAPI.bancardCall(ip, "/pos/venta-qr", bodyQr, 180000)
+    console.log(`[BANCARD-TRACE] QR <- ${JSON.stringify(res)}`)
 
     if (!res.ok) {
       if (res.status === 400 || res.status === 500) {
