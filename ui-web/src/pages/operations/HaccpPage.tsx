@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import {
   ShieldCheck, Plus, AlertTriangle, CheckCircle2, Loader2,
-  Info, FileText, Thermometer, Clock, AlertCircle, RefreshCw
+  Info, FileText, Thermometer, Clock, AlertCircle, RefreshCw,
+  Layers, Check, ShieldAlert, ArrowRight
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -50,7 +51,7 @@ export default function HaccpPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [toast])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -111,112 +112,221 @@ export default function HaccpPage() {
 
   const dash = dashboard || {}
   const conformidadPct = parseFloat(dash.conformidad_pct || 0)
-  const conformidadColor = conformidadPct >= 90 ? "text-emerald-600" : conformidadPct >= 70 ? "text-amber-600" : "text-red-600"
+  const conformidadColor = conformidadPct >= 90 ? "text-emerald-400" : conformidadPct >= 70 ? "text-amber-400" : "text-rose-400"
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">Inocuidad & HACCP</h1>
-            {(dash.alertas_activas || 0) > 0 && (
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300 uppercase animate-pulse">
-                {dash.alertas_activas} desviación{(dash.alertas_activas || 0) > 1 ? "es" : ""}
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/90 text-white p-7 border border-cyan-500/20 shadow-2xl shadow-cyan-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-500 border border-cyan-400/30 text-white flex items-center justify-center shadow-lg shadow-cyan-500/25">
+                  <ShieldCheck className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-cyan-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-cyan-400 uppercase bg-cyan-500/10 px-2.5 py-0.5 rounded-md border border-cyan-500/20">
+                    CALIDAD & SEGURIDAD ALIMENTARIA · AUDITORÍAS SENAVE / INTN
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    Conformidad: {conformidadPct.toFixed(1)}%
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Inocuidad & Control HACCP
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Puntos Críticos de Control (PCC), registro térmico en cámaras y rotisería, y libro digital de acciones correctivas
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
               </span>
-            )}
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-cyan-300">
+                🛡️ {planes.length} planes HACCP activos
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                🌡️ {dash.monitoreos_hoy ?? 0} mediciones registradas hoy
+              </span>
+            </div>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Sistema HACCP (Hazard Analysis and Critical Control Points): Gestión de planes de inocuidad, control de puntos críticos de temperatura, pH y aw, registros de monitoreo y acciones correctivas con trazabilidad completa para auditorías del INTN y SENAVE.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={loadData} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" /><span>Actualizar</span></button>
-          <button onClick={() => setShowPlanForm(true)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" /><span>Nuevo Plan HACCP</span></button>
-        </div>
-      </div>
 
-      {/* BANNER */}
-      <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 flex items-start gap-3 text-xs">
-        <Info className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-        <div>
-          <p className="font-extrabold uppercase text-[11px] tracking-wider text-emerald-900 dark:text-emerald-300 mb-0.5">HACCP — Control de Puntos Críticos para Seguridad Alimentaria</p>
-          <p className="text-emerald-800 dark:text-emerald-400 leading-relaxed">
-            Creá un plan HACCP por área del supermercado, definí los puntos críticos de control (temperatura de cámara, cocción mínima, enfriamiento rápido) con sus límites críticos. Los operarios registran mediciones en tiempo real, y el sistema genera alertas automáticas cuando se supera un límite.
-          </p>
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          { label: "Planes Activos", val: dash.planes_activos ?? planes.length, color: "text-blue-600" },
-          { label: "Puntos Críticos", val: dash.puntos_criticos ?? 0, color: "text-purple-600" },
-          { label: "Monitoreos Hoy", val: dash.monitoreos_hoy ?? 0, color: "text-emerald-600" },
-          { label: "Conformidad", val: `${conformidadPct.toFixed(1)}%`, color: conformidadColor },
-          { label: "Alertas Activas", val: dash.alertas_activas ?? 0, color: "text-red-600" },
-          { label: "Acciones Pendientes", val: dash.acciones_pendientes ?? acciones.filter((a: any) => !a.resuelta).length, color: "text-amber-600" },
-        ].map((kpi) => (
-          <div key={kpi.label} className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-            <p className="text-[10px] font-bold text-gray-400 uppercase leading-tight mb-1">{kpi.label}</p>
-            <p className={`text-lg font-black font-mono ${kpi.color}`}>{kpi.val}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* TABS */}
-      <div className="border-b border-gray-200 dark:border-slate-800">
-        <div className="flex gap-1 overflow-x-auto">
-          {[
-            { id: "dashboard", label: "Reporte de Conformidad" },
-            { id: "planes", label: `Planes HACCP (${planes.length})` },
-            { id: "monitoreos", label: "Registrar Monitoreo" },
-            { id: "acciones", label: `Acciones Correctivas (${acciones.length})` },
-          ].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id as any)}
-              className={`pb-3 px-4 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${tab === t.id ? "border-emerald-600 text-emerald-600 dark:text-emerald-400" : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"}`}>
-              {t.label}
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={loadData}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-cyan-400" : ""}`} />
+              Recargar
             </button>
-          ))}
+
+            <button
+              onClick={() => setShowPlanForm(true)}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-cyan-600 to-blue-500 hover:from-cyan-500 hover:to-blue-400 transition shadow-lg shadow-cyan-500/25 flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo Plan HACCP
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Planes Activos</span>
+              <ShieldCheck className="w-4 h-4 text-cyan-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-cyan-300">
+              {dash.planes_activos ?? planes.length}
+            </p>
+            <p className="text-[11px] text-slate-400">Por sección del súper</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Puntos Críticos</span>
+              <Thermometer className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {dash.puntos_criticos ?? 0}
+            </p>
+            <p className="text-[11px] text-slate-400">PCCs bajo monitoreo</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Mediciones Hoy</span>
+              <Clock className="w-4 h-4 text-purple-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
+              {dash.monitoreos_hoy ?? 0}
+            </p>
+            <p className="text-[11px] text-slate-400">Controles de turno</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Conformidad</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className={`text-2xl font-black font-mono tracking-tight ${conformidadColor}`}>
+              {conformidadPct.toFixed(1)}%
+            </p>
+            <p className="text-[11px] text-slate-400">Cumplimiento global</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Desviaciones</span>
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {dash.alertas_activas ?? 0}
+            </p>
+            <p className="text-[11px] text-slate-400">Fuera de límite</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Acciones Pend.</span>
+              <AlertCircle className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {dash.acciones_pendientes ?? acciones.filter((a: any) => !a.resuelta).length}
+            </p>
+            <p className="text-[11px] text-slate-400">Por resolver</p>
+          </div>
         </div>
       </div>
 
-      {/* TAB DASHBOARD */}
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "dashboard", label: "Reporte de Conformidad", icon: ShieldCheck },
+          { id: "planes", label: `Planes HACCP`, count: planes.length, icon: Layers },
+          { id: "monitoreos", label: "Registrar Medición", icon: Thermometer },
+          { id: "acciones", label: `Acciones Correctivas`, count: acciones.length, icon: AlertTriangle },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-cyan-600 dark:text-cyan-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              {t.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ══════════════════════ TAB 1: REPORTES DE CONFORMIDAD ══════════════════════ */}
       {tab === "dashboard" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs">
-            <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase mb-4">Estado de Conformidad por Área</h3>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase">Estado de Conformidad por Sección</h3>
             {loading ? (
-              <div className="flex items-center gap-2 text-xs text-gray-400"><Loader2 className="w-4 h-4 animate-spin" />Cargando...</div>
+              <div className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="w-4 h-4 animate-spin text-cyan-500" />Cargando...</div>
             ) : complianceReport?.por_area?.length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {complianceReport.por_area.map((a: any) => (
-                  <div key={a.area} className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-slate-800/60 rounded-xl text-xs">
-                    <span className="font-bold">{a.area}</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-24 bg-gray-200 dark:bg-slate-700 rounded-full h-1.5">
-                        <div className="h-1.5 rounded-full bg-emerald-500" style={{ width: `${Math.min(100, a.conformidad_pct || 0)}%` }} />
+                  <div key={a.area} className="flex items-center justify-between p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl text-xs">
+                    <span className="font-extrabold text-slate-900 dark:text-white">{a.area}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-24 bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                        <div className="h-2 rounded-full bg-cyan-500" style={{ width: `${Math.min(100, a.conformidad_pct || 0)}%` }} />
                       </div>
-                      <span className="font-mono font-bold">{(a.conformidad_pct || 0).toFixed(1)}%</span>
+                      <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">{(a.conformidad_pct || 0).toFixed(1)}%</span>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-400 text-xs">
+              <div className="text-center py-8 text-slate-400 text-xs">
                 <ShieldCheck className="w-8 h-8 mx-auto mb-2 opacity-40" />
                 <p>Creá planes HACCP para ver el reporte de conformidad.</p>
               </div>
             )}
           </div>
-          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs">
-            <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase mb-4">Últimas Desviaciones Críticas</h3>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase">Últimas Desviaciones Críticas</h3>
             {(complianceReport?.desviaciones || []).length > 0 ? (
               <div className="space-y-2">
                 {complianceReport.desviaciones.map((d: any, i: number) => (
-                  <div key={i} className="p-2.5 bg-red-50 dark:bg-red-950/30 rounded-xl border border-red-200 dark:border-red-900/40 text-xs">
-                    <p className="font-extrabold text-red-700 dark:text-red-400">{d.punto_critico}</p>
-                    <p className="text-red-600 dark:text-red-300">Valor: {d.valor} | Límite: {d.limite_critico}</p>
+                  <div key={i} className="p-3.5 bg-rose-500/10 rounded-2xl border border-rose-500/20 text-xs">
+                    <p className="font-extrabold text-rose-600 dark:text-rose-400">{d.punto_critico}</p>
+                    <p className="text-slate-400 font-mono mt-0.5">Valor medido: {d.valor} | Límite seguro: {d.limite_critico}</p>
                   </div>
                 ))}
               </div>
@@ -224,38 +334,41 @@ export default function HaccpPage() {
               <div className="text-center py-8 text-emerald-600 text-xs">
                 <CheckCircle2 className="w-8 h-8 mx-auto mb-2 opacity-60" />
                 <p className="font-bold">Sin desviaciones críticas recientes.</p>
+                <p className="text-slate-400 mt-1">Todos los puntos de control están en rangos óptimos.</p>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* TAB PLANES */}
+      {/* ══════════════════════ TAB 2: PLANES HACCP ══════════════════════ */}
       {tab === "planes" && (
-        <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
           {planes.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-xs">
+            <div className="text-center py-16 text-slate-400 text-xs">
               <ShieldCheck className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-bold text-sm text-gray-600 dark:text-gray-300">Sin planes HACCP creados</p>
+              <p className="font-bold text-sm text-slate-700 dark:text-slate-300">Sin planes HACCP creados</p>
               <p className="mt-1 max-w-xs mx-auto">Creá un plan por área (Carnicería, Panadería, etc.) y definí los puntos críticos de control.</p>
-              <button onClick={() => setShowPlanForm(true)} className="btn-primary text-xs px-4 py-2 mt-4 inline-flex items-center gap-1.5">
+              <button onClick={() => setShowPlanForm(true)} className="px-4 py-2 mt-4 rounded-2xl bg-cyan-600 text-white font-bold text-xs inline-flex items-center gap-1.5">
                 <Plus className="w-3.5 h-3.5" />Crear Primer Plan
               </button>
             </div>
           ) : (
-            <div className="divide-y divide-gray-100 dark:divide-slate-800">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
               {planes.map((plan: any) => (
-                <div key={plan.id} className="p-4 flex items-center justify-between hover:bg-gray-50/50 dark:hover:bg-slate-800/40">
-                  <div className="text-xs">
-                    <p className="font-extrabold text-gray-900 dark:text-white">{plan.nombre}</p>
-                    <p className="text-gray-500">{plan.area} · v{plan.version || 1}</p>
-                    <p className="text-gray-400 mt-0.5 max-w-sm">{plan.descripcion}</p>
+                <div key={plan.id} className="p-5 flex items-center justify-between hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                  <div className="text-xs space-y-1">
+                    <p className="font-extrabold text-slate-900 dark:text-white text-sm">{plan.nombre}</p>
+                    <p className="text-slate-400 font-medium">{plan.area} · Versión {plan.version || 1}</p>
+                    {plan.descripcion && <p className="text-slate-500 text-[11px] max-w-md">{plan.descripcion}</p>}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${plan.activo ? "text-emerald-600 bg-emerald-50" : "text-gray-500 bg-gray-100"}`}>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${plan.activo ? "text-emerald-600 bg-emerald-500/10 border border-emerald-500/20" : "text-slate-400 bg-slate-100"}`}>
                       {plan.activo ? "Activo" : "Inactivo"}
                     </span>
-                    <button onClick={() => loadCriticos(plan.id)} className="btn-secondary text-[10px] px-3 py-1.5">Registrar Monitoreo</button>
+                    <button onClick={() => loadCriticos(plan.id)} className="px-3 py-1.5 rounded-xl text-xs font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 transition">
+                      Registrar Monitoreo
+                    </button>
                   </div>
                 </div>
               ))}
@@ -264,20 +377,20 @@ export default function HaccpPage() {
         </div>
       )}
 
-      {/* TAB REGISTRAR MONITOREO */}
+      {/* ══════════════════════ TAB 3: REGISTRAR MONITOREO ══════════════════════ */}
       {tab === "monitoreos" && (
-        <div className="card p-6 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs max-w-lg">
-          <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase mb-4 flex items-center gap-2">
-            <Thermometer className="w-4 h-4 text-red-600" />Registrar Medición de Control
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm max-w-xl">
+          <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase mb-1 flex items-center gap-2">
+            <Thermometer className="w-4 h-4 text-cyan-500" /> Registrar Medición de Control
           </h3>
-          <p className="text-[11px] text-gray-500 mb-4">Seleccioná el plan, luego el punto crítico y registrá el valor medido con la fecha y hora actual.</p>
+          <p className="text-[11px] text-slate-400 mb-4">Seleccioná el plan, luego el punto crítico y registrá el valor medido.</p>
           {planes.length === 0 ? (
-            <div className="text-center py-8 text-gray-400 text-xs">Primero creá un Plan HACCP desde la pestaña anterior.</div>
+            <div className="text-center py-8 text-slate-400 text-xs">Primero creá un Plan HACCP desde la pestaña anterior.</div>
           ) : (
-            <div className="space-y-3 text-xs">
+            <div className="space-y-3.5 text-xs">
               <div>
-                <label className="label-sm">Plan HACCP</label>
-                <select className="input text-xs" value={selectedPlanId} onChange={e => { setSelectedPlanId(e.target.value); loadCriticos(e.target.value) }}>
+                <label className="block text-slate-400 font-bold mb-1">Plan HACCP *</label>
+                <select className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={selectedPlanId} onChange={e => { setSelectedPlanId(e.target.value); loadCriticos(e.target.value) }}>
                   <option value="">Seleccioná un plan...</option>
                   {planes.map((p: any) => <option key={p.id} value={p.id}>{p.nombre} — {p.area}</option>)}
                 </select>
@@ -285,25 +398,25 @@ export default function HaccpPage() {
               {criticos.length > 0 && (
                 <>
                   <div>
-                    <label className="label-sm">Punto Crítico de Control</label>
-                    <select className="input text-xs" value={selectedCpId} onChange={e => setSelectedCpId(e.target.value)}>
+                    <label className="block text-slate-400 font-bold mb-1">Punto Crítico de Control (PCC) *</label>
+                    <select className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={selectedCpId} onChange={e => setSelectedCpId(e.target.value)}>
                       <option value="">Seleccioná un PCC...</option>
                       {criticos.map((cp: any) => <option key={cp.id} value={cp.id}>{cp.nombre} (Límite: {cp.limite_critico_min}–{cp.limite_critico_max} {cp.unidad})</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="label-sm">Valor Medido</label>
-                    <input type="number" step="0.1" className="input text-xs" value={monitorForm.valor_medido} onChange={e => setMonitorForm(f => ({ ...f, valor_medido: e.target.value }))} placeholder="Ej: 4.5" />
+                    <label className="block text-slate-400 font-bold mb-1">Valor Medido</label>
+                    <input type="number" step="0.1" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={monitorForm.valor_medido} onChange={e => setMonitorForm(f => ({ ...f, valor_medido: e.target.value }))} placeholder="Ej: 4.5" />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" id="correcto" checked={monitorForm.valor_correcto} onChange={e => setMonitorForm(f => ({ ...f, valor_correcto: e.target.checked }))} />
-                    <label htmlFor="correcto" className="font-bold text-gray-700 dark:text-gray-300">Valor dentro de límites críticos</label>
+                  <div className="flex items-center gap-2.5 pt-1">
+                    <input type="checkbox" id="correcto" checked={monitorForm.valor_correcto} onChange={e => setMonitorForm(f => ({ ...f, valor_correcto: e.target.checked }))} className="w-4 h-4 rounded accent-cyan-500" />
+                    <label htmlFor="correcto" className="font-bold text-slate-700 dark:text-slate-300">Valor dentro de límites críticos seguros</label>
                   </div>
                   <div>
-                    <label className="label-sm">Observaciones</label>
-                    <textarea className="input text-xs h-14" value={monitorForm.observaciones} onChange={e => setMonitorForm(f => ({ ...f, observaciones: e.target.value }))} />
+                    <label className="block text-slate-400 font-bold mb-1">Observaciones</label>
+                    <textarea className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none h-16" value={monitorForm.observaciones} onChange={e => setMonitorForm(f => ({ ...f, observaciones: e.target.value }))} />
                   </div>
-                  <button onClick={handleSaveMonitoreo} disabled={savingMonitoreo} className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 w-full justify-center">
+                  <button onClick={handleSaveMonitoreo} disabled={savingMonitoreo} className="w-full py-3 rounded-2xl bg-cyan-600 hover:bg-cyan-700 text-white font-extrabold text-xs shadow-md shadow-cyan-500/20 flex items-center justify-center gap-2 transition">
                     {savingMonitoreo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                     Guardar Monitoreo
                   </button>
@@ -314,48 +427,62 @@ export default function HaccpPage() {
         </div>
       )}
 
-      {/* TAB ACCIONES CORRECTIVAS */}
+      {/* ══════════════════════ TAB 4: ACCIONES CORRECTIVAS ══════════════════════ */}
       {tab === "acciones" && (
         <div className="space-y-3">
           {acciones.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-xs card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl">
+            <div className="text-center py-16 text-slate-400 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm">
               <CheckCircle2 className="w-10 h-10 mx-auto mb-3 opacity-40 text-emerald-500" />
-              <p className="font-bold text-sm text-emerald-600">Sin acciones correctivas pendientes</p>
+              <p className="font-bold text-sm text-emerald-500">Sin acciones correctivas pendientes</p>
               <p className="mt-1">Todos los puntos críticos están dentro de los límites aceptables.</p>
             </div>
-          ) : acciones.map((ac: any) => (
-            <div key={ac.id} className={`card p-4 border rounded-2xl flex items-center justify-between gap-4 ${ac.resuelta ? "bg-gray-50 dark:bg-slate-900 border-gray-200 dark:border-slate-800" : "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/40"}`}>
-              <div className="text-xs">
-                <p className={`font-extrabold ${ac.resuelta ? "text-gray-600" : "text-amber-800 dark:text-amber-300"}`}>{ac.descripcion}</p>
-                <p className={`mt-0.5 ${ac.resuelta ? "text-gray-400" : "text-amber-600"}`}>{ac.responsable || "—"} · {ac.fecha_limite || "Sin fecha límite"}</p>
-              </div>
-              {!ac.resuelta && (
-                <button onClick={() => handleResolveAccion(ac.id)} className="btn-secondary text-[10px] px-3 py-1.5 text-emerald-700 border-emerald-300 whitespace-nowrap">
-                  Marcar Resuelta
-                </button>
-              )}
-              {ac.resuelta && <span className="text-[10px] font-black text-emerald-600 uppercase">Resuelta ✓</span>}
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {acciones.map((ac: any) => (
+                <div key={ac.id} className={`p-5 rounded-3xl border flex items-center justify-between gap-4 text-xs shadow-sm ${ac.resuelta ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800" : "bg-amber-500/10 border-amber-500/30"}`}>
+                  <div className="space-y-1">
+                    <p className={`font-extrabold text-sm ${ac.resuelta ? "text-slate-700 dark:text-slate-300" : "text-amber-600 dark:text-amber-300"}`}>{ac.descripcion}</p>
+                    <p className="text-slate-400 text-[11px]">{ac.responsable || "Sin asignar"} · Límite: {ac.fecha_limite || "Inmediato"}</p>
+                  </div>
+                  {!ac.resuelta ? (
+                    <button onClick={() => handleResolveAccion(ac.id)} className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-emerald-600 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition whitespace-nowrap">
+                      Marcar Resuelta
+                    </button>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black text-emerald-600 bg-emerald-500/10 border border-emerald-500/20 uppercase">Resuelta ✓</span>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
 
-      {/* MODAL NUEVO PLAN */}
+      {/* ── MODAL NUEVO PLAN ── */}
       {showPlanForm && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-gray-200 dark:border-slate-800 p-6 space-y-4">
-            <h2 className="font-extrabold text-base text-gray-900 dark:text-white uppercase">Nuevo Plan HACCP</h2>
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+            <h2 className="font-extrabold text-base text-slate-900 dark:text-white uppercase flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-cyan-500" /> Nuevo Plan HACCP
+            </h2>
             <form onSubmit={handleSavePlan} className="space-y-3 text-xs">
-              <div><label className="label-sm">Nombre del Plan *</label><input required className="input text-xs" value={planForm.nombre} onChange={e => setPlanForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej: Plan HACCP Carnicería 2026" /></div>
-              <div><label className="label-sm">Área</label>
-                <select className="input text-xs" value={planForm.area} onChange={e => setPlanForm(f => ({ ...f, area: e.target.value }))}>
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Nombre del Plan *</label>
+                <input required className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white font-bold outline-none" value={planForm.nombre} onChange={e => setPlanForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej: Plan HACCP Carnicería 2026" />
+              </div>
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Área / Sección</label>
+                <select className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold text-slate-900 dark:text-white outline-none" value={planForm.area} onChange={e => setPlanForm(f => ({ ...f, area: e.target.value }))}>
                   {AREAS_HACCP.map(a => <option key={a}>{a}</option>)}
                 </select>
               </div>
-              <div><label className="label-sm">Descripción</label><textarea className="input text-xs h-16" value={planForm.descripcion} onChange={e => setPlanForm(f => ({ ...f, descripcion: e.target.value }))} /></div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowPlanForm(false)} className="btn-secondary text-xs px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={savingPlan} className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5">
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Descripción</label>
+                <textarea className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white outline-none h-16" value={planForm.descripcion} onChange={e => setPlanForm(f => ({ ...f, descripcion: e.target.value }))} />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button type="button" onClick={() => setShowPlanForm(false)} className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs">Cancelar</button>
+                <button type="submit" disabled={savingPlan} className="px-5 py-2.5 rounded-2xl bg-cyan-600 hover:bg-cyan-700 text-white font-extrabold text-xs shadow-md shadow-cyan-500/20 flex items-center gap-1.5 transition">
                   {savingPlan ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}Crear Plan
                 </button>
               </div>
