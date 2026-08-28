@@ -126,7 +126,7 @@ const navGroups: NavGroup[] = [
       { icon: Scale, label: "Básculas & Balanzas", path: "/escalas" },
       { icon: Radio, label: "Etiquetas Electrónicas (ESL)", path: "/esl" },
       { icon: Globe, label: "Delivery Apps", path: "/delivery-integrations" },
-      { icon: CreditCard, label: "POS Bancard & Dinelco (Tarjetas/QR)", path: "/integrations" },
+      { icon: CreditCard, label: "Integración Medios de Pago", path: "/integrations" },
     ]
   },
   {

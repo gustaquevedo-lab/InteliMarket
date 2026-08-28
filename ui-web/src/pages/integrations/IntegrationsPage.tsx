@@ -191,7 +191,7 @@ export default function IntegrationsPage() {
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <span className="text-[10px] font-extrabold tracking-widest text-blue-400 uppercase bg-blue-500/10 px-2.5 py-0.5 rounded-md border border-blue-500/20">
-                    PASARELAS DE PAGO · BANCARD & DINELCO
+                    INTEGRACIÓN MEDIOS DE PAGO
                   </span>
                   {kpis.connected ? (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -206,7 +206,7 @@ export default function IntegrationsPage() {
                   )}
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
-                  POS Bancard, Dinelco, QR Zimple & PIX
+                  Integración Medios de Pago
                 </h1>
                 <p className="text-xs text-slate-400 font-medium mt-0.5">
                   Transacciones en vivo por tarjeta, QR y cupones de POS capturados en las 10 cajas de Extra Supermercado
@@ -324,7 +324,7 @@ export default function IntegrationsPage() {
           { key: "cierres_lote", label: "Cierres de Lote & Conciliación", icon: FileSpreadsheet },
           { key: "qr_pix", label: "QR Pagopar & PIX", icon: QrCode },
           { key: "hardware", label: "Hardware de Caja (Impresoras/Gavetas)", icon: Printer },
-          { key: "config", label: "Configuración", icon: Settings },
+          { key: "config", label: "Configuración de Medios", icon: Settings },
         ].map(t => (
           <button
             key={t.key}
