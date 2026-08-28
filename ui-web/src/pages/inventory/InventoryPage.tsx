@@ -236,117 +236,151 @@ export default function InventoryPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-4">
-        <div>
-          <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
-            Control de Depósitos & Existencias
-          </h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Gestión física y valorizada del stock por depósito, salón de ventas, cámaras frigoríficas y kardex oficial.
-          </p>
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950/90 text-white p-7 border border-blue-500/20 shadow-2xl shadow-blue-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 border border-blue-400/30 text-white flex items-center justify-center shadow-lg shadow-blue-500/25">
+                  <Warehouse className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-blue-400 uppercase bg-blue-500/10 px-2.5 py-0.5 rounded-md border border-blue-500/20">
+                    LOGÍSTICA & ALMACENAMIENTO · MULTI-DEPÓSITO
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                    {warehouses.length || 3} Depósitos Conectados
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Control de Depósitos & Existencias
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Gestión física y valorizada del stock por depósito, salón de ventas, cámaras frigoríficas y kardex oficial
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-blue-300">
+                📦 {stock.length} registros de stock
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                💰 {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 485000000)} en existencias
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => { loadStockData(); loadStats() }}
+              disabled={loadingStock}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingStock ? "animate-spin text-blue-400" : ""}`} />
+              Recargar
+            </button>
+
+            <button
+              onClick={() => setShowWarehouseModal(true)}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 transition shadow-lg shadow-blue-500/25 flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo Depósito
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => { loadStockData(); loadStats() }}
-            className="btn-secondary text-xs px-3 py-2 flex items-center gap-1.5"
-            title="Refrescar inventario"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Actualizar</span>
-          </button>
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Depósitos Activos</span>
+              <Warehouse className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {warehouses.length || 3}
+            </p>
+            <p className="text-[11px] text-slate-400">Salón, cámaras y reserva</p>
+          </div>
 
-          <button
-            onClick={() => setShowWarehouseModal(true)}
-            className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 shadow-md"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Nuevo Depósito</span>
-          </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Valorización Costo</span>
+              <DollarSign className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 485000000)}
+            </p>
+            <p className="text-[11px] text-slate-400">Patrimonio en inventario</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quiebres / Stock 0</span>
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {stats?.sin_stock || stock.filter(s => (s.cantidad ?? 0) <= 0).length || 0}
+            </p>
+            <p className="text-[11px] text-slate-400">SKUs sin disponibilidad</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Stock Bajo Mínimo</span>
+              <ShieldAlert className="w-4 h-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-amber-400">
+              {stats?.stock_bajo || 12}
+            </p>
+            <p className="text-[11px] text-slate-400">Alerta de punto de pedido</p>
+          </div>
         </div>
       </div>
 
-      {/* ── KPIS PRINCIPALES ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Depósitos Activos</span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 flex items-center justify-center">
-              <Warehouse className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-gray-900 dark:text-white mt-1">
-            {warehouses.length || 3}
-          </p>
-          <span className="text-[11px] text-gray-500 mt-1 block">Filiales, salón y cámaras</span>
-        </div>
-
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Valorización al Costo</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
-            {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 485000000)}
-          </p>
-          <span className="text-[11px] text-gray-500 mt-1 block">Patrimonio en existencias</span>
-        </div>
-
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">SKUs en Quiebre</span>
-            <div className="w-8 h-8 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 flex items-center justify-center">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-red-600 dark:text-red-400 mt-1">
-            {stats?.sin_stock || stock.filter(s => (s.cantidad ?? 0) <= 0).length || 0}
-          </p>
-          <span className="text-[11px] text-gray-500 mt-1 block">Requiere reposición inmediata</span>
-        </div>
-
-        <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Stock Bajo Mínimo</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center">
-              <ShieldAlert className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate font-mono text-amber-600 dark:text-amber-400 mt-1">
-            {stats?.stock_bajo || 12}
-          </p>
-          <span className="text-[11px] text-gray-500 mt-1 block">Alerta de punto de pedido</span>
-        </div>
-      </div>
-
-      {/* ── PESTAÑAS PRINCIPALES CON EXPLICACIONES ──────────────────────────── */}
-      <div className="border-b border-gray-200 dark:border-slate-800">
-        <div className="flex gap-2 overflow-x-auto">
-          {[
-            { id: "stock", label: "Existencias por Depósito", icon: Package, desc: "Stock físico, reservado y disponible en tiempo real" },
-            { id: "vencimientos", label: "Control de Vencimientos & Lotes", icon: Clock, desc: "Auditoría FEFO de lotes recibidos, alertas y rescate" },
-            { id: "kardex", label: "Kardex & Movimientos", icon: Layers, desc: "Trazabilidad completa de entradas, salidas y transferencias" },
-            { id: "toma_fisica", label: "Toma Física con Escáner", icon: Barcode, desc: "Conteo ciego de góndolas y comparación contra sistema" },
-            { id: "warehouses", label: "Administración de Depósitos", icon: Building2, desc: "Configuración de filiales, salones y cámaras de frío" },
-          ].map((tab) => (
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { id: "stock", label: "Existencias por Depósito", icon: Package },
+          { id: "vencimientos", label: "Control de Vencimientos & Lotes", icon: Clock },
+          { id: "kardex", label: "Kardex & Movimientos", icon: Layers },
+          { id: "toma_fisica", label: "Toma Física con Escáner", icon: Barcode },
+          { id: "warehouses", label: "Administración de Depósitos", icon: Building2 },
+        ].map((tab) => {
+          const Icon = tab.icon
+          const active = activeTab === tab.id
+          return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
-                activeTab === tab.id
-                  ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 font-extrabold"
-                  : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
               }`}
             >
-              <tab.icon className="w-4 h-4" />
+              <Icon className="w-4 h-4" />
               <span>{tab.label}</span>
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {/* ── BANNER EXPLICATIVO DE LA PESTAÑA ACTIVA ─────────────────────────── */}

@@ -417,157 +417,186 @@ export default function ProductsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-[1600px] mx-auto animate-fade-in pb-24">
-      {/* ──────────────────────────────────────────────────────────────────────────
-          HEADER PRINCIPAL
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-indigo-600/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400">
-              <Tag className="w-6 h-6" />
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-500 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <Tag className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    MAESTRO DE ARTÍCULOS · GÓNDOLA & BALANZA
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    {stats?.total_productos?.toLocaleString() || products.length.toLocaleString()} Artículos Activos
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Catálogo de Productos & Precios
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Artículos, códigos EAN/PLU de balanza, variantes por empaque, kits y márgenes en góndola
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                Catálogo de Productos & Precios
-              </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Artículos, códigos EAN/PLU, variantes (talles/sabores), kits promocionales y márgenes comerciales en vivo.
-              </p>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
+                ⚖️ {stats?.total_pesables || 0} pesables / balanza
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                💰 {formatPYG(stats?.total_valorizado_costo || 0)} valorizado
+              </span>
             </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => {
+                fetchData()
+                loadStats()
+                if (mainTab === "variantes") loadVariants()
+              }}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-indigo-400" : ""}`} />
+              Recargar
+            </button>
+
+            <button
+              onClick={() => {
+                setEditingProduct(null)
+                setForm({
+                  sku: "",
+                  nombre: "",
+                  codigo_barra: "",
+                  categoria_id: categories[0]?.id || "",
+                  tipo: "producto",
+                  unidad_medida: "UN",
+                  iva_tasa: 10,
+                  stock_minimo: 5,
+                  descripcion: "",
+                  costo_promedio: 0,
+                  precio_venta: 0,
+                  plu_codigo: "",
+                  es_perecedero: false,
+                  vida_util_dias: 0,
+                  tipo_venta: "unidad",
+                })
+                setFormTab("general")
+                setShowForm(true)
+              }}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-500 hover:to-blue-400 transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo Producto
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            onClick={() => {
-              fetchData()
-              loadStats()
-              if (mainTab === "variantes") loadVariants()
-            }}
-            disabled={loading}
-            className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors shadow-sm"
-            title="Refrescar catálogo"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-indigo-600" : ""}`} />
-          </button>
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Catálogo Activo</span>
+              <Package className="w-4 h-4 text-indigo-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
+              {stats?.total_productos?.toLocaleString() || products.length.toLocaleString()}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              <strong className="text-indigo-400 font-mono font-bold">{stats?.total_pesables || 0}</strong> pesables / balanza
+            </p>
+          </div>
 
-          <button
-            onClick={() => {
-              setEditingProduct(null)
-              setForm({
-                sku: "",
-                nombre: "",
-                codigo_barra: "",
-                categoria_id: categories[0]?.id || "",
-                tipo: "producto",
-                unidad_medida: "UN",
-                iva_tasa: 10,
-                stock_minimo: 5,
-                descripcion: "",
-                costo_promedio: 0,
-                precio_venta: 0,
-                plu_codigo: "",
-                es_perecedero: false,
-                vida_util_dias: 0,
-                tipo_venta: "unidad",
-              })
-              setFormTab("general")
-              setShowForm(true)
-            }}
-            className="btn-primary text-xs flex items-center gap-2 px-4 py-2.5 shadow-md"
-          >
-            <Plus className="w-4 h-4" /> + Nuevo Producto
-          </button>
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Valor Inventario</span>
+              <DollarSign className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(stats?.total_valorizado_costo || 0)}
+            </p>
+            <p className="text-[11px] text-slate-400">Costo promedio ponderado</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quiebres de Stock</span>
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {stats?.total_quiebres?.toLocaleString() || 0}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              <strong className="text-amber-400 font-bold font-mono">{stats?.total_bajos || 0}</strong> en stock crítico
+            </p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Bruto</span>
+              <TrendingUp className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {stats?.margen_promedio_pct || 0}%
+            </p>
+            <p className="text-[11px] text-slate-400">Rentabilidad media góndola</p>
+          </div>
         </div>
       </div>
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          HERO KPIS (TIPOGRAFÍA UNIFICADA MONOSPACE EXTRABOLD)
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Total Catálogo */}
-        <div className="card p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Catálogo Activo</span>
-            <Package className="w-4 h-4 text-indigo-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-            {stats?.total_productos?.toLocaleString() || products.length.toLocaleString()}
-          </p>
-          <span className="text-xs text-slate-400 mt-1 block">
-            <strong className="text-indigo-600 dark:text-indigo-400 font-mono font-bold">
-              {stats?.total_pesables || 0}
-            </strong> productos pesables / balanza
-          </span>
-        </div>
-
-        {/* KPI 2: Valorización Total */}
-        <div className="card p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Valor Inventario (Costo)</span>
-            <DollarSign className="w-4 h-4 text-emerald-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-            {formatPYG(stats?.total_valorizado_costo || 0)}
-          </p>
-          <span className="text-xs text-slate-400 mt-1 block">
-            Costo promedio ponderado de existencias
-          </span>
-        </div>
-
-        {/* KPI 3: Quiebres de Stock */}
-        <div className="card p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Quiebres / Sin Stock</span>
-            <AlertTriangle className="w-4 h-4 text-red-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-red-600 dark:text-red-400 font-mono">
-            {stats?.total_quiebres?.toLocaleString() || 0}
-          </p>
-          <span className="text-xs text-slate-400 mt-1 block">
-            <strong className="text-amber-500 font-bold font-mono">{stats?.total_bajos || 0}</strong> en stock bajo
-          </span>
-        </div>
-
-        {/* KPI 4: Margen Bruto Promedio */}
-        <div className="card p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Margen Bruto Promedio</span>
-            <TrendingUp className="w-4 h-4 text-indigo-500" />
-          </div>
-          <p className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400 font-mono">
-            {stats?.margen_promedio_pct || 0}%
-          </p>
-          <span className="text-xs text-slate-400 mt-1 block">
-            Margen comercial s/ precio de venta
-          </span>
-        </div>
-      </div>
-
-      {/* ──────────────────────────────────────────────────────────────────────────
-          PESTAÑAS PRINCIPALES DEL MÓDULO
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="flex gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-px">
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
-          { key: "catalogo", label: `Catálogo General (${products.length})`, icon: Package },
-          { key: "variantes", label: `Variantes (Talles / Sabores / Packs)`, icon: Palette },
-          { key: "kits", label: `Kits & Combos Promocionales (${kitsSaved.length})`, icon: Gift },
+          { key: "catalogo", label: "Catálogo General", icon: Package, count: products.length },
+          { key: "variantes", label: "Variantes (Talles / Sabores / Packs)", icon: Palette, count: variantsList.length },
+          { key: "kits", label: "Kits & Combos Promocionales", icon: Gift, count: kitsSaved.length },
           { key: "guia", label: "Manual Operativo & Ayuda", icon: BookOpen },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setMainTab(tab.key as any)}
-            className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
-              mainTab === tab.key
-                ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
-                : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300"
-            }`}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
+        ].map((tab) => {
+          const Icon = tab.icon
+          const active = mainTab === tab.key
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setMainTab(tab.key as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{tab.label}</span>
+              {tab.count !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
