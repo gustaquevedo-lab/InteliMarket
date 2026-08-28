@@ -121,7 +121,9 @@ async def _authed_request(db: AsyncSession, company_id: str, method: str, path: 
     if clean_path.startswith("partners/"):
         clean_path = clean_path[len("partners/"):]
     async with httpx.AsyncClient(base_url=base_url, timeout=30) as client:
+        print(f"[PLUGPAY-HTTP] Calling {method} {base_url}{clean_path} with body: {json_body}")
         resp = await client.request(method, clean_path, json=json_body, headers=headers)
+        print(f"[PLUGPAY-HTTP] Response {resp.status_code}: {resp.text}")
     if resp.status_code >= 400:
         try:
             body = resp.json()
