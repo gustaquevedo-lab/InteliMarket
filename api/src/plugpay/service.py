@@ -23,8 +23,8 @@ from api.src.payment_integrations.models import PaymentIntegrationConfig
 from api.src.payment_integrations.schemas import PaymentIntegrationConfigUpsert
 
 BASE_URLS = {
-    "sandbox": "https://apisandbox.plugpayapi.com/v1",
-    "production": "https://api.plugpayapi.com/v1",
+    "sandbox": "https://apisandbox.plugpayapi.com/v1/partners/",
+    "production": "https://api.plugpayapi.com/v1/partners/",
 }
 
 
@@ -95,7 +95,7 @@ async def get_valid_token(db: AsyncSession, company_id: str) -> tuple[str, Payme
         #    limit de login (10 req/15min) en cada operacion.
         if cfg.get("cached_refresh_token"):
             try:
-                resp = await client.post("/partners/auth/refresh", json={"refresh_token": cfg["cached_refresh_token"]})
+                resp = await client.post("auth/refresh", json={"refresh_token": cfg["cached_refresh_token"]})
                 if resp.status_code == 200:
                     data = resp.json()
                     await _save_tokens(db, company_id, row, data["token"], data["refresh_token"])
@@ -104,7 +104,7 @@ async def get_valid_token(db: AsyncSession, company_id: str) -> tuple[str, Payme
                 pass  # cae a login de cero
 
         # 2. Login de cero con client_id/password.
-        resp = await client.post("/partners/auth/token", json={"client_id": cfg["client_id"], "password": cfg["password"]})
+        resp = await client.post("auth/token", json={"client_id": cfg["client_id"], "password": cfg["password"]})
         if resp.status_code != 200:
             raise PlugpayApiError(resp.status_code, f"No se pudo autenticar con PlugPay: {resp.text}", None)
         data = resp.json()
@@ -116,10 +116,12 @@ async def _authed_request(db: AsyncSession, company_id: str, method: str, path: 
     token, row = await get_valid_token(db, company_id)
     base_url = _base_url(row)
     headers = {"Authorization": f"Bearer {token}"}
-    # Asegurar que el path use el prefijo /partners si no lo tiene
-    full_path = path if path.startswith("/partners") else f"/partners{path}"
+    # Asegurar que el path no inicie con slash / ni contenga prefijo duplicado
+    clean_path = path.lstrip("/")
+    if clean_path.startswith("partners/"):
+        clean_path = clean_path[len("partners/"):]
     async with httpx.AsyncClient(base_url=base_url, timeout=30) as client:
-        resp = await client.request(method, full_path, json=json_body, headers=headers)
+        resp = await client.request(method, clean_path, json=json_body, headers=headers)
     if resp.status_code >= 400:
         try:
             body = resp.json()
