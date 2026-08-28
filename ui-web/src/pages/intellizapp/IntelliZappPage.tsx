@@ -168,37 +168,94 @@ export default function IntelliZappPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-2xl bg-emerald-600 text-white shadow-md">
-              <MessageCircle className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
-                  IntelliZapp — Hub de Comunicación & WhatsApp
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 uppercase flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Conectado a IntelliZapp API
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/90 text-white p-7 border border-emerald-500/20 shadow-2xl shadow-emerald-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 border border-emerald-400/30 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                  <MessageCircle className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
                 </span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Plataforma centralizada de mensajería para el supermercado: atención interactiva de clientes, folletos digitales masivos, tickets electrónicos y disparadores por eventos.
-              </p>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
+                    MARKETING & COMUNICACIÓN · WHATSAPP BUSINESS SUITE
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    IntelliZapp Live Hub
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  IntelliZapp — Hub de WhatsApp & Campañas
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Atención interactiva de clientes, folletos digitales masivos, tickets electrónicos y disparadores por eventos POS
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                🟢 API Online ({config.phone})
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-teal-300">
+                ⚡ {rules.filter(r => r.activo).length} Disparadores POS Activos
+              </span>
             </div>
           </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button 
+              onClick={handleSyncRealData} 
+              disabled={syncingData} 
+              className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-emerald-300 hover:text-white border border-emerald-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+            >
+              {syncingData ? <Loader2 className="w-4 h-4 animate-spin text-emerald-400" /> : <Download className="w-4 h-4 text-emerald-400" />}
+              <span>{syncingData ? "Sincronizando..." : "Sincronizar Datos"}</span>
+            </button>
+            <button 
+              onClick={() => setShowCampModal(true)} 
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-emerald-500/25"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nueva Campaña</span>
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={handleSyncRealData} disabled={syncingData} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/50">
-            {syncingData ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-            <span>{syncingData ? "Sincronizando..." : "Sincronizar Datos de IntelliZapp"}</span>
-          </button>
-          <button onClick={() => setShowCampModal(true)} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="w-3.5 h-3.5" /><span>Nueva Campaña Masiva</span>
-          </button>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          {[
+            { label: "Mensajes Enviados Hoy", val: "1.420", color: "text-emerald-400", icon: Send },
+            { label: "Tasa de Entrega", val: "99.2%", color: "text-teal-300", icon: CheckCircle2 },
+            { label: "Tasa de Lectura", val: "88.4%", color: "text-purple-300", icon: Eye },
+            { label: "Conversaciones Activas", val: `${conversations.length}`, color: "text-pink-300", icon: MessageCircle },
+            { label: "Reglas Automáticas", val: `${rules.filter(r => r.activo).length} de ${rules.length}`, color: "text-indigo-300", icon: Zap },
+            { label: "Estado IntelliZapp", val: "ONLINE", color: "text-emerald-400", icon: Radio },
+          ].map((kpi) => (
+            <div key={kpi.label} className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{kpi.label}</span>
+                <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+              </div>
+              <p className={`text-base font-black font-mono tracking-tight ${kpi.color}`}>{kpi.val}</p>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -210,42 +267,32 @@ export default function IntelliZappPage() {
         </div>
       )}
 
-      {/* KPIs EJECUTIVOS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
-          { label: "Mensajes Enviados Hoy", val: "1.420", color: "text-emerald-600", icon: Send },
-          { label: "Tasa de Entrega", val: "99.2%", color: "text-blue-600", icon: CheckCircle2 },
-          { label: "Tasa de Lectura", val: "88.4%", color: "text-purple-600", icon: Eye },
-          { label: "Conversaciones Activas", val: `${conversations.length}`, color: "text-pink-600", icon: MessageCircle },
-          { label: "Reglas Automáticas", val: `${rules.filter(r => r.activo).length} de ${rules.length}`, color: "text-indigo-600", icon: Zap },
-          { label: "Estado IntelliZapp", val: "ONLINE", color: "text-emerald-600 font-bold", icon: Radio },
-        ].map((kpi) => (
-          <div key={kpi.label} className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-bold text-gray-400 uppercase leading-tight">{kpi.label}</span>
-              <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
-            </div>
-            <p className={`text-base font-black font-mono ${kpi.color}`}>{kpi.val}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* TABS */}
-      <div className="border-b border-gray-200 dark:border-slate-800">
-        <div className="flex gap-1 overflow-x-auto">
-          {[
-            { id: "chat", label: `Bandeja Live Chat (${conversations.length})` },
-            { id: "campanas", label: `Campañas Masivas (${campaigns.length})` },
-            { id: "automatizaciones", label: `Disparadores por Evento (${rules.length})` },
-            { id: "plantillas", label: "Plantillas Verificadas" },
-            { id: "config", label: "Conexión & Sincronización" },
-          ].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id as Tab)}
-              className={`pb-3 px-4 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${tab === t.id ? "border-emerald-600 text-emerald-600 dark:text-emerald-400" : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"}`}>
-              {t.label}
+          { id: "chat", label: `Bandeja Live Chat (${conversations.length})`, icon: MessageCircle },
+          { id: "campanas", label: `Campañas Masivas (${campaigns.length})`, icon: Send },
+          { id: "automatizaciones", label: `Disparadores por Evento (${rules.length})`, icon: Zap },
+          { id: "plantillas", label: "Plantillas Verificadas", icon: FileText },
+          { id: "config", label: "Conexión & Sincronización", icon: Settings },
+        ].map((t) => {
+          const Icon = t.icon
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as Tab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {/* TAB LIVE CHAT */}

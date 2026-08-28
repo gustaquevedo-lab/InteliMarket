@@ -187,60 +187,89 @@ export default function Customer360Page() {
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      {/* HEADER PRINCIPAL */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-cyan-600 via-blue-600 to-indigo-600 text-white shadow-lg shadow-cyan-500/20">
-              <Users className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
-                  Customer 360° & Fidelización Retail
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-cyan-100 text-cyan-800 dark:bg-cyan-950/70 dark:text-cyan-300 uppercase border border-cyan-300 dark:border-cyan-800">
-                  {customers.length.toLocaleString("es-PY")} Clientes Reales
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <Users className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-slate-950"></span>
                 </span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Expediente integral en vivo: hábitos de compra, canasta habitual, puntos ExtraClub y scoring RFM.
-              </p>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    MARKETING & CLIENTES · EXPEDIENTE 360° & FIDELIZACIÓN
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    {customers.length.toLocaleString("es-PY")} Clientes Reales
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Customer 360° & Fidelización Retail
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Expediente integral en vivo: hábitos de compra, canasta habitual, puntos ExtraClub y scoring RFM
+                </p>
+              </div>
             </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button 
-            onClick={loadCustomers} 
-            disabled={loadingList}
-            className="btn-secondary text-xs px-3.5 py-2 flex items-center gap-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition"
-          >
-            <RefreshCcw className={`w-3.5 h-3.5 ${loadingList ? "animate-spin" : ""}`} />
-            <span>Actualizar Base</span>
-          </button>
-        </div>
-      </div>
 
-      {/* KPIS GLOBALES EN TIEMPO REAL */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          { label: "Base Clientes Retail", val: "4.409 clientes", sub: "Filtrados sin proveedores", color: "text-cyan-600", bg: "bg-cyan-50 dark:bg-cyan-950/30", icon: Users },
-          { label: "Champions VIP Platino", val: "330 socios", sub: "Gasto > Gs. 3M ó >10 tickets", color: "text-purple-600", bg: "bg-purple-50 dark:bg-purple-950/30", icon: Award },
-          { label: "Leales Recurrentes", val: "334 socios", sub: "Frecuencia regular en tienda", color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-950/30", icon: UserCheck },
-          { label: "Volumen Champions", val: "Gs. 9.328 M", sub: "73% de la venta total", color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-950/30", icon: DollarSign },
-          { label: "Puntos Emitidos", val: "6.6M pts", sub: "Programa ExtraClub activo", color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-950/30", icon: Sparkles },
-          { label: "Tasa Retención VIP", val: "94.2%", sub: "Activos en los últimos 30d", color: "text-indigo-600", bg: "bg-indigo-50 dark:bg-indigo-950/30", icon: HeartHandshake },
-        ].map((kpi) => (
-          <div key={kpi.label} className={`card p-3.5 ${kpi.bg} border border-gray-200/80 dark:border-slate-800/80 rounded-2xl shadow-xs space-y-1`}>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{kpi.label}</span>
-              <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-purple-300">
+                👑 330 Socios Champions VIP
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
+                ⭐ 6.6M Puntos ExtraClub
+              </span>
             </div>
-            <p className={`text-base font-black font-mono ${kpi.color}`}>{kpi.val}</p>
-            <p className="text-[9px] text-gray-400 font-medium truncate">{kpi.sub}</p>
           </div>
-        ))}
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button 
+              onClick={loadCustomers} 
+              disabled={loadingList}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-indigo-500/25"
+            >
+              <RefreshCcw className={`w-4 h-4 ${loadingList ? "animate-spin" : ""}`} />
+              <span>Actualizar Base</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          {[
+            { label: "Base Clientes Retail", val: "4.409 clientes", sub: "Filtrados sin proveedores", color: "text-cyan-300", icon: Users },
+            { label: "Champions VIP Platino", val: "330 socios", sub: "Gasto > Gs. 3M ó >10 tickets", color: "text-purple-300", icon: Award },
+            { label: "Leales Recurrentes", val: "334 socios", sub: "Frecuencia regular en tienda", color: "text-blue-300", icon: UserCheck },
+            { label: "Volumen Champions", val: "Gs. 9.328 M", sub: "73% de la venta total", color: "text-emerald-400", icon: DollarSign },
+            { label: "Puntos Emitidos", val: "6.6M pts", sub: "Programa ExtraClub activo", color: "text-amber-300", icon: Sparkles },
+            { label: "Tasa Retención VIP", val: "94.2%", sub: "Activos en los últimos 30d", color: "text-indigo-300", icon: HeartHandshake },
+          ].map((kpi) => (
+            <div key={kpi.label} className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{kpi.label}</span>
+                <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+              </div>
+              <p className={`text-base font-black font-mono tracking-tight ${kpi.color}`}>{kpi.val}</p>
+              <p className="text-[9px] text-slate-400 font-medium truncate">{kpi.sub}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* PANEL PRINCIPAL: LISTA DE CLIENTES + EXPEDIENTE 360 DINÁMICO */}

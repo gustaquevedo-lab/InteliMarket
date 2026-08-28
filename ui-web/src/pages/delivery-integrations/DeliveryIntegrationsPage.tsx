@@ -28,134 +28,143 @@ export default function DeliveryIntegrationsPage() {
   ])
 
   return (
-    <div className="space-y-6">
-      {/* ── HEADER ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-600 text-white shadow-lg shadow-amber-500/20">
-              <Truck className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight">
-                  Delivery Apps & Canales Online
-                </h1>
-                <span className="px-2.5 py-0.5 text-xs font-black rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  3 Canales Conectados
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950/90 text-white p-7 border border-amber-500/20 shadow-2xl shadow-amber-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-600 border border-amber-400/30 text-white flex items-center justify-center shadow-lg shadow-amber-500/25">
+                  <Truck className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500 border-2 border-slate-950"></span>
                 </span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Integración de pedidos, reserva inmediata de stock en POS y ruteo de despachos
-              </p>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20">
+                    ECOMMERCE & DELIVERY · CANALES Y RUTEO EN LÍNEA
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    3 Canales Conectados
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Delivery Apps & Canales Online
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Integración de pedidos en vivo, reserva inmediata de stock en POS y ruteo de despachos
+                </p>
+              </div>
             </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
+                🛵 PedidosYa + Rappi + InteliEntregas
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                ⚡ Stock & Catálogo Sincronizado
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => toast.success("¡Catálogo Sincronizado!", "Se actualizaron precios y stock en PedidosYa y Rappi")}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-amber-500/25"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Sincronizar Catálogo & Precios</span>
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => toast.success("¡Catálogo Sincronizado!", "Se actualizaron precios y stock en PedidosYa y Rappi")}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-black text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 rounded-xl shadow-md shadow-amber-500/25 transition"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Sincronizar Catálogo & Precios
-          </button>
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pedidos Online Hoy</span>
+              <ShoppingBag className="w-4 h-4 text-orange-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-orange-400">77 pedidos</p>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1 pt-1 border-t border-slate-800/60 font-mono">
+              <span>PedidosYa + Rappi</span>
+              <span className="text-orange-400 font-bold">+18% vs ayer</span>
+            </div>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Facturación Online</span>
+              <DollarSign className="w-4 h-4 text-emerald-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-emerald-400">{formatPYG(7420000)}</p>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1 pt-1 border-t border-slate-800/60 font-mono">
+              <span>Ticket Medio: {formatPYG(96360)}</span>
+              <span className="text-emerald-400 font-bold">Activo</span>
+            </div>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tiempo de Picking</span>
+              <Clock className="w-4 h-4 text-blue-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-blue-400">18.4 min</p>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1 pt-1 border-t border-slate-800/60 font-mono">
+              <span>Objetivo: &lt;20 min</span>
+              <span className="text-blue-400 font-bold">Eficiente</span>
+            </div>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Precisión Catálogo</span>
+              <CheckCircle2 className="w-4 h-4 text-purple-400" />
+            </div>
+            <p className="text-xl font-black font-mono tracking-tight text-purple-400">99.5%</p>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1 pt-1 border-t border-slate-800/60 font-mono">
+              <span>14 quiebres evitados</span>
+              <span className="text-purple-400 font-bold">En Vivo</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ── KPI CARDS ESTILIZADAS CON ESTÉTICA OFICIAL ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Pedidos Online Hoy */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Pedidos Online Hoy</span>
-            <div className="p-2 rounded-xl bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400">
-              <ShoppingBag className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-orange-600 dark:text-orange-400 font-mono tracking-tight">
-            77 pedidos
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Canales: <strong className="text-gray-700 dark:text-gray-200 font-mono">PedidosYa + Rappi</strong></span>
-            <span className="text-orange-600 font-bold font-mono">+18% vs ayer</span>
-          </div>
-        </div>
-
-        {/* KPI 2: Facturación Online */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Facturación Online</span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
-            {formatPYG(7420000)}
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Ticket Medio: <strong className="text-gray-700 dark:text-gray-200 font-mono">{formatPYG(96360)}</strong></span>
-            <span className="text-emerald-600 font-bold font-mono flex items-center gap-0.5">
-              <TrendingUp className="w-3.5 h-3.5" /> Activo
-            </span>
-          </div>
-        </div>
-
-        {/* KPI 3: Tiempo Medio de Despacho */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Tiempo de Picking</span>
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-              <Clock className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-blue-600 dark:text-blue-400 font-mono tracking-tight">
-            18.4 min
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Objetivo: <strong className="text-gray-700 dark:text-gray-200 font-mono">&lt;20 min</strong></span>
-            <span className="text-blue-600 font-bold font-mono">Eficiente</span>
-          </div>
-        </div>
-
-        {/* KPI 4: Sincronización de Stock */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Precisión Catálogo</span>
-            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-purple-600 dark:text-purple-400 font-mono tracking-tight">
-            99.5%
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Quiebres evitados: <strong className="text-gray-700 dark:text-gray-200 font-mono">14 hoy</strong></span>
-            <span className="text-purple-600 font-bold font-mono">Stock en Vivo</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ── TABS BAR ── */}
-      <div className="flex gap-1.5 bg-gray-100/50 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 rounded-2xl p-1.5 w-full overflow-x-auto shadow-inner">
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { key: "dashboard", label: "Canales Conectados", icon: Smartphone },
           { key: "orders", label: "Pedidos Entrantes en Vivo", icon: ShoppingBag },
-        ].map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key as Tab)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 ${
-              tab === t.key
-                ? "bg-white dark:bg-slate-700 shadow-md text-amber-700 dark:text-amber-400 ring-1 ring-amber-500/20"
-                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/50 dark:hover:bg-slate-700/50"
-            }`}
-          >
-            <t.icon className="w-4 h-4" />
-            {t.label}
-          </button>
-        ))}
+        ].map(t => {
+          const Icon = t.icon
+          const active = tab === t.key
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as Tab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+            </button>
+          )
+        })}
       </div>
 
       {/* ── TAB: CANALES ── */}
