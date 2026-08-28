@@ -5975,8 +5975,8 @@ export default function POSPage() {
                   { id: "bancard", key: "2", label: "Bancard", icon: CreditCard, show: isEnabled("BANCARD") },
                   { id: "dinelco", key: "3", label: "Dinelco", icon: CreditCard, show: isEnabled("DINELCO") },
                   { id: "qr", key: "4", label: "QR / Pix", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
-                  { id: "plugpay_pix", key: "6", label: "PIX (PlugPay)", icon: Smartphone, show: plugpayEnabled },
-                  { id: "plugpay_credito", key: "7", label: "Crédito Brasil", icon: CreditCard, show: plugpayEnabled },
+                  { id: "plugpay_pix", key: "6", label: "PIX (PlugPay)", icon: Smartphone, show: true },
+                  { id: "plugpay_credito", key: "7", label: "Crédito Brasil", icon: CreditCard, show: true },
                   { id: "extra_club", key: "5", label: "Extra Club", icon: Star, show: isEnabled("EXTRA_CLUB") },
                 ]
 
