@@ -494,6 +494,7 @@ export interface IntegrationDelivery { id: string; config_id?: string; evento?: 
 export interface PriceList { id: string; company_id?: string; nombre?: string; tipo?: string; customer_id?: string | null; grupo?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
 export interface PriceListItem { id: string; price_list_id?: string; product_id?: string; variant_id?: string | null; precio?: number; moneda?: string; notas?: string | null; activo?: boolean; created_at?: string; updated_at?: string }
 export interface PosTerminalTransaction { id: string; company_id?: string; sale_id?: string | null; customer_id?: string | null; tipo_operacion: string; terminal_ip?: string | null; punto_emision?: string | null; factura_nro_provisional?: string | null; bin?: string | null; nsu?: string | null; codigo_autorizacion?: string | null; codigo_comercio?: string | null; issuer_id?: string | null; nombre_tarjeta?: string | null; pan?: string | null; mensaje_display?: string | null; nombre_cliente?: string | null; monto?: number | null; monto_vuelto?: number | null; monto_comision?: number | null; monto_extraccion?: number | null; saldo?: number | null; moneda_alt?: string | null; monto_alt?: number | null; exitosa: boolean; verificado_automaticamente: boolean; error_message?: string | null; raw_response?: any; created_at?: string }
+export interface PaymentIntegrationConfig { id: string; company_id: string; provider: string; environment: string; enabled: boolean; config: Record<string, any>; created_at: string; updated_at: string }
 export interface Kit { id: string; company_id?: string; nombre?: string; descripcion?: string; sku?: string; precio?: number; costo?: number; margen?: number; items?: KitItem[]; activo?: boolean; created_at?: string; updated_at?: string }
 export interface KitItem { id: string; kit_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; created_at?: string }
 export interface Backup { id: string; company_id?: string; tenant_id?: string; tenant_slug?: string | null; schema_name?: string; nombre?: string; filename?: string; file_size?: number; status?: string; backup_type?: string; expires_at?: string; tipo?: string; ruta?: string; tamano_bytes?: number; estado?: string; fecha_inicio?: string; fecha_fin?: string; duracion_seg?: number; error_mensaje?: string; created_at?: string }
@@ -1293,6 +1294,24 @@ export const api = {
   posTerminalTransactions: {
     create: (data: Partial<PosTerminalTransaction>) => client.post<PosTerminalTransaction>("/v1/pos-terminal-transactions", data),
     update: (id: string, data: Partial<PosTerminalTransaction>) => client.patch<PosTerminalTransaction>(`/v1/pos-terminal-transactions/${id}`, data),
+  },
+  paymentIntegrations: {
+    get: (provider: "bancard" | "plugpay") => client.get<PaymentIntegrationConfig | null>(`/v1/payment-integrations/${provider}`),
+    update: (provider: "bancard" | "plugpay", data: { environment?: string; enabled?: boolean; config?: Record<string, any> }) =>
+      client.put<PaymentIntegrationConfig>(`/v1/payment-integrations/${provider}`, data),
+  },
+  plugpay: {
+    compliance: (cpf: string) => client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/compliance/${cpf}`),
+    createPix: (data: { monto: number; moneda?: string; customer_cpf_cnpj: string; sale_id?: string; customer_id?: string }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/pix/create", data),
+    quotePix: (data: { monto: number; moneda?: string }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/pix/quote", data),
+    calcularParcelado: (data: { monto: number; moneda?: string; cuotas: number }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/credito-parcelado/calcular", data),
+    startParcelado: (data: { monto: number; moneda?: string; cuotas: number; customer_cpf: string; customer_phone: string; sale_id?: string; customer_id?: string }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/credito-parcelado/start", data),
+    parceladoStatus: (id: string) => client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/${id}`),
+    linkSale: (txnId: string, saleId: string) => client.patch<{ message: string }>(`/v1/plugpay/transactions/${txnId}/link-sale/${saleId}`, {}),
   },
   integrations: {
     configs: () => client.get<IntegrationConfig[]>("/api/integrations/configs"),

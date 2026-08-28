@@ -195,6 +195,21 @@ async function createWindow() {
     startScaleAutoDiscovery()
   })
 
+  // ── VOLCADO A ARCHIVO DE LA CONSOLA DEL RENDERER ──────────────────────────
+  // En modo kiosco (sin bordes, pantalla completa real) el DevTools de
+  // Electron abre pero queda invisible detras de la ventana -- no sirve para
+  // diagnosticar nada en la caja fisica. Esto vuelca cada console.log/error
+  // del renderer a un archivo de texto que se puede leer remotamente sin
+  // depender de ninguna ventana visible.
+  try {
+    const consoleLogPath = path.join(app.getPath('userData'), 'pos-console.log')
+    mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      const ts = new Date().toISOString()
+      const levelName = ['LOG', 'WARN', 'ERROR', 'DEBUG'][level] || level
+      fs.appendFileSync(consoleLogPath, `[${ts}] [${levelName}] ${message}\n`)
+    })
+  } catch (e) {}
+
   // Si el proceso de renderizado se cae (falta de memoria, crash de GPU,
   // etc) Electron por defecto deja la ventana en blanco sin avisar a nadie
   // -- para un POS que hace ventas eso es inaceptable, hay que recargar

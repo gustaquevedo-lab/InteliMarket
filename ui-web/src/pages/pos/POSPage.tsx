@@ -779,7 +779,9 @@ export default function POSPage() {
     const path1 = posCardType === "debito" ? "/pos/venta/debito" : "/pos/venta/credito"
     const body1: any = { facturaNro }
     if (posCardType === "credito") { body1.cuotas = 0; body1.plan = 0 }
+    console.log(`[BANCARD-TRACE] paso1 -> ip=${ip} path=${path1} body=${JSON.stringify(body1)}`)
     const res1 = await electronAPI.bancardCall(ip, path1, body1, 90000)
+    console.log(`[BANCARD-TRACE] paso1 <- ${JSON.stringify(res1)}`)
 
     if (!res1.ok) {
       if (res1.status === 400 || res1.status === 500) {
@@ -800,7 +802,10 @@ export default function POSPage() {
 
     const { bin, nsu } = res1.body || {}
     setBancardTxnState("confirmando")
-    const res2 = await electronAPI.bancardCall(ip, "/pos/descuento", { bin, nsu, monto: montoBancard }, 30000)
+    const body2 = { bin, nsu, monto: montoBancard }
+    console.log(`[BANCARD-TRACE] paso2 -> ip=${ip} path=/pos/descuento body=${JSON.stringify(body2)}`)
+    const res2 = await electronAPI.bancardCall(ip, "/pos/descuento", body2, 30000)
+    console.log(`[BANCARD-TRACE] paso2 <- ${JSON.stringify(res2)}`)
 
     if (!res2.ok) {
       if (res2.status === 400 || res2.status === 500) {
