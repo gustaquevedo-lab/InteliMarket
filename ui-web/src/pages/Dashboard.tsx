@@ -57,7 +57,7 @@ export default function Dashboard() {
   const toast = useToast()
   const navigate = useNavigate()
 
-  const [timeRange, setTimeRange] = useState<TimeRange>("30d")
+  const [timeRange, setTimeRange] = useState<TimeRange>("mes")
   const [customFrom, setCustomFrom] = useState<string>("")
   const [customTo, setCustomTo] = useState<string>("")
   const [showCustomPicker, setShowCustomPicker] = useState(false)

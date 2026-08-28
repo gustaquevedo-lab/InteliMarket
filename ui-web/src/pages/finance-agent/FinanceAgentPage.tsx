@@ -5,7 +5,7 @@ import {
   Calendar, Layers, Clock, Zap, MessageSquare, DollarSign,
   PieChart, BarChart3, ChevronRight, ThumbsUp, Activity,
   Scale, ShieldAlert, Sparkles, Filter, Check, X, FileText,
-  UserCheck, AlertCircle, ShoppingBag, Eye
+  UserCheck, AlertCircle, ShoppingBag, Eye, Wallet
 } from "lucide-react"
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { api } from "../../api"
@@ -13,7 +13,7 @@ import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
 import { formatPYG, formatDate } from "../../utils/format"
 
-type CFOActiveTab = "torre" | "inter_agente" | "flujo_caja" | "chat" | "acciones"
+type CFOActiveTab = "torre" | "inter_agente" | "flujo_caja" | "chat"
 
 export default function FinanceAgentPage() {
   const [tab, setTab] = useState<CFOActiveTab>("torre")
@@ -55,7 +55,6 @@ export default function FinanceAgentPage() {
       setSyncData(syncRes)
       setCashFlowData(cashRes)
 
-      // Actualizar mensaje de bienvenida del CFO con datos reales de la BD
       if (towerRes) {
         setMessages([
           {
@@ -98,247 +97,269 @@ export default function FinanceAgentPage() {
     setChatLoading(true)
 
     try {
-      const history = newMessages.map(m => ({ role: m.role, content: m.content }))
       const res = await api.financeAgent.chat({
         company_id: companyId,
         message: textToSend,
-        conversation_history: history
+        context_tab: tab,
       })
 
-      setMessages(prev => [
-        ...prev,
-        {
-          role: "assistant",
-          content: res.response,
-          suggestions: res.suggestions
-        }
-      ])
-    } catch (err) {
-      toast.error("Error al comunicarse con el Gerente Financiero IA")
+      const botReply = {
+        role: "assistant" as const,
+        content: res.reply || "No se pudo obtener una respuesta del Gerente Financiero IA.",
+        suggestions: res.suggested_prompts || []
+      }
+      setMessages([...newMessages, botReply])
+    } catch (err: any) {
+      toast.error("Error al enviar mensaje al CFO")
+      console.error(err)
     } finally {
       setChatLoading(false)
     }
   }
 
-  return (
-    <div className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto min-h-screen">
-      
-      {/* ════════════ HEADER ESTRATÉGICO DEL CFO IA ════════════ */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 p-6 text-white border border-blue-500/20 shadow-2xl">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 right-32 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+  if (loading && !towerData) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[70vh] space-y-4">
+        <div className="relative">
+          <div className="w-16 h-16 rounded-3xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center animate-pulse shadow-xl shadow-emerald-500/10">
+            <Landmark className="w-8 h-8 text-emerald-500 animate-spin" />
+          </div>
+          <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full animate-ping" />
+        </div>
+        <div className="text-center">
+          <h3 className="text-base font-bold text-slate-900 dark:text-white">Conectando con la Torre de Tesorería & CFO IA</h3>
+          <p className="text-xs text-slate-500 mt-1">Conciliando bancos, bóveda, cuentas por pagar y flujo proyectado...</p>
+        </div>
+      </div>
+    )
+  }
 
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
+  return (
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/90 text-white p-7 border border-emerald-500/20 shadow-2xl shadow-emerald-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-blue-500/20 border border-blue-400/30 text-blue-400 backdrop-blur-md shadow-inner">
-                <Bot className="w-7 h-7 animate-pulse text-blue-300" />
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 border border-emerald-400/30 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                  <Landmark className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
+                </span>
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate tracking-tight text-white flex items-center gap-2">
-                    Gerente Financiero IA
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold tracking-wide flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      CFO ACTIVO
-                    </span>
-                  </h1>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
+                    INTELIGENCIA ARTIFICIAL · TORRE DE CONTROL
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Cobertura: {towerData?.dias_cobertura_operativa || 138} Días
+                  </span>
                 </div>
-                <p className="text-xs text-blue-200/80 font-medium">
-                  Torre de Control de Tesorería · Enlace Bidireccional con Gerente de Ventas IA · Flujo de Caja Proyectado
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Gerente Financiero IA (CFO Virtual)
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Monitoreo de liquidez en tiempo real, conciliación bancaria y blindaje de flujo de caja para Extra Supermercado
                 </p>
               </div>
             </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                ⚡ Motor: Gemini 2.5 Flash Pipeline
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-teal-300">
+                🏛️ {towerData?.desglose_bancos?.length || 0} Cuentas Bancarias Conciliadas
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 backdrop-blur-md flex items-center gap-3">
-              <Activity className="w-4 h-4 text-emerald-400" />
-              <div className="text-left">
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Enlace Inter-Agente</p>
-                <p className="text-xs font-bold text-emerald-300">100% Sincronizado</p>
-              </div>
-            </div>
-
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
             <button
               onClick={loadAllFinancialData}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              Auditar Tesorería
+              Recalcular Liquidez
+            </button>
+            <button
+              onClick={() => setTab("chat")}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-emerald-400 to-teal-300 hover:from-emerald-300 hover:to-teal-200 transition shadow-lg shadow-emerald-500/25 flex items-center gap-2"
+            >
+              <MessageSquare className="w-4 h-4" />
+              Copiloto Financiero IA
             </button>
           </div>
         </div>
 
-        {/* ── Quick KPI Strip ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-4 border-t border-white/10">
-          <div className="bg-white/5 rounded-xl p-3 border border-white/5">
-            <span className="text-[11px] text-blue-200/70 font-semibold flex items-center gap-1">
-              <Banknote className="w-3.5 h-3.5 text-emerald-400" /> Posición Neta Liquidez
-            </span>
-            <p className="text-base sm:text-lg font-black text-white mt-0.5 tabular-nums">
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Liquidez Total</span>
+              <span className="text-[10px] font-bold text-emerald-400">Disponible</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
               {towerData ? formatPYG(towerData.liquidez_total_gs) : "₲ 441.800.000"}
             </p>
-            <span className="text-[10px] text-emerald-400 font-bold">Bancos + Bóveda + Cajas</span>
+            <p className="text-[11px] text-slate-400">Bancos + Bóveda + Cajas Salón</p>
           </div>
 
-          <div className="bg-white/5 rounded-xl p-3 border border-white/5">
-            <span className="text-[11px] text-blue-200/70 font-semibold flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5 text-blue-400" /> Cash Runway (Cobertura)
-            </span>
-            <p className="text-base sm:text-lg font-black text-white mt-0.5 tabular-nums">
-              {towerData ? `${towerData.cash_runway_dias} Días` : "138.1 Días"}
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cuentas por Pagar (AP)</span>
+              <span className="text-[10px] font-bold text-rose-400">{towerData?.ap_facturas_pendientes_count || 0} facturas</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">
+              {towerData ? formatPYG(towerData.ap_total_mes_gs) : "₲ 268.000.000"}
             </p>
-            <span className="text-[10px] text-blue-300 font-bold">Operación sin ingresos</span>
+            <p className="text-[11px] text-slate-400">Próximos 7d: {towerData ? formatPYG(towerData.ap_proximos_7d_gs) : "₲ 94.5M"}</p>
           </div>
 
-          <div className="bg-white/5 rounded-xl p-3 border border-white/5">
-            <span className="text-[11px] text-blue-200/70 font-semibold flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" /> Vencimientos Prov. 7d
-            </span>
-            <p className="text-base sm:text-lg font-black text-white mt-0.5 tabular-nums">
-              {towerData ? formatPYG(towerData.ap_proximos_7d_gs) : "₲ 94.500.000"}
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cuentas por Cobrar (AR)</span>
+              <span className="text-[10px] font-bold text-blue-400 font-mono">Clientes</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-blue-300">
+              {towerData ? formatPYG(towerData.ar_total_gs) : "₲ 142.000.000"}
             </p>
-            <span className="text-[10px] text-amber-400 font-bold">Cobierto 4.67x</span>
+            <p className="text-[11px] text-blue-400 font-mono">Vigente: {towerData ? formatPYG(towerData.ar_vigente_gs) : "₲ 142M"}</p>
           </div>
 
-          <div className="bg-white/5 rounded-xl p-3 border border-white/5">
-            <span className="text-[11px] text-blue-200/70 font-semibold flex items-center gap-1">
-              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> Morosidad Clientes
-            </span>
-            <p className="text-base sm:text-lg font-black text-white mt-0.5 tabular-nums">
-              {towerData ? formatPYG(towerData.ar_moroso_gs) : "₲ 38.400.000"}
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ratio de Solvencia</span>
+              <span className="text-[10px] font-mono text-teal-400">7 Días</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-teal-300">
+              {towerData ? `${towerData.ratio_solvencia_7d}x` : "4.67x"}
             </p>
-            <span className="text-[10px] text-rose-400 font-bold">2 clientes en mora</span>
+            <p className="text-[11px] text-slate-400">Solvencia líquida sobre pasivos inmediatos</p>
           </div>
         </div>
       </div>
 
-      {/* ════════════ PESTAÑAS DE NAVEGACIÓN ESTRATÉGICA ════════════ */}
-      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-slate-800 pb-2 overflow-x-auto">
-        <button
-          onClick={() => setTab("torre")}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all whitespace-nowrap ${
-            tab === "torre"
-              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
-          }`}
-        >
-          <Landmark className="w-4 h-4" />
-          Torre de Tesorería
-        </button>
-
-        <button
-          onClick={() => setTab("inter_agente")}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all whitespace-nowrap ${
-            tab === "inter_agente"
-              ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
-              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
-          }`}
-        >
-          <Zap className="w-4 h-4 text-amber-300" />
-          Enlace Inter-Agente (CFO ↔ Ventas)
-          <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-black text-[10px] font-black">3</span>
-        </button>
-
-        <button
-          onClick={() => setTab("flujo_caja")}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all whitespace-nowrap ${
-            tab === "flujo_caja"
-              ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
-              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          Simulador Flujo de Caja (30d)
-        </button>
-
-        <button
-          onClick={() => setTab("chat")}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all whitespace-nowrap ${
-            tab === "chat"
-              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
-          }`}
-        >
-          <MessageSquare className="w-4 h-4" />
-          Chat Consultivo con el CFO
-        </button>
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { key: "torre", label: "Torre de Tesorería & Liquidez", icon: Landmark },
+          { key: "inter_agente", label: "Enlace Inter-Agente (CFO ↔ Ventas)", icon: Zap, badge: syncData?.directivas_a_ventas?.length },
+          { key: "flujo_caja", label: "Simulador Flujo de Caja (30d)", icon: BarChart3 },
+          { key: "chat", label: "Copiloto Financiero IA", icon: MessageSquare },
+        ].map(t => {
+          const Icon = t.icon
+          const active = tab === t.key
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as CFOActiveTab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              {t.badge !== undefined && t.badge > 0 && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.badge}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
-      {/* ════════════ TAB 1: TORRE DE TESORERÍA ════════════ */}
+      {/* ══════════════════════ TAB 1: TORRE DE TESORERÍA ══════════════════════ */}
       {tab === "torre" && (
         <div className="space-y-6">
-          {/* Desglose de Liquidez */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             {/* Cuentas Bancarias */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 relative overflow-hidden group">
+              <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-500 absolute top-0 left-0" />
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                  <div className="p-2.5 rounded-2xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
                     <Landmark className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">Cuentas Bancarias</h3>
-                    <p className="text-xs text-gray-500">Saldos disponibles conciliados</p>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">Cuentas Bancarias</h3>
+                    <p className="text-xs text-slate-500">Saldos disponibles conciliados</p>
                   </div>
                 </div>
-                <span className="text-sm font-black text-blue-600 dark:text-blue-400 tabular-nums">
+                <span className="text-sm font-black text-blue-600 dark:text-blue-400 tabular-nums font-mono">
                   {towerData ? formatPYG(towerData.bancos_total_gs) : "₲ 348.500.000"}
                 </span>
               </div>
 
               <div className="space-y-2.5 pt-2">
                 {towerData?.desglose_bancos ? towerData.desglose_bancos.map((b: any, idx: number) => (
-                  <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-800/60 border border-gray-100 dark:border-slate-800">
+                  <div key={idx} className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
                     <div>
-                      <p className="text-xs font-bold text-gray-900 dark:text-white">{b.banco}</p>
-                      <p className="text-[11px] text-gray-400 font-mono">{b.numero_cuenta}</p>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white">{b.banco}</p>
+                      <p className="text-[11px] text-slate-400 font-mono">{b.numero_cuenta}</p>
                     </div>
-                    <span className="text-xs font-black text-gray-900 dark:text-white tabular-nums">
+                    <span className="text-xs font-black text-slate-900 dark:text-white tabular-nums font-mono">
                       {formatPYG(b.saldo_gs)}
                     </span>
                   </div>
                 )) : (
-                  <div className="text-xs text-gray-400">Cargando cuentas...</div>
+                  <div className="text-xs text-slate-400">Cargando cuentas...</div>
                 )}
               </div>
             </div>
 
             {/* Bóveda Central & Cajas POS */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 relative overflow-hidden group">
+              <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-500 absolute top-0 left-0" />
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+                  <div className="p-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
                     <Banknote className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">Efectivo Físico en Custodia</h3>
-                    <p className="text-xs text-gray-500">Bóveda central y cajas abiertas</p>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">Efectivo en Custodia</h3>
+                    <p className="text-xs text-slate-500">Bóveda central y cajas abiertas</p>
                   </div>
                 </div>
-                <span className="text-sm font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+                <span className="text-sm font-black text-emerald-600 dark:text-emerald-400 tabular-nums font-mono">
                   {towerData ? formatPYG(towerData.boveda_central_gs + towerData.cajas_pos_gs) : "₲ 93.300.000"}
                 </span>
               </div>
 
               <div className="space-y-3 pt-2">
-                <div className="p-3.5 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40">
+                <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200/80 dark:border-emerald-800/40">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-900 dark:text-emerald-300">Bóveda Central de Tesorería</span>
-                    <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 tabular-nums">
+                    <span className="text-xs font-bold text-emerald-950 dark:text-emerald-300">Bóveda Central de Tesorería</span>
+                    <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 tabular-nums font-mono">
                       {towerData ? formatPYG(towerData.boveda_central_gs) : "₲ 68.500.000"}
                     </span>
                   </div>
                   <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-1">Fondo de reserva y resguardo para cambio operativo.</p>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/40">
+                <div className="p-4 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-800/40">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-blue-900 dark:text-blue-300">Cajas POS en Salón Comercial</span>
-                    <span className="text-xs font-black text-blue-700 dark:text-blue-400 tabular-nums">
+                    <span className="text-xs font-bold text-blue-950 dark:text-blue-300">Cajas POS en Salón Comercial</span>
+                    <span className="text-xs font-black text-blue-700 dark:text-blue-400 tabular-nums font-mono">
                       {towerData ? formatPYG(towerData.cajas_pos_gs) : "₲ 24.800.000"}
                     </span>
                   </div>
@@ -348,37 +369,38 @@ export default function FinanceAgentPage() {
             </div>
 
             {/* Matriz de Calce de Plazos */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 relative overflow-hidden group">
+              <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500 absolute top-0 left-0" />
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                  <div className="p-2.5 rounded-2xl bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
                     <Scale className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">Calce de Pasivos & Activos</h3>
-                    <p className="text-xs text-gray-500">Compromisos vs Cobranzas</p>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">Calce de Pasivos & Activos</h3>
+                    <p className="text-xs text-slate-500">Compromisos vs Cobranzas</p>
                   </div>
                 </div>
               </div>
 
               <div className="space-y-3 pt-2">
-                <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-800/60">
-                  <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">A Pagar Próximos 7d (AP)</span>
-                  <span className="text-xs font-bold text-rose-600 dark:text-rose-400 tabular-nums">
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
+                  <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">A Pagar Próximos 7d (AP)</span>
+                  <span className="text-xs font-bold text-rose-600 dark:text-rose-400 tabular-nums font-mono">
                     {towerData ? formatPYG(towerData.ap_proximos_7d_gs) : "₲ 94.500.000"}
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-800/60">
-                  <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">A Cobrar Clientes Vigentes (AR)</span>
-                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
+                  <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">A Cobrar Clientes Vigentes (AR)</span>
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 tabular-nums font-mono">
                     {towerData ? formatPYG(towerData.ar_vigente_gs) : "₲ 142.000.000"}
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-800/60">
-                  <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">Gastos Operativos Mes MTD</span>
-                  <span className="text-xs font-bold text-gray-900 dark:text-white tabular-nums">
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
+                  <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Gastos Operativos Mes MTD</span>
+                  <span className="text-xs font-bold text-slate-900 dark:text-white tabular-nums font-mono">
                     {towerData ? formatPYG(towerData.gastos_operativos_mes_gs) : "₲ 42.150.000"}
                   </span>
                 </div>
@@ -389,14 +411,12 @@ export default function FinanceAgentPage() {
         </div>
       )}
 
-      {/* ════════════ TAB 2: ENLACE INTER-AGENTE (CFO ↔ VENTAS) ════════════ */}
+      {/* ══════════════════════ TAB 2: ENLACE INTER-AGENTE ══════════════════════ */}
       {tab === "inter_agente" && (
         <div className="space-y-6">
-          
-          {/* Header del Enlace */}
-          <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="p-5 rounded-3xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/50 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-indigo-600 text-white shadow-md">
+              <div className="p-3 rounded-2xl bg-indigo-600 text-white shadow-md">
                 <Zap className="w-5 h-5" />
               </div>
               <div>
@@ -409,21 +429,20 @@ export default function FinanceAgentPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800">
+              <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 bg-white dark:bg-slate-900 px-3.5 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-sm">
                 Piso Mínimo Margen: 18.5%
               </span>
             </div>
           </div>
 
-          {/* Directivas Activas del CFO a Ventas */}
           <div className="space-y-3">
-            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Directivas Comerciales Emitidas por Tesorería</h4>
+            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Directivas Comerciales Emitidas por Tesorería</h4>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {syncData?.directivas_a_ventas ? syncData.directivas_a_ventas.map((dir: any, idx: number) => (
-                <div key={idx} className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-gray-200 dark:border-slate-800 shadow-sm space-y-3 flex flex-col justify-between">
+                <div key={idx} className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 flex flex-col justify-between hover:border-indigo-300 transition">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300">
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                         {dir.codigo}
                       </span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -432,10 +451,10 @@ export default function FinanceAgentPage() {
                         {dir.prioridad.toUpperCase()}
                       </span>
                     </div>
-                    <h4 className="text-xs font-bold text-gray-900 dark:text-white leading-snug">{dir.titulo}</h4>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{dir.mensaje}</p>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white leading-snug">{dir.titulo}</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{dir.mensaje}</p>
                   </div>
-                  <div className="pt-2 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between">
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                     <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" /> {dir.accion}
                     </span>
@@ -445,15 +464,15 @@ export default function FinanceAgentPage() {
             </div>
           </div>
 
-          {/* Oportunidades de Venta Flash para Generar Liquidez */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
+          {/* Oportunidades Flash */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <ShoppingBag className="w-4 h-4 text-emerald-500" />
                   Operación "Cash-Flow Flash" — Monetización de Sobre-Stock
                 </h3>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-slate-500">
                   Productos con baja rotación identificados para remate promocional inmediato y recaudación rápida.
                 </p>
               </div>
@@ -465,7 +484,7 @@ export default function FinanceAgentPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="border-b border-gray-200 dark:border-slate-800 text-gray-400 font-semibold">
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 font-semibold">
                     <th className="pb-2.5">Producto</th>
                     <th className="pb-2.5 text-right">Stock Inmovilizado</th>
                     <th className="pb-2.5 text-right">Días Sin Rotación</th>
@@ -474,13 +493,13 @@ export default function FinanceAgentPage() {
                     <th className="pb-2.5 text-right">Recaudación Estimada</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
                   {syncData?.oportunidades_flash_stock?.map((item: any, idx: number) => (
-                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3 font-bold text-gray-900 dark:text-white">{item.producto}</td>
+                    <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="py-3 font-bold text-slate-900 dark:text-white">{item.producto}</td>
                       <td className="py-3 text-right font-mono">{item.stock_actual} un</td>
                       <td className="py-3 text-right text-amber-500 font-semibold">{item.dias_sin_rotacion} días</td>
-                      <td className="py-3 text-right font-mono font-bold text-gray-900 dark:text-white">{formatPYG(item.monto_inmovilizado_gs)}</td>
+                      <td className="py-3 text-right font-mono font-bold text-slate-900 dark:text-white">{formatPYG(item.monto_inmovilizado_gs)}</td>
                       <td className="py-3 text-right">
                         <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 font-bold">
                           -{item.descuento_sugerido_pct}%
@@ -493,53 +512,20 @@ export default function FinanceAgentPage() {
               </table>
             </div>
           </div>
-
-          {/* Alertas de Riesgo Crediticio */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-rose-200 dark:border-rose-950/40 shadow-sm space-y-4">
-            <div className="flex items-center gap-2.5 text-rose-600 dark:text-rose-400">
-              <ShieldAlert className="w-5 h-5" />
-              <div>
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Bloqueo Preventivo de Crédito a Clientes Morosos</h3>
-                <p className="text-xs text-gray-500">Notificación automática enviada al módulo de Pedidos del Gerente de Ventas</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              {syncData?.alertas_riesgo_crediticio?.map((c: any, idx: number) => (
-                <div key={idx} className="p-4 rounded-xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-gray-900 dark:text-white">{c.cliente}</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300">
-                      Mora: {c.dias_mora_max} días
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
-                    <span>Límite: {formatPYG(c.limite_credito)}</span>
-                    <span className="font-bold text-rose-600 dark:text-rose-400">Deuda: {formatPYG(c.deuda_actual)}</span>
-                  </div>
-                  <p className="text-[11px] text-rose-700 dark:text-rose-300 pt-1 font-medium">
-                    👉 {c.accion_sugerida}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-
         </div>
       )}
 
-      {/* ════════════ TAB 3: SIMULADOR DE FLUJO DE CAJA (30D) ════════════ */}
+      {/* ══════════════════════ TAB 3: SIMULADOR FLUJO DE CAJA (30D) ══════════════════════ */}
       {tab === "flujo_caja" && (
         <div className="space-y-6">
-          
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
-                <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <BarChart3 className="w-5 h-5 text-emerald-500" />
                   Curva Proyectada de Flujo de Caja (Próximos 30 Días)
                 </h3>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-slate-500">
                   Ingresos estimados por ventas diarias vs Egresos programados de proveedores y salarios.
                 </p>
               </div>
@@ -547,20 +533,11 @@ export default function FinanceAgentPage() {
               <div className="flex items-center gap-4 text-xs font-bold">
                 <div className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-full bg-emerald-500" />
-                  <span className="text-gray-700 dark:text-gray-300">Saldo Disponible Proyectado</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-indigo-500" />
-                  <span className="text-gray-700 dark:text-gray-300">Ingresos</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-rose-500" />
-                  <span className="text-gray-700 dark:text-gray-300">Egresos</span>
+                  <span className="text-slate-700 dark:text-slate-300">Saldo Disponible Proyectado</span>
                 </div>
               </div>
             </div>
 
-            {/* Gráfico Recharts de Flujo de Caja */}
             <div className="h-72 w-full pt-4">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={cashFlowData?.proyeccion_diaria || []}>
@@ -600,193 +577,146 @@ export default function FinanceAgentPage() {
               </ResponsiveContainer>
             </div>
 
-            {/* Resumen del Flujo */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-gray-100 dark:border-slate-800">
-              <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800/60">
-                <span className="text-xs text-gray-500">Ingresos Totales Esperados (30d)</span>
-                <p className="text-base font-black text-emerald-600 dark:text-emerald-400 mt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
+                <span className="text-xs text-slate-500">Ingresos Totales Esperados (30d)</span>
+                <p className="text-base font-black text-emerald-600 dark:text-emerald-400 mt-1 font-mono">
                   {cashFlowData ? formatPYG(cashFlowData.total_ingresos_30d_gs) : "₲ 0"}
                 </p>
-                <p className="text-[11px] text-gray-400 mt-0.5">Ventas según DOW + Cobranzas AR</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Ventas según DOW + Cobranzas AR</p>
               </div>
 
-              <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800/60">
-                <span className="text-xs text-gray-500">Egresos Comprometidos (30d)</span>
-                <p className="text-base font-black text-rose-600 dark:text-rose-400 mt-1">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
+                <span className="text-xs text-slate-500">Egresos Comprometidos (30d)</span>
+                <p className="text-base font-black text-rose-600 dark:text-rose-400 mt-1 font-mono">
                   {cashFlowData ? formatPYG(cashFlowData.total_egresos_30d_gs) : "₲ 0"}
                 </p>
-                <p className="text-[11px] text-gray-400 mt-0.5">Facturas AP + Reposición CMV + Nómina</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Facturas AP + Reposición CMV + Nómina</p>
               </div>
 
-              <div className="p-3 rounded-xl bg-gray-50 dark:bg-slate-800/60">
-                <span className="text-xs text-gray-500">Saldo Final Proyectado a 30d</span>
-                <p className="text-base font-black text-blue-600 dark:text-blue-400 mt-1">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60">
+                <span className="text-xs text-slate-500">Saldo Final Proyectado a 30d</span>
+                <p className="text-base font-black text-blue-600 dark:text-blue-400 mt-1 font-mono">
                   {cashFlowData ? formatPYG(cashFlowData.saldo_proyectado_30d_gs) : "₲ 0"}
                 </p>
-                <p className="text-[11px] text-gray-400 mt-0.5">Posición neta estimada a cierre</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Posición neta estimada a cierre</p>
               </div>
             </div>
           </div>
-
-          {/* Tabla de Detalle Diario (30 Días) */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
-              <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-blue-500" />
-                Desglose Calendario Día por Día (30 Días)
-              </h4>
-              <span className="text-xs text-gray-500">
-                Basado en 125k tickets y vencimientos reales
-              </span>
-            </div>
-
-            <div className="overflow-x-auto max-h-96">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 dark:bg-slate-800/80 text-gray-500 font-semibold sticky top-0">
-                  <tr>
-                    <th className="py-2.5 px-4">Fecha</th>
-                    <th className="py-2.5 px-4">Día</th>
-                    <th className="py-2.5 px-4 text-right">Saldo Inicial</th>
-                    <th className="py-2.5 px-4 text-right">Ingresos (Venta + AR)</th>
-                    <th className="py-2.5 px-4 text-right">Egresos (AP + CMV)</th>
-                    <th className="py-2.5 px-4 text-right">Saldo Proyectado</th>
-                    <th className="py-2.5 px-4 text-center">Estado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
-                  {(cashFlowData?.proyeccion_diaria || []).map((row: any, idx: number) => (
-                    <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40">
-                      <td className="py-2 px-4 font-mono font-medium text-gray-900 dark:text-white">
-                        {row.fecha}
-                      </td>
-                      <td className="py-2 px-4 text-gray-600 dark:text-gray-300">
-                        {row.dia_semana}
-                      </td>
-                      <td className="py-2 px-4 text-right font-mono text-gray-600 dark:text-gray-400">
-                        {formatPYG(row.saldo_inicial_estimado)}
-                      </td>
-                      <td className="py-2 px-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                        +{formatPYG(row.ingresos_esperados)}
-                      </td>
-                      <td className="py-2 px-4 text-right font-mono font-bold text-rose-600 dark:text-rose-400">
-                        -{formatPYG(row.egresos_comprometidos)}
-                      </td>
-                      <td className="py-2 px-4 text-right font-mono font-black text-gray-900 dark:text-white">
-                        {formatPYG(row.saldo_final_estimado)}
-                      </td>
-                      <td className="py-2 px-4 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          row.estado === "superavit"
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                            : row.estado === "ajustado"
-                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                            : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
-                        }`}>
-                          {row.estado.toUpperCase()}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
         </div>
       )}
 
-      {/* ════════════ TAB 4: CHAT CONSULTIVO CON EL CFO IA ════════════ */}
+      {/* ══════════════════════ TAB 4: COPILOTO FINANCIERO IA ══════════════════════ */}
       {tab === "chat" && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm flex flex-col h-[650px] overflow-hidden">
-          
-          {/* Chat Header */}
-          <div className="p-4 border-b border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-blue-600 text-white shadow-md">
-                <Bot className="w-5 h-5" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-4 space-y-4">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md">
+                  <Bot className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Gerente Financiero IA</h3>
+                  <p className="text-[11px] text-slate-500">CFO Virtual · Motor Gemini 2.5</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Asistente Estratégico CFO Virtual</h3>
-                <p className="text-xs text-gray-500">Consultas financieras en tiempo real con datos de Extra Supermercado</p>
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400">
+                  <Activity className="w-3.5 h-3.5" /> Capacidades Activas
+                </div>
+                <p>• Análisis de solvencia y pasivos a 7/30 días.</p>
+                <p>• Conciliación de bóveda y saldos bancarios.</p>
+                <p>• Emisión de directivas a Ventas y Compras.</p>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Consultas Rápidas Sugeridas</span>
+                <div className="flex flex-col gap-2">
+                  {[
+                    "¿Cuánto vence con proveedores en los próximos 7 días?",
+                    "Ver reporte de morosidad y clientes bloqueados",
+                    "¿Qué directivas enviamos al Gerente de Ventas?",
+                    "Simular flujo de caja de los próximos 30 días"
+                  ].map((q, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleSendMessage(q)}
+                      className="text-left text-xs p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-100 dark:border-slate-800 transition"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-              En línea
-            </span>
           </div>
 
-          {/* Chat Messages */}
-          <div className="flex-1 p-4 overflow-y-auto space-y-4">
-            {messages.map((m, idx) => (
-              <div
-                key={idx}
-                className={`flex gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                {m.role === "assistant" && (
-                  <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 mt-1 shadow">
-                    <Bot className="w-4 h-4" />
-                  </div>
-                )}
-                <div
-                  className={`max-w-2xl rounded-2xl p-4 text-xs leading-relaxed ${
-                    m.role === "user"
-                      ? "bg-blue-600 text-white shadow-md"
-                      : "bg-gray-100 dark:bg-slate-800 text-gray-900 dark:text-gray-100 border border-gray-200/60 dark:border-slate-700"
-                  }`}
-                >
-                  <div className="whitespace-pre-line space-y-1">{m.content}</div>
+          <div className="lg:col-span-8 flex flex-col h-[650px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-850/50">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">Sesión Activa con el CFO Virtual</span>
+              </div>
+              <span className="text-[10px] font-mono font-bold text-slate-400">Contexto: Tesorería en Tiempo Real</span>
+            </div>
 
-                  {m.suggestions && m.suggestions.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-gray-200/40 dark:border-slate-700 space-y-1.5">
-                      <p className="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wider">Preguntas recomendadas:</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {m.suggestions.map((sug, sIdx) => (
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {messages.map((m, idx) => (
+                <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-2xl p-4 space-y-2 text-xs leading-relaxed ${
+                    m.role === "user"
+                      ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-tr-none shadow-md shadow-emerald-500/10"
+                      : "bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 rounded-tl-none"
+                  }`}>
+                    <div className="whitespace-pre-wrap font-sans">{m.content}</div>
+                    {m.suggestions && m.suggestions.length > 0 && (
+                      <div className="pt-2 flex flex-wrap gap-1.5">
+                        {m.suggestions.map((p, pIdx) => (
                           <button
-                            key={sIdx}
-                            onClick={() => handleSendMessage(sug)}
-                            className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-white dark:bg-slate-700 hover:bg-blue-50 dark:hover:bg-slate-600 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-slate-600 transition-colors text-left"
+                            key={pIdx}
+                            onClick={() => handleSendMessage(p)}
+                            className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 hover:bg-emerald-100 transition"
                           >
-                            {sug}
+                            {p}
                           </button>
                         ))}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {chatLoading && (
-              <div className="flex items-center gap-2 text-xs text-gray-400 p-2">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                El Gerente Financiero IA está analizando los registros contables y de tesorería...
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
+              ))}
+              {chatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 text-xs text-slate-500 flex items-center gap-2 border border-slate-200 dark:border-slate-700">
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                    El Gerente Financiero IA está consultando la tesorería y cuentas contables...
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
 
-          {/* Chat Input */}
-          <div className="p-3 border-t border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900 flex items-center gap-2">
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-              placeholder="Preguntale al CFO sobre liquidez, proveedores, morosidad o flujo de caja..."
-              className="flex-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              onClick={() => handleSendMessage()}
-              disabled={!inputMessage.trim() || chatLoading}
-              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md disabled:opacity-50 flex items-center gap-1.5 transition-all"
-            >
-              <Send className="w-3.5 h-3.5" />
-              Enviar
-            </button>
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50">
+              <form onSubmit={e => { e.preventDefault(); handleSendMessage() }} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Preguntale al CFO sobre liquidez, morosidad o flujo de caja..."
+                  value={inputMessage}
+                  onChange={e => setInputMessage(e.target.value)}
+                  className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!inputMessage.trim() || chatLoading}
+                  className="px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       )}
-
     </div>
   )
 }

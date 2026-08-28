@@ -6,8 +6,8 @@ import {
   Zap, HeartHandshake, Eye, MessageCircle, BarChart3, Filter,
   Layers, Check, X, ChevronRight, ThumbsUp, ShoppingCart, Percent,
   Monitor, ImagePlus, Pencil, Trash2, ArrowUp, ArrowDown, Loader2,
+  Activity
 } from "lucide-react"
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { api, type KioskBanner } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
@@ -36,8 +36,7 @@ export default function MarketingAgentPage() {
   const [products, setProducts] = useState<any[]>([])
   const [salesStats, setSalesStats] = useState<any>(null)
 
-  // Banners del Verificador de Precios (kiosco de salón) -- creativos reales,
-  // marketing los carga y aparecen rotando en las 3 terminales del salón.
+  // Banners del Verificador de Precios (kiosco de salón)
   const [kioskBanners, setKioskBanners] = useState<KioskBanner[]>([])
   const [kioskLoading, setKioskLoading] = useState(false)
   const [editingBanner, setEditingBanner] = useState<KioskBanner | null>(null)
@@ -261,142 +260,203 @@ export default function MarketingAgentPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-slate-800 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-2xl bg-gradient-to-tr from-pink-600 to-purple-600 text-white shadow-md">
-              <Bot className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg xl:text-lg 2xl:text-xl font-black font-mono tracking-tight truncate text-gray-900 dark:text-white tracking-tight uppercase">
-                  Gerente de Marketing IA (CMO Virtual)
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-pink-100 text-pink-700 dark:bg-pink-950/60 dark:text-pink-300 uppercase animate-pulse">
-                  Motor Autónomo
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* 🌟 LUXURY COMMAND DECK HEADER */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-purple-950/90 text-white p-7 border border-purple-500/20 shadow-2xl shadow-purple-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-pink-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 border border-purple-400/30 text-white flex items-center justify-center shadow-lg shadow-purple-500/25">
+                  <Megaphone className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-pink-500 border-2 border-slate-950"></span>
                 </span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Inteligencia artificial para maximización de demanda, liquidación rentable de sobre-stock, retención de clientes VIP y automatización de campañas multicanal vía IntelliZapp.
-              </p>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-purple-400 uppercase bg-purple-500/10 px-2.5 py-0.5 rounded-md border border-purple-500/20">
+                    INTELIGENCIA ARTIFICIAL · TORRE DE CONTROL
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
+                    ROI IntelliZapp: 14.8x
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Gerente de Marketing IA (CMO Virtual)
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Segmentación RFM de 4.854 clientes, anti-churn con cupones 1-a-1 y automatización de banners en terminales
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado (Central)
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-pink-400">
+                ⚡ Motor: Gemini 2.5 Flash Pipeline
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-purple-300">
+                📲 Envíos activos vía IntelliZapp Hub
+              </span>
             </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={loadData} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
-            <RefreshCw className="w-3.5 h-3.5" /><span>Actualizar Auditoría</span>
-          </button>
-          <a href="/intellizapp" className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700">
-            <MessageCircle className="w-3.5 h-3.5" /><span>Abrir IntelliZapp Hub</span>
-          </a>
-        </div>
-      </div>
 
-      {/* BANNER ESTRATÉGICO */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-pink-50 via-purple-50 to-indigo-50 dark:from-pink-950/30 dark:via-purple-950/30 dark:to-indigo-950/30 border border-pink-200 dark:border-pink-900/40 flex items-start gap-3 text-xs text-pink-950 dark:text-pink-200">
-        <Sparkles className="w-5 h-5 text-pink-600 shrink-0 mt-0.5" />
-        <div>
-          <p className="font-extrabold uppercase text-[11px] tracking-wider text-pink-900 dark:text-pink-300 mb-0.5">
-            Sincronización Estratégica Tripartita (Ventas + Finanzas + Marketing)
-          </p>
-          <p className="text-pink-800 dark:text-pink-300/80 leading-relaxed">
-            El Gerente de Marketing IA no crea promociones a ciegas: audita el costo real de compra, respeta los márgenes mínimos pactados con el <b>Gerente Financiero</b> y coordina metas de impulso con el <b>Gerente de Ventas</b> en salón y cajas. Todos los envíos se disparan en tiempo real a través de <b>IntelliZapp</b>.
-          </p>
-        </div>
-      </div>
-
-      {/* KPIs EJECUTIVOS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          { label: "Clientes ExtraClub", val: "4.854", color: "text-purple-600", icon: Users },
-          { label: "Tasa de Retención", val: "87.4%", color: "text-emerald-600", icon: HeartHandshake },
-          { label: "En Riesgo Abandono", val: "42 VIPs", color: "text-rose-600 font-bold", icon: AlertTriangle },
-          { label: "Margen Promedio Promos", val: "29.6%", color: "text-blue-600", icon: Percent },
-          { label: "ROI Campañas IntelliZapp", val: "14.8x", color: "text-pink-600 font-black", icon: Zap },
-          { label: "Sobre-Stock Detectado", val: "Gs. 14.2M", color: "text-amber-600", icon: ShoppingBag },
-        ].map((kpi) => (
-          <div key={kpi.label} className="card p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-bold text-gray-400 uppercase leading-tight">{kpi.label}</span>
-              <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
-            </div>
-            <p className={`text-base font-black font-mono ${kpi.color}`}>{kpi.val}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* TABS DE NAVEGACIÓN */}
-      <div className="border-b border-gray-200 dark:border-slate-800">
-        <div className="flex gap-1 overflow-x-auto">
-          {[
-            { id: "torre", label: "Torre de Control CMO" },
-            { id: "campanas_ia", label: `Campañas Sugeridas (${suggestedCampaigns.length})` },
-            { id: "anti_abandono", label: "Anti-Abandono VIP (42)" },
-            { id: "chat", label: "Chat con el Gerente IA" },
-            { id: "sincronizacion", label: "Sincronización Tripartita" },
-            { id: "kiosco", label: `Verificador de Precios (${kioskBanners.length})` },
-          ].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id as Tab)}
-              className={`pb-3 px-4 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${tab === t.id ? "border-pink-600 text-pink-600 dark:text-pink-400" : "border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"}`}>
-              {t.label}
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={loadData}
+              disabled={loading}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-750 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              Actualizar Auditoría
             </button>
-          ))}
+            <button
+              onClick={() => setTab("chat")}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 transition shadow-lg shadow-purple-500/25 flex items-center gap-2"
+            >
+              <MessageSquare className="w-4 h-4" />
+              Copiloto de Marketing IA
+            </button>
+          </div>
+        </div>
+
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Clientes Fidelizados</span>
+              <span className="text-[10px] font-bold text-purple-400">ExtraClub</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-purple-400">4.854</p>
+            <p className="text-[11px] text-slate-400">Base activa registrada</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tasa de Retención</span>
+              <span className="text-[10px] font-bold text-emerald-400">Saludable</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">87.4%</p>
+            <p className="text-[11px] text-slate-400">Recurrencia mensual en salón</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Riesgo de Abandono</span>
+              <span className="text-[10px] font-bold text-rose-400">Anti-Churn</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-rose-400">42 VIPs</p>
+            <p className="text-[11px] text-slate-400">Cupones 1-a-1 generados</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Protegido</span>
+              <span className="text-[10px] font-mono text-pink-400">Promociones</span>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight text-pink-300">29.6%</p>
+            <p className="text-[11px] text-slate-400">Validado con Gerente Financiero</p>
+          </div>
         </div>
       </div>
 
-      {/* TAB TORRE DE CONTROL */}
+      {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
+      <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
+        {[
+          { key: "torre", label: "Torre de Control CMO", icon: Users },
+          { key: "campanas_ia", label: `Campañas Sugeridas (${suggestedCampaigns.length})`, icon: Megaphone, badge: suggestedCampaigns.filter(c => c.estado !== "lanzada").length },
+          { key: "anti_abandono", label: "Anti-Abandono VIP (42)", icon: HeartHandshake, badge: 42 },
+          { key: "chat", label: "Copiloto de Marketing IA", icon: MessageSquare },
+          { key: "sincronizacion", label: "Sincronización Tripartita", icon: Layers },
+          { key: "kiosco", label: `Verificador de Precios (${kioskBanners.length})`, icon: Monitor, badge: kioskBanners.filter(b => b.activo).length },
+        ].map(t => {
+          const Icon = t.icon
+          const active = tab === t.key
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as Tab)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                active
+                  ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{t.label}</span>
+              {t.badge !== undefined && t.badge > 0 && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  active ? "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300" : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                }`}>
+                  {t.badge}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ══════════════════════ TAB 1: TORRE DE CONTROL CMO ══════════════════════ */}
       {tab === "torre" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Alertas de Oportunidad de Demanda */}
-          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs space-y-4">
-            <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 relative overflow-hidden group">
+            <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500 absolute top-0 left-0" />
+            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Zap className="w-4 h-4 text-amber-500" /> Diagnóstico de Sobre-Stock & Demanda
             </h3>
             <div className="space-y-3">
-              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/40 text-xs space-y-1">
+              <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-xs space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-amber-900 dark:text-amber-200">Verdulería & Frutas: Tomate + Hojas Verdes</span>
+                  <span className="font-extrabold text-amber-950 dark:text-amber-200">Verdulería & Frutas: Tomate + Hojas Verdes</span>
                   <span className="text-[10px] font-black uppercase text-amber-700 bg-amber-200/60 dark:bg-amber-900/60 px-2 py-0.5 rounded-full">Riesgo Alto</span>
                 </div>
-                <p className="text-amber-800 dark:text-amber-300">Stock acumulado de 340 kg con rotación lenta. Se recomienda activar combo 'Ensalada Lista' hoy antes de las 16:00 hs.</p>
-                <p className="text-[10px] font-mono text-amber-700 dark:text-amber-400 pt-1">Margen protegido: 29.4% · Ventas estimadas: Gs. 8.4M</p>
+                <p className="text-amber-900 dark:text-amber-300">Stock acumulado de 340 kg con rotación lenta. Se recomienda activar combo 'Ensalada Lista' hoy antes de las 16:00 hs.</p>
+                <p className="text-[10px] font-mono text-amber-700 dark:text-amber-400 pt-1 font-bold">Margen protegido: 29.4% · Ventas estimadas: Gs. 8.4M</p>
               </div>
 
-              <div className="p-3.5 bg-purple-50 dark:bg-purple-950/30 rounded-2xl border border-purple-200 dark:border-purple-900/40 text-xs space-y-1">
+              <div className="p-4 rounded-2xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 text-xs space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-purple-900 dark:text-purple-200">Lácteos & Fiambrería: Quesos Especiales</span>
+                  <span className="font-extrabold text-purple-950 dark:text-purple-200">Lácteos & Fiambrería: Quesos Especiales</span>
                   <span className="text-[10px] font-black uppercase text-purple-700 bg-purple-200/60 dark:bg-purple-900/60 px-2 py-0.5 rounded-full">Oportunidad</span>
                 </div>
-                <p className="text-purple-800 dark:text-purple-300">Vencimiento a 25 días de quesos gouda y sardo. Sugerido degustación y 15% OFF en segunda unidad.</p>
-                <p className="text-[10px] font-mono text-purple-700 dark:text-purple-400 pt-1">Margen protegido: 33.1% · Ventas estimadas: Gs. 5.7M</p>
+                <p className="text-purple-900 dark:text-purple-300">Vencimiento a 25 días de quesos gouda y sardo. Sugerido degustación y 15% OFF en segunda unidad.</p>
+                <p className="text-[10px] font-mono text-purple-700 dark:text-purple-400 pt-1 font-bold">Margen protegido: 33.1% · Ventas estimadas: Gs. 5.7M</p>
               </div>
             </div>
           </div>
 
-          {/* Estado de Retención ExtraClub */}
-          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs space-y-4">
-            <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 relative overflow-hidden group">
+            <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-500 absolute top-0 left-0" />
+            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Users className="w-4 h-4 text-purple-600" /> Segmentación de los 4.854 Clientes ExtraClub
             </h3>
             <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-900/40">
+              <div className="p-4 bg-emerald-50/70 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200 dark:border-emerald-900/40">
                 <span className="text-[10px] font-bold text-emerald-700 uppercase">Clientes VIP & Oro (Top 10%)</span>
                 <p className="text-lg font-black text-emerald-800 dark:text-emerald-200 font-mono mt-0.5">485 clientes</p>
                 <p className="text-[10px] text-emerald-600 mt-1">Ticket Promedio: Gs. 385.000</p>
               </div>
-              <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-2xl border border-blue-200 dark:border-blue-900/40">
+              <div className="p-4 bg-blue-50/70 dark:bg-blue-950/20 rounded-2xl border border-blue-200 dark:border-blue-900/40">
                 <span className="text-[10px] font-bold text-blue-700 uppercase">Recurrentes (Semanal)</span>
                 <p className="text-lg font-black text-blue-800 dark:text-blue-200 font-mono mt-0.5">2.140 clientes</p>
                 <p className="text-[10px] text-blue-600 mt-1">Frecuencia: 2.4 veces/sem.</p>
               </div>
-              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/40">
+              <div className="p-4 bg-amber-50/70 dark:bg-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-900/40">
                 <span className="text-[10px] font-bold text-amber-700 uppercase">Ocasionales (Quincenal)</span>
                 <p className="text-lg font-black text-amber-800 dark:text-amber-200 font-mono mt-0.5">1.620 clientes</p>
                 <p className="text-[10px] text-amber-600 mt-1">Oportunidad de impulso</p>
               </div>
-              <div className="p-3 bg-rose-50 dark:bg-rose-950/30 rounded-2xl border border-rose-200 dark:border-rose-900/40">
+              <div className="p-4 bg-rose-50/70 dark:bg-rose-950/20 rounded-2xl border border-rose-200 dark:border-rose-900/40">
                 <span className="text-[10px] font-bold text-rose-700 uppercase">En Riesgo de Abandono</span>
                 <p className="text-lg font-black text-rose-800 dark:text-rose-200 font-mono mt-0.5">609 clientes</p>
                 <p className="text-[10px] text-rose-600 mt-1">Acción Anti-Churn requerida</p>
@@ -406,38 +466,39 @@ export default function MarketingAgentPage() {
         </div>
       )}
 
-      {/* TAB CAMPAÑAS SUGERIDAS */}
+      {/* ══════════════════════ TAB 2: CAMPAÑAS IA ══════════════════════ */}
       {tab === "campanas_ia" && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {suggestedCampaigns.map((c) => (
-              <div key={c.id} className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs flex flex-col justify-between space-y-4 text-xs">
-                <div className="space-y-2">
+              <div key={c.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col justify-between space-y-4 text-xs relative overflow-hidden group">
+                <div className="h-1 w-full bg-gradient-to-r from-purple-500 to-pink-500 absolute top-0 left-0" />
+                <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase text-pink-700 bg-pink-100 dark:bg-pink-950/60 dark:text-pink-300 px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] font-black uppercase text-pink-700 bg-pink-100 dark:bg-pink-950/60 dark:text-pink-300 px-2.5 py-0.5 rounded-full">
                       {c.tipo}
                     </span>
-                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${c.estado === "lanzada" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                    <span className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full ${c.estado === "lanzada" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
                       {c.estado === "lanzada" ? "Lanzada ✓" : "Lista para Enviar"}
                     </span>
                   </div>
-                  <h4 className="font-extrabold text-sm text-gray-900 dark:text-white">{c.titulo}</h4>
-                  <p className="text-[11px] text-gray-500">Segmento: <b>{c.segmento}</b></p>
-                  <p className="text-[11px] text-gray-500">Canal: <b>{c.canal}</b></p>
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white leading-snug">{c.titulo}</h4>
+                  <p className="text-[11px] text-slate-500">Segmento: <b>{c.segmento}</b></p>
+                  <p className="text-[11px] text-slate-500">Canal: <b>{c.canal}</b></p>
 
-                  <div className="p-3 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-100 dark:border-slate-700 italic text-gray-600 dark:text-gray-300">
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800 italic text-slate-600 dark:text-slate-300">
                     "{c.copy}"
                   </div>
 
                   <div className="flex items-center justify-between pt-1 font-mono text-[11px]">
-                    <span className="text-gray-400">Margen: <b className="text-blue-600">{c.margen_proyectado}</b></span>
-                    <span className="text-gray-400">Ventas: <b className="text-emerald-600">{c.recuperacion_stock}</b></span>
+                    <span className="text-slate-400">Margen: <b className="text-blue-600">{c.margen_proyectado}</b></span>
+                    <span className="text-slate-400">Ventas: <b className="text-emerald-600">{c.recuperacion_stock}</b></span>
                   </div>
                 </div>
 
                 <button onClick={() => handleLaunchCampaign(c.id)} disabled={c.estado === "lanzada"}
-                  className={`w-full py-2.5 rounded-xl font-bold uppercase text-xs flex items-center justify-center gap-1.5 transition ${c.estado === "lanzada" ? "bg-gray-200 dark:bg-slate-800 text-gray-400 cursor-not-allowed" : "bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white shadow-md shadow-pink-500/20"}`}>
-                  {c.estado === "lanzada" ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
+                  className={`w-full py-3 rounded-2xl font-bold uppercase text-xs flex items-center justify-center gap-1.5 transition ${c.estado === "lanzada" ? "bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed" : "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-md shadow-pink-500/20"}`}>
+                  {c.estado === "lanzada" ? <CheckCircle2 className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                   {c.estado === "lanzada" ? "Campaña en Curso" : "Disparar vía IntelliZapp"}
                 </button>
               </div>
@@ -446,10 +507,10 @@ export default function MarketingAgentPage() {
         </div>
       )}
 
-      {/* TAB ANTI-ABANDONO & CUPONES 1-A-1 POR PRODUCTO FAVORITO */}
+      {/* ══════════════════════ TAB 3: ANTI-ABANDONO VIP ══════════════════════ */}
       {tab === "anti_abandono" && (
         <div className="space-y-4">
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-500/10 via-purple-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/40 flex items-start justify-between gap-4 text-xs">
+          <div className="p-5 rounded-3xl bg-gradient-to-r from-rose-500/10 via-purple-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/40 flex items-start justify-between gap-4 text-xs shadow-sm">
             <div className="flex items-start gap-3">
               <Sparkles className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
               <div>
@@ -461,12 +522,12 @@ export default function MarketingAgentPage() {
                 </p>
               </div>
             </div>
-            <button onClick={() => handleLaunchCampaign("camp-2")} className="btn-primary text-xs px-4 py-2 shrink-0 flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-md">
-              <MessageCircle className="w-3.5 h-3.5" /> Disparar Todos los Rescates ({customers.length ? "42 VIPs" : "42"})
+            <button onClick={() => handleLaunchCampaign("camp-2")} className="text-xs px-4 py-2.5 rounded-xl shrink-0 flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-md shadow-rose-500/20 transition">
+              <MessageCircle className="w-4 h-4" /> Disparar Todos los Rescates ({customers.length ? "42 VIPs" : "42"})
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {[
               {
                 nombre: "Rodrigo Daniel Resquín",
@@ -497,97 +558,63 @@ export default function MarketingAgentPage() {
                 vigencia: "Válido por 72 horas (Hasta 22/08 23:59)",
                 margen_resultante: "32.1% (Protegido)",
                 copy_preview: "👋 ¡Hola Yanina! Hace días que no te vemos por el súper 🌟. Tenés un 20% OFF especial en Yerba Kurupí Menta y Limón. Mostrá tu cupón RESCATE-YANINA-KURUPI20 en caja. ¡Válido hasta este fin de semana!"
-              },
-              {
-                nombre: "Saúl Eduardo Salinas",
-                ruc: "6957312-3",
-                telefono: "0971 695731",
-                nivel: "Oro (1.5x)",
-                dias_inactivo: 19,
-                ticket_promedio: "Gs. 380.000",
-                producto_favorito: "Tapa Cuadril FrigoChaco al Vacío",
-                compras_previas: 11,
-                cupon: "RESCATE-SAUL-CARNE15",
-                descuento: "15% OFF en Tapa Cuadril",
-                vigencia: "Válido por 72 horas (Hasta 22/08 23:59)",
-                margen_resultante: "26.8% (Protegido)",
-                copy_preview: "🥩 ¡Hola Saúl! Para tu asado del finde, tenés un 15% de descuento exclusivo en Tapa Cuadril FrigoChaco. Canjealo en carnicería con tu RUC o código RESCATE-SAUL-CARNE15."
-              },
-              {
-                nombre: "Mirna Elisa Caballero",
-                ruc: "3619386-0",
-                telefono: "0983 361938",
-                nivel: "Oro (1.5x)",
-                dias_inactivo: 24,
-                ticket_promedio: "Gs. 410.000",
-                producto_favorito: "Leche Entera Trébol Larga Vida 1L",
-                compras_previas: 22,
-                cupon: "RESCATE-MIRNA-TREBOL20",
-                descuento: "20% OFF en Lácteos Trébol",
-                vigencia: "Válido por 72 horas (Hasta 22/08 23:59)",
-                margen_resultante: "29.0% (Protegido)",
-                copy_preview: "🥛 ¡Hola Mirna! Te esperamos en Extra Supermercado con un 20% OFF exclusivo en Leche Trébol Larga Vida. Tu código personal es: RESCATE-MIRNA-TREBOL20."
-              },
+              }
             ].map((c, i) => (
-              <div key={i} className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs space-y-3.5 text-xs">
-                <div className="flex items-start justify-between gap-2 border-b border-gray-100 dark:border-slate-800 pb-3">
+              <div key={i} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-3.5 text-xs">
+                <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h4 className="font-extrabold text-sm text-gray-900 dark:text-white">{c.nombre}</h4>
+                      <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">{c.nombre}</h4>
                       <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-100 text-purple-700">
                         {c.nivel}
                       </span>
                     </div>
-                    <p className="text-[11px] text-gray-400 font-mono mt-0.5">RUC: {c.ruc} · WhatsApp: {c.telefono}</p>
+                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">RUC: {c.ruc} · WhatsApp: {c.telefono}</p>
                   </div>
                   <div className="text-right">
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 text-rose-700 font-mono">
                       {c.dias_inactivo} días inactivo
                     </span>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Ticket prom: {c.ticket_promedio}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Ticket prom: {c.ticket_promedio}</p>
                   </div>
                 </div>
 
-                <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/40 space-y-1">
+                <div className="p-3.5 bg-amber-50/70 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/40 space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase flex items-center gap-1">
                       <ShoppingBag className="w-3.5 h-3.5" /> Producto Habitual Detectado:
                     </span>
-                    <span className="text-[10px] font-mono text-gray-500 font-bold">{c.compras_previas} compras previas</span>
+                    <span className="text-[10px] font-mono text-slate-500 font-bold">{c.compras_previas} compras previas</span>
                   </div>
-                  <p className="font-black text-gray-900 dark:text-white text-xs">{c.producto_favorito}</p>
+                  <p className="font-black text-slate-900 dark:text-white text-xs">{c.producto_favorito}</p>
                 </div>
 
-                <div className="p-3 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-100 dark:border-slate-700 space-y-1.5 font-mono text-[11px]">
+                <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-1.5 font-mono text-[11px]">
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-400">Cupón Generado:</span>
+                    <span className="text-slate-400">Cupón Generado:</span>
                     <span className="font-black text-purple-600 bg-purple-50 dark:bg-purple-950 px-2 py-0.5 rounded border border-purple-200">{c.cupon}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-400">Beneficio:</span>
+                    <span className="text-slate-400">Beneficio:</span>
                     <span className="font-bold text-emerald-600">{c.descuento}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-400">Vigencia:</span>
+                    <span className="text-slate-400">Vigencia:</span>
                     <span className="text-rose-600 font-bold">{c.vigencia}</span>
-                  </div>
-                  <div className="flex items-center justify-between pt-1 border-t border-gray-200 dark:border-slate-700">
-                    <span className="text-gray-400">Margen Supermercado:</span>
-                    <span className="text-blue-600 font-bold">{c.margen_resultante}</span>
                   </div>
                 </div>
 
-                <div className="p-2.5 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/30 text-[11px] text-gray-600 dark:text-gray-300 italic">
+                <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/30 text-[11px] text-slate-600 dark:text-slate-300 italic">
                   "{c.copy_preview}"
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-slate-800">
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                   <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5" /> Habilitado en Caja POS
                   </span>
                   <button onClick={() => {
                     toast.success(`WhatsApp Despachado a ${c.nombre}`, `Cupón ${c.cupon} enviado por IntelliZapp con vigencia de 72hs.`)
-                  }} className="btn-primary text-xs px-3.5 py-1.5 flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700">
+                  }} className="text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition">
                     <Send className="w-3 h-3" /> Enviar Cupón vía IntelliZapp
                   </button>
                 </div>
@@ -597,80 +624,136 @@ export default function MarketingAgentPage() {
         </div>
       )}
 
-      {/* TAB CHAT INTERACTIVO */}
+      {/* ══════════════════════ TAB 4: COPILOTO DE MARKETING IA ══════════════════════ */}
       {tab === "chat" && (
-        <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs flex flex-col h-[520px] overflow-hidden">
-          <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center gap-3 bg-gray-50/50 dark:bg-slate-800/30">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-pink-600 to-purple-600 text-white flex items-center justify-center shadow-xs">
-              <Bot className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="font-extrabold text-xs text-gray-900 dark:text-white uppercase">CFO & CMO Virtual — Asesor de Marketing & Rentabilidad</p>
-              <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" /> Conectado en tiempo real a IntelliZapp y Ventas
-              </p>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-4 space-y-4">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 text-white flex items-center justify-center shadow-md">
+                  <Bot className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Gerente de Marketing IA</h3>
+                  <p className="text-[11px] text-slate-500">CMO Virtual · Motor Gemini 2.5</p>
+                </div>
+              </div>
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
+                <div className="flex items-center gap-1.5 font-bold text-purple-600 dark:text-purple-400">
+                  <Activity className="w-3.5 h-3.5" /> Capacidades Activas
+                </div>
+                <p>• Combos de sobre-stock con margen protegido.</p>
+                <p>• Cupones nominativos 1-a-1 de retención VIP.</p>
+                <p>• Sincronización de banners en terminales de salón.</p>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Consultas Rápidas Sugeridas</span>
+                <div className="flex flex-col gap-2">
+                  {[
+                    "Lanzar combo de sobre-stock en Verdulería",
+                    "Reactivar los 42 clientes VIP por IntelliZapp",
+                    "Ver calendario de promociones recomendadas",
+                    "Consultar margen y ROI proyectado"
+                  ].map((q, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleSendMessage(q)}
+                      className="text-left text-xs p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-slate-700 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 border border-slate-100 dark:border-slate-800 transition"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
-            {messages.map((m, idx) => (
-              <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] p-3.5 rounded-2xl space-y-2 ${m.role === "user" ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-br-none" : "bg-gray-100 dark:bg-slate-800 text-gray-900 dark:text-gray-100 rounded-bl-none border border-gray-200 dark:border-slate-700"}`}>
-                  <p className="whitespace-pre-line leading-relaxed">{m.content}</p>
-                  {m.suggestions && m.suggestions.length > 0 && (
-                    <div className="pt-2 flex flex-wrap gap-1.5">
-                      {m.suggestions.map((s, i) => (
-                        <button key={i} onClick={() => handleSendMessage(s)}
-                          className="text-[10px] font-bold px-2.5 py-1 bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 rounded-lg border border-purple-200 dark:border-purple-800 hover:bg-purple-50 transition">
-                          💡 {s}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+          <div className="lg:col-span-8 flex flex-col h-[650px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-850/50">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">Sesión Activa con el CMO Virtual</span>
               </div>
-            ))}
-            {chatLoading && (
-              <div className="flex justify-start">
-                <div className="p-3 bg-gray-100 dark:bg-slate-800 rounded-2xl flex items-center gap-2 text-gray-500 text-xs">
-                  <Bot className="w-4 h-4 animate-spin text-pink-600" /> Analizando base de clientes y márgenes...
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
+              <span className="text-[10px] font-mono font-bold text-slate-400">Contexto: Campañas & RFM</span>
+            </div>
 
-          <div className="p-3 border-t border-gray-100 dark:border-slate-800 flex items-center gap-2">
-            <input type="text" value={inputMessage} onChange={e => setInputMessage(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleSendMessage()}
-              placeholder="Preguntale al Gerente de Marketing IA sobre promociones, clientes o campañas..."
-              className="input text-xs flex-1" />
-            <button onClick={() => handleSendMessage()} disabled={!inputMessage.trim()}
-              className="btn-primary text-xs px-4 py-2 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white">
-              <Send className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {messages.map((m, idx) => (
+                <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-2xl p-4 space-y-2 text-xs leading-relaxed ${
+                    m.role === "user"
+                      ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-tr-none shadow-md shadow-purple-500/10"
+                      : "bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 rounded-tl-none"
+                  }`}>
+                    <div className="whitespace-pre-wrap font-sans">{m.content}</div>
+                    {m.suggestions && m.suggestions.length > 0 && (
+                      <div className="pt-2 flex flex-wrap gap-1.5">
+                        {m.suggestions.map((p, pIdx) => (
+                          <button
+                            key={pIdx}
+                            onClick={() => handleSendMessage(p)}
+                            className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/80 dark:text-purple-300 hover:bg-purple-100 transition"
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {chatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 text-xs text-slate-500 flex items-center gap-2 border border-slate-200 dark:border-slate-700">
+                    <Loader2 className="w-4 h-4 animate-spin text-purple-500" />
+                    El Gerente de Marketing IA está analizando la base de clientes y promociones...
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50">
+              <form onSubmit={e => { e.preventDefault(); handleSendMessage() }} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Preguntale al CMO sobre promociones, clientes o campañas..."
+                  value={inputMessage}
+                  onChange={e => setInputMessage(e.target.value)}
+                  className="flex-1 px-4 py-3 text-xs rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!inputMessage.trim() || chatLoading}
+                  className="px-5 py-3 rounded-2xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-500/20 transition"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       )}
 
-      {/* TAB SINCRONIZACIÓN */}
+      {/* ══════════════════════ TAB 5: SINCRONIZACIÓN TRIPARTITA ══════════════════════ */}
       {tab === "sincronizacion" && (
-        <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs space-y-4 text-xs">
-          <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 text-xs">
+          <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
             <Layers className="w-4 h-4 text-indigo-600" /> Matriz de Sincronización Tripartita IA
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/40 space-y-2">
+            <div className="p-5 rounded-3xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 space-y-2">
               <span className="font-extrabold text-blue-900 dark:text-blue-200 uppercase text-[10px]">1. Gerente Financiero IA (CFO)</span>
               <p className="text-blue-800 dark:text-blue-300">Define márgenes brutos mínimos (25%) y valida cupo de inversión de Gs. 15.000.000 mensuales.</p>
               <div className="pt-2 border-t border-blue-200 dark:border-blue-900 font-bold text-emerald-600">✓ Estado: Validado</div>
             </div>
-            <div className="p-4 rounded-2xl bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-900/40 space-y-2">
+            <div className="p-5 rounded-3xl bg-pink-50/70 dark:bg-pink-950/20 border border-pink-200 dark:border-pink-900/40 space-y-2">
               <span className="font-extrabold text-pink-900 dark:text-pink-200 uppercase text-[10px]">2. Gerente de Marketing IA (CMO)</span>
               <p className="text-pink-800 dark:text-pink-300">Genera combos de sobre-stock, segmenta clientes RFM y dispara campañas vía IntelliZapp.</p>
               <div className="pt-2 border-t border-pink-200 dark:border-pink-900 font-bold text-pink-600">⚡ 3 Campañas Listas</div>
             </div>
-            <div className="p-4 rounded-2xl bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/40 space-y-2">
+            <div className="p-5 rounded-3xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 space-y-2">
               <span className="font-extrabold text-purple-900 dark:text-purple-200 uppercase text-[10px]">3. Gerente de Ventas IA (CSO)</span>
               <p className="text-purple-800 dark:text-purple-300">Alinea a los cajeros y repositores en salón para destacar los productos en góndola y cajas.</p>
               <div className="pt-2 border-t border-purple-200 dark:border-purple-900 font-bold text-purple-600">🎯 Impulso en Salón Activo</div>
@@ -679,67 +762,67 @@ export default function MarketingAgentPage() {
         </div>
       )}
 
-      {/* TAB VERIFICADOR DE PRECIOS -- banners reales de los 3 kioscos del salón */}
+      {/* ══════════════════════ TAB 6: VERIFICADOR DE PRECIOS ══════════════════════ */}
       {tab === "kiosco" && (
         <div className="space-y-4">
-          <div className="card p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-xs">
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="font-extrabold text-sm text-gray-900 dark:text-white uppercase flex items-center gap-2">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
                 <Monitor className="w-4 h-4 text-pink-600" /> Ofertas en los Verificadores de Precio
               </h3>
               <button
                 onClick={openNewBannerForm}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold transition shadow-md shadow-pink-500/20"
               >
-                <ImagePlus className="w-3.5 h-3.5" /> Nuevo Banner
+                <ImagePlus className="w-4 h-4" /> Nuevo Banner
               </button>
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Estos creativos rotan en las 3 terminales de consulta de precios del salón de ventas. Subí una imagen horizontal para el mejor resultado.
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Estos creativos rotan en las 3 terminales de consulta de precios del salón de ventas.
             </p>
           </div>
 
           {kioskLoading ? (
-            <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-pink-600" /></div>
+            <div className="flex items-center justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-pink-600" /></div>
           ) : kioskBanners.length === 0 ? (
-            <div className="card p-8 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl text-center text-sm text-gray-500 dark:text-gray-400">
+            <div className="p-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl text-center text-sm text-slate-500 dark:text-slate-400">
               Todavía no hay banners cargados. Creá el primero para que empiece a rotar en salón.
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {[...kioskBanners].sort((a, b) => a.orden - b.orden).map((b, idx, arr) => (
-                <div key={b.id} className={`rounded-2xl border overflow-hidden bg-white dark:bg-slate-900 ${b.activo ? "border-gray-200 dark:border-slate-800" : "border-dashed border-gray-300 dark:border-slate-700 opacity-60"}`}>
-                  <div className="aspect-[16/9] bg-gray-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden">
+                <div key={b.id} className={`rounded-3xl border overflow-hidden bg-white dark:bg-slate-900 ${b.activo ? "border-slate-200 dark:border-slate-800 shadow-sm" : "border-dashed border-slate-300 dark:border-slate-700 opacity-60"}`}>
+                  <div className="aspect-[16/9] bg-slate-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden">
                     {b.imagen_url ? (
                       <img src={b.imagen_url} alt={b.titulo} className="w-full h-full object-cover" />
                     ) : (
-                      <ImagePlus className="w-8 h-8 text-gray-300 dark:text-slate-700" />
+                      <ImagePlus className="w-8 h-8 text-slate-300 dark:text-slate-700" />
                     )}
                   </div>
-                  <div className="p-3.5 space-y-2">
+                  <div className="p-4 space-y-2">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {b.etiqueta && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300">{b.etiqueta}</span>}
                       {b.descuento_texto && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">{b.descuento_texto}</span>}
-                      {!b.activo && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-gray-100 dark:bg-slate-800 text-gray-500">Inactivo</span>}
+                      {!b.activo && <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">Inactivo</span>}
                     </div>
-                    <p className="text-sm font-bold text-gray-900 dark:text-white leading-snug line-clamp-2">{b.titulo}</p>
-                    <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-slate-800">
+                    <p className="text-sm font-bold text-slate-900 dark:text-white leading-snug line-clamp-2">{b.titulo}</p>
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                       <div className="flex items-center gap-1">
-                        <button onClick={() => moveBanner(b, -1)} disabled={idx === 0} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer" title="Subir">
+                        <button onClick={() => moveBanner(b, -1)} disabled={idx === 0} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30" title="Subir">
                           <ArrowUp className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => moveBanner(b, 1)} disabled={idx === arr.length - 1} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer" title="Bajar">
+                        <button onClick={() => moveBanner(b, 1)} disabled={idx === arr.length - 1} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30" title="Bajar">
                           <ArrowDown className="w-3.5 h-3.5" />
                         </button>
                       </div>
                       <div className="flex items-center gap-1">
-                        <button onClick={() => toggleBannerActivo(b)} className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer ${b.activo ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" : "bg-gray-100 dark:bg-slate-800 text-gray-500"}`}>
+                        <button onClick={() => toggleBannerActivo(b)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${b.activo ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" : "bg-slate-100 dark:bg-slate-800 text-slate-500"}`}>
                           {b.activo ? "Activo" : "Pausado"}
                         </button>
-                        <button onClick={() => openEditBannerForm(b)} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer" title="Editar">
+                        <button onClick={() => openEditBannerForm(b)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" title="Editar">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => deleteBanner(b)} className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer" title="Eliminar">
+                        <button onClick={() => deleteBanner(b)} className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30" title="Eliminar">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -752,27 +835,25 @@ export default function MarketingAgentPage() {
 
           {/* MODAL DE CREAR/EDITAR BANNER */}
           {showBannerForm && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-extrabold text-base text-gray-900 dark:text-white">{editingBanner ? "Editar Banner" : "Nuevo Banner"}</h3>
-                  <button onClick={() => setShowBannerForm(false)} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer"><X className="w-5 h-5" /></button>
+            <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">{editingBanner ? "Editar Banner" : "Nuevo Banner"}</h3>
+                  <button onClick={() => setShowBannerForm(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"><X className="w-5 h-5" /></button>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-3 text-xs">
                   <label className="block">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400">Imagen del banner</span>
-                      <span className="text-[10px] font-bold text-pink-600 dark:text-pink-400">Recomendado: formato vertical (ej. 1080×1350px, tipo post de Instagram)</span>
+                      <span className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400">Imagen del banner</span>
                     </div>
-                    <div className="aspect-[4/5] max-h-64 rounded-2xl bg-gray-100 dark:bg-slate-800 border-2 border-dashed border-gray-300 dark:border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer relative group mx-auto">
+                    <div className="aspect-[4/5] max-h-64 rounded-2xl bg-slate-100 dark:bg-slate-800 border-2 border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer relative group mx-auto">
                       {bannerImagePreview ? (
                         <img src={bannerImagePreview} alt="preview" className="w-full h-full object-contain" />
                       ) : (
-                        <div className="flex flex-col items-center text-gray-400 text-center px-4">
+                        <div className="flex flex-col items-center text-slate-400 text-center px-4">
                           <ImagePlus className="w-8 h-8 mb-1" />
-                          <span className="text-xs font-bold">Subir imagen vertical</span>
-                          <span className="text-[10px] mt-1">Ideal formato vertical (4:5 o similar) -- se muestra completa en el verificador, sin recortar</span>
+                          <span className="text-xs font-bold">Subir imagen</span>
                         </div>
                       )}
                       <input
@@ -785,61 +866,61 @@ export default function MarketingAgentPage() {
                   </label>
 
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Título</label>
+                    <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Título</label>
                     <input
                       value={bannerForm.titulo}
                       onChange={(e) => setBannerForm((f) => ({ ...f, titulo: e.target.value }))}
                       placeholder="Ej: Carnicería Premium · Cortes al Vacío"
-                      className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Subtítulo (opcional)</label>
+                    <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Subtítulo (opcional)</label>
                     <input
                       value={bannerForm.subtitulo}
                       onChange={(e) => setBannerForm((f) => ({ ...f, subtitulo: e.target.value }))}
-                      className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Etiqueta</label>
+                      <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Etiqueta</label>
                       <input
                         value={bannerForm.etiqueta}
                         onChange={(e) => setBannerForm((f) => ({ ...f, etiqueta: e.target.value }))}
                         placeholder="OFERTA DEL DÍA"
-                        className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Texto de descuento</label>
+                      <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Texto de descuento</label>
                       <input
                         value={bannerForm.descuento_texto}
                         onChange={(e) => setBannerForm((f) => ({ ...f, descuento_texto: e.target.value }))}
                         placeholder="-20% OFF"
-                        className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
                       />
                     </div>
                   </div>
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-1">Color de acento (si no hay imagen)</label>
+                    <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Color de acento</label>
                     <select
                       value={bannerForm.color}
                       onChange={(e) => setBannerForm((f) => ({ ...f, color: e.target.value }))}
-                      className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-pink-500 text-gray-900 dark:text-white"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-white"
                     >
                       {KIOSK_COLORS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                     </select>
                   </div>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex items-center gap-2 cursor-pointer pt-1">
                     <input type="checkbox" checked={bannerForm.activo} onChange={(e) => setBannerForm((f) => ({ ...f, activo: e.target.checked }))} className="w-4 h-4" />
-                    <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Activo (se muestra ya en las terminales)</span>
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Activo (se muestra ya en las terminales)</span>
                   </label>
 
                   <button
                     onClick={submitBannerForm}
                     disabled={savingBanner}
-                    className="w-full py-3 rounded-xl bg-pink-600 hover:bg-pink-700 text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer mt-2"
+                    className="w-full py-3 rounded-2xl bg-pink-600 hover:bg-pink-700 text-white font-bold text-xs flex items-center justify-center gap-2 disabled:opacity-60 transition shadow-md shadow-pink-500/20"
                   >
                     {savingBanner ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                     {editingBanner ? "Guardar Cambios" : "Crear Banner"}
