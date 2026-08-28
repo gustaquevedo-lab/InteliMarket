@@ -116,8 +116,10 @@ async def _authed_request(db: AsyncSession, company_id: str, method: str, path: 
     token, row = await get_valid_token(db, company_id)
     base_url = _base_url(row)
     headers = {"Authorization": f"Bearer {token}"}
+    # Asegurar que el path use el prefijo /partners si no lo tiene
+    full_path = path if path.startswith("/partners") else f"/partners{path}"
     async with httpx.AsyncClient(base_url=base_url, timeout=30) as client:
-        resp = await client.request(method, path, json=json_body, headers=headers)
+        resp = await client.request(method, full_path, json=json_body, headers=headers)
     if resp.status_code >= 400:
         try:
             body = resp.json()
@@ -131,23 +133,28 @@ async def check_compliance(db: AsyncSession, company_id: str, cpf: str) -> dict:
     return await _authed_request(db, company_id, "GET", f"/customers/checkCompliance/{cpf}")
 
 
-async def create_pix(db: AsyncSession, company_id: str, monto: float, moneda: str, customer_cpf_cnpj: str) -> dict:
+async def create_pix(db: AsyncSession, company_id: str, monto: float, moneda: str, customer_cpf: str) -> dict:
     row = await _load_config(db, company_id)
     document_merchant = (row.config or {}).get("document_merchant")
     if not document_merchant:
-        raise PlugpayNotConfigured("Falta document_merchant (RUC) en la configuración de PlugPay.")
+        raise PlugpayNotConfigured("Falta document_merchant en la configuración de PlugPay.")
     return await _authed_request(db, company_id, "POST", "/transactionPix/create", {
         "originCurrencie": moneda,
         "value": monto,
-        "customerCPFCNPJ": customer_cpf_cnpj,
+        "customerCPF": customer_cpf,
         "documentMerchant": document_merchant,
     })
 
 
+async def get_pix_status(db: AsyncSession, company_id: str, referencia_interna: str) -> dict:
+    return await _authed_request(db, company_id, "GET", f"/transactionPix/status/{referencia_interna}")
+
+
+async def get_pix_qrcode(db: AsyncSession, company_id: str, referencia_interna: str) -> dict:
+    return await _authed_request(db, company_id, "GET", f"/transactionPix/qrcode/{referencia_interna}")
+
+
 async def quote_pix(db: AsyncSession, company_id: str, monto: float, moneda: str) -> dict:
-    # Endpoint documentado en el Swagger real solo con el summary, sin body/
-    # response -- este payload es una suposicion basada en el patron del
-    # resto de la API hasta confirmar con credenciales reales.
     row = await _load_config(db, company_id)
     document_merchant = (row.config or {}).get("document_merchant")
     return await _authed_request(db, company_id, "POST", "/transactionPix/quote", {
@@ -161,7 +168,7 @@ async def calcular_valor_parcelado(db: AsyncSession, company_id: str, monto: flo
     row = await _load_config(db, company_id)
     document_merchant = (row.config or {}).get("document_merchant")
     if not document_merchant:
-        raise PlugpayNotConfigured("Falta document_merchant (RUC) en la configuración de PlugPay.")
+        raise PlugpayNotConfigured("Falta document_merchant en la configuración de PlugPay.")
     return await _authed_request(db, company_id, "POST", "/transactionCreditoParcelado/calcularValor", {
         "originCurrencie": moneda,
         "value": monto,
@@ -174,7 +181,7 @@ async def start_credito_parcelado(db: AsyncSession, company_id: str, monto: floa
     row = await _load_config(db, company_id)
     document_merchant = (row.config or {}).get("document_merchant")
     if not document_merchant:
-        raise PlugpayNotConfigured("Falta document_merchant (RUC) en la configuración de PlugPay.")
+        raise PlugpayNotConfigured("Falta document_merchant en la configuración de PlugPay.")
     return await _authed_request(db, company_id, "POST", "/transactionCreditoParcelado/start", {
         "originCurrencie": moneda,
         "value": monto,
@@ -185,5 +192,9 @@ async def start_credito_parcelado(db: AsyncSession, company_id: str, monto: floa
     })
 
 
-async def get_credito_parcelado_status(db: AsyncSession, company_id: str, transaction_id: str) -> dict:
-    return await _authed_request(db, company_id, "GET", f"/transactionCreditoParcelado/id/{transaction_id}")
+async def get_credito_parcelado_status(db: AsyncSession, company_id: str, referencia_interna: str) -> dict:
+    return await _authed_request(db, company_id, "GET", f"/transactionCreditoParcelado/status/{referencia_interna}")
+
+
+async def cancel_credito_parcelado(db: AsyncSession, company_id: str, referencia_interna: str) -> dict:
+    return await _authed_request(db, company_id, "POST", f"/transactionCreditoParcelado/cancel/{referencia_interna}")

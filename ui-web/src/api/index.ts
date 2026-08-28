@@ -1302,15 +1302,22 @@ export const api = {
   },
   plugpay: {
     compliance: (cpf: string) => client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/compliance/${cpf}`),
-    createPix: (data: { monto: number; moneda?: string; customer_cpf_cnpj: string; sale_id?: string; customer_id?: string }) =>
+    createPix: (data: { monto: number; moneda?: string; customer_cpf?: string; customer_cpf_cnpj?: string; sale_id?: string; customer_id?: string }) =>
       client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/pix/create", data),
+    pixStatus: (referenciaInterna: string) =>
+      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/status/${referenciaInterna}`),
+    pixQrcode: (referenciaInterna: string) =>
+      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/qrcode/${referenciaInterna}`),
     quotePix: (data: { monto: number; moneda?: string }) =>
       client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/pix/quote", data),
     calcularParcelado: (data: { monto: number; moneda?: string; cuotas: number }) =>
       client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/credito-parcelado/calcular", data),
     startParcelado: (data: { monto: number; moneda?: string; cuotas: number; customer_cpf: string; customer_phone: string; sale_id?: string; customer_id?: string }) =>
       client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/credito-parcelado/start", data),
-    parceladoStatus: (id: string) => client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/${id}`),
+    parceladoStatus: (referenciaInterna: string) =>
+      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/${referenciaInterna}`),
+    cancelParcelado: (referenciaInterna: string) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/cancel/${referenciaInterna}`, {}),
     linkSale: (txnId: string, saleId: string) => client.patch<{ message: string }>(`/v1/plugpay/transactions/${txnId}/link-sale/${saleId}`, {}),
   },
   integrations: {

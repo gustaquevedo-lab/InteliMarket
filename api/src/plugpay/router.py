@@ -35,7 +35,8 @@ async def compliance(cpf: str, db: AsyncSession = Depends(get_db), user=Depends(
 @router.post("/pix/create", response_model=PlugpayTransactionResponse)
 async def pix_create(data: PixCreateRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     try:
-        result = await service.create_pix(db, user["company_id"], data.monto, data.moneda, data.customer_cpf_cnpj)
+        cpf = data.customer_cpf or data.customer_cpf_cnpj or ""
+        result = await service.create_pix(db, user["company_id"], data.monto, data.moneda, cpf)
         txn = await transactions_service.log_transaction(
             db, user["company_id"], sale_id=data.sale_id, customer_id=data.customer_id,
             tipo_operacion="pix", id_transacao=str(result.get("IdTransacao") or result.get("idTransacao") or ""),
@@ -51,6 +52,24 @@ async def pix_create(data: PixCreateRequest, db: AsyncSession = Depends(get_db),
                 tipo_operacion="pix", moneda_origen=data.moneda, monto_origen=data.monto,
                 exitosa=False, error_message=e.message, raw_response=e.body,
             )
+        return _error_response(e)
+
+
+@router.get("/pix/status/{referencia_interna}", response_model=PlugpayTransactionResponse)
+async def pix_status(referencia_interna: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.get_pix_status(db, user["company_id"], referencia_interna)
+        return PlugpayTransactionResponse(ok=True, data=result)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        return _error_response(e)
+
+
+@router.get("/pix/qrcode/{referencia_interna}", response_model=PlugpayTransactionResponse)
+async def pix_qrcode(referencia_interna: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.get_pix_qrcode(db, user["company_id"], referencia_interna)
+        return PlugpayTransactionResponse(ok=True, data=result)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
         return _error_response(e)
 
 
@@ -97,10 +116,19 @@ async def credito_start(data: StartParceladoRequest, db: AsyncSession = Depends(
         return _error_response(e)
 
 
-@router.get("/credito-parcelado/{transaction_id}", response_model=PlugpayTransactionResponse)
-async def credito_status(transaction_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+@router.get("/credito-parcelado/{referencia_interna}", response_model=PlugpayTransactionResponse)
+async def credito_status(referencia_interna: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     try:
-        result = await service.get_credito_parcelado_status(db, user["company_id"], transaction_id)
+        result = await service.get_credito_parcelado_status(db, user["company_id"], referencia_interna)
+        return PlugpayTransactionResponse(ok=True, data=result)
+    except (PlugpayNotConfigured, PlugpayApiError) as e:
+        return _error_response(e)
+
+
+@router.post("/credito-parcelado/cancel/{referencia_interna}", response_model=PlugpayTransactionResponse)
+async def credito_cancel(referencia_interna: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        result = await service.cancel_credito_parcelado(db, user["company_id"], referencia_interna)
         return PlugpayTransactionResponse(ok=True, data=result)
     except (PlugpayNotConfigured, PlugpayApiError) as e:
         return _error_response(e)

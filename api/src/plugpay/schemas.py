@@ -13,7 +13,8 @@ class ComplianceCheckResponse(BaseModel):
 class PixCreateRequest(BaseModel):
     monto: float
     moneda: str = "PYG"
-    customer_cpf_cnpj: str
+    customer_cpf: Optional[str] = None
+    customer_cpf_cnpj: Optional[str] = None
     sale_id: Optional[uuid.UUID] = None
     customer_id: Optional[uuid.UUID] = None
 
