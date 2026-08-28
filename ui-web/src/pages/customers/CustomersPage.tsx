@@ -147,9 +147,9 @@ export default function CustomersPage() {
       email: c.email || "",
       direccion: c.direccion || "",
       ciudad: c.ciudad || "",
-      departamento: c.departamento || "",
+      departamento: (c as any).departamento || "",
       credito_limite: c.credito_limite || 0,
-      condicion_iva: c.condicion_iva || "contribuyente",
+      condicion_iva: (c as any).condicion_iva || "contribuyente",
       activo: c.activo !== false,
     })
     setShowForm(true)

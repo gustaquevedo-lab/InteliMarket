@@ -2707,11 +2707,19 @@ export const api = {
   supplierKpis: {
     listPeriods: (supplierId: string) => client.get<any[]>(`/v1/supplier-kpis/periods?supplier_id=${supplierId}`),
     createPeriod: (data: any) => client.post<any>("/v1/supplier-kpis/periods", data),
-    getSummary: (periodId: string) => client.get<any>(`/v1/supplier-kpis/periods/${periodId}/summary`),
+    getSummary: (periodId: string, branchId?: string) => client.get<any>(`/v1/supplier-kpis/periods/${periodId}/summary`, { branch_id: branchId }),
     getDashboard: (companyId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: companyId || COMPANY_ID }),
     updateIndicator: (id: string, data: any) => client.put<any>(`/v1/supplier-kpis/indicators/${id}`, data),
+    bulkUpdateIndicators: (periodId: string, data: any) => client.put<any>(`/v1/supplier-kpis/periods/${periodId}/indicators/bulk`, data),
     deleteIndicator: (id: string) => client.delete<void>(`/v1/supplier-kpis/indicators/${id}`),
     addIndicator: (periodId: string, data: any) => client.post<any>(`/v1/supplier-kpis/periods/${periodId}/indicators`, data),
+  },
+  cupones: {
+    registrar: (data: any) => client.post<any>("/v1/cupones/registrar", data),
+    listarTickets: (params?: any) => client.get<any[]>("/v1/cupones/tickets", params),
+    listarClientes: (params?: any) => client.get<any[]>("/v1/cupones/clientes", params),
+    stats: (params?: any) => client.get<any>("/v1/cupones/stats", params),
+    aiInsights: (params?: any) => client.get<any>("/v1/cupones/ai-insights", params),
   },
   posTerminals: {
     list: () => client.get<any[]>(`/v1/pos-terminals`, { company_id: COMPANY_ID }),
@@ -2742,3 +2750,11 @@ export const api = {
     },
   },
 }
+
+export type CuponTicket = any
+export type CuponCliente = any
+export type CuponStats = any
+export type SupplierKpiPeriod = any
+export type SupplierKpiSummary = any
+export type SupplierKpiIndicator = any
+

@@ -5,7 +5,7 @@ import {
   Calendar, Layers, Clock, Zap, MessageSquare, DollarSign,
   PieChart, BarChart3, ChevronRight, ThumbsUp, Activity,
   Scale, ShieldAlert, Sparkles, Filter, Check, X, FileText,
-  UserCheck, AlertCircle, ShoppingBag, Eye, Wallet
+  UserCheck, AlertCircle, ShoppingBag, Eye, Wallet, Loader2
 } from "lucide-react"
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { api } from "../../api"
@@ -100,13 +100,12 @@ export default function FinanceAgentPage() {
       const res = await api.financeAgent.chat({
         company_id: companyId,
         message: textToSend,
-        context_tab: tab,
       })
 
       const botReply = {
         role: "assistant" as const,
-        content: res.reply || "No se pudo obtener una respuesta del Gerente Financiero IA.",
-        suggestions: res.suggested_prompts || []
+        content: res.response || (res as any).reply || "No se pudo obtener una respuesta del Gerente Financiero IA.",
+        suggestions: res.suggestions || (res as any).suggested_prompts || []
       }
       setMessages([...newMessages, botReply])
     } catch (err: any) {
