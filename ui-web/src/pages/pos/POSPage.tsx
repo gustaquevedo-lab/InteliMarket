@@ -228,6 +228,8 @@ const FORMA_PAGO_LABEL: Record<string, string> = {
   TARJETA_DINELCO: "Tarjeta Dinelco",
   QR: "QR / Transferencia",
   EXTRA_CLUB: "Extra Club (Crédito)",
+  PLUGPAY_PIX: "PIX Brasil (PlugPay)",
+  PLUGPAY_CREDITO: "Crédito Brasil (PlugPay)",
 }
 
 const DEFAULT_CUSTOMER: Customer = {
@@ -3646,7 +3648,15 @@ export default function POSPage() {
         }
         if (activeMethods.has("qr")) {
           const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) out.push({ forma_pago: "QR", monto, moneda: "PYG" })
+          if (monto > 0) {
+            if (plugpayEnabled && plugpayMethod === "pix") {
+              out.push({ forma_pago: "PLUGPAY_PIX", monto, moneda: "PYG" })
+            } else if (plugpayEnabled && plugpayMethod === "parcelado") {
+              out.push({ forma_pago: "PLUGPAY_CREDITO", monto, moneda: "PYG" })
+            } else {
+              out.push({ forma_pago: "QR", monto, moneda: "PYG" })
+            }
+          }
         }
         if (activeMethods.has("extra_club")) {
           const monto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
