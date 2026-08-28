@@ -14,59 +14,73 @@ export default function CapacitacionPage() {
   return (
     <div className="space-y-6">
       {/* ── COMMAND DECK HERO HEADER ── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/80 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/50">
-        <div className="absolute -right-10 -bottom-10 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute top-0 right-1/4 w-64 h-64 bg-violet-500/10 rounded-full blur-2xl pointer-events-none" />
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 text-white p-7 border border-indigo-500/20 shadow-2xl shadow-indigo-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-violet-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex items-center gap-5">
-            <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 border border-indigo-400/30 flex items-center justify-center shadow-lg shadow-indigo-500/30 flex-shrink-0">
-              <GraduationCap className="w-7 h-7 text-white" />
-              <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-400 border-2 border-slate-950 rounded-full animate-pulse" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="text-xl sm:text-2xl font-black font-mono tracking-tight text-white">
-                  Capacitación, Onboarding & Certificaciones
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1.5 backdrop-blur-sm">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                  Campus Extra Supermercado
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 border border-indigo-400/30 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                  <GraduationCap className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
                 </span>
               </div>
-              <p className="text-xs sm:text-sm text-slate-300/90 mt-1 max-w-2xl font-normal">
-                Inducción de cajeros, manipulación bromatológica INAN/HACCP, calibración de balanzas y certificación de servicio.
-              </p>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    GESTIÓN DE TALENTO & CERTIFICACIONES
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Campus Extra Supermercado
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Capacitación, Onboarding & Certificaciones
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Inducción de cajeros, manipulación bromatológica INAN/HACCP, calibración de balanzas y prevención de pérdidas
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2 self-start md:self-auto">
-            <span className="px-3 py-1 rounded-xl text-xs font-mono font-bold bg-slate-800/80 border border-slate-700/60 text-indigo-300 shadow-inner">
-              Nivel de Cumplimiento: 94.2%
-            </span>
+            {/* Micro pills */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado Matriz
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                ⭐ Cumplimiento: 94.2%
+              </span>
+            </div>
           </div>
         </div>
 
         {/* Mini KPI Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800/80">
-          <div className="bg-slate-900/60 backdrop-blur-md p-3.5 rounded-2xl border border-slate-800/80">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Cursos Activos</span>
-            <span className="text-lg font-black font-mono text-white mt-0.5 block">8 Programas</span>
+            <span className="text-2xl font-extrabold font-mono text-white block">8 Programas</span>
             <span className="text-[10px] text-indigo-400 font-medium">100% interactivos</span>
           </div>
-          <div className="bg-slate-900/60 backdrop-blur-md p-3.5 rounded-2xl border border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Colaboradores</span>
-            <span className="text-lg font-black font-mono text-emerald-400 mt-0.5 block">42 Asignados</span>
+            <span className="text-2xl font-extrabold font-mono text-emerald-400 block">42 Asignados</span>
             <span className="text-[10px] text-emerald-500 font-medium">96% asistencia</span>
           </div>
-          <div className="bg-slate-900/60 backdrop-blur-md p-3.5 rounded-2xl border border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Certificados Vigentes</span>
-            <span className="text-lg font-black font-mono text-cyan-400 mt-0.5 block">38 Empleados</span>
-            <span className="text-[10px] text-cyan-500 font-medium">Con carnet bromatológico</span>
+            <span className="text-2xl font-extrabold font-mono text-cyan-400 block">38 Empleados</span>
+            <span className="text-[10px] text-cyan-500 font-medium">Carnet INAN al día</span>
           </div>
-          <div className="bg-slate-900/60 backdrop-blur-md p-3.5 rounded-2xl border border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Progreso Promedio</span>
-            <span className="text-lg font-black font-mono text-violet-400 mt-0.5 block">87.5%</span>
+            <span className="text-2xl font-extrabold font-mono text-violet-400 block">87.5%</span>
             <span className="text-[10px] text-violet-500 font-medium">Evaluaciones aprobadas</span>
           </div>
         </div>

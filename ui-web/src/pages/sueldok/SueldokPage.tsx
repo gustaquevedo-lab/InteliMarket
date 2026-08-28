@@ -82,15 +82,19 @@ export default function SueldokPage() {
               <Building className="w-7 h-7 text-white" />
               <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-400 border-2 border-slate-950 rounded-full animate-pulse" />
             </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="text-xl sm:text-2xl font-black font-mono tracking-tight text-white">
-                  Sueld<span className="text-indigo-400">OK</span> · Nómina & Recursos Humanos
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="text-[10px] font-extrabold tracking-widest text-indigo-400 uppercase bg-indigo-500/10 px-2.5 py-0.5 rounded-md border border-indigo-500/20">
+                    GESTIÓN DE NÓMINA & RRHH
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 backdrop-blur-sm">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                    SSO Activo & Biometría
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Sueld<span className="text-indigo-400">OK</span> · Liquidación Salarial & RRHH
                 </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 backdrop-blur-sm">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                  SSO Activo & Biometría
-                </span>
               </div>
               <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl font-normal">
                 Extra Supermercado (RUC 80092451-2) — Liquidación salarial, aporte patronal IPS (16.5%), obrero (9%), horas extras y bonos de productividad en cajas POS.

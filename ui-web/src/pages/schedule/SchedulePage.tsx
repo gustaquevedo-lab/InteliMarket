@@ -111,15 +111,19 @@ export default function SchedulePage() {
               <Calendar className="w-7 h-7 text-white" />
               <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-400 border-2 border-slate-950 rounded-full animate-pulse" />
             </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="text-xl sm:text-2xl font-black font-mono tracking-tight text-white">
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20">
+                    GESTIÓN DE TURNOS & CUADRANTE
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Sincronizado con SueldOK
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
                   Turnos & Cuadrante Semanal
                 </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1.5 backdrop-blur-sm">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                  Sincronizado con SueldOK
-                </span>
               </div>
               <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl font-normal">
                 Extra Supermercado — Gestión de rotaciones de cajas, cobertura en horarios pico, francos compensatorios y cálculo proyectado de horas extras.

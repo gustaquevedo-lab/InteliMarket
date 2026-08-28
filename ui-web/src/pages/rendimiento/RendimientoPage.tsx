@@ -184,43 +184,64 @@ export default function RendimientoPage() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* ── HERO COMMAND DECK ── */}
-      <div className="relative overflow-hidden rounded-3xl p-6 lg:p-7 border border-slate-200/80 dark:border-slate-800/80 bg-gradient-to-br from-white via-slate-50/50 to-emerald-50/30 dark:from-slate-900 dark:via-slate-900/90 dark:to-emerald-950/20 shadow-xl shadow-slate-200/40 dark:shadow-none">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/25 border border-white/20 shrink-0">
-              <Trophy className="w-7 h-7" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md">
-                  Recursos Humanos & Performance
-                </span>
-                <span className="flex items-center gap-1 text-[11px] font-bold text-slate-500 font-mono">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Salón Pedro Juan Caballero
+    <div className="space-y-6 animate-fade-in-up pb-16">
+      {/* ── LUXURY COMMAND DECK HEADER ── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/90 text-white p-7 border border-emerald-500/20 shadow-2xl shadow-emerald-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 border border-emerald-400/30 text-white flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                  <Trophy className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
                 </span>
               </div>
-              <h1 className="text-xl lg:text-2xl font-black tracking-tight text-slate-900 dark:text-white mt-1">
-                Rendimiento & Evaluación de Personal
-              </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Ranking de productividad en caja, velocidad de escaneo, cumplimiento de turnos y atención al cliente en Extra Supermercado
-              </p>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
+                    RECURSOS HUMANOS & PERFORMANCE
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Salón Pedro Juan Caballero
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Rendimiento & Evaluación de Personal
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Ranking de productividad en caja, velocidad de escaneo, cumplimiento de turnos y atención al cliente en Extra Supermercado
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏢 Extra Supermercado Matriz
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
+                ⭐ Score Global: {avgScore} / 100
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <div className="flex bg-slate-800/80 p-1 rounded-2xl border border-slate-700">
               {(["daily", "weekly", "monthly"] as const).map((p) => (
                 <button
                   key={p}
                   onClick={() => setPeriod(p)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer capitalize ${
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer capitalize ${
                     period === p
-                      ? "bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm"
-                      : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                      ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20"
+                      : "text-slate-400 hover:text-white"
                   }`}
                 >
                   {p === "daily" ? "Hoy" : p === "weekly" ? "Esta Semana" : "Mes Actual"}
@@ -231,7 +252,7 @@ export default function RendimientoPage() {
             <select
               value={selectedSector}
               onChange={(e) => setSelectedSector(e.target.value)}
-              className="px-3.5 py-2 text-xs font-bold rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none focus:border-emerald-500 shadow-sm"
+              className="px-4 py-2.5 text-xs font-bold rounded-2xl border border-slate-700 bg-slate-800/90 text-white outline-none focus:border-emerald-500 shadow-sm"
             >
               <option value="TODOS">Todos los Sectores</option>
               <option value="Cajas">Cajas & Cobro</option>
