@@ -4839,7 +4839,7 @@ export default function POSPage() {
                   <div className={`font-bold text-xs truncate ${textHeading}`}>
                     {customer.nombre}
                   </div>
-                  {((customer as any).extra_club_numero || (customer as any).extra_club_activo || isClubMember) && (
+                  {((customer as any).extra_club_numero || (customer as any).extra_club_activo) && (
                     <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-600 dark:text-purple-300 text-[9px] font-black uppercase tracking-wider shrink-0 border border-purple-500/30 flex items-center gap-0.5">
                       <Star className="w-2.5 h-2.5 fill-purple-500" /> Extra Club
                     </span>
@@ -6376,7 +6376,7 @@ export default function POSPage() {
                         <span className="font-bold text-slate-800 dark:text-slate-200 truncate text-[11px] block">
                           {customer?.nombre || "Consumidor Final"}
                         </span>
-                        {((customer as any)?.extra_club_numero || (customer as any)?.extra_club_activo || isClubMember) && (
+                        {((customer as any)?.extra_club_numero || (customer as any)?.extra_club_activo) && (
                           <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-600 dark:text-purple-300 text-[8px] font-black uppercase tracking-wider shrink-0 border border-purple-500/30">
                             ★ Extra Club
                           </span>
