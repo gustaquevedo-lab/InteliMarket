@@ -6232,7 +6232,7 @@ export default function POSPage() {
       {/* ── 8. MODAL DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO (F12) ── */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-4xl w-full shadow-2xl text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-5xl w-full shadow-2xl text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col">
             
             {/* 1. HEADER BAR */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60">
@@ -6439,7 +6439,7 @@ export default function POSPage() {
                     </label>
                   </div>
 
-                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  <div className="grid grid-cols-6 gap-1.5 sm:gap-2">
                     {(() => {
                       let pMethods: any[] = []
                       try {
@@ -6468,9 +6468,9 @@ export default function POSPage() {
                           <button
                             key={m.id}
                             onClick={() => toggleActiveMethod(m.id as any)}
-                            className={`relative p-2.5 rounded-xl border font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all cursor-pointer select-none min-h-[58px] ${
+                            className={`relative px-2 py-2 rounded-xl border font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all cursor-pointer select-none min-h-[54px] ${
                               isActive
-                                ? "bg-emerald-600 text-white border-emerald-500 shadow-sm"
+                                ? "bg-emerald-600 text-white border-emerald-500 shadow-sm shadow-emerald-600/20"
                                 : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60"
                             }`}
                           >
@@ -6478,7 +6478,7 @@ export default function POSPage() {
                               {m.key}
                             </span>
                             <m.icon className="w-4 h-4" />
-                            <span className="text-center leading-tight truncate w-full font-semibold">{m.label}</span>
+                            <span className="text-center leading-tight truncate w-full text-[11px] font-bold">{m.label}</span>
                           </button>
                         )
                       })
@@ -6879,7 +6879,7 @@ export default function POSPage() {
 
                     {/* 4. QR / PIX (Bancard Zimple + PlugPay PIX) */}
                     {activeMethods.has("qr") && (
-                      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                      <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-2.5">
                         {/* Subselector Segmented Control */}
                         <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl gap-1 max-w-xs mx-auto">
                           <button
@@ -6935,22 +6935,24 @@ export default function POSPage() {
                         {/* SUB-PANEL 1: QR ZIMPLE */}
                         {qrSubMethod === "zimple" && (
                           <div className="flex flex-col items-center text-center space-y-2">
-                            <div className="w-24 h-24 bg-white rounded-2xl p-2 flex items-center justify-center shadow-xs border border-slate-200">
-                              <QrCode className="w-20 h-20 text-purple-600" />
-                            </div>
-                            <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple</div>
-                            {!isMultiPayment && (
-                              <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
-                                {formatPYG(totalPyg)} (R$ {totalBrl})
+                            <div className="flex items-center gap-2">
+                              <QrCode className="w-8 h-8 text-purple-600" />
+                              <div className="text-left">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple</div>
+                                {!isMultiPayment && (
+                                  <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
+                                    {formatPYG(totalPyg)} (R$ {totalBrl})
+                                  </div>
+                                )}
                               </div>
-                            )}
+                            </div>
 
                             {bancardQrState !== "aprobada" && (
                               <button
                                 type="button"
                                 onClick={handleBancardQR}
                                 disabled={!activePosConfig.bancardIp || bancardQrState === "esperando"}
-                                className="w-full max-w-xs mt-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
+                                className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
                               >
                                 {bancardQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
                                 <span>{bancardQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR Zimple"}</span>
@@ -6958,7 +6960,7 @@ export default function POSPage() {
                             )}
 
                             {bancardQrState === "aprobada" && bancardQrResult && (
-                              <div className="w-full max-w-xs p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5 text-left">
+                              <div className="w-full max-w-sm p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5 text-left">
                                 <div className="font-black">✓ {bancardQrResult.mensajeDisplay || "Pago Exitoso"}</div>
                                 <div className="font-posMono tabular-nums">Autorización {bancardQrResult.codigoAutorizacion} · Boleta {bancardQrResult.nroBoleta}</div>
                               </div>
@@ -6968,61 +6970,69 @@ export default function POSPage() {
 
                         {/* SUB-PANEL 2: PIX BRASIL */}
                         {qrSubMethod === "pix" && (
-                          <div className="flex flex-col items-center text-center space-y-2 w-full">
-                            {plugpayState === "esperando" && plugpayResult?.qrCodeStringImage ? (
-                              <div className="w-24 h-24 bg-white rounded-2xl p-1.5 flex items-center justify-center shadow-xs border border-slate-200">
-                                <img src={`data:image/png;base64,${plugpayResult.qrCodeStringImage}`} className="w-20 h-20" alt="PIX QR" />
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-lg bg-orange-50 dark:bg-orange-950 flex items-center justify-center text-orange-600">
+                                  <Smartphone className="w-3.5 h-3.5" />
+                                </div>
+                                <span className="font-bold text-xs text-slate-900 dark:text-white">PIX Brasil (PlugPay)</span>
                               </div>
-                            ) : (
-                              <div className="w-20 h-20 bg-white rounded-2xl p-2 flex items-center justify-center shadow-xs border border-slate-200">
-                                <QrCode className="w-16 h-16 text-orange-600" />
+                              <div className="text-right">
+                                <span className="text-xs font-posMono font-black text-orange-600 dark:text-orange-400">
+                                  {plugpayBrlValue ? `R$ ${plugpayBrlValue.toFixed(2)}` : `Gs. ${formatPYG(isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`}
+                                </span>
                               </div>
-                            )}
-                            <div className="font-bold text-xs text-slate-900 dark:text-white">PIX Brasil (PlugPay)</div>
-                            <div className="text-xs font-posMono font-black text-orange-600">
-                              {plugpayBrlValue ? `Valor Venta: R$ ${plugpayBrlValue.toFixed(2)}` : `Gs. ${formatPYG(isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg)}`}
                             </div>
 
                             {plugpayState === "idle" && (
-                              <div className="w-full max-w-xs space-y-2 text-left">
-                                <div>
-                                  <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">CPF del Cliente Brasileño (11 dígitos):</label>
+                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                                <div className="sm:col-span-8">
+                                  <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF (11 dígitos):</label>
                                   <input
                                     type="text"
                                     value={plugpayCpf}
                                     onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                                    placeholder="Ej: 52998224725"
-                                    className="w-full mt-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-orange-500 text-center"
+                                    placeholder="52998224725"
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-orange-500 text-center font-bold"
                                   />
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={handlePlugpayPix}
-                                  className="w-full py-2.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-orange-600/20"
-                                >
-                                  Generar QR PIX
-                                </button>
+                                <div className="sm:col-span-4">
+                                  <button
+                                    type="button"
+                                    onClick={handlePlugpayPix}
+                                    className="w-full py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-orange-600/20 flex items-center justify-center gap-1.5 h-[36px]"
+                                  >
+                                    <QrCode className="w-3.5 h-3.5" />
+                                    <span>Generar PIX</span>
+                                  </button>
+                                </div>
                               </div>
                             )}
 
                             {plugpayState === "esperando" && (
-                              <div className="space-y-2 text-center">
-                                <div className="flex items-center justify-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-                                  <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
-                                  <span>Esperando confirmación de PlugPay...</span>
+                              <div className="flex items-center justify-between p-2.5 bg-orange-50 dark:bg-orange-950/40 rounded-xl border border-orange-200 dark:border-orange-800">
+                                {plugpayResult?.qrCodeStringImage && (
+                                  <img src={`data:image/png;base64,${plugpayResult.qrCodeStringImage}`} className="w-14 h-14 rounded-lg bg-white p-1 border shrink-0" alt="PIX QR" />
+                                )}
+                                <div className="flex-1 px-2.5 text-left">
+                                  <div className="flex items-center gap-1 text-xs font-bold text-orange-700 dark:text-orange-300">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Esperando confirmación de PlugPay...</span>
+                                  </div>
                                 </div>
                                 <button
                                   type="button"
                                   onClick={resetBancardFlow}
-                                  className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
+                                  className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer shrink-0"
                                 >
-                                  Cancelar Operación
+                                  Cancelar
                                 </button>
                               </div>
                             )}
 
                             {plugpayState === "aprobada" && (
-                              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
+                              <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
                                 <div className="font-black">✓ Transacción PIX Aprobada</div>
                                 <div>ID: {plugpayResult?.IdTransacao}</div>
                               </div>
@@ -7032,46 +7042,54 @@ export default function POSPage() {
                       </div>
                     )}
 
-                    {/* 6. CRÉDITO BRASIL (PlugPay) */}
+                    {/* 5. CRÉDITO BRASIL (PlugPay) */}
                     {activeMethods.has("plugpay_credito") && (
-                      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center text-center w-full">
-                        <div className="w-full space-y-3">
-                          <div className="flex flex-col items-center">
-                            <div className="w-28 h-28 bg-white rounded-2xl p-2 flex items-center justify-center shadow-md mb-2 border border-slate-200">
-                              <CreditCard className="w-24 h-24 text-blue-600" />
+                      <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-2.5">
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950 flex items-center justify-center text-blue-600">
+                              <CreditCard className="w-4 h-4" />
                             </div>
-                            <div className="font-bold text-xs text-slate-900 dark:text-white">Crédito Brasil (PlugPay)</div>
-                            {plugpayBrlValue && (
-                              <div className="text-xs font-posMono font-black text-blue-600 mt-0.5">
+                            <div>
+                              <span className="font-black text-xs text-slate-900 dark:text-white">Crédito Brasil (PlugPay)</span>
+                              <span className="text-[10px] text-slate-400 block font-normal">Cobro parcelado internacional</span>
+                            </div>
+                          </div>
+                          {plugpayBrlValue && (
+                            <div className="text-right">
+                              <div className="text-[9px] text-slate-400 uppercase font-bold">Total a Financiar</div>
+                              <div className="text-xs font-posMono font-black text-blue-600 dark:text-blue-400">
                                 R$ {plugpayBrlValue.toFixed(2)}
                               </div>
-                            )}
-                          </div>
+                            </div>
+                          )}
+                        </div>
 
-                          {plugpayState === "idle" && (
-                            <div className="space-y-2 text-left">
+                        {plugpayState === "idle" && (
+                          <div className="space-y-2.5">
+                            <div className="grid grid-cols-3 gap-2">
                               <div>
-                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF del Cliente:</label>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF (11 dígitos):</label>
                                 <input
                                   type="text"
                                   value={plugpayCpf}
                                   onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                                  placeholder="Ej: 52998224725"
-                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center"
+                                  placeholder="52998224725"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
                                 />
                               </div>
                               <div>
-                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">WhatsApp:</label>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">WhatsApp:</label>
                                 <input
                                   type="text"
                                   value={plugpayPhone}
                                   onChange={(e) => setPlugpayPhone(e.target.value.replace(/\D/g, ""))}
-                                  placeholder="Ej: 48999999999"
-                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center"
+                                  placeholder="48999999999"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-blue-500 text-center font-bold"
                                 />
                               </div>
                               <div>
-                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Cuotas:</label>
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Cuotas:</label>
                                 <select
                                   value={plugpayCuotas}
                                   onChange={(e) => setPlugpayCuotas(Number(e.target.value))}
@@ -7082,16 +7100,17 @@ export default function POSPage() {
                                   ))}
                                 </select>
                               </div>
-                              <button
-                                type="button"
-                                onClick={handlePlugpayParcelado}
-                                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-md shadow-blue-600/20"
-                              >
-                                Iniciar Crédito Parcelado
-                              </button>
                             </div>
-                          )}
-                        </div>
+                            <button
+                              type="button"
+                              onClick={handlePlugpayParcelado}
+                              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-blue-600/20 flex items-center justify-center gap-2"
+                            >
+                              <CreditCard className="w-4 h-4" />
+                              <span>Iniciar Crédito Parcelado en Terminal</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
 
