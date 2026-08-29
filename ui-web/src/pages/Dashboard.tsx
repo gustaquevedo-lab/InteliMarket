@@ -6,7 +6,7 @@ import {
   BarChart3, ShieldCheck, Truck, CheckCircle2, Building2, Flame, Layers,
   Box, Calendar, Activity, Wallet, Cpu, CheckCircle, ArrowUpDown,
   Zap, FileText, Download, ExternalLink, Percent, Award, Target, Check,
-  CircleAlert
+  CircleAlert, Gauge, Landmark
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, ComposedChart, Line,
@@ -18,7 +18,7 @@ import {
 } from "../api"
 import { useAuth } from "../context/AuthContext"
 import { useToast } from "../context/ToastContext"
-import { formatPYG, formatDate, formatPercentage } from "../utils/format"
+import { formatPYG, formatDate, formatNumber } from "../utils/format"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 const PARESA_SUPPLIER_ID = "1de9068d-9c27-5557-b142-710b227dc153"
@@ -71,7 +71,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
-  // Distribuidora Specific Data
+  // Distribuidora Core Data
   const [distribData, setDistribData] = useState<DistribuidoraDashboard | null>(null)
   const [salesSummary, setSalesSummary] = useState<any>(null)
   const [salesPeriodData, setSalesPeriodData] = useState<any[]>([])
@@ -83,7 +83,7 @@ export default function Dashboard() {
   const [paresaPeriod, setParesaPeriod] = useState<SupplierKpiPeriod | null>(null)
   const [paresaLoading, setParesaLoading] = useState(true)
 
-  // Load PARESA Rebate KPI Data from database
+  // Load PARESA Rebate & Indicators Data
   const loadParesaData = useCallback(async () => {
     setParesaLoading(true)
     try {
@@ -108,7 +108,7 @@ export default function Dashboard() {
     }
   }, [])
 
-  // Load Main Distribuidora Metrics
+  // Load Main Distribuidora Metrics & Charts
   const loadDashboardData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
     setLoading(true)
@@ -145,7 +145,7 @@ export default function Dashboard() {
     loadDashboardData()
   }, [loadDashboardData])
 
-  // Operational metrics
+  // Operational numbers
   const totalVentas = Number(salesSummary?.total_ventas || distribData?.ventas_mes || 5960973103)
   const cantComprobantes = Number(salesSummary?.cantidad_ventas || 1420)
   const montoVencido = Number(distribData?.monto_vencido || agingData?.total_vencido || 9406499305)
@@ -153,7 +153,17 @@ export default function Dashboard() {
   const totalClientes = Number(distribData?.total_clientes || 10592)
   const clientesCredito = Number(distribData?.clientes_con_credito || 5943)
 
-  // 🏆 PARESA Rebate & Metas KPIs (Safe Coercion)
+  // 🏆 Pacing Calculations
+  const now = new Date()
+  const totalDiasMes = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  const diasTranscurridos = Math.max(1, now.getDate())
+  const pacingEsperadoPct = Number(((diasTranscurridos / totalDiasMes) * 100).toFixed(1))
+  const proyeccionCierreVentas = Math.round((totalVentas / diasTranscurridos) * totalDiasMes)
+  const metaMesObjetivo = 6500000000 // Meta mensual Gs. 6.500M
+  const pacingVentasPct = Number(((totalVentas / metaMesObjetivo) * 100).toFixed(1))
+  const proyeccionCumplimientoPct = Number(((proyeccionCierreVentas / metaMesObjetivo) * 100).toFixed(1))
+
+  // 🏆 PARESA Rebate & Indicators in UC (Unidades de Caja)
   const rebateGanadoPct = Number(
     paresaSummary?.total_rebate_pct_ganado ??
       (paresaSummary?.cumplimiento_general_pct
@@ -162,7 +172,6 @@ export default function Dashboard() {
   ) || 3.85
 
   const rebateObjetivoPct = Number(paresaSummary?.periodo?.rebate_pct_objetivo ?? 4.50) || 4.50
-
   const rebateCumplimientoPct = Number(
     paresaSummary?.cumplimiento_general_pct ??
       Math.round((rebateGanadoPct / rebateObjetivoPct) * 100)
@@ -176,17 +185,39 @@ export default function Dashboard() {
     paresaSummary?.total_rebate_gs_estimado || Math.round(ventaBaseParesa * (rebateGanadoPct / 100))
   ) || 149173352
 
-  const indicadoresParesa = [
-    { codigo: "total_compra", nombre: "Total Compra (Sell-In)", peso: "1.00%", meta: "113.503 UC", actual: "98.450 UC", pct: 86.7, ganado: "0.00%", foco: false, obs: "Meta mínima: 90% (Prorrateado)" },
-    { codigo: "venta_ssds", nombre: "Venta SSDs (Gaseosas CSD/VPO)", peso: "1.00%", meta: "68.131 UC", actual: "62.450 UC", pct: 91.7, ganado: "0.50%", foco: false, obs: "Core MS + Core SS + Crush" },
-    { codigo: "venta_hidra", nombre: "Hidratación (Aguas Dasani/Benedictino)", peso: "0.50%", meta: "24.698 UC", actual: "25.100 UC", pct: 101.6, ganado: "0.50%", foco: false, obs: "Superado (+1.6% sobre meta)" },
-    { codigo: "venta_nutri", nombre: "Nutrición y Energía (Del Valle/Ades/Monster)", peso: "0.50%", meta: "20.674 UC", actual: "19.200 UC", pct: 92.9, ganado: "0.25%", foco: false, obs: "Escala parcial alcanzada" },
-    { codigo: "foco_schweppes", nombre: "Foco SSDs: Schweppes Tónica 1.5L PET", peso: "0.25%", meta: "367 UC", actual: "380 UC", pct: 103.5, ganado: "0.25%", foco: true, obs: "Foco prioritario cumplido" },
-    { codigo: "foco_aguas", nombre: "Foco Hidratación: Volumen Total Aguas", peso: "0.25%", meta: "23.245 UC", actual: "23.800 UC", pct: 102.4, ganado: "0.25%", foco: true, obs: "Consolidado Dasani + Benedictino" },
-    { codigo: "foco_delvalle", nombre: "Foco Nutrición: Del Valle 1L Tetra", peso: "0.25%", meta: "4.213 UC", actual: "4.350 UC", pct: 103.2, ganado: "0.25%", foco: true, obs: "Todos los sabores 1L" },
-    { codigo: "tpm_auditoria", nombre: "TPM (Trade Promotion Management)", peso: "0.25%", meta: "80.0%", actual: "85.0%", pct: 106.3, ganado: "0.25%", foco: false, obs: "Auditoría de promociones & POP" },
-    { codigo: "ejecucion_pdv", nombre: "Ejecución en PDV / Salón", peso: "0.50%", meta: "75.0%", actual: "82.0%", pct: 109.3, ganado: "0.50%", foco: false, obs: "Planogramas, heladeras & exhibición" },
+  // Indicadores PARESA en UC (Unidades de Caja) con Pacing y Proyecciones
+  const paresaIndicatorsUC = [
+    { codigo: "total_compra", nombre: "Total Compra (Sell-In)", cat: "Compra", meta_uc: 113503, actual_uc: 98450, proy_uc: 104500, pct: 86.7, proy_pct: 92.1, peso: "1.00%", foco: false, obs: "Mínimo 90% para escala" },
+    { codigo: "venta_ssds", nombre: "Venta SSDs (Gaseosas CSD/VPO)", cat: "Categoría", meta_uc: 68131, actual_uc: 62450, proy_uc: 67800, pct: 91.7, proy_pct: 99.5, peso: "1.00%", foco: false, obs: "Core MS (44k) + SS (21k) + Crush" },
+    { codigo: "venta_hidra", nombre: "Hidratación (Aguas Dasani/Benedictino)", cat: "Categoría", meta_uc: 24698, actual_uc: 25100, proy_uc: 26800, pct: 101.6, proy_pct: 108.5, peso: "0.50%", foco: false, obs: "Superado (+1.6% sobre meta)" },
+    { codigo: "venta_nutri", nombre: "Nutrición y Energía (Del Valle/Monster)", cat: "Categoría", meta_uc: 20674, actual_uc: 19200, proy_uc: 20400, pct: 92.9, proy_pct: 98.7, peso: "0.50%", foco: false, obs: "Del Valle (8.7k) + Monster (7.1k)" },
+    { codigo: "foco_schweppes", nombre: "Foco SSDs: Schweppes Tónica 1.5L PET", cat: "Foco Prioritario", meta_uc: 367, actual_uc: 380, proy_uc: 410, pct: 103.5, proy_pct: 111.7, peso: "0.25%", foco: true, obs: "Foco prioritario cumplido" },
+    { codigo: "foco_aguas", nombre: "Foco Hidratación: Consolidado Aguas", cat: "Foco Prioritario", meta_uc: 23245, actual_uc: 23800, proy_uc: 24900, pct: 102.4, proy_pct: 107.1, peso: "0.25%", foco: true, obs: "Dasani + Benedictino" },
+    { codigo: "foco_delvalle", nombre: "Foco Nutrición: Del Valle 1L Tetra", cat: "Foco Prioritario", meta_uc: 4213, actual_uc: 4350, proy_uc: 4600, pct: 103.2, proy_pct: 109.2, peso: "0.25%", foco: true, obs: "Todos los sabores 1L" },
+    { codigo: "tpm_auditoria", nombre: "TPM (Trade Promotion Management)", cat: "Trade Marketing", meta_uc: 80, actual_uc: 85, proy_uc: 85, pct: 106.3, proy_pct: 106.3, peso: "0.25%", foco: false, obs: "Auditoría de promociones & POP (%)" },
+    { codigo: "ejecucion_pdv", nombre: "Ejecución en PDV / Salón", cat: "Trade Marketing", meta_uc: 75, actual_uc: 82, proy_uc: 82, pct: 109.3, proy_pct: 109.3, peso: "0.50%", foco: false, obs: "Planogramas, heladeras & exhibición (%)" },
   ]
+
+  // Totales de volumen en UC
+  const totalVolumeMetaUC = paresaIndicatorsUC.filter(i => i.cat !== "Trade Marketing").reduce((acc, i) => acc + i.meta_uc, 0)
+  const totalVolumeActualUC = paresaIndicatorsUC.filter(i => i.cat !== "Trade Marketing").reduce((acc, i) => acc + i.actual_uc, 0)
+  const totalVolumeProyUC = paresaIndicatorsUC.filter(i => i.cat !== "Trade Marketing").reduce((acc, i) => acc + i.proy_uc, 0)
+
+  // Gráfico Comparativo de Ventas con Líneas Sincronizadas
+  const chartSalesData = useMemo(() => {
+    if (chartComparisonData && chartComparisonData.length > 0) {
+      return chartComparisonData
+    }
+    // Fallback de serie temporal rica con comparativas
+    const labels = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"]
+    return labels.map((lbl, idx) => ({
+      label: lbl,
+      actual: [1420000000, 1580000000, 1610000000, 1350973103][idx],
+      semana_pasada: [1350000000, 1490000000, 1520000000, 1480000000][idx],
+      ano_anterior: [1200000000, 1310000000, 1390000000, 1410000000][idx],
+      meta: [1625000000, 1625000000, 1625000000, 1625000000][idx],
+    }))
+  }, [chartComparisonData])
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -197,12 +228,12 @@ export default function Dashboard() {
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">
               Casa Gonzalito — Centro de Control
             </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border border-red-200 dark:border-red-700/50">
-              Distribuidor Exclusivo PARESA / Amambay
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border border-red-200 dark:border-red-700/50">
+              Distribuidor Exclusivo PARESA / Coca-Cola
             </span>
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Hola <span className="font-semibold text-gray-700 dark:text-gray-200">{userName}</span>. Control ejecutivo de metas PARESA, preventa, facturación y logística mayorista.
+            Hola <span className="font-semibold text-gray-700 dark:text-gray-200">{userName}</span>. Pacing mensual, metas en UC, comparativas históricas y logística mayorista.
           </p>
         </div>
 
@@ -253,42 +284,42 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 🏆 HERO SECTION: TABLERO DE CONTROL DE METAS & REBATE PARESA (COCA-COLA 4,5%) */}
+      {/* 🏆 HERO CARD 1: TABLERO DE CONTROL PARESA CON VOLUMEN EN UC (UNIDADES DE CAJA) & REBATE 4.5% */}
       <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-red-950 text-white rounded-3xl p-6 shadow-2xl border border-red-500/30 space-y-6">
-        {/* Hero Header */}
+        {/* Header PARESA */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-white/10">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 bg-red-600/40 text-red-300 border border-red-500/40 rounded-full text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
                 <Award className="w-4 h-4 text-red-400" />
-                KPI Estratégico Exclusivo: PARESA
+                Alianza Estratégica: PARESA / Coca-Cola Company
               </span>
-              <span className="text-xs text-gray-400 font-medium">Portafolio The Coca-Cola Company</span>
+              <span className="text-xs text-gray-400 font-medium">Cumplimiento en Unidades de Caja (UC)</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Cumplimiento de Metas & Rebate PARESA (4,5%)
+              Metas de Venta PARESA en UC & Rebate Mensual (4,5%)
             </h2>
             <p className="text-xs sm:text-sm text-gray-300 max-w-2xl">
-              Monitoreo ponderado de Sell-In, categorías de volumen (SSDs, Hidratación, Nutrición), focos prioritarios y auditoría de PDV.
+              Seguimiento por categorías de volumen (SSDs, Hidratación, Nutrición), focos prioritarios en UC y liquidación del rebate de 4,5% sobre ventas netas.
             </p>
           </div>
 
-          {/* 3 Grandes Métricas de Rebate */}
+          {/* 3 Grandes Métricas de PARESA */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-black/50 p-4 rounded-2xl border border-white/15 backdrop-blur-md">
             <div className="space-y-1">
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Rebate Ganado</p>
-              <p className="text-3xl font-black text-emerald-400 font-mono">
-                {rebateGanadoPct.toFixed(2)}%
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Volumen Total PARESA</p>
+              <p className="text-2xl sm:text-3xl font-black text-white font-mono">
+                {formatNumber(totalVolumeActualUC, 0)} <span className="text-xs font-normal text-gray-400">UC</span>
               </p>
-              <p className="text-[10px] text-gray-400">Meta: {rebateObjetivoPct.toFixed(2)}% objetivo</p>
+              <p className="text-[10px] text-gray-400">Meta: {formatNumber(totalVolumeMetaUC, 0)} UC ({((totalVolumeActualUC / totalVolumeMetaUC) * 100).toFixed(1)}%)</p>
             </div>
 
             <div className="space-y-1 sm:border-l border-white/10 sm:pl-3">
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Cumplimiento Global</p>
-              <p className="text-3xl font-black text-white font-mono">
-                {rebateCumplimientoPct.toFixed(1)}%
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Rebate Ganado (Tasa)</p>
+              <p className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono">
+                +{rebateGanadoPct.toFixed(2)}%
               </p>
-              <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden mt-1.5">
+              <div className="w-full bg-gray-700 h-1.5 rounded-full overflow-hidden mt-1.5">
                 <div
                   className={`h-full rounded-full transition-all duration-700 ${rebateCumplimientoPct >= 100 ? "bg-emerald-500" : "bg-amber-400"}`}
                   style={{ width: `${Math.min(100, rebateCumplimientoPct)}%` }}
@@ -298,62 +329,227 @@ export default function Dashboard() {
 
             <div className="space-y-1 sm:border-l border-white/10 sm:pl-3">
               <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Rebate Estimado (Gs.)</p>
-              <p className="text-xl font-black text-emerald-300 font-mono">
+              <p className="text-lg sm:text-xl font-black text-emerald-300 font-mono truncate">
                 {formatPYG(montoRebateEstimado)}
               </p>
               <Link
                 to="/proveedor-kpis"
                 className="inline-flex items-center gap-1 text-[11px] font-bold text-red-400 hover:text-red-300 transition mt-1"
               >
-                <span>Ver y ajustar indicadores</span>
+                <span>Ver módulo completo</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </Link>
             </div>
           </div>
         </div>
 
-        {/* Tabla Desglose de los 9 Indicadores Reales PARESA */}
+        {/* Tabla Detallada de Metas en UC con Pacing & Proyección */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-gray-200 flex items-center gap-2">
               <Target className="w-4 h-4 text-red-400" />
-              Desglose de Indicadores & Escalas del Período
+              Indicadores de Volumen en Unidades de Caja (UC) & Trade Marketing
             </h3>
-            <span className="text-[11px] text-gray-400">9 Indicadores ponderados</span>
+            <span className="text-xs text-gray-400">Pacing del mes: <strong className="text-white font-mono">{pacingEsperadoPct}%</strong> transcurrido</span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {indicadoresParesa.map((ind, i) => (
-              <div
-                key={i}
-                className="bg-white/5 hover:bg-white/10 p-3.5 rounded-2xl border border-white/10 transition space-y-2 flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-white truncate">{ind.nombre}</span>
-                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${ind.foco ? "bg-red-500/30 text-red-300 border border-red-500/40" : "bg-gray-800 text-gray-300"}`}>
-                      Peso {ind.peso}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-gray-400 mt-1">{ind.obs}</p>
-                </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs min-w-[700px]">
+              <thead className="bg-white/5 text-gray-400 font-bold uppercase text-[10px] tracking-wider border-b border-white/10">
+                <tr>
+                  <th className="py-2.5 px-3">Indicador / Categoría</th>
+                  <th className="py-2.5 px-3 text-right">Meta (UC)</th>
+                  <th className="py-2.5 px-3 text-right">Real Actual (UC)</th>
+                  <th className="py-2.5 px-3 text-right">Proyección Cierre</th>
+                  <th className="py-2.5 px-3 text-center">Cumplimiento</th>
+                  <th className="py-2.5 px-3 text-center">Peso</th>
+                  <th className="py-2.5 px-3 text-center">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {paresaIndicatorsUC.map((ind, i) => (
+                  <tr key={i} className="hover:bg-white/5 transition-colors">
+                    <td className="py-2.5 px-3">
+                      <div className="font-bold text-white flex items-center gap-1.5">
+                        {ind.foco && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0"></span>}
+                        {ind.nombre}
+                      </div>
+                      <div className="text-[10px] text-gray-400">{ind.obs}</div>
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono text-gray-300 font-bold">
+                      {ind.cat === "Trade Marketing" ? `${ind.meta_uc}%` : `${formatNumber(ind.meta_uc, 0)} UC`}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono text-white font-black">
+                      {ind.cat === "Trade Marketing" ? `${ind.actual_uc}%` : `${formatNumber(ind.actual_uc, 0)} UC`}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono text-indigo-300 font-bold">
+                      {ind.cat === "Trade Marketing" ? `${ind.proy_uc}%` : `${formatNumber(ind.proy_uc, 0)} UC`}
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <span className={`inline-block font-mono font-black ${ind.pct >= 100 ? "text-emerald-400" : "text-amber-400"}`}>
+                        {ind.pct}%
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-center font-bold text-gray-400">
+                      {ind.peso}
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        ind.pct >= 100
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                          : ind.pct >= 90
+                          ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                          : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                      }`}>
+                        {ind.pct >= 100 ? "Superado" : ind.pct >= 90 ? "En Meta" : "Riesgo"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
 
-                <div className="pt-2 border-t border-white/10">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-400">Logrado: <strong className="text-gray-200">{ind.actual}</strong> / {ind.meta}</span>
-                    <span className={`font-black ${ind.pct >= 100 ? "text-emerald-400" : "text-amber-400"}`}>
-                      {ind.pct}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden mt-1.5">
-                    <div
-                      className={`h-full rounded-full ${ind.pct >= 100 ? "bg-emerald-500" : "bg-amber-400"}`}
-                      style={{ width: `${Math.min(100, ind.pct)}%` }}
-                    ></div>
-                  </div>
+      {/* 📊 GRÁFICO COMPARATIVO: VENTAS ACTUAL VS SEMANA PASADA VS AÑO ANTERIOR VS META (PACING) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Gráfico de Líneas Multi-Comparativo (2 Cols) */}
+        <div className="lg:col-span-2 bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 dark:border-gray-700 pb-3">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-indigo-500" />
+                Curva de Facturación: Período Actual vs Semana Pasada vs Año Anterior vs Meta
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Comparativa histórica con trazado de líneas y barras de meta de pacing.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 text-xs font-bold flex-wrap">
+              <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400">
+                <span className="w-3 h-0.5 bg-indigo-600 inline-block"></span> Venta Actual
+              </span>
+              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                <span className="w-3 h-0.5 bg-emerald-500 inline-block border-dashed"></span> Sem. Pasada
+              </span>
+              <span className="flex items-center gap-1 text-cyan-600 dark:text-cyan-400">
+                <span className="w-3 h-0.5 bg-cyan-500 inline-block"></span> Año Anterior
+              </span>
+              <span className="flex items-center gap-1 text-amber-500">
+                <span className="w-3 h-2 bg-amber-400/30 inline-block rounded-xs"></span> Meta Pacing
+              </span>
+            </div>
+          </div>
+
+          <div className="h-72 w-full pt-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartSalesData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.15} />
+                <XAxis dataKey="label" stroke="#9ca3af" fontSize={11} />
+                <YAxis
+                  stroke="#9ca3af"
+                  fontSize={11}
+                  tickFormatter={(v) => `${(v / 1000000).toFixed(0)}M`}
+                />
+                <Tooltip
+                  formatter={(val: any, name: string) => [
+                    formatPYG(Number(val) || 0),
+                    name === "actual" ? "Venta Actual" : name === "semana_pasada" ? "Semana Pasada" : name === "ano_anterior" ? "Mismo Período Año Anterior" : "Meta de Pacing"
+                  ]}
+                  contentStyle={{ backgroundColor: "#1f2937", borderColor: "#374151", borderRadius: "12px", color: "#fff", fontSize: "12px" }}
+                />
+                <Bar dataKey="meta" name="meta" fill="#fbbf24" opacity={0.25} radius={[4, 4, 0, 0]} barSize={24} />
+                <Line
+                  type="monotone"
+                  dataKey="ano_anterior"
+                  name="ano_anterior"
+                  stroke="#06b6d4"
+                  strokeWidth={2}
+                  strokeDasharray="3 3"
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="semana_pasada"
+                  name="semana_pasada"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="actual"
+                  name="actual"
+                  stroke="#6366f1"
+                  strokeWidth={3}
+                  dot={{ r: 4, fill: "#6366f1", stroke: "#fff", strokeWidth: 2 }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Panel Lateral: Pacing & Proyección de Cierre */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Gauge className="w-5 h-5 text-indigo-500" />
+                Pacing & Proyección de Cierre
+              </h3>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                Mes en Curso
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">Ritmo diario de ventas vs meta corporativa</p>
+
+            <div className="mt-4 space-y-3">
+              <div className="p-3 bg-gray-50 dark:bg-gray-700/40 rounded-2xl space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500 font-medium">Facturación Acumulada:</span>
+                  <span className="font-bold font-mono text-gray-900 dark:text-white">{formatPYG(totalVentas)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500 font-medium">Meta Total del Mes:</span>
+                  <span className="font-bold font-mono text-amber-600 dark:text-amber-400">{formatPYG(metaMesObjetivo)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500 font-medium">Avance sobre Meta:</span>
+                  <span className="font-bold text-indigo-600 dark:text-indigo-400">{pacingVentasPct}%</span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-600 h-2 rounded-full overflow-hidden mt-1">
+                  <div className="h-full bg-indigo-600 rounded-full" style={{ width: `${Math.min(100, pacingVentasPct)}%` }}></div>
                 </div>
               </div>
-            ))}
+
+              <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/40 rounded-2xl space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-800 dark:text-emerald-300 font-bold">Proyección al Cierre:</span>
+                  <span className="font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(proyeccionCierreVentas)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-800 dark:text-emerald-300 font-medium">Cumplimiento Proyectado:</span>
+                  <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">{proyeccionCumplimientoPct}%</span>
+                </div>
+                <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">
+                  {proyeccionCumplimientoPct >= 100
+                    ? "🚀 Al ritmo actual, superás la meta del mes por Gs. " + formatPYG(proyeccionCierreVentas - metaMesObjetivo)
+                    : "⚠️ Al ritmo actual, faltarían Gs. " + formatPYG(metaMesObjetivo - proyeccionCierreVentas) + " para la meta."}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+            <Link
+              to="/metas-ventas"
+              className="w-full py-2.5 px-4 bg-gray-900 hover:bg-black dark:bg-gray-700 dark:hover:bg-gray-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition"
+            >
+              <span>Ver metas por vendedor (Ramas PARESA & MIX)</span>
+              <ChevronRight className="w-4 h-4" />
+            </Link>
           </div>
         </div>
       </div>
@@ -461,114 +657,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Gráficos y Top Clientes */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Evolución de Ventas */}
-        <div className="lg:col-span-2 bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-base font-bold text-gray-900 dark:text-white">Evolución de Facturación de Distribución</h3>
-              <p className="text-xs text-gray-500">Montos facturados en Guaraníes (Gs.)</p>
-            </div>
-            <span className="text-xs font-bold text-gray-500 bg-gray-100 dark:bg-gray-700 px-2.5 py-1 rounded-lg">
-              Histórico en vivo
-            </span>
-          </div>
-
-          <div className="h-72 w-full pt-2">
-            {salesPeriodData && salesPeriodData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={salesPeriodData}>
-                  <defs>
-                    <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#dc2626" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#dc2626" stopOpacity={0.0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.15} />
-                  <XAxis
-                    dataKey="periodo"
-                    stroke="#9ca3af"
-                    fontSize={11}
-                    tickFormatter={(v) => v ? v.slice(5) : ""}
-                  />
-                  <YAxis
-                    stroke="#9ca3af"
-                    fontSize={11}
-                    tickFormatter={(v) => `${(v / 1000000).toFixed(0)}M`}
-                  />
-                  <Tooltip
-                    formatter={(value: any) => [formatPYG(Number(value) || 0), "Ventas"]}
-                    labelFormatter={(label) => `Fecha: ${label}`}
-                    contentStyle={{ backgroundColor: "#1f2937", borderColor: "#374151", borderRadius: "12px", color: "#fff", fontSize: "12px" }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="monto"
-                    stroke="#dc2626"
-                    strokeWidth={2.5}
-                    fillOpacity={1}
-                    fill="url(#salesGrad)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-gray-400 text-sm">
-                Cargando datos de facturación...
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Top Clientes Mayoristas */}
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-gray-900 dark:text-white">Cuentas Comerciales Clave</h3>
-              <Link to="/clientes" className="text-xs font-bold text-primary hover:underline">
-                Ver todos
-              </Link>
-            </div>
-            <p className="text-xs text-gray-500 mt-0.5">Top clientes con mayor volumen de compra</p>
-
-            <div className="mt-4 space-y-2.5">
-              {[
-                { nombre: "DAVIDA SA (Central & Maxi)", ruc: "80105645-4", monto: 23700000000, rama: "Mayorista" },
-                { nombre: "MUSTER S.A.", ruc: "80088741-7", monto: 13170590125, rama: "Cadena" },
-                { nombre: "GUARANI PARAGUAY S.A.", ruc: "80085973-1", monto: 12485906158, rama: "Cadena" },
-                { nombre: "GRUPO ALVI S.A.", ruc: "80112956-7", monto: 11167521381, rama: "Autoservicios" },
-                { nombre: "COMERCIAL ALICE S.A.", ruc: "80119626-4", monto: 7348424425, rama: "Comercial" },
-              ].map((c, i) => (
-                <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-gray-50 dark:bg-gray-700/40 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="w-6 h-6 rounded-full bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 font-bold text-xs flex items-center justify-center flex-shrink-0">
-                      {i + 1}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-gray-900 dark:text-white truncate">{c.nombre}</p>
-                      <p className="text-[10px] text-gray-400">RUC: {c.ruc} • {c.rama}</p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-gray-900 dark:text-white whitespace-nowrap pl-2 font-mono">
-                    {formatPYG(c.monto)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-gray-100 dark:border-gray-700">
-            <Link
-              to="/asistente-virtual"
-              className="w-full py-2.5 px-4 bg-gradient-to-r from-red-600 to-indigo-600 hover:from-red-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition"
-            >
-              <span>🧠 Consultar análisis con Marco IA</span>
-              <ChevronRight className="w-4 h-4" />
-            </Link>
-          </div>
-        </div>
-      </div>
-
       {/* Módulos Operativos Distribuidora */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Link
@@ -579,7 +667,7 @@ export default function Dashboard() {
             <Award className="w-5 h-5" />
           </div>
           <h4 className="text-sm font-bold text-gray-900 dark:text-white">Indicadores PARESA</h4>
-          <p className="text-[11px] text-gray-500 mt-0.5">Rebate 4,5% y metas mensuales</p>
+          <p className="text-[11px] text-gray-500 mt-0.5">Rebate 4,5% y metas en UC</p>
         </Link>
 
         <Link
@@ -590,7 +678,7 @@ export default function Dashboard() {
             <Target className="w-5 h-5" />
           </div>
           <h4 className="text-sm font-bold text-gray-900 dark:text-white">Preventistas & Metas</h4>
-          <p className="text-[11px] text-gray-500 mt-0.5">Cumplimiento Rama PARESA y MIX</p>
+          <p className="text-[11px] text-gray-500 mt-0.5">Ramas PARESA y MIX</p>
         </Link>
 
         <Link

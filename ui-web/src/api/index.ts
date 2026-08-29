@@ -2112,17 +2112,17 @@ export const api = {
       client.post<{ metas_publicadas: number }>(`/v1/companies/${COMPANY_ID}/sales-targets/publish`, data),
   },
   supplierKpis: {
-    listPeriods: (supplierId?: string) => client.get<SupplierKpiPeriod[]>("/v1/supplier-kpis/periods", supplierId ? { supplier_id: supplierId } : undefined),
+    listPeriods: (supplierId?: string) => client.get<SupplierKpiPeriod[]>(`/v1/supplier-kpis/periods${supplierId ? `?supplier_id=${supplierId}` : ""}`),
     createPeriod: (data: { supplier_id: string; periodo: string; rebate_pct_objetivo?: number; observaciones?: string }) =>
       client.post<SupplierKpiPeriod>("/v1/supplier-kpis/periods", data),
-    updatePeriod: (id: string, data: Partial<{ rebate_pct_objetivo: number; estado: string; observaciones: string }>) =>
-      client.patch<SupplierKpiPeriod>(`/v1/supplier-kpis/periods/${id}`, data),
-    getSummary: (periodId: string) => client.get<SupplierKpiSummary>(`/v1/supplier-kpis/periods/${periodId}/summary`),
-    addIndicator: (periodId: string, data: { codigo: string; nombre: string; peso_pct: number; meta?: number; resultado?: number; piso_minimo_pct?: number; orden?: number }) =>
+    getSummary: (periodId: string, branchId?: string) => client.get<SupplierKpiSummary>(`/v1/supplier-kpis/periods/${periodId}/summary`, { branch_id: branchId }),
+    getDashboard: (companyId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: companyId || COMPANY_ID }),
+    updateIndicator: (id: string, data: { meta?: number; resultado?: number; peso_pct?: number; meta_uc?: number; resultado_uc?: number }) =>
+      client.put<SupplierKpiIndicator>(`/v1/supplier-kpis/indicators/${id}`, data),
+    bulkUpdateIndicators: (periodId: string, data: any) => client.put<any>(`/v1/supplier-kpis/periods/${periodId}/indicators/bulk`, data),
+    deleteIndicator: (id: string) => client.delete<void>(`/v1/supplier-kpis/indicators/${id}`),
+    addIndicator: (periodId: string, data: { codigo: string; nombre: string; peso_pct: number; meta_uc?: number; resultado_uc?: number }) =>
       client.post<SupplierKpiIndicator>(`/v1/supplier-kpis/periods/${periodId}/indicators`, data),
-    updateIndicator: (id: string, data: Partial<{ codigo: string; nombre: string; peso_pct: number; meta: number | null; resultado: number | null; piso_minimo_pct: number | null; orden: number }>) =>
-      client.patch<SupplierKpiIndicator>(`/v1/supplier-kpis/indicators/${id}`, data),
-    deleteIndicator: (id: string) => client.delete<{ ok: boolean }>(`/v1/supplier-kpis/indicators/${id}`),
   },
   // Distribuidora: devoluciones A proveedores (mercaderia vencida/danada).
   // NUNCA renombrar esto de vuelta a "supplierReturns" -- esa clave ya la usa
