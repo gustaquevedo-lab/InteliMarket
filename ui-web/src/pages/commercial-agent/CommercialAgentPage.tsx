@@ -113,7 +113,7 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
     try {
       const [recs, kpis] = await Promise.all([
         api.commercialAgent.recommendations().catch(() => []),
-        api.getSupplierKpisDashboard("2026-08", "all").catch(() => null)
+        api.supplierKpis.getDashboard("2026-08", "all").catch(() => null)
       ])
       setRecommendations(recs || [])
       if (kpis) setMultiDashboard(kpis)
@@ -131,7 +131,7 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
       if (res && res.recommendations) {
         setRecommendations(res.recommendations)
       }
-      const kpis = await api.getSupplierKpisDashboard("2026-08", "all")
+      const kpis = await api.supplierKpis.getDashboard("2026-08", "all")
       if (kpis) setMultiDashboard(kpis)
     } catch (e) {
       console.error("Error running commercial diagnosis", e)
