@@ -1,10 +1,9 @@
-from sqlalchemy import select, or_
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 
 from api.src.pos_terminals.models import PosTerminalAssignment
 from api.src.pos_terminals.schemas import PosTerminalAssignmentCreate, PosTerminalAssignmentUpdate
-from api.src.fiscal.models import PuntoEmisionSecuencia
 
 
 async def list_assignments(db: AsyncSession, company_id: str) -> list[dict]:
@@ -13,22 +12,29 @@ async def list_assignments(db: AsyncSession, company_id: str) -> list[dict]:
     )
     assignments = list(result.scalars().all())
 
-    # Cargar secuencias de puntos de emisión (Factura y Nota de Crédito)
+    # Cargar secuencias fiscales de Factura y Nota de Crédito usando SQL directo
     seq_result = await db.execute(
-        select(PuntoEmisionSecuencia).where(
-            PuntoEmisionSecuencia.company_id == company_id,
-            PuntoEmisionSecuencia.activo == True
-        )
+        text("""
+            SELECT punto_emision, LOWER(tipo_documento) as tipo, numero_actual, numero_final, activo
+            FROM punto_emision_secuencias
+            WHERE company_id = :company_id AND activo = true
+        """),
+        {"company_id": company_id}
     )
-    all_seqs = seq_result.scalars().all()
+    all_seqs = seq_result.fetchall()
 
     # Mapear secuencias por punto de emisión
     seqs_by_punto: dict[str, dict] = {}
     for s in all_seqs:
-        p = s.punto_emision.zfill(3) if s.punto_emision else ""
+        p = str(s[0]).zfill(3) if s[0] else ""
+        tipo = str(s[1]).lower()
         if p not in seqs_by_punto:
             seqs_by_punto[p] = {}
-        seqs_by_punto[p][s.tipo_documento.lower()] = s
+        seqs_by_punto[p][tipo] = {
+            "numero_actual": s[2],
+            "numero_final": s[3],
+            "activo": s[4]
+        }
 
     enriched = []
     for a in assignments:
@@ -44,10 +50,10 @@ async def list_assignments(db: AsyncSession, company_id: str) -> list[dict]:
             "punto_emision": a.punto_emision,
             "caja_nombre": a.caja_nombre,
             "activo": a.activo,
-            "factura_actual": factura_seq.numero_actual if factura_seq else None,
-            "factura_final": factura_seq.numero_final if factura_seq else None,
-            "nc_actual": nc_seq.numero_actual if nc_seq else None,
-            "nc_final": nc_seq.numero_final if nc_seq else None,
+            "factura_actual": factura_seq["numero_actual"] if factura_seq else None,
+            "factura_final": factura_seq["numero_final"] if factura_seq else None,
+            "nc_actual": nc_seq["numero_actual"] if nc_seq else None,
+            "nc_final": nc_seq["numero_final"] if nc_seq else None,
             "tiene_factura": bool(factura_seq),
             "tiene_nc": bool(nc_seq),
             "created_at": a.created_at,
