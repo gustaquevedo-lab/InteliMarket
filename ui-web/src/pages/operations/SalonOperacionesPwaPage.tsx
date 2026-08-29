@@ -10,6 +10,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { useTheme } from "../../context/ThemeContext"
 import { api, type Product, type KioskBanner } from "../../api"
+import { DEFAULT_TV_CONFIG, DEFAULT_CORTES, type TvCarniceriaConfig, type MeatProduct } from "../kiosk/CarniceriaTvDigitalPage"
 
 // Tipos del Hub de Operaciones
 type SectorTab = "carniceria" | "panaderia" | "verduleria" | "auditoria_precios" | "marketing_tv" | "haccp"
@@ -119,6 +120,29 @@ export default function SalonOperacionesPwaPage() {
   const [scannedItem, setScannedItem] = useState<{ product: Product; precio_gondola?: number } | null>(null)
   const [priceGondolaInput, setPriceGondolaInput] = useState("")
   const [printingTag, setPrintingTag] = useState(false)
+
+  // ── ESTADOS DE CONFIGURADOR DE TV 55" ──
+  const [tvConfig, setTvConfig] = useState<TvCarniceriaConfig>(() => {
+    try {
+      const saved = localStorage.getItem("extra_tv_carniceria_config")
+      if (saved) return { ...DEFAULT_TV_CONFIG, ...JSON.parse(saved) }
+    } catch {}
+    return DEFAULT_TV_CONFIG
+  })
+
+  const saveTvConfig = (updated: TvCarniceriaConfig) => {
+    setTvConfig(updated)
+    localStorage.setItem("extra_tv_carniceria_config", JSON.stringify(updated))
+    toast.success("Configuración de TV Guardada", "Los cambios se aplicaron en vivo a las pantallas.")
+  }
+
+  const toggleProductoTvVisible = (prodId: string) => {
+    const current = tvConfig.productos_visibles_ids || []
+    const updatedIds = current.includes(prodId)
+      ? current.filter((id) => id !== prodId)
+      : [...current, prodId]
+    saveTvConfig({ ...tvConfig, productos_visibles_ids: updatedIds })
+  }
 
   // Cargar productos para auditorías y carnicería
   useEffect(() => {
@@ -824,24 +848,228 @@ export default function SalonOperacionesPwaPage() {
         {/* ══════════════════════ SECTOR 5: MARKETING & TV 55" ══════════════════════ */}
         {tab === "marketing_tv" && (
           <div className="space-y-6 animate-fade-in">
-            <div className="p-5 rounded-3xl bg-slate-900 text-white border border-slate-800 shadow-xl flex items-center justify-between">
+            {/* Banner y Acceso Rápido a la TV */}
+            <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-slate-950 to-black text-white border border-slate-800 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div>
                 <div className="text-[10px] font-black uppercase tracking-widest text-amber-400 flex items-center gap-1.5">
-                  <Monitor className="w-4 h-4" /> Google TV 55" Carnicería
+                  <Monitor className="w-4 h-4" /> Google TV 55" Carnicería · Panel de Control
                 </div>
                 <h2 className="font-black text-xl text-white mt-1" style={displayFont}>
-                  Cartelería Dinámica en Salón
+                  Configurador de Cartelería en Salón
                 </h2>
-                <p className="text-xs text-slate-400 max-w-lg mt-0.5">
-                  Los precios y cortes se sincronizan automáticamente. Si un corte se queda sin stock en el sistema, sale de la pantalla al instante.
+                <p className="text-xs text-slate-400 max-w-xl mt-0.5">
+                  Controlá qué se exhibe en las 2 pantallas de carnicería: seleccioná los cortes activos, cambiá el tema de color y configurá promociones con un solo toque.
                 </p>
               </div>
-              <button
-                onClick={() => window.open("/tv/carniceria", "_blank")}
-                className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-red-600 to-amber-500 hover:brightness-110 text-white font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-lg shadow-red-600/30 cursor-pointer"
-              >
-                Abrir Menuboard en TV ➔
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => window.open("/tv/carniceria", "_blank")}
+                  className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-red-600 to-amber-500 hover:brightness-110 text-white font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-lg shadow-red-600/30 cursor-pointer"
+                >
+                  <Eye className="w-4 h-4" /> Ver Pantalla en Vivo
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* Opciones y Toggles de la TV */}
+              <div className="lg:col-span-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
+                <h3 className="font-black text-xs uppercase tracking-wider text-slate-500" style={displayFont}>
+                  Ajustes de Exhibición en Pantalla
+                </h3>
+
+                {/* Toggle Modo Claro / Oscuro de la TV */}
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                      {tvConfig.theme === "light" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white">Modo de Color de la TV</div>
+                      <div className="text-[11px] text-slate-500">
+                        {tvConfig.theme === "light" ? "☀️ Modo Claro (Gourmet White)" : "🌙 Modo Oscuro (Boutique Black)"}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => saveTvConfig({ ...tvConfig, theme: tvConfig.theme === "light" ? "dark" : "light" })}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase cursor-pointer transition ${
+                      tvConfig.theme === "light"
+                        ? "bg-amber-500 text-slate-950 font-bold"
+                        : "bg-slate-800 text-slate-300"
+                    }`}
+                  >
+                    {tvConfig.theme === "light" ? "Claro" : "Oscuro"}
+                  </button>
+                </div>
+
+                {/* Intervalo de Rotación */}
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <Clock className="w-4 h-4 text-slate-400" /> Tiempo por Sector:
+                    </div>
+                    <span className="font-mono text-xs font-black text-red-600 dark:text-amber-400">
+                      {tvConfig.intervalo_segundos} segundos
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[6, 8, 10, 15].map((sec) => (
+                      <button
+                        key={sec}
+                        onClick={() => saveTvConfig({ ...tvConfig, intervalo_segundos: sec })}
+                        className={`py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                          tvConfig.intervalo_segundos === sec
+                            ? "bg-red-600 text-white font-black"
+                            : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-red-400"
+                        }`}
+                      >
+                        {sec}s
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Toggle Club Extra */}
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white">Precios Club Extra</div>
+                    <div className="text-[11px] text-slate-500">Mostrar columna de precio socio</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={tvConfig.mostrar_club_extra}
+                    onChange={(e) => saveTvConfig({ ...tvConfig, mostrar_club_extra: e.target.checked })}
+                    className="w-5 h-5 rounded text-red-600 cursor-pointer"
+                  />
+                </div>
+
+                {/* Toggle Turnero Digital */}
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white">Turnero Digital (Encausador)</div>
+                    <div className="text-[11px] text-slate-500">Módulo de número de turno en pantalla</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={tvConfig.mostrar_turnero}
+                    onChange={(e) => saveTvConfig({ ...tvConfig, mostrar_turnero: e.target.checked })}
+                    className="w-5 h-5 rounded text-red-600 cursor-pointer"
+                  />
+                </div>
+
+                {/* Toggle Banner Combo */}
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white">Banner Combo Parrillero</div>
+                    <div className="text-[11px] text-slate-500">Franja inferior con promo especial</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={tvConfig.mostrar_combo_banner}
+                    onChange={(e) => saveTvConfig({ ...tvConfig, mostrar_combo_banner: e.target.checked })}
+                    className="w-5 h-5 rounded text-red-600 cursor-pointer"
+                  />
+                </div>
+
+                {/* Edición de Textos del Combo */}
+                {tvConfig.mostrar_combo_banner && (
+                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
+                    <div className="text-[10px] font-black uppercase text-slate-400">Texto del Combo en TV:</div>
+                    <input
+                      type="text"
+                      value={tvConfig.combo_titulo}
+                      onChange={(e) => setTvConfig({ ...tvConfig, combo_titulo: e.target.value })}
+                      onBlur={() => saveTvConfig(tvConfig)}
+                      placeholder="Título del combo"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-white"
+                    />
+                    <input
+                      type="text"
+                      value={tvConfig.combo_descripcion}
+                      onChange={(e) => setTvConfig({ ...tvConfig, combo_descripcion: e.target.value })}
+                      onBlur={() => saveTvConfig(tvConfig)}
+                      placeholder="Descripción de cortes incluidos"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-900 dark:text-white"
+                    />
+                    <input
+                      type="text"
+                      value={tvConfig.combo_precio}
+                      onChange={(e) => setTvConfig({ ...tvConfig, combo_precio: e.target.value })}
+                      onBlur={() => saveTvConfig(tvConfig)}
+                      placeholder="Precio combo (ej: ₲ 195.000)"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-red-600 dark:text-amber-400 font-mono"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Selector de Productos Habilitados para la TV */}
+              <div className="lg:col-span-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-xs">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-black text-xs uppercase tracking-wider text-slate-500" style={displayFont}>
+                      Cortes Habilitados en TV ({DEFAULT_CORTES.filter((c) => tvConfig.productos_visibles_ids.includes(c.id)).length} de {DEFAULT_CORTES.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-400">Activá o desactivá los cortes que querés que aparezcan en pantalla</p>
+                  </div>
+                  <button
+                    onClick={() => saveTvConfig({ ...tvConfig, productos_visibles_ids: DEFAULT_CORTES.map((c) => c.id) })}
+                    className="text-[11px] font-bold text-red-600 dark:text-amber-400 hover:underline cursor-pointer"
+                  >
+                    Activar Todos
+                  </button>
+                </div>
+
+                <div className="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
+                  {DEFAULT_CORTES.map((c) => {
+                    const isVisible = tvConfig.productos_visibles_ids.includes(c.id)
+                    return (
+                      <div
+                        key={c.id}
+                        onClick={() => toggleProductoTvVisible(c.id)}
+                        className={`p-3 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition ${
+                          isVisible
+                            ? "bg-slate-50 dark:bg-slate-950/60 border-slate-300 dark:border-slate-700"
+                            : "bg-slate-100/40 dark:bg-slate-950/20 border-slate-200 dark:border-slate-900 opacity-60"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 border border-slate-200 dark:border-slate-800">
+                            <img src={c.foto_url} alt={c.nombre} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                              {c.nombre}
+                            </div>
+                            <div className="text-[10px] text-slate-500 capitalize">
+                              Sector: {c.categoria} · {formatPYG(c.precio)}/Kg
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                            isVisible
+                              ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                              : "bg-slate-200 dark:bg-slate-800 text-slate-400"
+                          }`}>
+                            {isVisible ? "En Pantalla" : "Pausado"}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={isVisible}
+                            onChange={() => {}}
+                            className="w-4 h-4 rounded text-red-600 pointer-events-none"
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
             </div>
           </div>
         )}
