@@ -158,12 +158,28 @@ export default function Dashboard() {
   const totalClientes = distribData?.total_clientes || 10592
   const clientesCredito = distribData?.clientes_con_credito || 5943
 
-  // PARESA Rebate Calculations
-  const rebateGanadoPct = paresaSummary?.total_rebate_pct_ganado ?? (paresaSummary?.cumplimiento_general_pct ? (paresaSummary.cumplimiento_general_pct * 4.5 / 100) : 3.85)
-  const rebateObjetivoPct = paresaSummary?.periodo?.rebate_pct_objetivo ?? 4.50
-  const rebateCumplimientoPct = paresaSummary?.cumplimiento_general_pct ?? Math.round((rebateGanadoPct / rebateObjetivoPct) * 100)
-  const ventaBaseParesa = paresaSummary?.monto_compras_sin_iva || (totalVentas * 0.65) // PARESA represents ~65% of volume
-  const montoRebateEstimado = paresaSummary?.total_rebate_gs_estimado || Math.round(ventaBaseParesa * (rebateGanadoPct / 100))
+  // PARESA Rebate Calculations (Strict Number Coercion)
+  const rebateGanadoPct = Number(
+    paresaSummary?.total_rebate_pct_ganado ??
+      (paresaSummary?.cumplimiento_general_pct
+        ? (Number(paresaSummary.cumplimiento_general_pct) * 4.5) / 100
+        : 3.85)
+  ) || 0
+
+  const rebateObjetivoPct = Number(paresaSummary?.periodo?.rebate_pct_objetivo ?? 4.50) || 4.5
+
+  const rebateCumplimientoPct = Number(
+    paresaSummary?.cumplimiento_general_pct ??
+      Math.round((rebateGanadoPct / rebateObjetivoPct) * 100)
+  ) || 0
+
+  const ventaBaseParesa = Number(
+    paresaSummary?.monto_compras_sin_iva || (Number(totalVentas) * 0.65)
+  ) || 0
+
+  const montoRebateEstimado = Number(
+    paresaSummary?.total_rebate_gs_estimado || Math.round(ventaBaseParesa * (rebateGanadoPct / 100))
+  ) || 0
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
