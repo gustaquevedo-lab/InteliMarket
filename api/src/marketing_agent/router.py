@@ -38,7 +38,7 @@ async def chat_marketing(
     """Direct conversational intelligence with the Marketing Agent."""
     target_cid = uuid.UUID(company_id or user.get("company_id") or str(COMPANY_DEFAULT_ID))
     user_name = payload.user_name or user.get("nombre") or user.get("email", "Gustavo").split("@")[0]
-    return await service.chat_marketing_agent(db, target_cid, payload.query, user_name)
+    return await service.chat_marketing_agent(db, target_cid, payload.query, user_name, payload.use_gemini)
 
 
 @router.get("/summary", response_model=MarketingExecutiveSummaryResponse)

@@ -56,6 +56,7 @@ class MarketingAgentDashboard(BaseModel):
 class MarketingChatRequest(BaseModel):
     query: str
     user_name: Optional[str] = "Gustavo"
+    use_gemini: Optional[bool] = False
 
 
 class MarketingChatResponse(BaseModel):

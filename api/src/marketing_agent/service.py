@@ -200,12 +200,43 @@ async def get_marketing_dashboard(db: AsyncSession, company_id: uuid.UUID) -> Ma
     )
 
 
-async def chat_marketing_agent(db: AsyncSession, company_id: uuid.UUID, query: str, user_name: str = "Gustavo") -> MarketingChatResponse:
-    """Conversational marketing intelligence engine connected to PostgreSQL and commercial targets."""
+async def chat_marketing_agent(db: AsyncSession, company_id: uuid.UUID, query: str, user_name: str = "Gustavo", use_gemini: bool = False) -> MarketingChatResponse:
+    """Conversational marketing intelligence engine connected to PostgreSQL and commercial targets, with optional Gemini integration for external market trends."""
     start_time = time.time()
     q_lower = query.lower()
 
     dash = await get_marketing_dashboard(db, company_id)
+
+    # 0. Consultas de Pulso de Mercado, Ideas de Afuera o Gemini
+    is_external_market_query = use_gemini or any(k in q_lower for k in [
+        "gemini", "ideas de afuera", "afuera", "pulso del mercado", "pulso", "mercado", "tendencias", "tendencia",
+        "competencia", "innovacion", "innovación", "ideas creativas", "benchmark", "fmcg", "consumo masivo",
+        "internacional", "buenas practicas", "buenas prácticas", "estrategia creativa", "afuera que se hace"
+    ])
+
+    if is_external_market_query:
+        from api.src.asistente_virtual.brain_engine import query_gemini
+        sys_prompt = f"""Sos el Gerente de Marketing Estratégico de Casa Gonzalito S.R.L., una de las principales distribuidoras mayoristas de consumo masivo (FMCG) en Pedro Juan Caballero, Paraguay (frontera con Ponta Porã, Brasil).
+Tus proveedores clave son:
+- PARAGUAY REFRESCOS S.A. (Coca-Cola, Fanta, Sprite, Monster, Aquarius)
+- SOC. COOP. CHORTITZER LTDA (Lácteos Trébol, quesos)
+- TROCIUK (Harinas, fideos, balanceados)
+- LAURO RAATZ (Yerba Mate Pajarito)
+- Abarrotes y secos en general (Arroz Tío Nico, aceites, etc.)
+
+Tu interlocutor es {user_name} (Director / Dueño de Casa Gonzalito).
+Tu misión es aportar ideas frescas del mercado exterior, benchmark internacional de distribución B2B, tendencias de consumo masivo, psicología de precios en despensas y mini-mercados, y estrategias de activación por WhatsApp / App B2B.
+Responde de forma ejecutiva, estructurada con viñetas limpias, pragmática para el canal distribuidor mayorista paraguayo y siempre buscando traccionar volumen y margen sin arriesgar crédito."""
+
+        gemini_prompt = f"Consulta del Director {user_name}:\n{query}\n\nContexto actual de Casa Gonzalito: Ventas por campañas activas este mes: {_format_gs(dash.ventas_por_campanas_gs)}, {dash.fardos_traccionados_rebate:,} fardos aportados a rebates comerciales. Segmentos activos: Mayoristas Oro, Autoservicios Plata y Clientes Contado/Pix."
+
+        gemini_resp = await query_gemini(gemini_prompt, sys_prompt)
+        if gemini_resp:
+            return MarketingChatResponse(
+                response=f"### 💡 Análisis de Mercado & Tendencias Externas (Gemini AI)\n{gemini_resp}",
+                execution_time_seconds=round(time.time() - start_time, 2),
+                model_used="gemini-3.1-flash"
+            )
 
     # 1. Consultas sobre PARESA / Gaseosas
     if any(k in q_lower for k in ["paresa", "coca", "coca-cola", "gaseosa", "fanta", "monster"]):

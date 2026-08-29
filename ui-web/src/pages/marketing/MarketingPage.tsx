@@ -62,6 +62,7 @@ interface ChatMsg {
   isUser: boolean
   text: string
   time: string
+  model_used?: string
   campana?: MarketingCampaignSuggestion
 }
 
@@ -75,6 +76,7 @@ export default function MarketingPage() {
   const [data, setData] = useState<MarketingDashboardData | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [activatedId, setActivatedId] = useState<string | null>(null)
+  const [useGemini, setUseGemini] = useState(false)
 
   // Chat State
   const [chatHistory, setChatHistory] = useState<ChatMsg[]>([
@@ -84,12 +86,14 @@ export default function MarketingPage() {
       text: `### 🚀 Tracción & Demanda Comercial — Casa Gonzalito S.R.L.
 Saludos, ${userName}. Soy el Gerente de Marketing IA de Casa Gonzalito.
 
-Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brechas de metas y rebates) y al **Gerente Financiero** (para blindar ofertas a crédito y cuidar la caja).
+Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brechas de metas y rebates) y al **Gerente Financiero** (para blindar ofertas a crédito y cuidar la caja). Además, cuento con **Google Gemini** para traer ideas innovadoras de afuera y el pulso del mercado de consumo masivo internacional.
 
 • **Campañas de Rebate:** Diseñadas para empujar los volúmenes exactos de PARESA, Chortitzer y Trociuk.
 • **Combos Ancla:** Vinculan productos estrella con artículos de baja rotación en depósito central.
-• **Filtro Financiero:** Segmentación por solvencia crediticia (crédito a 15-30d vs solo contado/Pix).`,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+• **Filtro Financiero:** Segmentación por solvencia crediticia (crédito a 15-30d vs solo contado/Pix).
+• **Gemini Pulso Exterior:** Análisis de tendencias FMCG, benchmark de precios y psicología promocional para despensas.`,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      model_used: "local"
     }
   ])
   const [query, setQuery] = useState("")
@@ -116,11 +120,12 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
     }
   }
 
-  const handleSendChat = async (e?: React.FormEvent, presetQuery?: string) => {
+  const handleSendChat = async (e?: React.FormEvent, presetQuery?: string, forceGemini?: boolean) => {
     if (e) e.preventDefault()
     const textToSend = presetQuery || query
     if (!textToSend.trim() || sendingChat) return
 
+    const activeGemini = forceGemini !== undefined ? forceGemini : useGemini
     setQuery("")
     const userMsg: ChatMsg = {
       id: Date.now().toString(),
@@ -132,12 +137,13 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
     setSendingChat(true)
 
     try {
-      const res = await api.marketingAgent.chat(textToSend, userName)
+      const res = await api.marketingAgent.chat(textToSend, userName, activeGemini)
       const botMsg: ChatMsg = {
         id: (Date.now() + 1).toString(),
         isUser: false,
         text: res.response,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        model_used: res.model_used,
         campana: res.campana_generada
       }
       setChatHistory(prev => [...prev, botMsg])
@@ -410,9 +416,19 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
                   <p className="text-[11px] text-gray-500 dark:text-gray-400">Tracción de Metas, Combos Ancla & Filtro de Crédito</p>
                 </div>
               </div>
-              <span className="text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2.5 py-1 rounded-xl border border-gray-200 dark:border-gray-600 font-medium">
-                PostgreSQL + Ollama Local
-              </span>
+              <button
+                type="button"
+                onClick={() => setUseGemini(!useGemini)}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                  useGemini
+                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-400 shadow-sm shadow-blue-500/30"
+                    : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-650"
+                }`}
+                title="Activar Google Gemini Flash para traer ideas de mercado exterior, tendencias FMCG y benchmark B2B"
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${useGemini ? "text-amber-300" : "text-gray-400"}`} />
+                <span>{useGemini ? "Gemini Pulso de Mercado" : "Modo Gemini"}</span>
+              </button>
             </div>
 
             {/* Chat Messages */}
@@ -432,8 +448,17 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
                     }`}
                   >
                     {m.isUser ? <p className="text-xs whitespace-pre-wrap">{m.text}</p> : renderMarkdownText(m.text)}
-                    <div className={`mt-2 text-[10px] text-right ${m.isUser ? "text-violet-100" : "text-gray-400"}`}>
-                      {m.time}
+                    <div className={`mt-2 flex items-center justify-between text-[10px] ${m.isUser ? "text-violet-100" : "text-gray-400"}`}>
+                      {!m.isUser && m.model_used && (
+                        <span className={`px-2 py-0.5 rounded-md font-mono text-[9px] font-bold ${
+                          m.model_used.includes("gemini")
+                            ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30"
+                            : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                        }`}>
+                          {m.model_used.includes("gemini") ? "✨ Gemini 3.1 Flash" : "Local Qwen2.5"}
+                        </span>
+                      )}
+                      <span className="ml-auto">{m.time}</span>
                     </div>
                   </div>
                 </div>
@@ -456,6 +481,14 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
             <div className="p-2.5 bg-gray-50 dark:bg-gray-850 border-t border-gray-200 dark:border-gray-700 flex gap-2 overflow-x-auto text-[11px]">
               <button
                 type="button"
+                onClick={() => handleSendChat(undefined, "¿Qué tendencias y buenas prácticas de promociones masivas B2B se usan afuera para distribuidoras mayoristas?", true)}
+                className="px-3 py-1.5 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-indigo-950/40 dark:to-violet-950/40 text-blue-700 dark:text-blue-300 rounded-xl border border-blue-200 dark:border-blue-800 whitespace-nowrap transition shadow-2xs font-bold cursor-pointer flex items-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                💡 Pulso del Mercado & Tendencias (Gemini)
+              </button>
+              <button
+                type="button"
                 onClick={() => handleSendChat(undefined, "¿Cómo empujamos la meta de PARESA antes del cierre?")}
                 className="px-3 py-1.5 bg-white dark:bg-gray-800 hover:bg-violet-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl border border-gray-200 dark:border-gray-700 whitespace-nowrap transition shadow-2xs font-medium cursor-pointer"
               >
@@ -467,6 +500,13 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
                 className="px-3 py-1.5 bg-white dark:bg-gray-800 hover:bg-violet-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl border border-gray-200 dark:border-gray-700 whitespace-nowrap transition shadow-2xs font-medium cursor-pointer"
               >
                 🥛 Lácteos Trébol B2B
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSendChat(undefined, "¿Qué ideas creativas de fidelización B2B podemos aplicar para despensas?")}
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 hover:bg-violet-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl border border-gray-200 dark:border-gray-700 whitespace-nowrap transition shadow-2xs font-medium cursor-pointer"
+              >
+                🎯 Fidelización Despensas
               </button>
               <button
                 type="button"

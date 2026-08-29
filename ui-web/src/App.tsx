@@ -227,6 +227,8 @@ function AppRoutes() {
           ["finance-agent", <FinanceAgentPage />],
           ["commercial-agent", <CommercialAgentPage />],
           ["sales-agent", <CommercialAgentPage />],
+          ["marketing-agent", <MarketingPage />],
+          ["marketing", <MarketingPage />],
           ["notifications", <NotificationsPage />],
           ["intelicont", <InteliContPage />],
           ["integrations", <IntegrationsPage />],
