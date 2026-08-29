@@ -144,6 +144,36 @@ function escposCenter(s: string, width = ESCPOS_LINE_WIDTH): string {
   const padL = Math.floor((width - s.length) / 2)
   return ' '.repeat(padL) + s
 }
+function escposWrapText(text: string, width = ESCPOS_LINE_WIDTH, align: 'left' | 'center' = 'left'): string {
+  const clean = escposStripAccents(text).trim()
+  if (!clean) return ''
+  
+  const paragraphs = clean.split('\n')
+  const formattedLines: string[] = []
+
+  for (const para of paragraphs) {
+    const words = para.trim().split(/\s+/)
+    let currentLine = ''
+
+    for (const word of words) {
+      if (!word) continue
+      if (!currentLine) {
+        currentLine = word
+      } else if ((currentLine + ' ' + word).length <= width) {
+        currentLine += ' ' + word
+      } else {
+        formattedLines.push(align === 'center' ? escposCenter(currentLine, width) : currentLine)
+        currentLine = word
+      }
+    }
+
+    if (currentLine) {
+      formattedLines.push(align === 'center' ? escposCenter(currentLine, width) : currentLine)
+    }
+  }
+
+  return formattedLines.join('\n') + '\n'
+}
 function escposDashes(width = ESCPOS_LINE_WIDTH): string {
   return '-'.repeat(width)
 }
@@ -2186,13 +2216,13 @@ export default function POSPage() {
 
         // 2. Subtítulo del Sorteo y Premio
         const subtitulo = camp.ticket_subtitulo?.trim() || `*** ${escposStripAccents(camp.nombre).trim().toUpperCase()} ***`
-        t += ESCPOS_BOLD_ON + escposStripAccents(subtitulo) + ESCPOS_BOLD_OFF + '\n'
+        t += ESCPOS_BOLD_ON + escposWrapText(subtitulo, W, 'center') + ESCPOS_BOLD_OFF
 
         if (camp.premio_destacado) {
-          t += `Premio: ${escposStripAccents(camp.premio_destacado)}\n`
+          t += escposWrapText(`Premio: ${camp.premio_destacado}`, W, 'center')
         }
         if (camp.patrocinador && camp.patrocinador !== "Extra Supermercado") {
-          t += `Patrocinador: ${escposStripAccents(camp.patrocinador)}\n`
+          t += escposWrapText(`Patrocinador: ${camp.patrocinador}`, W, 'center')
         }
 
         // 3. Número de cupón (tamaño normal en negrita, idéntico al diseñador)
@@ -2215,7 +2245,7 @@ export default function POSPage() {
 
         // 6. Pie de Urna y Validez
         t += ESCPOS_ALIGN_CENTER
-        t += ESCPOS_BOLD_ON + escposStripAccents(camp.ticket_pie_urna || "¡Deposita este cupon en la urna de la sucursal!") + ESCPOS_BOLD_OFF + '\n'
+        t += ESCPOS_BOLD_ON + escposWrapText(camp.ticket_pie_urna || "¡Deposita este cupon en la urna de la sucursal!", W, 'center') + ESCPOS_BOLD_OFF
         t += "Valido para los sorteos de la campana\n"
         t += '\n'.repeat(Math.max(4, tpl.lineas_salto_corte || 4))
         t += GS + 'V' + '\x01' // Corte parcial
@@ -4406,10 +4436,10 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_CENTER
           if (isClubMember) {
             t += ESCPOS_BOLD_ON + '* CLUB FIDELIDAD EXTRA *' + ESCPOS_BOLD_OFF + '\n'
-            t += escposStripAccents(msgSocio) + '\n'
+            t += escposWrapText(msgSocio, W, 'center')
           } else {
             t += ESCPOS_BOLD_ON + '* UNITE AL EXTRA CLUB *' + ESCPOS_BOLD_OFF + '\n'
-            t += escposStripAccents(msgInvitacion) + '\n'
+            t += escposWrapText(msgInvitacion, W, 'center')
             if (tpl.mostrar_qr_club && tpl.qr_url_club) {
               t += escposQr(tpl.qr_url_club) + '\n'
             }
@@ -4418,14 +4448,15 @@ export default function POSPage() {
         }
 
         if (showMarketing && tpl.mensaje_marketing) {
-          t += ESCPOS_ALIGN_CENTER + ESCPOS_BOLD_ON + escposStripAccents(tpl.mensaje_marketing) + ESCPOS_BOLD_OFF + '\n' + ESCPOS_ALIGN_LEFT
+          t += ESCPOS_ALIGN_CENTER + ESCPOS_BOLD_ON + escposWrapText(tpl.mensaje_marketing, W, 'center') + ESCPOS_BOLD_OFF + ESCPOS_ALIGN_LEFT
         }
 
         if (donacionActiva && montoDonacionEfectiva > 0) {
           t += escposDashes(W) + '\n'
           t += ESCPOS_ALIGN_CENTER
           t += ESCPOS_BOLD_ON + escposStripAccents(tpl.donacion_titulo || '* ABRE TU CORAZON *') + ESCPOS_BOLD_OFF + '\n'
-          t += escposStripAccents(tpl.donacion_mensaje || `Gracias por colaborar con ${fmtGs(montoDonacionEfectiva)} para el Centro Amor y Esperanza.`) + '\n'
+          const donMsg = tpl.donacion_mensaje || `Gracias por colaborar con ${fmtGs(montoDonacionEfectiva)} para el Centro Amor y Esperanza.`
+          t += escposWrapText(donMsg, W, 'center')
           t += 'Conoce mas en:\n'
           t += ESCPOS_BOLD_ON + escposStripAccents(tpl.donacion_web || 'www.centroamoresperanza.org') + ESCPOS_BOLD_OFF + '\n'
           t += ESCPOS_ALIGN_LEFT
@@ -4435,14 +4466,14 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_CENTER
           t += 'CUPON DE RECOMPRA\n'
           t += ESCPOS_BOLD_ON + ESCPOS_DOUBLE_ON + cuponCod + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
-          t += escposStripAccents(cuponDesc) + '\n'
+          t += escposWrapText(cuponDesc, W, 'center')
           t += `Valido por ${cuponDias} dias\n`
           t += ESCPOS_ALIGN_LEFT
         }
 
         t += ESCPOS_ALIGN_CENTER
         if (showQrSifen) t += `Consulte en: ${sifenUrl}\n`
-        t += ESCPOS_BOLD_ON + escposStripAccents(msgDespedida) + ESCPOS_BOLD_OFF + '\n'
+        t += ESCPOS_BOLD_ON + escposWrapText(msgDespedida, W, 'center') + ESCPOS_BOLD_OFF
         t += '\n'.repeat(Math.max(8, feedLinesCount))
         // Corte automatico (GS V 1 = corte parcial).
         if (tpl.corte_automatico !== false) t += GS + 'V' + '\x01'
