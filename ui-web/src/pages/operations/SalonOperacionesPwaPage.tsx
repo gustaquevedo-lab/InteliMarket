@@ -144,10 +144,53 @@ export default function SalonOperacionesPwaPage() {
     saveTvConfig({ ...tvConfig, productos_visibles_ids: updatedIds })
   }
 
+  const [tvSearchQuery, setTvSearchQuery] = useState("")
+
+  const filteredCatalogProducts = useMemo(() => {
+    if (!tvSearchQuery.trim()) return []
+    const q = tvSearchQuery.toLowerCase()
+    return products.filter((p) =>
+      p.nombre.toLowerCase().includes(q) ||
+      (p.codigo_barra && p.codigo_barra.includes(q)) ||
+      (p.sku && p.sku.toLowerCase().includes(q))
+    ).slice(0, 8)
+  }, [products, tvSearchQuery])
+
+  const handleAddCatalogProductToTv = (p: Product) => {
+    const newMeat: MeatProduct = {
+      id: p.id,
+      nombre: p.nombre,
+      categoria: "otros",
+      precio: p.precio_venta || p.precio || 0,
+      stock_kg: p.stock || 10,
+      foto_url: p.imagen_url || "https://images.unsplash.com/photo-1544025162-d76694265947?w=800&auto=format&fit=crop&q=80",
+      etiqueta: "OFERTA",
+      origen: "Extra Supermercado",
+      destacado: false,
+      sku: p.sku
+    }
+
+    const currentCustom = tvConfig.custom_products || []
+    const updatedCustom = currentCustom.some((c) => c.id === p.id)
+      ? currentCustom
+      : [...currentCustom, newMeat]
+
+    const currentIds = tvConfig.productos_visibles_ids || []
+    const updatedIds = currentIds.includes(p.id) ? currentIds : [...currentIds, p.id]
+
+    saveTvConfig({
+      ...tvConfig,
+      custom_products: updatedCustom,
+      productos_visibles_ids: updatedIds
+    })
+    toast.success("Producto Añadido a la TV", `${p.nombre} con precio del sistema ${formatPYG(p.precio_venta || p.precio || 0)}`)
+    setTvSearchQuery("")
+  }
+
   // Cargar productos para auditorías y carnicería
   useEffect(() => {
     setLoading(true)
-    api.products.list({ limit: 80 })
+    api.products.list({ limit: 300 })
       .then((res) => setProducts(Array.isArray(res) ? res : ((res as any)?.items || [])))
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -1006,67 +1049,120 @@ export default function SalonOperacionesPwaPage() {
               </div>
 
               {/* Selector de Productos Habilitados para la TV */}
-              <div className="lg:col-span-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-xs">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h3 className="font-black text-xs uppercase tracking-wider text-slate-500" style={displayFont}>
-                      Cortes Habilitados en TV ({DEFAULT_CORTES.filter((c) => tvConfig.productos_visibles_ids.includes(c.id)).length} de {DEFAULT_CORTES.length})
-                    </h3>
-                    <p className="text-[11px] text-slate-400">Activá o desactivá los cortes que querés que aparezcan en pantalla</p>
+              <div className="lg:col-span-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h3 className="font-black text-xs uppercase tracking-wider text-slate-500" style={displayFont}>
+                        Productos & Cortes en TV ({[...DEFAULT_CORTES, ...(tvConfig.custom_products || [])].filter((c) => tvConfig.productos_visibles_ids.includes(c.id)).length} activos)
+                      </h3>
+                      <p className="text-[11px] text-slate-400">Precios sincronizados directamente con la base de datos de Intelimarket</p>
+                    </div>
+                    <button
+                      onClick={() => saveTvConfig({ ...tvConfig, productos_visibles_ids: [...DEFAULT_CORTES, ...(tvConfig.custom_products || [])].map((c) => c.id) })}
+                      className="text-[11px] font-bold text-red-600 dark:text-amber-400 hover:underline cursor-pointer"
+                    >
+                      Activar Todos
+                    </button>
                   </div>
-                  <button
-                    onClick={() => saveTvConfig({ ...tvConfig, productos_visibles_ids: DEFAULT_CORTES.map((c) => c.id) })}
-                    className="text-[11px] font-bold text-red-600 dark:text-amber-400 hover:underline cursor-pointer"
-                  >
-                    Activar Todos
-                  </button>
-                </div>
 
-                <div className="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
-                  {DEFAULT_CORTES.map((c) => {
-                    const isVisible = tvConfig.productos_visibles_ids.includes(c.id)
-                    return (
-                      <div
-                        key={c.id}
-                        onClick={() => toggleProductoTvVisible(c.id)}
-                        className={`p-3 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition ${
-                          isVisible
-                            ? "bg-slate-50 dark:bg-slate-950/60 border-slate-300 dark:border-slate-700"
-                            : "bg-slate-100/40 dark:bg-slate-950/20 border-slate-200 dark:border-slate-900 opacity-60"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 border border-slate-200 dark:border-slate-800">
-                            <img src={c.foto_url} alt={c.nombre} className="w-full h-full object-cover" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                              {c.nombre}
-                            </div>
-                            <div className="text-[10px] text-slate-500 capitalize">
-                              Sector: {c.categoria} · {formatPYG(c.precio)}/Kg
-                            </div>
-                          </div>
-                        </div>
+                  {/* Buscador de Cualquier Producto del Supermercado */}
+                  <div className="mb-4 relative">
+                    <input
+                      type="text"
+                      placeholder="🔍 Buscar cualquier producto del supermercado para agregar a la TV..."
+                      value={tvSearchQuery}
+                      onChange={(e) => setTvSearchQuery(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-2.5 text-xs text-slate-900 dark:text-white outline-none focus:border-red-500"
+                    />
 
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                            isVisible
-                              ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                              : "bg-slate-200 dark:bg-slate-800 text-slate-400"
-                          }`}>
-                            {isVisible ? "En Pantalla" : "Pausado"}
-                          </span>
-                          <input
-                            type="checkbox"
-                            checked={isVisible}
-                            onChange={() => {}}
-                            className="w-4 h-4 rounded text-red-600 pointer-events-none"
-                          />
+                    {filteredCatalogProducts.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl z-30 max-h-56 overflow-y-auto p-2 space-y-1">
+                        <div className="text-[10px] font-black uppercase text-slate-400 px-2 py-1">
+                          Resultados del Catálogo ({filteredCatalogProducts.length}):
                         </div>
+                        {filteredCatalogProducts.map((p) => (
+                          <div
+                            key={p.id}
+                            onClick={() => handleAddCatalogProductToTv(p)}
+                            className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between gap-3 cursor-pointer transition"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                {p.nombre}
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-mono">
+                                SKU: {p.sku || p.id.slice(0, 8)} · {p.unidad_medida || "UN"}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 flex items-center gap-2">
+                              <span className="font-black text-xs text-emerald-600 dark:text-emerald-400 font-mono">
+                                {formatPYG(p.precio_venta || p.precio || 0)}
+                              </span>
+                              <span className="px-2 py-1 rounded-lg bg-red-600 text-white font-black text-[10px] uppercase">
+                                + Agregar
+                              </span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    )
-                  })}
+                    )}
+                  </div>
+
+                  {/* Lista de Cortes y Productos Activos */}
+                  <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                    {[...DEFAULT_CORTES, ...(tvConfig.custom_products || [])].map((c) => {
+                      const isVisible = tvConfig.productos_visibles_ids.includes(c.id)
+                      const dbMatch = products.find((p) => p.id === c.id || p.nombre.toLowerCase() === c.nombre.toLowerCase())
+                      const realPrice = dbMatch?.precio_venta || dbMatch?.precio || c.precio
+
+                      return (
+                        <div
+                          key={c.id}
+                          onClick={() => toggleProductoTvVisible(c.id)}
+                          className={`p-3 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition ${
+                            isVisible
+                              ? "bg-slate-50 dark:bg-slate-950/60 border-slate-300 dark:border-slate-700"
+                              : "bg-slate-100/40 dark:bg-slate-950/20 border-slate-200 dark:border-slate-900 opacity-60"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 border border-slate-200 dark:border-slate-800">
+                              <img src={c.foto_url || "https://images.unsplash.com/photo-1544025162-d76694265947?w=800&auto=format&fit=crop&q=80"} alt={c.nombre} className="w-full h-full object-cover" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                {c.nombre}
+                              </div>
+                              <div className="text-[10px] text-slate-500 capitalize flex items-center gap-1.5">
+                                <span>Sector: {c.categoria}</span>
+                                <span>·</span>
+                                <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                                  {formatPYG(realPrice)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                              isVisible
+                                ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                                : "bg-slate-200 dark:bg-slate-800 text-slate-400"
+                            }`}>
+                              {isVisible ? "En Pantalla" : "Pausado"}
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={isVisible}
+                              onChange={() => {}}
+                              className="w-4 h-4 rounded text-red-600 pointer-events-none"
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               </div>
 

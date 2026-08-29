@@ -10,7 +10,7 @@ import { api, type Product } from "../../api"
 export interface MeatProduct {
   id: string
   nombre: string
-  categoria: "bovino" | "porcino" | "ave" | "embutido" | "elaborado"
+  categoria: "bovino" | "porcino" | "ave" | "embutido" | "elaborado" | "otros"
   precio: number
   precio_club?: number
   stock_kg: number
@@ -19,6 +19,7 @@ export interface MeatProduct {
   origen?: string
   destacado?: boolean
   descripcion?: string
+  sku?: string
 }
 
 export interface TvCarniceriaConfig {
@@ -31,6 +32,7 @@ export interface TvCarniceriaConfig {
   combo_descripcion: string
   combo_precio: string
   productos_visibles_ids: string[]
+  custom_products?: MeatProduct[]
 }
 
 export const DEFAULT_TV_CONFIG: TvCarniceriaConfig = {
@@ -43,15 +45,16 @@ export const DEFAULT_TV_CONFIG: TvCarniceriaConfig = {
   combo_descripcion: "Costilla de Primera (5 Kg) + 1 Bolsa Carbón 5Kg + Sal Parrillera",
   combo_precio: "₲ 195.000",
   productos_visibles_ids: [
-    "bov-1", "bov-2", "bov-3", "bov-4", "bov-5",
-    "por-1", "por-2",
-    "ave-1", "ave-2",
-    "emb-1", "emb-2", "emb-3"
-  ]
+    "bov-1", "bov-2", "bov-3", "bov-4", "bov-5", "bov-6", "bov-7",
+    "por-1", "por-2", "por-3", "por-4",
+    "ave-1", "ave-2", "ave-3",
+    "emb-1", "emb-2", "emb-3", "emb-4", "emb-5"
+  ],
+  custom_products: []
 }
 
 export const DEFAULT_CORTES: MeatProduct[] = [
-  // ── BOVINOS ──
+  // ── BOVINOS / VACUNOS ──
   {
     id: "bov-1",
     nombre: "Tapa Cuadril (Picaña) Premium",
@@ -63,7 +66,7 @@ export const DEFAULT_CORTES: MeatProduct[] = [
     etiqueta: "CORTE ESTRELLA",
     origen: "Novillo Seleccionado",
     destacado: true,
-    descripcion: "Corte premium con capa de grasa perfecta para parrilla."
+    descripcion: "Corte premium con capa de grasa uniforme ideal para sellar y servir a punto."
   },
   {
     id: "bov-2",
@@ -117,8 +120,73 @@ export const DEFAULT_CORTES: MeatProduct[] = [
     destacado: true,
     descripcion: "Corte marmolado con cocción en papel aluminio a fuego lento."
   },
+  {
+    id: "bov-6",
+    nombre: "Bife de Chorizo / Ojo de Bife",
+    categoria: "bovino",
+    precio: 58000,
+    precio_club: 54000,
+    stock_kg: 25.0,
+    foto_url: "https://images.unsplash.com/photo-1544025162-d76694265947?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "PARRILLERO",
+    origen: "Novillo Liviano",
+    destacado: false,
+    descripcion: "Corte central del lomo con grasa intramuscular de altísimo sabor."
+  },
+  {
+    id: "bov-7",
+    nombre: "Matambre Vacuno Tierno",
+    categoria: "bovino",
+    precio: 41000,
+    precio_club: 38000,
+    stock_kg: 20.0,
+    foto_url: "https://images.unsplash.com/photo-1588168333986-5078d3ae3976?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "AL LIMÓN",
+    origen: "Frigorífico Nacional",
+    destacado: false,
+    descripcion: "Ideal para preparar a la pizza o arrollado con condimentos."
+  },
+  {
+    id: "bov-8",
+    nombre: "Colita de Cuadril Selección",
+    categoria: "bovino",
+    precio: 52000,
+    precio_club: 49000,
+    stock_kg: 19.0,
+    foto_url: "https://images.unsplash.com/photo-1603048588665-791ca8aea617?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "GOURMET",
+    origen: "Novillo Seleccionado",
+    destacado: false,
+    descripcion: "Corte magro y tierno, excelente para horno o asador cruz."
+  },
+  {
+    id: "bov-9",
+    nombre: "Peceto / Bola de Lomo de Primera",
+    categoria: "bovino",
+    precio: 47000,
+    precio_club: 44000,
+    stock_kg: 35.0,
+    foto_url: "https://images.unsplash.com/photo-1607623814075-e51df1bdc82f?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "MILANESAS",
+    origen: "Novillo Seleccionado",
+    destacado: false,
+    descripcion: "Corte sin nervios ni grasa, perfecto para milanesas y estofados."
+  },
+  {
+    id: "bov-10",
+    nombre: "Puchero Especial / Carnaza Negra",
+    categoria: "bovino",
+    precio: 26000,
+    precio_club: 23500,
+    stock_kg: 40.0,
+    foto_url: "https://images.unsplash.com/photo-1558030006-450675393462?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "ECONÓMICO",
+    origen: "Faena Nacional",
+    destacado: false,
+    descripcion: "Rendidor con hueso y carne para caldos y guisados nutritivos."
+  },
 
-  // ── PORCINOS ──
+  // ── PORCINOS / CERDO ──
   {
     id: "por-1",
     nombre: "Costillita de Cerdo Grill",
@@ -145,8 +213,34 @@ export const DEFAULT_CORTES: MeatProduct[] = [
     destacado: true,
     descripcion: "Crocante por fuera y suave por dentro. Excelente a la chapa."
   },
+  {
+    id: "por-3",
+    nombre: "Bondiola de Cerdo Entera",
+    categoria: "porcino",
+    precio: 38000,
+    precio_club: 35000,
+    stock_kg: 28.0,
+    foto_url: "https://images.unsplash.com/photo-1603048588665-791ca8aea617?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "MARMOLADO",
+    origen: "Granja Santa Teresa",
+    destacado: false,
+    descripcion: "Sabor supremo con infiltración de grasa suave, ideal para ahumar o asar."
+  },
+  {
+    id: "por-4",
+    nombre: "Panceta de Cerdo con Cuero (Pork Belly)",
+    categoria: "porcino",
+    precio: 32000,
+    precio_club: 29500,
+    stock_kg: 22.0,
+    foto_url: "https://images.unsplash.com/photo-1558030006-450675393462?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "CROCANTE",
+    origen: "Granja Santa Teresa",
+    destacado: false,
+    descripcion: "Corte perfecto para chicharrón crocante o asado a fuego lento."
+  },
 
-  // ── AVES ──
+  // ── AVES / POLLO ──
   {
     id: "ave-1",
     nombre: "Pechuga de Pollo Fresca",
@@ -173,8 +267,34 @@ export const DEFAULT_CORTES: MeatProduct[] = [
     destacado: false,
     descripcion: "Ideal para guisados, horno y parrilla."
   },
+  {
+    id: "ave-3",
+    nombre: "Alitas de Pollo para Grill",
+    categoria: "ave",
+    precio: 21000,
+    precio_club: 19000,
+    stock_kg: 35.0,
+    foto_url: "https://images.unsplash.com/photo-1604503468506-a8da13d82791?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "BOTANA",
+    origen: "Faena Diaria",
+    destacado: false,
+    descripcion: "Crocantes y sabrosas con salsa barbacoa o limón a la parrilla."
+  },
+  {
+    id: "ave-4",
+    nombre: "Pollo Entero Faenado del Día",
+    categoria: "ave",
+    precio: 15500,
+    precio_club: 13900,
+    stock_kg: 70.0,
+    foto_url: "https://images.unsplash.com/photo-1587593810167-a84920ea0781?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "AL ESPIEDO",
+    origen: "Faena Diaria",
+    destacado: true,
+    descripcion: "Pollo fresco seleccionado para horno, espiedo o parrilla."
+  },
 
-  // ── ELABORADOS PROPIOS & EMBUTIDOS ──
+  // ── EMBUTIDOS & ELABORADOS CASEROS ──
   {
     id: "emb-1",
     nombre: "Chorizo Casero Extra Parrillero",
@@ -203,6 +323,19 @@ export const DEFAULT_CORTES: MeatProduct[] = [
   },
   {
     id: "emb-3",
+    nombre: "Morcilla Tradicional con Verdeo",
+    categoria: "embutido",
+    precio: 25000,
+    precio_club: 22500,
+    stock_kg: 20.0,
+    foto_url: "https://images.unsplash.com/photo-1597393353415-b3730f3719fe?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "TRADICIONAL",
+    origen: "Elaboración Propia Extra",
+    destacado: false,
+    descripcion: "Cremosa con verdeo fresco y nuez moscada."
+  },
+  {
+    id: "emb-4",
     nombre: "Hamburguesa Artesanal 100% Picaña",
     categoria: "elaborado",
     precio: 38000,
@@ -213,6 +346,19 @@ export const DEFAULT_CORTES: MeatProduct[] = [
     origen: "Elaboración Propia Extra",
     destacado: true,
     descripcion: "Pack de 4 medallones gruesos de pura picaña sin aditivos."
+  },
+  {
+    id: "emb-5",
+    nombre: "Milanesas de Bola de Lomo Preparadas",
+    categoria: "elaborado",
+    precio: 37000,
+    precio_club: 34000,
+    stock_kg: 25.0,
+    foto_url: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=80",
+    etiqueta: "LISTAS PARA FREIR",
+    origen: "Elaboración Propia Extra",
+    destacado: false,
+    descripcion: "Rebozado crujiente con huevo de campo y perejil fresco."
   }
 ]
 
@@ -248,7 +394,19 @@ export default function CarniceriaTvDigitalPage() {
     }
   }, [])
 
-  const [cortes, setCortes] = useState<MeatProduct[]>(DEFAULT_CORTES)
+  // Combinación de la lista base con los productos agregados desde el sistema
+  const allAvailableCortes = useMemo(() => {
+    const custom = config.custom_products || []
+    const combined = [...DEFAULT_CORTES]
+    for (const cp of custom) {
+      if (!combined.some((c) => c.id === cp.id)) {
+        combined.push(cp)
+      }
+    }
+    return combined
+  }, [config.custom_products])
+
+  const [cortes, setCortes] = useState<MeatProduct[]>(allAvailableCortes)
   const [currentCategoryIndex, setCurrentCategoryIndex] = useState(0)
   const [time, setTime] = useState(new Date())
 
@@ -262,23 +420,28 @@ export default function CarniceriaTvDigitalPage() {
     return () => clearInterval(timer)
   }, [])
 
-  // Sincronización en vivo con la base de datos de productos de Intelimarket
+  // Sincronización en vivo con la base de datos real de productos de Intelimarket
   const fetchLivePrices = useCallback(async () => {
     try {
-      const res = await api.products.list({ limit: 100 })
+      const res = await api.products.list({ limit: 200 })
       const dbProducts = Array.isArray(res) ? res : ((res as any)?.items || [])
       
       setCortes((prev) =>
         prev.map((c) => {
+          // Coincidencia exacta por ID o por coincidencia de nombre en la BD
           const match = dbProducts.find((p: Product) =>
+            p.id === c.id ||
+            p.nombre.toLowerCase().trim() === c.nombre.toLowerCase().trim() ||
             p.nombre.toLowerCase().includes(c.nombre.toLowerCase().split(" ")[0]) ||
             c.nombre.toLowerCase().includes(p.nombre.toLowerCase().split(" ")[0])
           )
           if (match) {
+            const dbPrice = match.precio_venta || match.precio || c.precio
             return {
               ...c,
-              precio: match.precio_venta || match.precio || c.precio,
+              precio: dbPrice,
               stock_kg: match.stock !== undefined ? match.stock : c.stock_kg,
+              foto_url: match.imagen_url || c.foto_url
             }
           }
           return c
@@ -293,12 +456,11 @@ export default function CarniceriaTvDigitalPage() {
     return () => clearInterval(interval)
   }, [fetchLivePrices])
 
-  // ── FILTRO ESTRICTO: Solo productos con stock > 0 y habilitados en el configurador ──
+  // ── FILTRO ESTRICTO: Solo productos habilitados en el configurador ──
   const activeCortes = useMemo(() => {
     return cortes.filter((c) => {
       const isVisibleInConfig = !config.productos_visibles_ids || config.productos_visibles_ids.includes(c.id)
-      const hasStock = c.stock_kg > 0
-      return isVisibleInConfig && hasStock
+      return isVisibleInConfig
     })
   }, [cortes, config.productos_visibles_ids])
 
@@ -338,6 +500,7 @@ export default function CarniceriaTvDigitalPage() {
     ave: "Pollo & Aves Frescas",
     embutido: "Chorizos Caseros de la Casa",
     elaborado: "Elaborados Artesanales Extra",
+    otros: "Ofertas Especiales de Salón"
   }
 
   return (
@@ -365,7 +528,7 @@ export default function CarniceriaTvDigitalPage() {
               </span>
             </div>
             <div className={`text-xs font-semibold ${isLight ? "text-slate-500" : "text-slate-400"}`}>
-              EXTRA SUPERMERCADO · Precios Actualizados en Vivo
+              EXTRA SUPERMERCADO · Precios Oficiales del Sistema en Vivo
             </div>
           </div>
         </div>
@@ -430,7 +593,7 @@ export default function CarniceriaTvDigitalPage() {
                     <Sparkles className="w-3.5 h-3.5" /> {destacadoDeCategoria.etiqueta || "RECOMENDADO DEL DÍA"}
                   </span>
                   <span className={`text-xs font-bold ${isLight ? "text-slate-500" : "text-slate-400"}`}>
-                    {destacadoDeCategoria.origen}
+                    {destacadoDeCategoria.origen || "Extra Selección"}
                   </span>
                 </div>
 
@@ -438,25 +601,25 @@ export default function CarniceriaTvDigitalPage() {
                   {destacadoDeCategoria.nombre}
                 </h2>
                 <p className={`text-sm font-medium line-clamp-2 mb-3 ${isLight ? "text-slate-600" : "text-slate-300"}`}>
-                  {destacadoDeCategoria.descripcion}
+                  {destacadoDeCategoria.descripcion || "Corte fresco seleccionado con los más altos estándares de calidad."}
                 </p>
               </div>
 
               {/* Imagen HD del Corte */}
               <div className="w-full h-56 rounded-2xl overflow-hidden my-auto border-2 border-slate-200 dark:border-slate-800 shadow-lg relative group">
                 <img
-                  src={destacadoDeCategoria.foto_url}
+                  src={destacadoDeCategoria.foto_url || "https://images.unsplash.com/photo-1544025162-d76694265947?w=800&auto=format&fit=crop&q=80"}
                   alt={destacadoDeCategoria.nombre}
                   className="w-full h-full object-cover transform scale-100 hover:scale-105 transition duration-700"
                 />
               </div>
 
-              {/* Bloque de Precio Gigante */}
+              {/* Bloque de Precio Gigante (Precios del Sistema) */}
               <div className={`p-4 rounded-2xl border mt-3 ${
                 isLight ? "bg-slate-50 border-slate-200" : "bg-slate-950/90 border-slate-800"
               }`}>
                 <div className={`text-[11px] font-black uppercase tracking-wider ${isLight ? "text-slate-500" : "text-slate-400"}`}>
-                  Precio por Kilo:
+                  Precio por Kilo / Unidad:
                 </div>
                 <div className={`font-black text-4xl tracking-tight mt-0.5 ${isLight ? "text-red-600" : "text-white"}`} style={monoFont}>
                   {formatPYG(destacadoDeCategoria.precio)}
@@ -506,7 +669,7 @@ export default function CarniceriaTvDigitalPage() {
             </div>
 
             {/* Listado de Precios Limpio y Nítido */}
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1 scrollbar-none">
               {currentCategoryCortes.map((c) => (
                 <div
                   key={c.id}
@@ -593,7 +756,7 @@ export default function CarniceriaTvDigitalPage() {
       }`}>
         <div className="flex items-center gap-4">
           <span className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" /> Precios Actualizados en Vivo
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" /> Precios Oficiales Sincronizados
           </span>
           <span>·</span>
           <span>Rotación automática cada {config.intervalo_segundos || 8}s</span>
