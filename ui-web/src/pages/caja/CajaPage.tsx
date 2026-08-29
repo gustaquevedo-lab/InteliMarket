@@ -1166,6 +1166,8 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
             </table>
           </div>
         </div>
+      )}
+
       {/* TAB 6: DONACIONES & RSE ("ABRE TU CORAZÓN" - CENTRO AMOR Y ESPERANZA) */}
       {activeTab === "donaciones" && (
         <div className="space-y-6 animate-fade-in">
