@@ -7160,13 +7160,14 @@ export default function POSPage() {
               </div>
 
               {/* 3. FOOTER ACTION BAR */}
-              <div className="flex items-center justify-between gap-3 px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
+              <div className="flex items-stretch gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
                 <button
                   type="button"
                   onClick={() => setShowPaymentModal(false)}
-                  className="px-4 py-3 rounded-2xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  className="w-52 shrink-0 rounded-2xl border-2 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-black text-sm hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-400 dark:hover:border-slate-600 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
-                  Volver al Carrito [ESC]
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Volver [ESC]</span>
                 </button>
 
                 <button
@@ -7197,14 +7198,14 @@ export default function POSPage() {
                     handleProcessCheckout()
                   }}
                   disabled={submitting}
-                  className="flex-1 max-w-md py-3 px-6 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-98 disabled:opacity-50"
+                  className="flex-1 py-4 px-8 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-base shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-3 transition-all cursor-pointer active:scale-[0.99] disabled:opacity-50"
                 >
                   {submitting ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     <>
                       <Printer className="w-5 h-5" />
-                      <span>Confirmar Cobro e Imprimir Factura [F12 / Enter]</span>
+                      <span>Confirmar Cobro e Imprimir Factura [F12]</span>
                     </>
                   )}
                 </button>
