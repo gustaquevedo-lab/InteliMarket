@@ -26,7 +26,7 @@ class CuponClienteUpdate(BaseModel):
     barrio: Optional[str] = None
     ciudad: Optional[str] = None
     segmentos: Optional[str] = None
-    ia_analisis: Optional[Dict[str, Any]] = None
+    ia_analisis: Optional[Any] = None
     activo: Optional[bool] = None
 
 
@@ -38,7 +38,7 @@ class CuponClienteOut(CuponClienteBase):
     cantidad_compras: int
     ultimo_consumo: Optional[datetime] = None
     segmentos: Optional[str] = None
-    ia_analisis: Optional[Dict[str, Any]] = None
+    ia_analisis: Optional[Any] = None
     activo: bool
     created_at: datetime
     updated_at: datetime
