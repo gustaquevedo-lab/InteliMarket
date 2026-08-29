@@ -6,11 +6,11 @@ import {
   ShoppingBag, Clock, Brain, ThumbsUp, Copy, Check, Filter,
   Settings, Sliders, Printer, Wand2, Scissors, Save, HelpCircle,
   Plus, Edit3, X, CheckSquare, Gift, Store, BarChart3, ChevronRight,
-  Package, ToggleLeft, ToggleRight, Receipt
+  Package, ToggleLeft, ToggleRight, Receipt, Percent, Star, ArrowUpRight
 } from "lucide-react"
 import { api, type CuponTicket, type CuponCliente, type CuponStats, type Product } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG } from "../../utils/format"
+import { formatPYG, formatDate } from "../../utils/format"
 
 const BARRIOS_PJC = [
   "San Gerardo",
@@ -267,7 +267,7 @@ export default function CapturaCuponesPage() {
         }
         if (c.barrio) setBarrio(c.barrio)
         if (c.direccion) setDireccion(c.direccion)
-        toast.info("Cliente encontrado", `Datos autocompletados desde ${res.origen === "cupones" ? "Cupones" : "Clientes General"}`)
+        toast.info("Cliente encontrado", `Datos autocompletados desde ${res.origen === "cupones" ? "Cupones" : "Directorio de Clientes"}`)
       } else {
         setClienteExistente(null)
       }
@@ -282,7 +282,7 @@ export default function CapturaCuponesPage() {
   const handleRegistrarCupon = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!documento.trim() || !nombre.trim() || !telefono.trim() || !nroTicket.trim()) {
-      toast.warning("Campos obligatorios", "Documento, Nombre, Teléfono y Nro. Ticket son requeridos.")
+      toast.warning("Campos requeridos", "Por favor completa el documento, nombre, teléfono y número de ticket.")
       return
     }
 
@@ -295,7 +295,6 @@ export default function CapturaCuponesPage() {
     setSubmitting(true)
     const telCompleto = `${codigoPais}${telefono.replace(/\D/g, "")}`
 
-    // Buscar nombre de campaña
     const campanaSeleccionada = campanas.find(c => c.id === campanaCapturaId)
     const campanaNombre = campanaSeleccionada ? campanaSeleccionada.nombre : "Gran Sorteo Aniversario"
 
@@ -320,7 +319,6 @@ export default function CapturaCuponesPage() {
       toast.success("¡Cupón Registrado!", `Se emitieron ${cantidadCupones} cupón(es) para ${campanaNombre}.`)
       setUltimoRegistrado(res)
 
-      // Limpiar formulario para el siguiente cliente
       setDocumento("")
       setNombre("")
       setTelefono("")
@@ -369,7 +367,7 @@ export default function CapturaCuponesPage() {
 
   const handleGuardarCampana = async () => {
     if (!campanaEditando || !campanaEditando.nombre?.trim()) {
-      toast.warning("Nombre obligatorio", "Ingrese el nombre de la campaña.")
+      toast.warning("Nombre obligatorio", "Ingrese el nombre del sorteo o campaña.")
       return
     }
 
@@ -377,10 +375,10 @@ export default function CapturaCuponesPage() {
     try {
       if (campanaEditando.id) {
         await api.cupones.updateCampana(campanaEditando.id, campanaEditando)
-        toast.success("Campaña Actualizada", "Los cambios se aplicaron exitosamente.")
+        toast.success("Campaña Actualizada", "Los parámetros del sorteo se guardaron correctamente.")
       } else {
         await api.cupones.createCampana(campanaEditando)
-        toast.success("Campaña Creada", "La nueva campaña de sorteo está lista y activa.")
+        toast.success("Campaña Creada", "Nueva promoción activa y lista en las cajas.")
       }
       setShowCampanaModal(false)
       setCampanaEditando(null)
@@ -419,7 +417,7 @@ export default function CapturaCuponesPage() {
     const actual = campanaEditando.productos_participantes || []
     const yaExiste = actual.some(p => p.id === prod.id || p.sku === prod.sku)
     if (yaExiste) {
-      toast.warning("Ya seleccionado", "Este producto ya está en la lista de participantes.")
+      toast.warning("Ya seleccionado", "Este artículo ya forma parte de los aceleradores.")
       return
     }
     const nuevo = [
@@ -487,402 +485,416 @@ export default function CapturaCuponesPage() {
     setSyncBatchLoading(true)
     try {
       await api.cupones.syncBatch({ limite: 50, delay_ms: 150 })
-      toast.info("Sincronización iniciada", "Procesando lotes en segundo plano...")
+      toast.info("Sincronización iniciada", "Procesando lotes de tickets en segundo plano...")
     } catch (err: any) {
       toast.error("Error iniciando sync", err.message)
       setSyncBatchLoading(false)
     }
   }
 
+  const handleSyncTicket = async (ticketId: string) => {
+    try {
+      const res = await api.cupones.syncTicket(ticketId)
+      if (res.sincronizado) {
+        toast.success("Venta Sincronizada", `Monto cruzado: Gs. ${res.monto_compra.toLocaleString("es-PY")}`)
+      } else {
+        toast.info("Sin Venta Encontrada", res.mensaje)
+      }
+      loadTickets()
+      loadStats()
+    } catch (err: any) {
+      toast.error("Error en sincronización", err.message)
+    }
+  }
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto animate-fade-in font-sans">
+    <div className="space-y-6 animate-fade-in-up pb-20 max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8 font-sans">
       
-      {/* ── ENCABEZADO Y HEADER ──────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-gradient-to-tr from-amber-500 to-orange-500 rounded-2xl shadow-lg shadow-orange-500/20 text-white">
-              <Ticket className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                  Motor Multi-Campaña de Sorteos & Cupones
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300">
-                  Extra Supermercado
+      {/* ──────────────────────────────────────────────────────────────────────────
+          🌟 LUXURY COMMAND DECK HEADER (ALINEADO AL SISTEMA DE DISEÑO)
+      ────────────────────────────────────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950/90 text-white p-6 sm:p-8 border border-amber-500/20 shadow-2xl shadow-amber-950/30">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3.5">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 border border-amber-400/30 text-white flex items-center justify-center shadow-lg shadow-orange-500/25">
+                  <Ticket className="w-7 h-7" />
+                </div>
+                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500 border-2 border-slate-950"></span>
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Sorteos globales, promociones de proveedores con electrodomésticos, aceleradores por producto e impresión térmica con corte.
-              </p>
+
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-[10px] font-extrabold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20">
+                    FIDELIZACIÓN & MARKETING · MOTOR MULTI-CAMPAÑA
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    Extra Supermercado (Central)
+                  </span>
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
+                  Sorteos Comerciales & Cupones
+                </h1>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Sorteos de tienda, promociones de proveedores con electrodomésticos, aceleradores por producto e impresión térmica con corte en cajas.
+                </p>
+              </div>
+            </div>
+
+            {/* Micro pills de estado */}
+            <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+                🏆 {campanas.filter(c => c.activo).length} Campañas activas
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-amber-300">
+                🎟️ {stats?.total_cupones?.toLocaleString("es-PY") || 0} Cupones emitidos
+              </span>
+              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-300">
+                ⚡ Detección automática en POS
+              </span>
             </div>
           </div>
-        </div>
 
-        {/* Acciones Rápidas */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleAbrirCrearCampana}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs shadow-md shadow-orange-500/20 transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nueva Campaña de Sorteo</span>
-          </button>
+          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => {
+                loadCampanas()
+                loadStats()
+                if (tab === "tickets") loadTickets()
+                if (tab === "clientes") loadClientes()
+              }}
+              disabled={campanasLoading}
+              className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 backdrop-blur-md transition shadow-sm cursor-pointer"
+              title="Refrescar datos"
+            >
+              <RefreshCw className={`w-4 h-4 ${campanasLoading ? "animate-spin text-amber-400" : ""}`} />
+            </button>
 
-          <button
-            onClick={() => { loadCampanas(); loadStats(); if (tab === "tickets") loadTickets(); if (tab === "clientes") loadClientes(); }}
-            className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-            title="Refrescar datos"
-          >
-            <RefreshCw className={`w-4 h-4 ${campanasLoading ? "animate-spin" : ""}`} />
-          </button>
-        </div>
-      </div>
-
-      {/* ── RESUMEN DE MÉTRICAS GLOBALES (KPIS) ─────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
-            <span className="font-bold">Campañas Activas</span>
-            <Gift className="w-4 h-4 text-orange-500" />
-          </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white font-posMono">
-            {campanas.filter(c => c.activo).length}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">
-            {campanas.length} campañas configuradas
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
-            <span className="font-bold">Cupones Emitidos</span>
-            <Ticket className="w-4 h-4 text-amber-500" />
-          </div>
-          <div className="text-2xl font-black text-amber-600 dark:text-amber-400 font-posMono">
-            {stats?.total_cupones?.toLocaleString("es-PY") || 0}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">
-            En {stats?.total_tickets || 0} ventas cruzadas
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
-            <span className="font-bold">Clientes Participantes</span>
-            <User className="w-4 h-4 text-blue-500" />
-          </div>
-          <div className="text-2xl font-black text-blue-600 dark:text-blue-400 font-posMono">
-            {stats?.total_clientes?.toLocaleString("es-PY") || 0}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">
-            Base de datos fidelizada
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
-            <span className="font-bold">Monto Total de Compras</span>
-            <DollarSign className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="text-lg font-black text-emerald-600 dark:text-emerald-400 font-posMono truncate">
-            {formatPYG(stats?.monto_total_compras || 0)}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">
-            Ventas con participación en sorteos
-          </div>
-        </div>
-      </div>
-
-      {/* ── BARRA DE PESTAÑAS ─────────────────────────────────────────────────── */}
-      <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2 overflow-x-auto pb-1">
-        <button
-          onClick={() => setTab("campanas")}
-          className={`flex items-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
-            tab === "campanas"
-              ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
-              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-          }`}
-        >
-          <Gift className="w-4 h-4" />
-          <span>🏆 Campañas & Sorteos Multi-Proveedor</span>
-          <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-white/20">
-            {campanas.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setTab("captura")}
-          className={`flex items-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
-            tab === "captura"
-              ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
-              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-          }`}
-        >
-          <Zap className="w-4 h-4" />
-          <span>⚡ Captura Rápida de Mostrador</span>
-        </button>
-
-        <button
-          onClick={() => setTab("tickets")}
-          className={`flex items-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
-            tab === "tickets"
-              ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
-              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-          }`}
-        >
-          <Receipt className="w-4 h-4" />
-          <span>📋 Historial & Auditoría</span>
-        </button>
-
-        <button
-          onClick={() => setTab("clientes")}
-          className={`flex items-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
-            tab === "clientes"
-              ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
-              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-          }`}
-        >
-          <User className="w-4 h-4" />
-          <span>👥 Clientes & RFM</span>
-        </button>
-
-        <button
-          onClick={() => setTab("ia_insights")}
-          className={`flex items-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
-            tab === "ia_insights"
-              ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
-              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-          }`}
-        >
-          <Brain className="w-4 h-4" />
-          <span>🧠 Analítica IA & Campañas</span>
-        </button>
-      </div>
-
-      {/* ────────────────────────────────────────────────────────────────────── */}
-      {/* PESTAÑA 1: GESTIÓN DE CAMPAÑAS Y SORTEOS MULTI-PROVEEDOR               */}
-      {/* ────────────────────────────────────────────────────────────────────── */}
-      {tab === "campanas" && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-black text-slate-900 dark:text-white">
-                Sorteos y Promociones Activas
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Cada sorteo evalúa automáticamente el carrito al cobrar en el POS e imprime sus propios cupones individuales.
-              </p>
-            </div>
             <button
               onClick={handleAbrirCrearCampana}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold cursor-pointer"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-xs font-black transition flex items-center gap-2 shadow-lg shadow-amber-500/25 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Crear Sorteo</span>
+              <span>Nueva Campaña de Sorteo</span>
             </button>
           </div>
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {campanas.map(c => {
-              const esGlobal = c.tipo_trigger === "MONTO_GLOBAL"
-              const esProductos = c.tipo_trigger === "PRODUCTOS_ESPECIFICOS"
-              const esMarca = c.tipo_trigger === "MARCA_PROVEEDOR"
+        {/* 📊 BARRA DE KPIS EJECUTIVOS */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          {[
+            { label: "Total Cupones", val: stats?.total_cupones?.toLocaleString("es-PY") || "0", color: "text-amber-400", icon: Award },
+            { label: "Clientes Fidelizados", val: stats?.total_clientes?.toLocaleString("es-PY") || "0", color: "text-blue-300", icon: User },
+            { label: "Tickets Auditados", val: `${stats?.tickets_sincronizados || 0} / ${stats?.total_tickets || 0}`, color: "text-emerald-400", icon: ShieldCheck },
+            { label: "Campañas en Caja", val: campanas.length, color: "text-purple-300", icon: Layers },
+          ].map((kpi) => (
+            <div key={kpi.label} className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80 backdrop-blur-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{kpi.label}</span>
+                <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+              </div>
+              <p className={`text-xl font-black font-mono tracking-tight ${kpi.color}`}>{kpi.val}</p>
+            </div>
+          ))}
+        </div>
+      </div>
 
-              return (
-                <div
-                  key={c.id}
-                  className={`p-5 rounded-3xl border transition flex flex-col justify-between ${
-                    c.activo
-                      ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-md"
-                      : "bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-60"
-                  }`}
-                >
-                  <div className="space-y-3">
-                    {/* Tags y Estado */}
-                    <div className="flex items-center justify-between">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                        esGlobal
-                          ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
-                          : esProductos
+      {/* ──────────────────────────────────────────────────────────────────────────
+          🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS
+      ────────────────────────────────────────────────────────────────────────── */}
+      <div className="flex gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-px">
+        {[
+          { key: "campanas", label: `Campañas & Sorteos Multi-Proveedor (${campanas.length})`, icon: Award },
+          { key: "captura", label: "Captura Rápida en Mostrador", icon: Zap },
+          { key: "tickets", label: `Historial & Auditoría (${tickets.length})`, icon: Ticket },
+          { key: "clientes", label: `Directorio de Clientes & RFM (${clientes.length})`, icon: User },
+          { key: "ia_insights", label: "Copilot IA & WhatsApp", icon: Brain },
+        ].map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key as any)}
+            className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              tab === t.key
+                ? "border-amber-500 text-amber-600 dark:text-amber-400"
+                : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300"
+            }`}
+          >
+            <t.icon className="w-4 h-4" />
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA 1: GESTOR DE CAMPAÑAS MULTI-PROVEEDOR
+      ────────────────────────────────────────────────────────────────────────── */}
+      {tab === "campanas" && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Banner de Información */}
+          <div className="card p-4 bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 flex items-start gap-3 text-xs text-amber-900 dark:text-amber-200 rounded-2xl">
+            <Sparkles className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-extrabold uppercase text-[11px] tracking-wider text-amber-950 dark:text-amber-200 mb-0.5">
+                Coexistencia Multi-Campaña en el Punto de Venta
+              </p>
+              <p className="text-amber-800 dark:text-amber-300/80 leading-relaxed">
+                Puedes tener activos el Sorteo General de la Tienda y promociones comerciales de proveedores (ej. Unilever con sorteo de lavarropas por compra de shampoos, o Coca-Cola sorteando Smart TVs). Las cajas evaluarán cada ticket y emitirán los cupones correspondientes con corte automático individual.
+              </p>
+            </div>
+          </div>
+
+          {/* Grid de Campañas */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {campanas.map((camp) => (
+              <div
+                key={camp.id}
+                className={`card p-6 bg-white dark:bg-slate-900 border rounded-3xl space-y-4 transition-all duration-300 ${
+                  camp.activo
+                    ? "border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-amber-500/30"
+                    : "border-slate-200/60 dark:border-slate-800/60 opacity-60 bg-slate-50/50 dark:bg-slate-950/50"
+                }`}
+              >
+                {/* Cabecera de la Tarjeta */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1 flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider font-mono ${
+                        camp.tipo_trigger === "MONTO_GLOBAL"
+                          ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                          : camp.tipo_trigger === "PRODUCTOS_ESPECIFICOS"
                           ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                          : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                          : "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
                       }`}>
-                        {esGlobal ? "🌐 Cesta Global" : esProductos ? "📦 Productos Aceleradores" : "🏷️ Por Marca/Proveedor"}
+                        {camp.tipo_trigger === "MONTO_GLOBAL" && "🌐 Cesta Global"}
+                        {camp.tipo_trigger === "PRODUCTOS_ESPECIFICOS" && "📦 Acelerador SKU"}
+                        {camp.tipo_trigger === "MARCA_PROVEEDOR" && "🏷️ Marca/Proveedor"}
+                        {camp.tipo_trigger === "CATEGORIA" && "📁 Categoría"}
                       </span>
 
-                      <button
-                        onClick={() => handleToggleActivoCampana(c)}
-                        className={`text-xs font-bold flex items-center gap-1 cursor-pointer ${
-                          c.activo ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400"
-                        }`}
-                      >
-                        {c.activo ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
-                        <span>{c.activo ? "Activo" : "Pausado"}</span>
-                      </button>
+                      {camp.activo ? (
+                        <span className="badge-success text-[10px]">
+                          <CheckCircle2 className="w-3 h-3" /> Activo
+                        </span>
+                      ) : (
+                        <span className="badge-gray text-[10px]">
+                          Pausado
+                        </span>
+                      )}
                     </div>
 
-                    {/* Título y Patrocinador */}
-                    <div>
-                      <div className="text-[11px] font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wide">
-                        Patrocinado por: {c.patrocinador || "Extra Supermercado"}
-                      </div>
-                      <h3 className="text-base font-black text-slate-900 dark:text-white leading-snug">
-                        {c.nombre}
-                      </h3>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white truncate pt-1">
+                      {camp.nombre}
+                    </h3>
+                  </div>
+
+                  <button
+                    onClick={() => handleToggleActivoCampana(camp)}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                    title={camp.activo ? "Pausar campaña" : "Activar campaña"}
+                  >
+                    {camp.activo ? (
+                      <ToggleRight className="w-7 h-7 text-emerald-500" />
+                    ) : (
+                      <ToggleLeft className="w-7 h-7 text-slate-400" />
+                    )}
+                  </button>
+                </div>
+
+                {/* Detalles de Patrocinador y Premio */}
+                <div className="space-y-2 text-xs">
+                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80 space-y-1">
+                    <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                      <span className="text-[10px] font-bold uppercase">Patrocinador:</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{camp.patrocinador}</span>
                     </div>
 
-                    {/* Premio Destacado */}
-                    {c.premio_destacado && (
-                      <div className="p-2.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-2">
-                        <Gift className="w-4 h-4 shrink-0 text-amber-500" />
-                        <span className="truncate">Premio: {c.premio_destacado}</span>
+                    {camp.premio_destacado && (
+                      <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/50 dark:border-slate-700/50">
+                        <span className="text-[10px] font-bold uppercase">Premio Mayor:</span>
+                        <span className="font-black text-amber-600 dark:text-amber-400 truncate max-w-[180px]">
+                          🎁 {camp.premio_destacado}
+                        </span>
                       </div>
                     )}
+                  </div>
 
-                    {/* Regla de Disparo */}
-                    <div className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl space-y-1">
-                      <div className="font-bold text-[11px] text-slate-400 uppercase">Regla de Emisión:</div>
-                      {esGlobal && (
-                        <div>
-                          1 cupón por cada <strong>{formatPYG(c.valor_umbral)}</strong> de compra general.
-                        </div>
+                  {/* Regla de Disparo */}
+                  <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-300 px-1">
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Criterio:</span>
+                    <span className="font-black font-posMono text-slate-900 dark:text-white">
+                      {camp.criterio_evaluacion === "MONTO_ACUMULADO" ? (
+                        <>1 Cupón c/ {formatPYG(camp.valor_umbral)}</>
+                      ) : (
+                        <>1 Cupón c/ {camp.valor_umbral} Unidades</>
                       )}
-                      {esProductos && (
-                        <div>
-                          1 cupón por cada{" "}
-                          <strong>
-                            {c.criterio_evaluacion === "CANTIDAD_UNIDADES"
-                              ? `${c.valor_umbral} unidades`
-                              : formatPYG(c.valor_umbral)}
-                          </strong>{" "}
-                          en los <strong>{c.productos_participantes?.length || 0} productos participantes</strong>.
-                        </div>
-                      )}
-                      {esMarca && (
-                        <div>
-                          1 cupón por cada <strong>{formatPYG(c.valor_umbral)}</strong> en marcas participantes.
-                        </div>
-                      )}
+                    </span>
+                  </div>
+
+                  {/* Artículos participantes */}
+                  {camp.tipo_trigger === "PRODUCTOS_ESPECIFICOS" && (
+                    <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-300 px-1">
+                      <span className="text-slate-400 font-bold uppercase text-[10px]">Productos:</span>
+                      <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                        {camp.productos_participantes?.length || 0} SKUs configurados
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* KPIs & Acciones */}
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <div>
+                    <div className="text-[9px] font-bold text-slate-400 uppercase">Emitidos</div>
+                    <div className="text-base font-black font-posMono text-slate-900 dark:text-white">
+                      {camp.total_cupones_emitidos?.toLocaleString("es-PY") || 0}
                     </div>
                   </div>
 
-                  {/* Footer con Métricas y Botones */}
-                  <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                    <div>
-                      <div className="text-[10px] text-slate-400">Cupones Emitidos</div>
-                      <div className="text-sm font-black text-slate-900 dark:text-white font-posMono">
-                        {c.total_cupones_emitidos?.toLocaleString("es-PY") || 0}
-                      </div>
-                    </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleAbrirEditarCampana(camp)}
+                      className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition cursor-pointer"
+                      title="Editar parámetros y diseñador"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
 
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleAbrirEditarCampana(c)}
-                        className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 transition cursor-pointer"
-                        title="Diseñar Ticket & Editar"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleEliminarCampana(c.id, c.nombre)}
-                        className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 text-rose-600 transition cursor-pointer"
-                        title="Eliminar campaña"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => handleEliminarCampana(camp.id, camp.nombre)}
+                      className="p-2 rounded-xl border border-red-200 dark:border-red-900/40 hover:bg-red-50 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 transition cursor-pointer"
+                      title="Eliminar campaña"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
-              )
-            })}
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* ────────────────────────────────────────────────────────────────────── */}
-      {/* PESTAÑA 2: CAPTURA RÁPIDA EN VENTANILLA / MOSTRADOR                    */}
-      {/* ────────────────────────────────────────────────────────────────────── */}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA 2: CAPTURA RÁPIDA DE MOSTRADOR
+      ────────────────────────────────────────────────────────────────────────── */}
       {tab === "captura" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <form onSubmit={handleRegistrarCupon} className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-orange-500" />
-                  <span>Emisión Manual de Cupones</span>
-                </h3>
-                <span className="text-xs text-slate-400">PJC - Paraguay</span>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+          {/* Formulario Principal de Registro */}
+          <div className="lg:col-span-2 space-y-6">
+            <form onSubmit={handleRegistrarCupon} className="card p-6 sm:p-8 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-sm space-y-6">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <Zap className="w-5 h-5 text-amber-500" />
+                    <span>Emisión Manual de Cupones</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Registro rápido para promotoras en mostrador o servicio de atención al cliente.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-slate-400">Operador:</span>
+                  <input
+                    type="text"
+                    value={usuarioNombre}
+                    onChange={(e) => setUsuarioNombre(e.target.value)}
+                    className="input-field text-xs font-bold py-1.5 w-36"
+                  />
+                </div>
               </div>
 
               {/* Selector de Campaña Destino */}
               <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                  Campaña / Sorteo Destino *
+                <label className="input-label">
+                  Sorteo / Campaña a la que Aplica *
                 </label>
                 <select
                   value={campanaCapturaId}
-                  onChange={e => setCampanaCapturaId(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
+                  onChange={(e) => setCampanaCapturaId(e.target.value)}
+                  className="input-field font-bold text-xs"
                 >
-                  {campanas.filter(c => c.activo).map(c => (
+                  {campanas.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.nombre} (Patrocinador: {c.patrocinador})
+                      {c.nombre} ({c.patrocinador}) {c.premio_destacado ? `· Premio: ${c.premio_destacado}` : ""}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Documento y Búsqueda */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    C.I. / CPF / RUC *
+              {/* Fila 1: Documento y Nombre */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                <div className="sm:col-span-5">
+                  <label className="input-label">
+                    Documento (C.I. / CPF) *
                   </label>
                   <div className="relative">
                     <input
                       ref={docInputRef}
                       type="text"
                       required
+                      autoFocus
                       value={documento}
-                      onChange={e => setDocumento(e.target.value)}
+                      onChange={(e) => setDocumento(e.target.value)}
                       onBlur={() => handleLookupCliente()}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          handleLookupCliente()
+                        }
+                      }}
                       placeholder="Ej: 4567890 o CPF"
-                      className="w-full p-2.5 pr-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                      className="input-field font-mono font-bold text-sm pl-4 pr-10"
                     />
-                    {searchingDoc && (
-                      <RefreshCw className="w-4 h-4 animate-spin text-slate-400 absolute right-2.5 top-3" />
+                    {searchingDoc ? (
+                      <RefreshCw className="w-4 h-4 animate-spin text-amber-500 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleLookupCliente()}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-amber-500 cursor-pointer"
+                        title="Buscar cliente registrado"
+                      >
+                        <Search className="w-4 h-4" />
+                      </button>
                     )}
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                <div className="sm:col-span-7">
+                  <label className="input-label">
                     Nombre y Apellido *
                   </label>
                   <input
                     type="text"
                     required
                     value={nombre}
-                    onChange={e => setNombre(e.target.value)}
-                    placeholder="Nombre completo"
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
+                    onChange={(e) => setNombre(e.target.value)}
+                    placeholder="Nombre completo del cliente"
+                    className="input-field font-bold text-sm"
                   />
                 </div>
               </div>
 
-              {/* Teléfono y País */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Teléfono / WhatsApp *
+              {/* Fila 2: Teléfono WhatsApp y Barrio */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                <div className="sm:col-span-6">
+                  <label className="input-label">
+                    WhatsApp (Disparo de Confirmación) *
                   </label>
-                  <div className="flex gap-2">
+                  <div className="flex rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-800/60 overflow-hidden focus-within:ring-2 focus-within:ring-amber-500/20 focus-within:border-amber-500 transition">
                     <select
                       value={codigoPais}
-                      onChange={e => setCodigoPais(e.target.value as "595" | "55")}
-                      className="p-2.5 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={(e) => setCodigoPais(e.target.value as "595" | "55")}
+                      className="bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 px-3 py-2.5 border-r border-slate-200 dark:border-slate-700 outline-none cursor-pointer"
                     >
                       <option value="595">🇵🇾 +595</option>
                       <option value="55">🇧🇷 +55</option>
@@ -891,234 +903,354 @@ export default function CapturaCuponesPage() {
                       type="text"
                       required
                       value={telefono}
-                      onChange={e => setTelefono(e.target.value.replace(/\D/g, ""))}
+                      onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ""))}
                       placeholder={codigoPais === "595" ? "981 123456" : "67 991234567"}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white flex-1"
+                      className="w-full bg-transparent px-3 py-2.5 text-sm font-mono font-bold text-slate-900 dark:text-white outline-none"
                     />
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                <div className="sm:col-span-6">
+                  <label className="input-label">
                     Barrio / Ciudad
                   </label>
                   <select
                     value={barrio}
-                    onChange={e => setBarrio(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
+                    onChange={(e) => setBarrio(e.target.value)}
+                    className="input-field font-bold text-xs cursor-pointer"
                   >
-                    {BARRIOS_PJC.map(b => (
+                    {BARRIOS_PJC.map((b) => (
                       <option key={b} value={b}>{b}</option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              {/* Datos de Compra */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Nro. de Ticket / Venta *
+              {/* Fila 3: Dirección (Opcional) */}
+              <div>
+                <label className="input-label">
+                  Dirección Domiciliaria (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={direccion}
+                  onChange={(e) => setDireccion(e.target.value)}
+                  placeholder="Calle, número de casa, referencias"
+                  className="input-field text-xs"
+                />
+              </div>
+
+              {/* Fila 4: Ticket y Monto de Compra */}
+              <div className="p-5 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/40 grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
+                <div className="sm:col-span-5">
+                  <label className="input-label text-amber-950 dark:text-amber-200">
+                    Nro. de Factura / Ticket *
                   </label>
                   <input
                     type="text"
                     required
                     value={nroTicket}
-                    onChange={e => setNroTicket(e.target.value)}
+                    onChange={(e) => setNroTicket(e.target.value)}
                     placeholder="001-002-0001234"
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                    className="input-field font-mono font-bold text-sm bg-white dark:bg-slate-900"
                   />
                 </div>
 
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Monto de Compra (Gs.)
+                <div className="sm:col-span-4">
+                  <label className="input-label text-amber-950 dark:text-amber-200">
+                    Monto Compra (Gs.)
                   </label>
                   <input
                     type="text"
                     value={montoCompra}
-                    onChange={e => {
-                      const num = parseInt(e.target.value.replace(/\D/g, "") || "0", 10)
+                    onChange={(e) => {
+                      const rawVal = e.target.value.replace(/\D/g, "")
+                      const num = parseInt(rawVal, 10) || 0
                       setMontoCompra(num > 0 ? num.toLocaleString("es-PY") : "")
-                      // Auto cálculo con base en la campaña seleccionada
-                      const camp = campanas.find(c => c.id === campanaCapturaId)
-                      if (camp && camp.valor_umbral > 0) {
-                        setCantidadCupones(Math.max(1, Math.floor(num / camp.valor_umbral)))
+                      if (num > 0) {
+                        const campanaActual = campanas.find(c => c.id === campanaCapturaId)
+                        const divisor = (campanaActual && campanaActual.valor_umbral) || 50000
+                        const c = Math.max(1, Math.floor(num / divisor))
+                        setCantidadCupones(c)
                       }
                     }}
                     placeholder="150.000"
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                    className="input-field font-mono font-black text-sm bg-white dark:bg-slate-900"
                   />
                 </div>
 
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Cantidad de Cupones *
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={cantidadCupones}
-                    onChange={e => setCantidadCupones(parseInt(e.target.value, 10) || 1)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white"
-                  />
+                <div className="sm:col-span-3 text-center sm:text-right">
+                  <div className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest">
+                    Cupones Ganados
+                  </div>
+                  <div className="flex items-center justify-center sm:justify-end gap-2 mt-1">
+                    <input
+                      type="number"
+                      min={1}
+                      value={cantidadCupones}
+                      onChange={(e) => setCantidadCupones(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      className="w-20 text-center bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-xl py-2 text-2xl font-black font-posMono text-amber-600 dark:text-amber-400 outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2">
-                <label className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-400 cursor-pointer">
+              {/* Acciones */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+                <label className="flex items-center gap-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={enviarWhatsapp}
-                    onChange={e => setEnviarWhatsapp(e.target.checked)}
-                    className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4"
+                    onChange={(e) => setEnviarWhatsapp(e.target.checked)}
+                    className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 focus:ring-2 bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700"
                   />
-                  <span>Disparar confirmación de WhatsApp al registrar</span>
+                  <span className="flex items-center gap-1.5">
+                    <Send className="w-3.5 h-3.5 text-emerald-500" />
+                    Enviar comprobante digital y cupones por WhatsApp al registrar
+                  </span>
                 </label>
 
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-6 py-3 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-orange-500/30 flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                  className="btn-primary w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 border-none shadow-xl shadow-amber-500/25 cursor-pointer"
                 >
-                  <Ticket className="w-4 h-4" />
-                  <span>{submitting ? "Registrando..." : `Emitir ${cantidadCupones} Cupones`}</span>
+                  {submitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Registrando Cupones...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Ticket className="w-4 h-4" />
+                      <span>Generar {cantidadCupones} {cantidadCupones === 1 ? "Cupón" : "Cupones"}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
           </div>
 
-          {/* Panel Lateral: Resumen del Último Cupón */}
-          <div>
-            <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-              <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>Último Comprobante Emitido</span>
-              </h3>
+          {/* Panel Lateral: Perfil y Último Comprobante */}
+          <div className="space-y-6">
+            {clienteExistente && (
+              <div className="card p-6 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900/50 rounded-3xl shadow-sm space-y-4 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <span className="badge-info text-[10px]">
+                    Cliente Frecuente
+                  </span>
+                  <span className="text-xs font-mono text-slate-400">
+                    ID: {clienteExistente.id.slice(0, 8)}
+                  </span>
+                </div>
 
-              {ultimoRegistrado ? (
-                <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 text-xs space-y-2">
-                  <div className="font-bold text-emerald-800 dark:text-emerald-300 text-sm">
-                    {ultimoRegistrado.cliente?.nombre}
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    {clienteExistente.nombre}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {clienteExistente.barrio || "Centro"}, Pedro Juan Caballero
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-center">
+                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase">Compras</div>
+                    <div className="text-sm font-black text-slate-900 dark:text-white font-mono">
+                      {clienteExistente.cantidad_compras || 0}
+                    </div>
                   </div>
-                  <div className="text-slate-600 dark:text-slate-400">
-                    Doc: <strong>{ultimoRegistrado.cliente?.documento}</strong> · Tel: <strong>{ultimoRegistrado.cliente?.telefono}</strong>
+                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase">Total Gs.</div>
+                    <div className="text-xs font-black text-emerald-600 dark:text-emerald-400 font-mono truncate">
+                      {formatPYG(clienteExistente.total_gastado || 0)}
+                    </div>
                   </div>
-                  <div className="text-slate-600 dark:text-slate-400">
-                    Ticket: <strong>#{ultimoRegistrado.ticket?.nro_ticket}</strong>
-                  </div>
-                  <div className="pt-2 border-t border-emerald-200 dark:border-emerald-900/30 flex items-center justify-between">
-                    <span className="font-black text-emerald-700 dark:text-emerald-400">
-                      {ultimoRegistrado.ticket?.cantidad} Cupones Generados
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      {new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}
-                    </span>
+                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase">Promedio</div>
+                    <div className="text-xs font-black text-blue-600 dark:text-blue-400 font-mono truncate">
+                      {formatPYG(clienteExistente.ticket_promedio || 0)}
+                    </div>
                   </div>
                 </div>
-              ) : (
-                <div className="p-8 text-center text-slate-400 text-xs">
-                  No hay comprobantes emitidos en esta sesión todavía.
+              </div>
+            )}
+
+            {ultimoRegistrado && (
+              <div className="card p-6 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-3xl shadow-sm space-y-4 animate-scale-in">
+                <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-black text-xs uppercase tracking-wider">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Último Registro Exitoso</span>
                 </div>
-              )}
-            </div>
+
+                <div>
+                  <div className="text-xs text-emerald-700 dark:text-emerald-400">Cliente:</div>
+                  <div className="text-base font-black text-slate-900 dark:text-white">
+                    {ultimoRegistrado.cliente.nombre}
+                  </div>
+                  <div className="text-xs font-mono text-slate-500">
+                    Doc: {ultimoRegistrado.cliente.documento} · Tel: +{ultimoRegistrado.cliente.telefono}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-emerald-200 dark:border-emerald-900/40 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase">Factura / Ticket</div>
+                    <div className="text-xs font-mono font-black text-slate-800 dark:text-slate-200">
+                      #{ultimoRegistrado.ticket.nro_ticket}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] font-bold text-emerald-600 uppercase">Emitidos</div>
+                    <div className="text-lg font-black text-emerald-600 dark:text-emerald-400 font-posMono">
+                      {ultimoRegistrado.ticket.cantidad} Cupones
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ────────────────────────────────────────────────────────────────────── */}
-      {/* PESTAÑA 3: HISTORIAL & AUDITORÍA                                       */}
-      {/* ────────────────────────────────────────────────────────────────────── */}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA 3: HISTORIAL & AUDITORÍA DE TICKETS
+      ────────────────────────────────────────────────────────────────────────── */}
       {tab === "tickets" && (
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="space-y-4 animate-fade-in">
+          {/* Barra de Filtros */}
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
               <div className="relative flex-1 sm:w-64">
-                <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Buscar CI / Documento..."
                   value={filtroSearch}
-                  onChange={e => setFiltroSearch(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                  onChange={(e) => setFiltroSearch(e.target.value)}
+                  placeholder="Buscar documento o ticket..."
+                  className="input-field pl-9 text-xs"
                 />
               </div>
 
               <select
                 value={filtroBarrio}
-                onChange={e => setFiltroBarrio(e.target.value)}
-                className="py-2 px-3 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                onChange={(e) => setFiltroBarrio(e.target.value)}
+                className="input-field text-xs font-bold w-auto"
               >
                 <option value="">Todos los barrios</option>
-                {BARRIOS_PJC.map(b => (
+                {BARRIOS_PJC.map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}
               </select>
+
+              <select
+                value={filtroSinc}
+                onChange={(e) => setFiltroSinc(e.target.value)}
+                className="input-field text-xs font-bold w-auto"
+              >
+                <option value="todos">Todos los estados</option>
+                <option value="si">Solo Sincronizados</option>
+                <option value="no">Pendientes de Sync</option>
+              </select>
             </div>
 
-            <button
-              onClick={handleStartBatchSync}
-              disabled={syncBatchLoading}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${syncBatchLoading ? "animate-spin" : ""}`} />
-              <span>{syncBatchLoading ? "Sincronizando..." : "Sincronizar Lote con Ventas"}</span>
-            </button>
+            <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+              <button
+                onClick={handleStartBatchSync}
+                disabled={syncBatchLoading}
+                className="btn-primary text-xs flex items-center gap-2"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncBatchLoading ? "animate-spin" : ""}`} />
+                <span>{syncBatchLoading ? "Sincronizando..." : "Sincronizar con Ventas"}</span>
+              </button>
+
+              <button
+                onClick={loadTickets}
+                className="btn-outline p-2.5"
+                title="Refrescar"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+          {/* Tabla de Tickets */}
+          <div className="card bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-800">
+              <table className="w-full text-left text-xs text-slate-600 dark:text-slate-300">
+                <thead className="table-header">
                   <tr>
-                    <th className="py-3 px-4">Fecha</th>
-                    <th className="py-3 px-4">Ticket</th>
-                    <th className="py-3 px-4">Campaña / Sorteo</th>
-                    <th className="py-3 px-4">Cliente</th>
-                    <th className="py-3 px-4">Teléfono</th>
-                    <th className="py-3 px-4 text-center">Cupones</th>
-                    <th className="py-3 px-4 text-right">Monto</th>
-                    <th className="py-3 px-4 text-center">WhatsApp</th>
+                    <th className="table-cell">Fecha / Hora</th>
+                    <th className="table-cell">Nro. Ticket</th>
+                    <th className="table-cell">Sorteo / Campaña</th>
+                    <th className="table-cell">Cliente</th>
+                    <th className="table-cell">WhatsApp</th>
+                    <th className="table-cell text-center">Cupones</th>
+                    <th className="table-cell text-right">Monto Compra</th>
+                    <th className="table-cell text-center">Auditoría Venta</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {tickets.map(t => (
-                    <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
-                      <td className="py-3 px-4 text-slate-500">
-                        {t.fecha_captura ? new Date(t.fecha_captura).toLocaleDateString("es-PY") : "-"}
-                      </td>
-                      <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">
-                        #{t.nro_ticket}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300">
-                          {t.campana_nombre || "Gran Sorteo Aniversario"}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-bold text-slate-800 dark:text-slate-200">
-                        {t.cliente?.nombre || "Consumidor Final"}
-                      </td>
-                      <td className="py-3 px-4 text-slate-500 font-mono">
-                        {t.cliente?.telefono || "-"}
-                      </td>
-                      <td className="py-3 px-4 text-center font-black text-orange-600 dark:text-orange-400 font-posMono text-sm">
-                        {t.cantidad}
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
-                        {formatPYG(t.monto_compra || 0)}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          t.whatsapp_enviado
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
-                        }`}>
-                          {t.whatsapp_enviado ? "Enviado" : "Pendiente"}
-                        </span>
+                  {loadingData ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
+                        <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-amber-500" />
+                        Cargando registros de cupones...
                       </td>
                     </tr>
-                  ))}
+                  ) : tickets.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
+                        No se encontraron tickets con los filtros seleccionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    tickets.map((t) => (
+                      <tr key={t.id} className="table-row">
+                        <td className="table-td font-mono text-[11px] text-slate-400">
+                          {t.fecha_captura ? new Date(t.fecha_captura).toLocaleString("es-PY") : "-"}
+                        </td>
+                        <td className="table-td font-mono font-bold text-slate-900 dark:text-white">
+                          #{t.nro_ticket}
+                        </td>
+                        <td className="table-td font-bold text-slate-800 dark:text-slate-200">
+                          {t.campana_nombre || "Gran Sorteo Aniversario"}
+                        </td>
+                        <td className="table-td font-bold text-slate-900 dark:text-white">
+                          {t.cliente?.nombre || "Consumidor Final"}
+                          <div className="text-[10px] font-normal text-slate-400">
+                            Doc: {t.cliente?.documento} · {t.cliente?.barrio || "Centro"}
+                          </div>
+                        </td>
+                        <td className="table-td font-mono">
+                          +{t.cliente?.telefono}
+                        </td>
+                        <td className="table-td text-center">
+                          <span className="badge-accent font-posMono text-xs font-black">
+                            {t.cantidad}
+                          </span>
+                        </td>
+                        <td className="table-td text-right font-mono font-bold text-slate-900 dark:text-white">
+                          {formatPYG(t.monto_compra || 0)}
+                        </td>
+                        <td className="table-td text-center">
+                          {t.sincronizado ? (
+                            <span className="badge-success">
+                              <ShieldCheck className="w-3 h-3" /> Verificado
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleSyncTicket(t.id)}
+                              className="btn-outline px-2 py-1 text-[10px]"
+                              title="Buscar en base de ventas"
+                            >
+                              Verificar
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1126,75 +1258,96 @@ export default function CapturaCuponesPage() {
         </div>
       )}
 
-      {/* ────────────────────────────────────────────────────────────────────── */}
-      {/* PESTAÑA 4: CLIENTES & RFM                                              */}
-      {/* ────────────────────────────────────────────────────────────────────── */}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA 4: DIRECTORIO DE CLIENTES & RFM
+      ────────────────────────────────────────────────────────────────────────── */}
       {tab === "clientes" && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-black text-slate-900 dark:text-white">
-                Directorio Fidelizado de Clientes
-              </h2>
-              <p className="text-xs text-slate-400">
-                Segmentación conductual y acumulación de compras para campañas dirigidas.
-              </p>
+        <div className="space-y-4 animate-fade-in">
+          {/* Header de clientes */}
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-purple-50 dark:bg-purple-950/40 text-purple-600 rounded-xl">
+                <Brain className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                  Base Fidelizada & Segmentación RFM
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  {clientes.length} clientes participantes acumulando historial de compras en Extra Supermercado.
+                </p>
+              </div>
             </div>
-            <button
-              onClick={handleAnalizarIA}
-              disabled={analyzingIA}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-50"
-            >
-              <Brain className={`w-4 h-4 ${analyzingIA ? "animate-spin" : ""}`} />
-              <span>{analyzingIA ? "Perfilando con IA..." : "Perfilar con Gemini 2.5 Flash"}</span>
-            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleAnalizarIA}
+                disabled={analyzingIA}
+                className="btn-primary bg-purple-600 hover:bg-purple-700 text-xs shadow-purple-500/20"
+              >
+                <Brain className={`w-3.5 h-3.5 ${analyzingIA ? "animate-spin" : ""}`} />
+                <span>{analyzingIA ? "Analizando con Gemini..." : "Perfilar con Gemini 2.5 Flash"}</span>
+              </button>
+
+              <button
+                onClick={loadClientes}
+                className="btn-outline p-2.5"
+                title="Refrescar"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
+          {/* Cards de Clientes */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {clientes.map(cli => (
-              <div key={cli.id} className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-2">
+            {clientes.map((c) => (
+              <div key={c.id} className="card p-5 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="font-bold text-slate-900 dark:text-white text-sm truncate">
-                    {cli.nombre}
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                    {cli.documento}
+                  <span className="text-xs font-mono font-bold text-slate-400">
+                    {c.documento}
+                  </span>
+                  <span className="badge-accent font-posMono text-[10px] font-black">
+                    {c.total_cupones} Cupones
                   </span>
                 </div>
 
-                <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                  <Phone className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{cli.telefono || "Sin teléfono"}</span>
-                  <span>·</span>
-                  <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{cli.barrio || "Centro"}</span>
+                <div>
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
+                    {c.nombre}
+                  </h4>
+                  <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+                    <span>+{c.telefono}</span>
+                    <span>·</span>
+                    <span>{c.barrio || "Centro"}</span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-center">
-                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-                    <div className="text-[9px] text-slate-400 uppercase font-bold">Compras</div>
-                    <div className="font-black text-xs text-slate-900 dark:text-white font-posMono">
-                      {cli.cantidad_compras || 0}
+                  <div className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase">Compras</div>
+                    <div className="text-xs font-black text-slate-900 dark:text-white font-mono">
+                      {c.cantidad_compras || 0}
                     </div>
                   </div>
-                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-                    <div className="text-[9px] text-slate-400 uppercase font-bold">Total</div>
-                    <div className="font-black text-xs text-emerald-600 dark:text-emerald-400 font-posMono truncate">
-                      {formatPYG(cli.total_gastado || 0)}
+                  <div className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase">Total Gs.</div>
+                    <div className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 font-mono truncate">
+                      {formatPYG(c.total_gastado || 0)}
                     </div>
                   </div>
-                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-                    <div className="text-[9px] text-slate-400 uppercase font-bold">Promedio</div>
-                    <div className="font-black text-xs text-blue-600 dark:text-blue-400 font-posMono truncate">
-                      {formatPYG(cli.ticket_promedio || 0)}
+                  <div className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase">Promedio</div>
+                    <div className="text-[11px] font-black text-blue-600 dark:text-blue-400 font-mono truncate">
+                      {formatPYG(c.ticket_promedio || 0)}
                     </div>
                   </div>
                 </div>
 
-                {cli.segmentos && (
+                {c.segmentos && (
                   <div className="pt-1 flex flex-wrap gap-1">
-                    {cli.segmentos.split(",").map((s: string, idx: number) => (
-                      <span key={idx} className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300">
+                    {c.segmentos.split(",").map((s: string, idx: number) => (
+                      <span key={idx} className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
                         {s.trim()}
                       </span>
                     ))}
@@ -1206,346 +1359,398 @@ export default function CapturaCuponesPage() {
         </div>
       )}
 
-      {/* ────────────────────────────────────────────────────────────────────── */}
-      {/* PESTAÑA 5: ANALÍTICA IA & GENERADOR DE CAMPAÑAS WHATSAPP               */}
-      {/* ────────────────────────────────────────────────────────────────────── */}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA 5: COPILOT IA & REDACTOR DE MENSAJES WHATSAPP
+      ────────────────────────────────────────────────────────────────────────── */}
       {tab === "ia_insights" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Brain className="w-5 h-5 text-purple-500" />
-              <span>Redactor de Campañas WhatsApp con Gemini 2.5 Flash</span>
-            </h3>
-            <p className="text-xs text-slate-500">
-              Genera copys de alta conversión adaptados al perfil del segmento para potenciar las ventas de los sorteos.
-            </p>
-
-            <div className="space-y-3 text-xs">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fade-in">
+          {/* Controles de la Campaña IA */}
+          <div className="lg:col-span-5 card p-6 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-sm space-y-5">
+            <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="p-2.5 bg-gradient-to-tr from-purple-600 to-indigo-600 text-white rounded-2xl shadow-md shadow-purple-500/20">
+                <Brain className="w-5 h-5" />
+              </div>
               <div>
-                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Segmento Objetivo</label>
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  Generador de Campañas WhatsApp
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Potenciado con Google Gemini 2.5 Flash
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="input-label">
+                  Segmento Objetivo
+                </label>
                 <select
                   value={campanaSegmento}
-                  onChange={e => setCampanaSegmento(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                  onChange={(e) => setCampanaSegmento(e.target.value)}
+                  className="input-field text-xs font-bold cursor-pointer"
                 >
                   <option value="VIP">⭐ Clientes VIP / Alto Consumo</option>
                   <option value="Frecuente">🛒 Compradores Frecuentes</option>
                   <option value="En Riesgo">⚠️ En Riesgo de Abandono (Inactivos)</option>
-                  <option value="Nuevo">🌱 Nuevos Clientes</option>
+                  <option value="Nuevo">🌱 Clientes Nuevos</option>
+                  <option value="General">📢 Todos los Clientes</option>
                 </select>
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Tono del Mensaje</label>
+                <label className="input-label">
+                  Tono del Mensaje
+                </label>
                 <select
                   value={campanaTono}
-                  onChange={e => setCampanaTono(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                  onChange={(e) => setCampanaTono(e.target.value)}
+                  className="input-field text-xs font-bold cursor-pointer"
                 >
-                  <option value="Persuasivo">🔥 Persuasivo / Exclusivo</option>
-                  <option value="Urgente">⏳ Urgencia / Últimos Días</option>
-                  <option value="Amigable">🤝 Amigable y Cercano</option>
-                  <option value="Formal">👔 Formal e Institucional</option>
+                  <option value="Persuasivo">🔥 Persuasivo & Promocional</option>
+                  <option value="Urgente">⚡ Urgencia & Cierre de Sorteo</option>
+                  <option value="Amigable">🤝 Cercano & Familiar</option>
+                  <option value="Exclusivo">💎 Exclusivo & VIP</option>
                 </select>
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Oferta / Gancho Específico</label>
-                <input
-                  type="text"
+                <label className="input-label">
+                  Oferta / Gancho Específico (Opcional)
+                </label>
+                <textarea
+                  rows={3}
                   value={campanaOferta}
-                  onChange={e => setCampanaOferta(e.target.value)}
-                  placeholder="Ej: Promo Unilever - Lavarropas Automático con 2 Dove"
-                  className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                  onChange={(e) => setCampanaOferta(e.target.value)}
+                  placeholder="Ej: Este fin de semana doble cupón en carnes y bebidas para el Gran Sorteo Aniversario."
+                  className="input-field text-xs"
                 />
               </div>
 
               <button
                 onClick={handleGenerarCampanaIA}
                 disabled={campanaLoading}
-                className="w-full py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs shadow-lg shadow-purple-500/30 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50"
+                className="btn-primary w-full py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 shadow-purple-500/25"
               >
-                <Wand2 className="w-4 h-4" />
-                <span>{campanaLoading ? "Redactando con IA..." : "Generar Copy con Gemini 2.5 Flash"}</span>
+                {campanaLoading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Redactando con Gemini 2.5 Flash...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Redactar Campaña de WhatsApp</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
 
-          <div>
-            <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-emerald-500" />
-                  <span>Mensaje Listo para Difusión</span>
-                </h3>
-                {campanaResultado && (
+          {/* Resultado del Mensaje */}
+          <div className="lg:col-span-7 space-y-4">
+            {campanaResultado ? (
+              <div className="card p-6 sm:p-8 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-900/50 rounded-3xl shadow-sm space-y-4 animate-scale-in">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <div>
+                    <span className="badge-info text-[10px]">
+                      Audiencia Estimada: {campanaResultado.audiencia_estimada} Clientes
+                    </span>
+                    <div className="text-xs text-slate-400 mt-1">
+                      Segmento: <strong>{campanaResultado.segmento}</strong> · Tono: <strong>{campanaResultado.tono}</strong>
+                    </div>
+                  </div>
+
                   <button
                     onClick={() => handleCopiarTexto(campanaResultado.mensaje_generado, "campana")}
-                    className="flex items-center gap-1 text-xs font-bold text-purple-600 dark:text-purple-400 hover:underline cursor-pointer"
+                    className="btn-outline text-xs px-3 py-1.5 flex items-center gap-1.5 cursor-pointer"
                   >
-                    {copiedId === "campana" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedId === "campana" ? "¡Copiado!" : "Copiar"}</span>
+                    {copiedId === "campana" ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>¡Copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copiar Mensaje</span>
+                      </>
+                    )}
                   </button>
-                )}
-              </div>
+                </div>
 
-              {campanaResultado ? (
-                <div className="space-y-3">
-                  <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 text-xs font-mono text-slate-800 dark:text-slate-200 whitespace-pre-line leading-relaxed">
+                {/* Previsualización en Burbuja WhatsApp */}
+                <div className="p-4 rounded-2xl bg-[#efeae2] dark:bg-slate-950 border border-slate-200 dark:border-slate-800 max-w-lg">
+                  <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl rounded-tl-none shadow-xs space-y-2 text-xs text-slate-800 dark:text-slate-100 whitespace-pre-wrap font-sans leading-relaxed">
                     {campanaResultado.mensaje_generado}
                   </div>
-                  <div className="text-[11px] text-slate-400 text-right">
-                    Audiencia estimada: <strong>{campanaResultado.audiencia_estimada} clientes</strong>
+                  <div className="text-[10px] text-slate-400 text-right mt-1.5 font-mono">
+                    {new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })} ✓✓
                   </div>
                 </div>
-              ) : (
-                <div className="p-12 text-center text-slate-400 text-xs">
-                  Configura los parámetros a la izquierda y presiona Generar Copy.
+              </div>
+            ) : (
+              <div className="card p-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl text-center text-slate-400 space-y-3">
+                <Sparkles className="w-8 h-8 text-purple-400 mx-auto" />
+                <div className="text-sm font-bold text-slate-600 dark:text-slate-300">
+                  Ninguna campaña generada aún
                 </div>
-              )}
-            </div>
+                <p className="text-xs max-w-sm mx-auto">
+                  Selecciona el segmento de clientes y el tono a la izquierda para que Gemini redacte una campaña de alto impacto.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ────────────────────────────────────────────────────────────────────── */}
-      {/* MODAL / DRAWER DE CREACIÓN Y EDICIÓN DE CAMPAÑA DE SORTEO              */}
-      {/* ────────────────────────────────────────────────────────────────────── */}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL / DRAWER: CREAR O EDITAR CAMPAÑA DE SORTEO (DISEÑADOR INCLUIDO)
+      ────────────────────────────────────────────────────────────────────────── */}
       {showCampanaModal && campanaEditando && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 max-w-4xl w-full shadow-2xl space-y-6 my-8">
-            
+        <div className="modal-overlay">
+          <div className="modal-content max-w-4xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 space-y-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl">
             {/* Header del Modal */}
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-orange-500 text-white rounded-2xl">
-                  <Gift className="w-5 h-5" />
+                <div className="p-2.5 bg-gradient-to-tr from-amber-500 to-orange-600 text-white rounded-2xl shadow-md shadow-amber-500/20">
+                  <Award className="w-6 h-6" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-black text-slate-900 dark:text-white">
-                    {campanaEditando.id ? "Diseñador & Editor de Sorteo" : "Nueva Campaña de Sorteo"}
-                  </h2>
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                    {campanaEditando.id ? "Configurar Campaña de Sorteo" : "Nueva Campaña de Sorteo / Promoción"}
+                  </h3>
                   <p className="text-xs text-slate-400">
-                    Configuración de reglas, productos participantes, plantilla de WhatsApp y diseño de ticket térmico.
+                    Define la regla de emisión de cupones, productos aceleradores y el formato del ticket térmico.
                   </p>
                 </div>
               </div>
-
               <button
                 onClick={() => setShowCampanaModal(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
               >
-                <X className="w-6 h-6" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Cuerpo del Formulario en 2 Columnas */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Columna Izquierda: Parámetros y Reglas */}
-              <div className="space-y-4 text-xs">
-                <div>
-                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Nombre del Sorteo / Campaña *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={campanaEditando.nombre || ""}
-                    onChange={e => setCampanaEditando({ ...campanaEditando, nombre: e.target.value })}
-                    placeholder="Ej: Promo Unilever te equipa tu Hogar"
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
+              <div className="lg:col-span-7 space-y-4">
+                {/* Nombre y Patrocinador */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                      Patrocinador / Marca *
-                    </label>
+                    <label className="input-label">Nombre del Sorteo *</label>
+                    <input
+                      type="text"
+                      required
+                      value={campanaEditando.nombre || ""}
+                      onChange={(e) => setCampanaEditando({ ...campanaEditando, nombre: e.target.value })}
+                      placeholder="Ej: Gran Sorteo Lavarropas Unilever"
+                      className="input-field text-xs font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="input-label">Patrocinador / Marca *</label>
                     <input
                       type="text"
                       required
                       value={campanaEditando.patrocinador || ""}
-                      onChange={e => setCampanaEditando({ ...campanaEditando, patrocinador: e.target.value })}
-                      placeholder="Ej: Unilever, Coca-Cola, Extra"
-                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                      Premio Destacado
-                    </label>
-                    <input
-                      type="text"
-                      value={campanaEditando.premio_destacado || ""}
-                      onChange={e => setCampanaEditando({ ...campanaEditando, premio_destacado: e.target.value })}
-                      placeholder="Ej: Lavarropas Samsung, Smart TV"
-                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                      onChange={(e) => setCampanaEditando({ ...campanaEditando, patrocinador: e.target.value })}
+                      placeholder="Ej: Unilever / OMO / Sedal"
+                      className="input-field text-xs font-bold"
                     />
                   </div>
                 </div>
 
-                {/* Tipo de Regla de Activación */}
+                {/* Premio Destacado */}
                 <div>
-                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Tipo de Activador (Trigger) *
-                  </label>
-                  <select
-                    value={campanaEditando.tipo_trigger || "MONTO_GLOBAL"}
-                    onChange={e => setCampanaEditando({ ...campanaEditando, tipo_trigger: e.target.value as any })}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                  >
-                    <option value="MONTO_GLOBAL">🌐 Cesta Global (Por monto total de la compra)</option>
-                    <option value="PRODUCTOS_ESPECIFICOS">📦 Por Productos Específicos (SKUs Aceleradores)</option>
-                    <option value="MARCA_PROVEEDOR">🏷️ Por Marca / Proveedor</option>
-                    <option value="CATEGORIA">🏬 Por Categoría de Supermercado</option>
-                  </select>
+                  <label className="input-label">Premio Destacado (Visible en Cupones) *</label>
+                  <input
+                    type="text"
+                    value={campanaEditando.premio_destacado || ""}
+                    onChange={(e) => setCampanaEditando({ ...campanaEditando, premio_destacado: e.target.value })}
+                    placeholder="Ej: Lavarropas Automático 10kg + Kit de Productos"
+                    className="input-field text-xs font-bold text-amber-600 dark:text-amber-400"
+                  />
                 </div>
 
-                {/* Parámetro de Umbral */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* Tipo de Disparador (Trigger) */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
                   <div>
-                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                      Criterio de Evaluación
-                    </label>
-                    <select
-                      value={campanaEditando.criterio_evaluacion || "MONTO_ACUMULADO"}
-                      onChange={e => setCampanaEditando({ ...campanaEditando, criterio_evaluacion: e.target.value as any })}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                    >
-                      <option value="MONTO_ACUMULADO">Monto Acumulado (Gs.)</option>
-                      <option value="CANTIDAD_UNIDADES">Cantidad de Unidades</option>
-                    </select>
+                    <label className="input-label text-slate-800 dark:text-slate-200">Tipo de Promoción / Disparador</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { id: "MONTO_GLOBAL", label: "🌐 Cesta Global", desc: "Total de la compra" },
+                        { id: "PRODUCTOS_ESPECIFICOS", label: "📦 Por Productos", desc: "SKUs aceleradores" },
+                        { id: "MARCA_PROVEEDOR", label: "🏷️ Por Marca", desc: "Consumo de marcas" },
+                        { id: "CATEGORIA", label: "📁 Por Categoría", desc: "Secciones del súper" },
+                      ].map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setCampanaEditando({ ...campanaEditando, tipo_trigger: t.id as any })}
+                          className={`p-2.5 rounded-xl border text-left text-xs font-bold transition cursor-pointer ${
+                            campanaEditando.tipo_trigger === t.id
+                              ? "bg-amber-500 text-white border-amber-500 shadow-sm"
+                              : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100"
+                          }`}
+                        >
+                          <div>{t.label}</div>
+                          <div className={`text-[10px] font-normal ${campanaEditando.tipo_trigger === t.id ? "text-amber-100" : "text-slate-400"}`}>
+                            {t.desc}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                      Valor Requerido (Por Cupón) *
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={campanaEditando.valor_umbral || 50000}
-                      onChange={e => setCampanaEditando({ ...campanaEditando, valor_umbral: parseFloat(e.target.value) || 1 })}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold font-mono"
-                    />
+                  {/* Criterio y Umbral */}
+                  <div className="grid grid-cols-2 gap-3 pt-2">
+                    <div>
+                      <label className="input-label">Criterio de Evaluación</label>
+                      <select
+                        value={campanaEditando.criterio_evaluacion || "MONTO_ACUMULADO"}
+                        onChange={(e) => setCampanaEditando({ ...campanaEditando, criterio_evaluacion: e.target.value as any })}
+                        className="input-field text-xs font-bold"
+                      >
+                        <option value="MONTO_ACUMULADO">Monto en Guaraníes (Gs.)</option>
+                        <option value="CANTIDAD_UNIDADES">Cantidad de Unidades (Items)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="input-label">
+                        {campanaEditando.criterio_evaluacion === "MONTO_ACUMULADO" ? "Monto p/ 1 Cupón (Gs.) *" : "Unidades p/ 1 Cupón *"}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={campanaEditando.valor_umbral || 50000}
+                        onChange={(e) => setCampanaEditando({ ...campanaEditando, valor_umbral: parseFloat(e.target.value) || 1 })}
+                        className="input-field text-xs font-mono font-black text-amber-600 dark:text-amber-400"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                {/* Si es por productos específicos: Selector y Lista de Productos */}
+                {/* Si es por Productos: Selector de Productos Aceleradores */}
                 {campanaEditando.tipo_trigger === "PRODUCTOS_ESPECIFICOS" && (
-                  <div className="space-y-2 p-3 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40">
-                    <label className="font-bold text-amber-900 dark:text-amber-300 block">
-                      Seleccionar Productos Participantes ({campanaEditando.productos_participantes?.length || 0})
-                    </label>
+                  <div className="p-4 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="input-label text-amber-950 dark:text-amber-200">
+                        Productos Aceleradores Participantes ({campanaEditando.productos_participantes?.length || 0})
+                      </label>
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-bold">
+                        Detección en tiempo real en POS
+                      </span>
+                    </div>
 
-                    {/* Buscador de catálogo */}
+                    {/* Buscador de Producto en Catálogo */}
                     <div className="relative">
-                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
                         type="text"
-                        placeholder="Buscar producto por nombre o código de barra..."
                         value={busquedaProducto}
-                        onChange={e => setBusquedaProducto(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-bold"
+                        onChange={(e) => setBusquedaProducto(e.target.value)}
+                        placeholder="Buscar producto por nombre o código de barras para agregar..."
+                        className="input-field pl-9 text-xs"
                       />
                     </div>
 
-                    {/* Resultados de búsqueda */}
-                    {busquedaProducto.trim() && (
-                      <div className="max-h-36 overflow-y-auto space-y-1 bg-white dark:bg-slate-800 p-2 rounded-xl border border-slate-200 dark:border-slate-700">
+                    {/* Sugerencias Rápidas */}
+                    {busquedaProducto.trim().length > 1 && (
+                      <div className="max-h-36 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-1 shadow-lg space-y-1">
                         {catalogoProductos
-                          .filter(p => p.nombre.toLowerCase().includes(busquedaProducto.toLowerCase()) || p.codigo_barra?.includes(busquedaProducto))
-                          .slice(0, 5)
-                          .map(p => (
+                          .filter(p => p.nombre.toLowerCase().includes(busquedaProducto.toLowerCase()) || (p.codigo_barra && p.codigo_barra.includes(busquedaProducto)))
+                          .slice(0, 6)
+                          .map((p) => (
                             <div
                               key={p.id}
                               onClick={() => handleAgregarProductoACampana(p)}
-                              className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/40 cursor-pointer flex items-center justify-between text-xs"
+                              className="p-2 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs flex items-center justify-between cursor-pointer"
                             >
-                              <span className="font-bold truncate">{p.nombre}</span>
-                              <span className="text-[10px] text-slate-400 font-mono">+{formatPYG(p.precio_venta)}</span>
+                              <div>
+                                <div className="font-bold text-slate-900 dark:text-white">{p.nombre}</div>
+                                <div className="text-[10px] text-slate-400 font-mono">SKU: {p.sku} · {formatPYG(p.precio_venta)}</div>
+                              </div>
+                              <Plus className="w-4 h-4 text-amber-600" />
                             </div>
                           ))}
                       </div>
                     )}
 
-                    {/* Lista de seleccionados */}
-                    <div className="max-h-28 overflow-y-auto space-y-1">
-                      {campanaEditando.productos_participantes?.map((p, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
-                          <span className="truncate font-bold text-slate-800 dark:text-slate-200">{p.nombre}</span>
+                    {/* Lista de Productos ya Agregados */}
+                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pt-1">
+                      {(campanaEditando.productos_participantes || []).map((p, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 text-slate-800 dark:text-slate-200 shadow-2xs"
+                        >
+                          <span className="truncate max-w-[180px]">{p.nombre}</span>
                           <button
+                            type="button"
                             onClick={() => handleQuitarProductoDeCampana(idx)}
-                            className="text-rose-500 hover:text-rose-700 p-1"
+                            className="text-slate-400 hover:text-red-500 cursor-pointer"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <X className="w-3.5 h-3.5" />
                           </button>
-                        </div>
+                        </span>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Plantilla de WhatsApp */}
-                <div>
-                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Plantilla de WhatsApp del Sorteo
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={campanaEditando.whatsapp_template || ""}
-                    onChange={e => setCampanaEditando({ ...campanaEditando, whatsapp_template: e.target.value })}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-xs"
-                  />
-                  <div className="text-[10px] text-slate-400 mt-1">
-                    Tags disponibles: <code className="text-orange-500">{"{{nombre}}"}</code>, <code className="text-orange-500">{"{{cantidad}}"}</code>, <code className="text-orange-500">{"{{sorteo}}"}</code>, <code className="text-orange-500">{"{{premio}}"}</code>, <code className="text-orange-500">{"{{ticket}}"}</code>
+                {/* Personalización de Tickets Térmicos */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
+                  <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Printer className="w-4 h-4 text-amber-500" />
+                    <span>Textos del Ticket Térmico de Sorteo</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="input-label">Encabezado Ticket</label>
+                      <input
+                        type="text"
+                        value={campanaEditando.ticket_encabezado || ""}
+                        onChange={(e) => setCampanaEditando({ ...campanaEditando, ticket_encabezado: e.target.value })}
+                        placeholder="EXTRA SUPERMERCADO"
+                        className="input-field text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="input-label">Subtítulo de Sorteo</label>
+                      <input
+                        type="text"
+                        value={campanaEditando.ticket_subtitulo || ""}
+                        onChange={(e) => setCampanaEditando({ ...campanaEditando, ticket_subtitulo: e.target.value })}
+                        placeholder="*** GRAN SORTEO ***"
+                        className="input-field text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="input-label">Pie de Urna</label>
+                    <input
+                      type="text"
+                      value={campanaEditando.ticket_pie_urna || ""}
+                      onChange={(e) => setCampanaEditando({ ...campanaEditando, ticket_pie_urna: e.target.value })}
+                      placeholder="¡Deposita este cupon en la urna de la sucursal!"
+                      className="input-field text-xs font-mono"
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Columna Derecha: Diseñador de Ticket Térmico con Vista Previa */}
-              <div className="space-y-4">
+              {/* Columna Derecha: Diseñador / Vista Previa Monocromo ESC/POS */}
+              <div className="lg:col-span-5 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Printer className="w-4 h-4" />
-                    <span>Diseñador del Ticket Térmico</span>
-                  </h4>
-                  <span className="text-[10px] text-slate-400 font-mono">ESC/POS 80mm</span>
-                </div>
-
-                <div className="space-y-2 text-xs">
-                  <div>
-                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Encabezado Ticket</label>
-                    <input
-                      type="text"
-                      value={campanaEditando.ticket_encabezado || "EXTRA SUPERMERCADO"}
-                      onChange={e => setCampanaEditando({ ...campanaEditando, ticket_encabezado: e.target.value })}
-                      className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Subtítulo del Sorteo</label>
-                    <input
-                      type="text"
-                      value={campanaEditando.ticket_subtitulo || `*** ${campanaEditando.nombre?.toUpperCase() || "SORTEO"} ***`}
-                      onChange={e => setCampanaEditando({ ...campanaEditando, ticket_subtitulo: e.target.value })}
-                      className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Texto de Urna</label>
-                    <input
-                      type="text"
-                      value={campanaEditando.ticket_pie_urna || "¡Deposita este cupon en la urna de la sucursal!"}
-                      onChange={e => setCampanaEditando({ ...campanaEditando, ticket_pie_urna: e.target.value })}
-                      className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                    />
-                  </div>
+                  <span className="input-label flex items-center gap-1">
+                    <Printer className="w-3.5 h-3.5" />
+                    Vista Previa Ticket Físico (80mm)
+                  </span>
+                  <span className="text-[9px] font-mono text-slate-400">ESC/POS Thermal</span>
                 </div>
 
                 {/* Visualizador Monocromo Fidedigno */}
@@ -1560,7 +1765,7 @@ export default function CapturaCuponesPage() {
                     {campanaEditando.ticket_subtitulo || `*** ${campanaEditando.nombre?.toUpperCase() || "SORTEO"} ***`}
                   </div>
                   {campanaEditando.premio_destacado && (
-                    <div className="text-center font-bold text-[10px]">
+                    <div className="text-center font-bold text-[10px] text-slate-800">
                       Premio: {campanaEditando.premio_destacado}
                     </div>
                   )}
@@ -1610,7 +1815,7 @@ export default function CapturaCuponesPage() {
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
               <button
                 onClick={() => setShowCampanaModal(false)}
-                className="px-5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                className="btn-outline text-xs px-5 py-2.5 cursor-pointer"
               >
                 Cancelar
               </button>
@@ -1618,7 +1823,7 @@ export default function CapturaCuponesPage() {
               <button
                 onClick={handleGuardarCampana}
                 disabled={savingCampana}
-                className="px-6 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-black text-xs shadow-lg shadow-orange-500/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                className="btn-primary text-xs px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-500/25 cursor-pointer"
               >
                 <Save className="w-4 h-4" />
                 <span>{savingCampana ? "Guardando..." : "Guardar Campaña de Sorteo"}</span>
@@ -1630,4 +1835,3 @@ export default function CapturaCuponesPage() {
     </div>
   )
 }
-
