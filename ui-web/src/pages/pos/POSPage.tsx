@@ -5808,28 +5808,28 @@ export default function POSPage() {
               <Loader2 className="w-4 h-4 animate-spin" /> Esperando respuesta…
             </div>
 
-            {remoteAuthLocalSupervisorAvailable && (
-              <button
-                onClick={async () => {
-                  if (remoteAuthRequestId && user?.id) {
-                    try {
-                      await api.supervisorRequests.resolve(remoteAuthRequestId, { aprobado: false, resuelto_por: user.id, resuelto_por_nombre: "Resuelto localmente en caja" })
-                    } catch (e: any) {
-                      toast.error("No se pudo avisar al supervisor remoto", e?.message || "El pedido puede seguir apareciendo en su PWA. Intente de nuevo o pídale que lo rechace ahí.")
-                      return
-                    }
+            <button
+              onClick={async () => {
+                if (remoteAuthRequestId && user?.id) {
+                  try {
+                    await api.supervisorRequests.resolve(remoteAuthRequestId, { aprobado: false, resuelto_por: user.id, resuelto_por_nombre: "Resuelto localmente en caja" })
+                  } catch {
+                    // Si falla el aviso remoto, igual abrimos el modal local --
+                    // el pedido puede quedar colgado en la PWA de la supervisora
+                    // pero no bloqueamos a la cajera que ya tiene a la supervisora
+                    // parada al lado con la clave en la mano.
                   }
-                  setShowRemoteAuthModal(false)
-                  setRemoteAuthRequestId(null)
-                  setSupervisorPin("")
-                  setSupervisorEmail("")
-                  setShowSupervisorModal(true)
-                }}
-                className="w-full py-3 rounded-xl bg-brand-orange hover:brightness-95 text-[#1C1710] font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-orange-500/30 cursor-pointer mb-2"
-              >
-                <KeyRound className="w-4 h-4" /> Tengo un supervisor acá — escribir clave
-              </button>
-            )}
+                }
+                setShowRemoteAuthModal(false)
+                setRemoteAuthRequestId(null)
+                setSupervisorPin("")
+                setSupervisorEmail("")
+                setShowSupervisorModal(true)
+              }}
+              className="w-full py-3 rounded-xl bg-brand-orange hover:brightness-95 text-[#1C1710] font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-orange-500/30 cursor-pointer mb-2"
+            >
+              <KeyRound className="w-4 h-4" /> Tengo un supervisor acá — ingresar clave
+            </button>
             <button
               onClick={async () => {
                 if (remoteAuthRequestId && user?.id) {
