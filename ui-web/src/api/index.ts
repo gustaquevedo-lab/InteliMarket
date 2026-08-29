@@ -82,7 +82,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Error desconocido" }))
-    throw new Error(error.detail || `HTTP ${response.status}`)
+    const detailMsg = Array.isArray(error.detail)
+      ? error.detail.map((d: any) => d.msg || `${d.loc?.join(".")}: ${d.type}`).join(", ")
+      : typeof error.detail === "string"
+      ? error.detail
+      : typeof error.message === "string"
+      ? error.message
+      : JSON.stringify(error.detail || error)
+    throw new Error(detailMsg || `HTTP ${response.status}`)
   }
   if (response.status === 204) return undefined as T
   return response.json()

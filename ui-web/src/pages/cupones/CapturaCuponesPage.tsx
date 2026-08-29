@@ -373,11 +373,33 @@ export default function CapturaCuponesPage() {
 
     setSavingCampana(true)
     try {
+      const payload: any = {
+        nombre: campanaEditando.nombre.trim(),
+        codigo: campanaEditando.codigo?.trim() || undefined,
+        descripcion: campanaEditando.descripcion?.trim() || undefined,
+        patrocinador: campanaEditando.patrocinador?.trim() || "Extra Supermercado",
+        premio_destacado: campanaEditando.premio_destacado?.trim() || undefined,
+        tipo_trigger: campanaEditando.tipo_trigger || "MONTO_GLOBAL",
+        criterio_evaluacion: campanaEditando.criterio_evaluacion || "MONTO_ACUMULADO",
+        valor_umbral: Number(campanaEditando.valor_umbral) || 50000,
+        productos_participantes: campanaEditando.productos_participantes || [],
+        marcas_participantes: campanaEditando.marcas_participantes || [],
+        categorias_participantes: campanaEditando.categorias_participantes || [],
+        fecha_inicio: campanaEditando.fecha_inicio ? new Date(campanaEditando.fecha_inicio).toISOString() : undefined,
+        fecha_fin: campanaEditando.fecha_fin ? new Date(campanaEditando.fecha_fin).toISOString() : undefined,
+        activo: campanaEditando.activo !== false,
+        whatsapp_activo: campanaEditando.whatsapp_activo !== false,
+        whatsapp_template: campanaEditando.whatsapp_template?.trim() || undefined,
+        ticket_encabezado: campanaEditando.ticket_encabezado?.trim() || "EXTRA SUPERMERCADO",
+        ticket_subtitulo: campanaEditando.ticket_subtitulo?.trim() || undefined,
+        ticket_pie_urna: campanaEditando.ticket_pie_urna?.trim() || "¡Deposita este cupon en la urna de la sucursal!",
+      }
+
       if (campanaEditando.id) {
-        await api.cupones.updateCampana(campanaEditando.id, campanaEditando)
+        await api.cupones.updateCampana(campanaEditando.id, payload)
         toast.success("Campaña Actualizada", "Los parámetros del sorteo se guardaron correctamente.")
       } else {
-        await api.cupones.createCampana(campanaEditando)
+        await api.cupones.createCampana(payload)
         toast.success("Campaña Creada", "Nueva promoción activa y lista en las cajas.")
       }
       setShowCampanaModal(false)
@@ -1572,6 +1594,28 @@ export default function CapturaCuponesPage() {
                     placeholder="Ej: Lavarropas Automático 10kg + Kit de Productos"
                     className="input-field text-xs font-bold text-amber-600 dark:text-amber-400"
                   />
+                </div>
+
+                {/* Vigencia de la Campaña (Opcional) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="input-label">Fecha de Inicio (Opcional)</label>
+                    <input
+                      type="date"
+                      value={campanaEditando.fecha_inicio ? campanaEditando.fecha_inicio.slice(0, 10) : ""}
+                      onChange={(e) => setCampanaEditando({ ...campanaEditando, fecha_inicio: e.target.value || undefined })}
+                      className="input-field text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="input-label">Fecha de Cierre / Sorteo (Opcional)</label>
+                    <input
+                      type="date"
+                      value={campanaEditando.fecha_fin ? campanaEditando.fecha_fin.slice(0, 10) : ""}
+                      onChange={(e) => setCampanaEditando({ ...campanaEditando, fecha_fin: e.target.value || undefined })}
+                      className="input-field text-xs font-mono"
+                    />
+                  </div>
                 </div>
 
                 {/* Tipo de Disparador (Trigger) */}

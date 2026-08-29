@@ -1,6 +1,6 @@
 """Schemas for Cupones Sorteo, Fidelizacion and IA Analysis"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Any, Dict
 from datetime import datetime
 from uuid import UUID
@@ -105,42 +105,18 @@ class RegistrarCuponResponse(BaseModel):
     mensaje: str
 
 
-class ClienteLookupResponse(BaseModel):
-    existe: bool
-    cliente: Optional[CuponClienteOut] = None
-    origen: Optional[str] = None  # "cupones" | "customers" | None
+class CuponConfigBase(BaseModel):
+    monto_por_cupon: float = 50000
+    whatsapp_mensaje_template: str = "¡Hola *{nombre}*! 👋\n\n🎉 Te confirmamos que tenés *{cantidad} cupón(es)* generados para el *Gran Sorteo Aniversario* con tu Ticket *#{ticket}* en *Extra Supermercado*.\n\n🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨"
+    whatsapp_activo: bool = True
+    ticket_encabezado: str = "EXTRA SUPERMERCADO"
+    ticket_subtitulo: str = "*** GRAN SORTEO ANIVERSARIO ***"
+    ticket_pie_urna: str = "¡Deposita este cupon en la urna de la sucursal!"
 
 
-class AnalisisIARequest(BaseModel):
-    cliente_ids: Optional[List[UUID]] = None
-    limite: int = 20
-    forzar_reanalisis: bool = False
-
-
-class AnalisisIAResponse(BaseModel):
-    analizados: int
-    fallidos: int
-    detalles: List[Dict[str, Any]]
-    mensaje: str
-
-
-class CuponStatsResponse(BaseModel):
-    total_cupones: int
-    total_tickets: int
-    total_clientes: int
-    monto_total_compras: float
-    top_barrios: List[Dict[str, Any]]
-    whatsapp_stats: Dict[str, int]
-
-
-class CuponConfigOut(BaseModel):
+class CuponConfigOut(CuponConfigBase):
     id: UUID
     company_id: UUID
-    monto_por_cupon: float
-    sorteo_nombre: str
-    whatsapp_mensaje_template: Optional[str] = None
-    disparo_whatsapp_activo: bool
-    activo: bool
     created_at: datetime
     updated_at: datetime
 
@@ -150,29 +126,62 @@ class CuponConfigOut(BaseModel):
 
 class CuponConfigUpdate(BaseModel):
     monto_por_cupon: Optional[float] = None
-    sorteo_nombre: Optional[str] = None
     whatsapp_mensaje_template: Optional[str] = None
-    disparo_whatsapp_activo: Optional[bool] = None
-    activo: Optional[bool] = None
+    whatsapp_activo: Optional[bool] = None
+    ticket_encabezado: Optional[str] = None
+    ticket_subtitulo: Optional[str] = None
+    ticket_pie_urna: Optional[str] = None
+
+
+class CuponStatsResponse(BaseModel):
+    total_tickets: int
+    total_cupones: int
+    total_clientes: int
+    total_recaudado: float
+    tickets_sincronizados: int
+    tickets_pendientes: int
+    whatsapp_enviados: int
+    whatsapp_pendientes: int
+    whatsapp_fallidos: int
+    top_barrios: List[Dict[str, Any]]
+    distribucion_monto: List[Dict[str, Any]]
+
+
+class AnalisisIARequest(BaseModel):
+    cliente_ids: Optional[List[UUID]] = None
+    limite: int = 20
+    forzar_reanalisis: bool = False
+
+
+class AnalisisIAResponse(BaseModel):
+    procesados: int
+    exitos: int
+    fallas: int
+    detalles: List[Dict[str, Any]]
 
 
 class GenerarCampanaRequest(BaseModel):
     segmento: str
-    tono: Optional[str] = "Persuasivo"  # Persuasivo, Amigable, Urgente, Formal
+    tono: Optional[str] = "Persuasivo"
     oferta_especifica: Optional[str] = None
 
 
 class GenerarCampanaResponse(BaseModel):
     segmento: str
-    tono: str
-    mensaje_generado: str
-    audiencia_estimada: int
+    mensaje_sugerido: str
+    llamado_a_la_accion: str
+    keywords: List[str]
+
+
+class ClienteLookupResponse(BaseModel):
+    existe: bool
+    origen: Optional[str] = None  # "cupones" | "customers"
+    cliente: Optional[Dict[str, Any]] = None
 
 
 class SyncBatchRequest(BaseModel):
     limite: int = 50
     delay_ms: int = 200
-    force: bool = False
 
 
 class SyncBatchProgressResponse(BaseModel):
@@ -209,6 +218,22 @@ class SorteoCampanaBase(BaseModel):
     ticket_subtitulo: Optional[str] = None
     ticket_pie_urna: Optional[str] = "¡Deposita este cupon en la urna de la sucursal!"
 
+    @field_validator("fecha_inicio", "fecha_fin", mode="before")
+    @classmethod
+    def parse_optional_datetime(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+    @field_validator("codigo", "descripcion", "premio_destacado", "whatsapp_template", "ticket_subtitulo", mode="before")
+    @classmethod
+    def parse_optional_str(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
 
 class SorteoCampanaCreate(SorteoCampanaBase):
     pass
@@ -234,6 +259,22 @@ class SorteoCampanaUpdate(BaseModel):
     ticket_encabezado: Optional[str] = None
     ticket_subtitulo: Optional[str] = None
     ticket_pie_urna: Optional[str] = None
+
+    @field_validator("fecha_inicio", "fecha_fin", mode="before")
+    @classmethod
+    def parse_optional_datetime_update(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+    @field_validator("codigo", "descripcion", "premio_destacado", "whatsapp_template", "ticket_subtitulo", mode="before")
+    @classmethod
+    def parse_optional_str_update(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
 
 class SorteoCampanaOut(SorteoCampanaBase):
