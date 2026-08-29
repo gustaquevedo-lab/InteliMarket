@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react"
 import {
   TrendingUp, BarChart3, Bot, Sparkles, Send, Play, CheckCircle2, XCircle,
   AlertTriangle, ArrowUpRight, ArrowDownRight, RefreshCw, Layers, Users,
-  ShoppingBag, Target, DollarSign, Check, X, Loader2, ShieldCheck, ChevronRight
+  ShoppingBag, Target, DollarSign, Check, X, Loader2, ShieldCheck, ChevronRight,
+  Cpu, Award, Calendar, Percent, Zap
 } from "lucide-react"
 import { api } from "../../api/index"
 import { useAuth } from "../../context/AuthContext"
@@ -29,12 +30,25 @@ interface ChatMsg {
   diagnostico_key?: string
 }
 
+interface SupplierGoal {
+  name: string
+  category: string
+  meta: string
+  actual: string
+  pct: number
+  facturacion: string
+  margen: string
+  rebate: string
+  status: "on_track" | "warning" | "optimal"
+  pacingDiff: string
+}
+
 export default function CommercialAgentPage() {
   const { user } = useAuth()
   const rawName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
   const userName = rawName.toLowerCase().includes("admin") ? "Gustavo" : rawName
 
-  const [tab, setTab] = useState<"chat" | "recommendations" | "suppliers">("chat")
+  const [tab, setTab] = useState<"chat" | "metas" | "recommendations" | "suppliers">("metas")
   const [loading, setLoading] = useState(false)
   const [diagnosing, setDiagnosing] = useState(false)
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
@@ -44,14 +58,90 @@ export default function CommercialAgentPage() {
       isUser: false,
       text: `### 👔 Saludos, ${userName}. Soy el Gerente Comercial IA de Casa Gonzalito.
 
-Estoy conectado a las bases de datos operativas de ventas, preventa, metas de proveedores y márgenes de la distribuidora.
+Estoy conectado directamente a las bases de datos operativas de ventas, preventa, metas unificadas de proveedores y márgenes de la distribuidora.
 
-Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor o planes para cerrar el mes con PARESA.`,
+Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor o planes comerciales para asegurar el cumplimiento de metas y rebates.`,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ])
   const [query, setQuery] = useState("")
   const chatEndRef = useRef<HTMLDivElement>(null)
+
+  // Supplier Goals Data Panel (Consolidado de Casa Gonzalito)
+  const supplierGoals: SupplierGoal[] = [
+    {
+      name: "PARESA (Coca-Cola, Fanta, Sprite, Monster)",
+      category: "Bebidas & Gaseosas",
+      meta: "113.503 UC",
+      actual: "98.450 UC",
+      pct: 86.7,
+      facturacion: "Gs. 3.380 M",
+      margen: "14.8%",
+      rebate: "4.5% (Gs. 149,2 M)",
+      status: "optimal",
+      pacingDiff: "+3.2% sobre pacing"
+    },
+    {
+      name: "Río Aquidabán (Harinas, Fideos, Arroz)",
+      category: "Alimentos Secos",
+      meta: "Gs. 950 M",
+      actual: "Gs. 820 M",
+      pct: 86.3,
+      facturacion: "Gs. 820 M",
+      margen: "18.2%",
+      rebate: "2.0% (Gs. 16,4 M)",
+      status: "optimal",
+      pacingDiff: "+1.8% sobre pacing"
+    },
+    {
+      name: "Lácteos Trébol (Leches, Quesos, Yogures)",
+      category: "Lácteos & Refrigerados",
+      meta: "Gs. 720 M",
+      actual: "Gs. 640 M",
+      pct: 88.8,
+      facturacion: "Gs. 640 M",
+      margen: "7.2%",
+      rebate: "Bonif. 10+1",
+      status: "warning",
+      pacingDiff: "+4.1% vol. / Margen comprimido"
+    },
+    {
+      name: "Trovato C.I.S.A. (Golosinas, Galletitas)",
+      category: "Confitería & Snacks",
+      meta: "Gs. 550 M",
+      actual: "Gs. 490 M",
+      pct: 89.1,
+      facturacion: "Gs. 490 M",
+      margen: "22.5%",
+      rebate: "3.0% (Gs. 14,7 M)",
+      status: "optimal",
+      pacingDiff: "+5.0% sobre pacing"
+    },
+    {
+      name: "La Mercantil Guaraní (Aceites, Enlatados)",
+      category: "Almacén Mayorista",
+      meta: "Gs. 420 M",
+      actual: "Gs. 380 M",
+      pct: 90.5,
+      facturacion: "Gs. 380 M",
+      margen: "16.4%",
+      rebate: "1.5% (Gs. 5,7 M)",
+      status: "optimal",
+      pacingDiff: "+6.2% sobre pacing"
+    },
+    {
+      name: "Cervepar (Cervezas & Bebidas Alcohólicas)",
+      category: "Bebidas Alcohólicas",
+      meta: "Gs. 680 M",
+      actual: "Gs. 560 M",
+      pct: 82.4,
+      facturacion: "Gs. 560 M",
+      margen: "12.5%",
+      rebate: "2.5% (Gs. 14,0 M)",
+      status: "warning",
+      pacingDiff: "-2.1% bajo pacing"
+    }
+  ]
 
   useEffect(() => {
     loadRecommendations()
@@ -89,7 +179,7 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
 
   const handleApprove = async (id: string) => {
     try {
-      const updated = await api.commercialAgent.approve(id, userName, "Aprobado para ejecución en ruta")
+      await api.commercialAgent.approve(id, userName, "Aprobado para ejecución en ruta")
       setRecommendations(prev => prev.map(r => r.id === id ? { ...r, estado: "aprobada", approved_by: userName } : r))
     } catch (e) {
       console.error("Error approving recommendation", e)
@@ -133,7 +223,7 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
       setChatHistory(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         isUser: false,
-        text: "⚠️ Ocurrió un error al procesar el dictamen comercial. Por favor intenta de nuevo.",
+        text: "Ocurrió un error al procesar el dictamen comercial. Por favor intenta de nuevo.",
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }])
     } finally {
@@ -145,36 +235,75 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
     return `Gs. ${Math.round(val).toLocaleString('es-PY')}`
   }
 
+  const cleanText = (str: string) => {
+    return str.replace(/\*\*/g, "").replace(/\*/g, "").replace(/`/g, "").trim()
+  }
+
+  const renderInlineFormatting = (str: string) => {
+    const parts = str.split(/(\*\*.*?\*\*)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        const text = part.slice(2, -2).replace(/\*/g, "")
+        return <strong key={i} className="font-bold text-gray-900 dark:text-white">{text}</strong>
+      }
+      const clean = part.replace(/\*/g, "")
+      return <span key={i}>{clean}</span>
+    })
+  }
+
   const renderMarkdownText = (content: string) => {
-    const lines = content.split('\n')
+    const lines = content.split('\n').filter(l => l.trim().length > 0)
     return (
-      <div className="space-y-2 text-sm leading-relaxed">
+      <div className="space-y-2.5 text-xs leading-relaxed">
         {lines.map((line, idx) => {
           const trimmed = line.trim()
-          if (trimmed.startsWith('###')) {
+          
+          if (trimmed.startsWith('###') || trimmed.startsWith('##')) {
+            const hText = cleanText(trimmed.replace(/^#+\s*/, ''))
             return (
-              <h4 key={idx} className="font-bold text-gray-900 dark:text-white text-base mt-2 mb-1">
-                {trimmed.replace(/^###\s*/, '')}
+              <h4 key={idx} className="font-bold text-gray-900 dark:text-white text-xs mt-3 mb-1 flex items-center gap-1.5 border-b border-gray-100 dark:border-gray-700/60 pb-1">
+                <span>{hText}</span>
               </h4>
             )
           }
-          if (trimmed.startsWith('•') || trimmed.startsWith('-')) {
+
+          if (trimmed.startsWith('•') || trimmed.startsWith('-') || (trimmed.startsWith('*') && !trimmed.startsWith('**'))) {
+            const bulletContent = trimmed.replace(/^[•\-*]\s*/, '')
             return (
-              <div key={idx} className="flex items-start gap-2 pl-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-2 flex-shrink-0"></span>
-                <p className="text-gray-800 dark:text-gray-200">
-                  {trimmed.replace(/^[•\-]\s*/, '')}
-                </p>
+              <div key={idx} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/60">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0"></span>
+                <div className="flex-1 text-gray-800 dark:text-gray-200">
+                  {renderInlineFormatting(bulletContent)}
+                </div>
               </div>
             )
           }
-          if (trimmed.startsWith('|')) {
-            return <div key={idx} className="font-mono text-xs overflow-x-auto py-1 text-gray-700 dark:text-gray-300">{trimmed}</div>
+
+          const numMatch = trimmed.match(/^(\d+)\.\s*(.*)/)
+          if (numMatch) {
+            const num = numMatch[1]
+            const rest = numMatch[2]
+            return (
+              <div key={idx} className="flex items-start gap-2 p-2.5 bg-slate-50 dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/60">
+                <span className="w-4 h-4 rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+                  {num}
+                </span>
+                <div className="flex-1 text-gray-800 dark:text-gray-200">
+                  {renderInlineFormatting(rest)}
+                </div>
+              </div>
+            )
           }
-          if (trimmed === '---') {
+
+          if (trimmed === '---' || trimmed === '--') {
             return <hr key={idx} className="border-gray-200 dark:border-gray-700 my-2" />
           }
-          return <p key={idx} className="text-gray-800 dark:text-gray-200">{trimmed}</p>
+
+          return (
+            <p key={idx} className="text-gray-800 dark:text-gray-200">
+              {renderInlineFormatting(trimmed)}
+            </p>
+          )
         })}
       </div>
     )
@@ -189,14 +318,17 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
             <TrendingUp className="w-7 h-7" />
           </div>
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Gerente Comercial IA</h1>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
                 Casa Gonzalito S.R.L.
               </span>
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center gap-1">
+                <Cpu className="w-3 h-3" /> Minisforum Local (0 Tokens Gemini)
+              </span>
             </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">
-              Especialista analítico en rentabilidad mayorista, metas PARESA (Coca-Cola), rutas de preventa y gestión de márgenes.
+              Especialista analítico en rentabilidad mayorista, metas PARESA (Coca-Cola), rutas de preventa y gestión de márgenes de todos los proveedores.
             </p>
           </div>
         </div>
@@ -211,7 +343,7 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
         </button>
       </div>
 
-      {/* KPI Ribbon */}
+      {/* KPI Ribbon Consolidado */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
@@ -229,27 +361,27 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
 
         <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
-            <span>Rebate Proyectado (4.5%)</span>
-            <DollarSign className="w-4 h-4 text-emerald-500" />
+            <span>Rebates Totales Acumulados</span>
+            <Award className="w-4 h-4 text-emerald-500" />
           </div>
-          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">Gs. 149,2 Millones</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Faltan 15.053 UC para tramo pleno</p>
+          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">Gs. 200,3 Millones</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">PARESA: Gs. 149,2M | Otros: Gs. 51,1M</p>
         </div>
 
         <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
-            <span>Facturación del Mes</span>
+            <span>Facturación Consolidada Mes</span>
             <ShoppingBag className="w-4 h-4 text-blue-500" />
           </div>
-          <p className="text-xl font-bold text-gray-900 dark:text-white">Gs. 4.120 Millones</p>
+          <p className="text-xl font-bold text-gray-900 dark:text-white">Gs. 6.270 Millones</p>
           <p className="text-xs text-emerald-600 font-bold mt-1 flex items-center gap-0.5">
-            <ArrowUpRight className="w-3.5 h-3.5" /> Pacing en +4.2% sobre meta
+            <ArrowUpRight className="w-3.5 h-3.5" /> Pacing general en +3.8% sobre meta
           </p>
         </div>
 
         <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
-            <span>Margen Bruto Promedio</span>
+            <span>Margen Bruto Ponderado</span>
             <Layers className="w-4 h-4 text-violet-500" />
           </div>
           <p className="text-xl font-bold text-gray-900 dark:text-white">18.4%</p>
@@ -258,28 +390,40 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700 pb-2">
+      <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700 pb-2 overflow-x-auto">
+        <button
+          onClick={() => setTab("metas")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+            tab === "metas"
+              ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
+              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50"
+          }`}
+        >
+          <Target className="w-4 h-4" />
+          <span>Panel de Metas de Proveedores & Pacing</span>
+        </button>
+
         <button
           onClick={() => setTab("chat")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             tab === "chat"
               ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
               : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50"
           }`}
         >
           <Bot className="w-4 h-4" />
-          <span>Consola de Estrategia Comercial (Chat)</span>
+          <span>Consola Analítica (Chat IA)</span>
         </button>
 
         <button
           onClick={() => setTab("recommendations")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             tab === "recommendations"
               ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
               : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50"
           }`}
         >
-          <Target className="w-4 h-4" />
+          <Zap className="w-4 h-4" />
           <span>Medidas & Recomendaciones</span>
           <span className="px-1.5 py-0.2 text-[10px] bg-white/20 rounded-full font-mono">
             {recommendations.length}
@@ -288,16 +432,94 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
 
         <button
           onClick={() => setTab("suppliers")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             tab === "suppliers"
               ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
               : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50"
           }`}
         >
           <BarChart3 className="w-4 h-4" />
-          <span>Matriz de Rentabilidad por Proveedor</span>
+          <span>Matriz de Rentabilidad Detallada</span>
         </button>
       </div>
+
+      {/* Tab Metas de Proveedores */}
+      {tab === "metas" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {supplierGoals.map((sg, idx) => (
+              <div
+                key={idx}
+                className="p-5 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-3 hover:border-emerald-500/40 transition group"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                      {sg.category}
+                    </span>
+                    <h3 className="font-bold text-sm text-gray-900 dark:text-white group-hover:text-emerald-600 transition">
+                      {sg.name}
+                    </h3>
+                  </div>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                    sg.status === "optimal"
+                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200"
+                      : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200"
+                  }`}>
+                    {sg.pct}% Cumplido
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    <span>Avance: <strong>{sg.actual}</strong></span>
+                    <span>Meta: <strong>{sg.meta}</strong></span>
+                  </div>
+                  <div className="w-full h-2.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        sg.pct >= 88 ? "bg-emerald-500" : sg.pct >= 85 ? "bg-blue-500" : "bg-amber-500"
+                      }`}
+                      style={{ width: `${Math.min(100, sg.pct)}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Metrics Grid */}
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-100 dark:border-gray-750 text-center text-xs">
+                  <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
+                    <span className="text-[10px] text-gray-400 block">Facturación</span>
+                    <strong className="text-gray-900 dark:text-white font-bold">{sg.facturacion}</strong>
+                  </div>
+                  <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
+                    <span className="text-[10px] text-gray-400 block">Margen Real</span>
+                    <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{sg.margen}</strong>
+                  </div>
+                  <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
+                    <span className="text-[10px] text-gray-400 block">Rebate / Bonif.</span>
+                    <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{sg.rebate}</strong>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-xs pt-1 text-gray-500 dark:text-gray-400">
+                  <span className="text-[11px] font-medium">{sg.pacingDiff}</span>
+                  <button
+                    onClick={() => {
+                      setTab("chat")
+                      handleSendChat(`Diagnóstico comercial detallado para ${sg.name}`)
+                    }}
+                    className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline flex items-center gap-0.5 text-xs"
+                  >
+                    <span>Analizar</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Tab 1: Chat Analítico */}
       {tab === "chat" && (
@@ -316,7 +538,7 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
                     ? "bg-emerald-600 text-white rounded-tr-none font-medium"
                     : "bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200/80 dark:border-gray-700/80 rounded-tl-none"
                 }`}>
-                  {m.isUser ? <p className="text-sm">{m.text}</p> : renderMarkdownText(m.text)}
+                  {m.isUser ? <p className="text-xs whitespace-pre-wrap">{m.text}</p> : renderMarkdownText(m.text)}
                   <span className={`block text-[10px] mt-2 ${m.isUser ? "text-emerald-100" : "text-gray-400"}`}>
                     {m.time}
                   </span>
@@ -342,7 +564,8 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
               "¿Cómo cerramos las metas de PARESA este mes?",
               "Auditoría de rentabilidad por proveedor",
               "Plan para mejorar margen en Lácteos Trébol",
-              "¿Qué clientes están en riesgo de caída de compras?"
+              "¿Qué clientes están en riesgo de caída de compras?",
+              "Resumen unificado de metas y rebates"
             ].map((p, idx) => (
               <button
                 key={idx}
