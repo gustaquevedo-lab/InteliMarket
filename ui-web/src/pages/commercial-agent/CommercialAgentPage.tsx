@@ -199,7 +199,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
     return parts.map((part, i) => {
       if (part.startsWith("**") && part.endsWith("**")) {
         const text = part.slice(2, -2).replace(/\*/g, "")
-        return <strong key={i} className="font-bold text-slate-950 dark:text-white">{text}</strong>
+        return <strong key={i} className="font-bold text-gray-900 dark:text-white">{text}</strong>
       }
       const clean = part.replace(/\*/g, "")
       return <span key={i}>{clean}</span>
@@ -209,14 +209,14 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
   const renderMarkdownText = (content: string) => {
     const lines = content.split('\n').filter(l => l.trim().length > 0)
     return (
-      <div className="space-y-2 text-xs leading-relaxed text-slate-800 dark:text-slate-200">
+      <div className="space-y-2 text-xs leading-relaxed text-gray-800 dark:text-gray-200">
         {lines.map((line, idx) => {
           const trimmed = line.trim()
           
           if (trimmed.startsWith('###') || trimmed.startsWith('##')) {
             const hText = cleanText(trimmed.replace(/^#+\s*/, ''))
             return (
-              <h4 key={idx} className="font-black text-slate-950 dark:text-white text-xs mt-3 mb-1.5 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700/80 pb-1">
+              <h4 key={idx} className="font-bold text-gray-900 dark:text-white text-xs mt-2.5 mb-1.5 flex items-center gap-1.5 border-b border-gray-200 dark:border-gray-700 pb-1">
                 <span>{hText}</span>
               </h4>
             )
@@ -225,9 +225,9 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
           if (trimmed.startsWith('•') || trimmed.startsWith('-') || (trimmed.startsWith('*') && !trimmed.startsWith('**'))) {
             const bulletContent = trimmed.replace(/^[•\-*]\s*/, '')
             return (
-              <div key={idx} className="flex items-start gap-2 p-2 bg-slate-100/80 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700/70 shadow-2xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0"></span>
-                <div className="flex-1 text-slate-800 dark:text-slate-200">
+              <div key={idx} className="flex items-start gap-2 p-2.5 bg-gray-50 dark:bg-gray-750/70 rounded-xl border border-gray-200/70 dark:border-gray-700 shadow-2xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
+                <div className="flex-1 text-gray-800 dark:text-gray-200 leading-snug">
                   {renderInlineFormatting(bulletContent)}
                 </div>
               </div>
@@ -239,11 +239,11 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
             const num = numMatch[1]
             const rest = numMatch[2]
             return (
-              <div key={idx} className="flex items-start gap-2.5 p-2.5 bg-slate-100/80 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700/70 shadow-2xs">
-                <span className="w-4 h-4 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 font-black text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+              <div key={idx} className="flex items-start gap-2 p-2.5 bg-gray-50 dark:bg-gray-750/70 rounded-xl border border-gray-200/70 dark:border-gray-700 shadow-2xs">
+                <span className="w-4 h-4 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
                   {num}
                 </span>
-                <div className="flex-1 text-slate-800 dark:text-slate-200">
+                <div className="flex-1 text-gray-800 dark:text-gray-200 leading-snug">
                   {renderInlineFormatting(rest)}
                 </div>
               </div>
@@ -251,11 +251,11 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
           }
 
           if (trimmed === '---' || trimmed === '--') {
-            return <hr key={idx} className="border-slate-200 dark:border-slate-700 my-2" />
+            return <hr key={idx} className="border-gray-200 dark:border-gray-700 my-2" />
           }
 
           return (
-            <p key={idx} className="text-slate-800 dark:text-slate-200 font-normal">
+            <p key={idx} className="text-gray-800 dark:text-gray-200 font-normal">
               {renderInlineFormatting(trimmed)}
             </p>
           )
@@ -537,42 +537,42 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
 
       {/* Tab: Chat Analítico */}
       {tab === "chat" && (
-        <div className="bg-slate-900 text-slate-100 rounded-3xl border border-slate-800 shadow-xl flex flex-col h-[600px] overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col h-[600px] overflow-hidden">
           {/* Chat Header */}
-          <div className="p-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+          <div className="p-4 bg-gradient-to-r from-emerald-500/10 via-white to-teal-500/5 dark:from-gray-800 dark:via-gray-800 dark:to-gray-750 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-black">
+              <div className="w-9 h-9 rounded-2xl bg-emerald-600 text-white flex items-center justify-center text-base font-black shadow-sm">
                 👔
               </div>
               <div>
-                <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
                   Gerente Comercial IA
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 </h3>
-                <p className="text-[11px] text-slate-400">Auditor de Metas, Acuerdos y Estrategia</p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">Auditor de Metas, Acuerdos y Estrategia</p>
               </div>
             </div>
-            <div className="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">
+            <span className="text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2.5 py-1 rounded-xl border border-gray-200 dark:border-gray-600 font-medium">
               PostgreSQL + Ollama Local
-            </div>
+            </span>
           </div>
 
           {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900/60">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/60 dark:bg-gray-900/60">
             {chatHistory.map((m) => (
               <div key={m.id} className={`flex gap-3 ${m.isUser ? "justify-end" : "justify-start"}`}>
                 {!m.isUser && (
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold shrink-0">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 text-xs font-bold shrink-0">
                     IA
                   </div>
                 )}
-                <div className={`max-w-[85%] rounded-2xl p-4 text-xs leading-relaxed ${
+                <div className={`max-w-[88%] rounded-2xl p-4 text-xs leading-relaxed shadow-sm ${
                   m.isUser
-                    ? "bg-emerald-600 text-white rounded-br-none shadow-md font-medium"
-                    : "bg-slate-800 border border-slate-700 text-slate-200 rounded-bl-none shadow-md"
+                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-br-none font-medium shadow-emerald-500/10"
+                    : "bg-white dark:bg-gray-800 border border-gray-200/80 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-none"
                 }`}>
                   {m.isUser ? <p className="text-xs whitespace-pre-wrap">{m.text}</p> : renderMarkdownText(m.text)}
-                  <span className={`block text-[10px] mt-2 text-right ${m.isUser ? "text-emerald-100" : "text-slate-400"}`}>
+                  <span className={`block text-[10px] mt-2 text-right ${m.isUser ? "text-emerald-100" : "text-gray-400"}`}>
                     {m.time}
                   </span>
                 </div>
@@ -580,9 +580,9 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
             ))}
             {loading && (
               <div className="flex gap-3 items-center">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold animate-pulse">👔</div>
-                <div className="bg-slate-800 border border-slate-700 rounded-2xl p-3 text-xs flex items-center gap-2 text-slate-300">
-                  <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-600 text-xs font-bold animate-pulse">👔</div>
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2 shadow-sm">
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
                   <span>El Gerente Comercial está auditando las metas en PostgreSQL...</span>
                 </div>
               </div>
@@ -591,8 +591,8 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
           </div>
 
           {/* Quick Prompts */}
-          <div className="px-4 py-2 bg-slate-950/80 border-t border-slate-800 flex items-center gap-2 overflow-x-auto text-[11px]">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Consultas:</span>
+          <div className="p-2.5 bg-gray-50 dark:bg-gray-850 border-t border-gray-200 dark:border-gray-700 flex items-center gap-2 overflow-x-auto text-[11px]">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">Consultas:</span>
             {[
               "¿Cómo cerramos las metas de PARESA este mes?",
               "Auditoría consolidada de cartera de proveedores",
@@ -603,7 +603,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
               <button
                 key={idx}
                 onClick={() => handleSendChat(p)}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-lg border border-slate-700 whitespace-nowrap transition cursor-pointer"
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl border border-gray-200 dark:border-gray-700 whitespace-nowrap transition shadow-2xs font-medium cursor-pointer"
               >
                 {p}
               </button>
@@ -611,7 +611,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
           </div>
 
           {/* Chat Input */}
-          <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
+          <div className="p-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center gap-2">
             <input
               type="text"
               value={query}
@@ -619,14 +619,15 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendChat(); } }}
               placeholder="Consultá al Gerente Comercial sobre cualquier proveedor, metas o rebates..."
               disabled={loading}
-              className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className="flex-1 bg-slate-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-2.5 text-xs text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
             />
             <button
               onClick={() => handleSendChat()}
               disabled={!query.trim() || loading}
-              className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold rounded-xl transition shadow-md shadow-emerald-500/20 cursor-pointer"
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold rounded-2xl text-xs transition flex items-center gap-1.5 shadow-sm shadow-emerald-500/20 cursor-pointer"
             >
               <Send className="w-4 h-4" />
+              <span>Enviar</span>
             </button>
           </div>
         </div>

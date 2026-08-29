@@ -511,47 +511,47 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
       {activeTab === "ai" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Columna Izquierda: Chat Analítico Financiero (7 cols) */}
-          <div className="lg:col-span-7 flex flex-col h-[650px] card border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden bg-slate-900 text-slate-100">
+          <div className="lg:col-span-7 flex flex-col h-[650px] bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
             {/* Header del Chat */}
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+            <div className="p-4 bg-gradient-to-r from-amber-500/10 via-white to-orange-500/5 dark:from-gray-800 dark:via-gray-800 dark:to-gray-750 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-black">
+                <div className="w-9 h-9 rounded-2xl bg-amber-500 text-white flex items-center justify-center text-base font-black shadow-sm">
                   💼
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                  <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
                     Gerente Financiero IA
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                   </h3>
-                  <p className="text-[11px] text-slate-400">Auditor de Tesorería & Caja • Modo Interactivo</p>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Auditor de Tesorería, Bancos & Caja en Vivo</p>
                 </div>
               </div>
-              <div className="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">
+              <span className="text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2.5 py-1 rounded-xl border border-gray-200 dark:border-gray-600 font-medium">
                 PostgreSQL + Ollama Local
-              </div>
+              </span>
             </div>
 
             {/* Mensajes del Chat */}
-            <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-900/60">
+            <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/60 dark:bg-gray-900/60">
               {chatHistory.map((m) => (
                 <div
                   key={m.id}
                   className={`flex gap-3 ${m.isUser ? "justify-end" : "justify-start"}`}
                 >
                   {!m.isUser && (
-                    <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold shrink-0">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500/10 dark:bg-amber-950/40 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 text-xs font-bold shrink-0">
                       IA
                     </div>
                   )}
                   <div
-                    className={`max-w-[85%] rounded-2xl p-4 text-xs leading-relaxed ${
+                    className={`max-w-[88%] rounded-2xl p-4 text-xs leading-relaxed shadow-sm ${
                       m.isUser
-                        ? "bg-amber-600 text-white rounded-br-none shadow-md font-medium"
-                        : "bg-slate-800 border border-slate-700 text-slate-200 rounded-bl-none shadow-md"
+                        ? "bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-br-none font-medium shadow-amber-500/10"
+                        : "bg-white dark:bg-gray-800 border border-gray-200/80 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-none"
                     }`}
                   >
                     {m.isUser ? <p className="text-xs whitespace-pre-wrap">{m.text}</p> : renderMarkdownText(m.text)}
-                    <div className={`mt-2 text-[10px] text-right ${m.isUser ? "text-amber-100" : "text-slate-400"}`}>
+                    <div className={`mt-2 text-[10px] text-right ${m.isUser ? "text-amber-100" : "text-gray-400"}`}>
                       {m.time}
                     </div>
                   </div>
@@ -559,11 +559,11 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
               ))}
               {sendingChat && (
                 <div className="flex gap-3 justify-start">
-                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold shrink-0">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600 text-xs font-bold shrink-0">
                     IA
                   </div>
-                  <div className="bg-slate-800 border border-slate-700 rounded-2xl p-3 text-xs text-slate-400 flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2 shadow-sm">
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
                     Auditando cuentas de tesorería y balances...
                   </div>
                 </div>
@@ -572,52 +572,53 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
             </div>
 
             {/* Quick Prompt Chips */}
-            <div className="p-2.5 bg-slate-950/80 border-t border-slate-800 flex gap-1.5 overflow-x-auto text-[11px]">
+            <div className="p-2.5 bg-gray-50 dark:bg-gray-850 border-t border-gray-200 dark:border-gray-700 flex gap-2 overflow-x-auto text-[11px]">
               <button
                 type="button"
                 onClick={() => handleSendChat(undefined, "¿Cuál es el saldo actual en cada cuenta bancaria?")}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg border border-slate-700 whitespace-nowrap transition"
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 hover:bg-amber-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl border border-gray-200 dark:border-gray-700 whitespace-nowrap transition shadow-2xs font-medium cursor-pointer"
               >
                 🏦 Saldos Bancarios
               </button>
               <button
                 type="button"
                 onClick={() => handleSendChat(undefined, "¿Cuáles son los clientes con mayor deuda vencida?")}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-rose-300 rounded-lg border border-slate-700 whitespace-nowrap transition"
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 hover:bg-amber-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl border border-gray-200 dark:border-gray-700 whitespace-nowrap transition shadow-2xs font-medium cursor-pointer"
               >
                 ⚠️ Mora de Clientes
               </button>
               <button
                 type="button"
                 onClick={() => handleSendChat(undefined, "¿Cómo está el calendario de pagos a proveedores para asegurar rebates?")}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-300 rounded-lg border border-slate-700 whitespace-nowrap transition"
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 hover:bg-amber-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl border border-gray-200 dark:border-gray-700 whitespace-nowrap transition shadow-2xs font-medium cursor-pointer"
               >
                 📑 Pagos a Proveedores
               </button>
               <button
                 type="button"
                 onClick={() => handleSendChat(undefined, "¿Cuál es la proyección de flujo de caja para los próximos 30 días?")}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-lg border border-slate-700 whitespace-nowrap transition"
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 hover:bg-amber-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl border border-gray-200 dark:border-gray-700 whitespace-nowrap transition shadow-2xs font-medium cursor-pointer"
               >
                 📈 Flujo de Caja 30d
               </button>
             </div>
 
             {/* Input Form */}
-            <form onSubmit={handleSendChat} className="p-3 bg-slate-950 border-t border-slate-800 flex gap-2">
+            <form onSubmit={handleSendChat} className="p-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex gap-2">
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Preguntale al Gerente Financiero sobre caja, bancos, mora o cheques..."
-                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                className="flex-1 bg-slate-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-2.5 text-xs text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
               />
               <button
                 type="submit"
                 disabled={sendingChat || !query.trim()}
-                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition flex items-center gap-1"
+                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-2xl text-xs transition flex items-center gap-1.5 shadow-sm shadow-amber-500/20 cursor-pointer"
               >
                 <Send className="w-4 h-4" />
+                <span>Enviar</span>
               </button>
             </form>
           </div>
