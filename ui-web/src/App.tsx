@@ -51,6 +51,7 @@ const AccountsPayablePage = lazy(() => import("./pages/accounts-payable/Accounts
 const ConsolidatedDebtsPage = lazy(() => import("./pages/customers/ConsolidatedDebtsPage"))
 const TreasuryExecutiveSuitePage = lazy(() => import("./pages/financial/TreasuryExecutiveSuitePage"))
 const FinanceAgentPage = lazy(() => import("./pages/finance-agent/FinanceAgentPage"))
+const CommercialAgentPage = lazy(() => import("./pages/commercial-agent/CommercialAgentPage"))
 const RbacPage = lazy(() => import("./pages/rbac/RbacPage"))
 const CrmPage = lazy(() => import("./pages/crm/CrmPage"))
 const WhatsAppPage = lazy(() => import("./pages/whatsapp/WhatsAppPage"))
@@ -224,6 +225,8 @@ function AppRoutes() {
           ["tesoreria", <FinanceAgentPage />],
           ["finanzas-executive", <FinanceAgentPage />],
           ["finance-agent", <FinanceAgentPage />],
+          ["commercial-agent", <CommercialAgentPage />],
+          ["sales-agent", <CommercialAgentPage />],
           ["notifications", <NotificationsPage />],
           ["intelicont", <InteliContPage />],
           ["integrations", <IntegrationsPage />],

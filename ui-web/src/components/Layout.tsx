@@ -36,7 +36,7 @@ const navGroups: NavGroup[] = [
     title: "Inicio",
     items: [
       { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
-      { icon: TrendingUp, label: "Gerente de Ventas IA", path: "/sales-agent" },
+      { icon: TrendingUp, label: "Gerente Comercial IA", path: "/commercial-agent" },
       { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
       { icon: Sparkles, label: "Gerente de Marketing IA", path: "/marketing-agent" },
     ]

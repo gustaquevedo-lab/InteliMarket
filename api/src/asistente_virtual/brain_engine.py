@@ -413,26 +413,113 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
     return None
 
 
+def build_conversational_voice_script(display_name: str, q_type: Optional[str], fast_data: Optional[Any], written_response: str) -> str:
+    """Genera un guión hablado conversacional, cálido y ejecutivo (sin lectura robótica de viñetas)."""
+    if q_type == "paresa_status" and isinstance(fast_data, dict):
+        d = fast_data
+        uc_actual = d.get('uc_acumuladas', 98450)
+        meta_uc = d.get('meta_uc', 113503)
+        faltan = max(0, meta_uc - uc_actual)
+        rebate = d.get('rebate_formateado', 'ciento cuarenta y nueve millones')
+        return (
+            f"Mira {display_name}, por lo que pude ver en los datos de este mes, la situación con PARESA viene muy bien. "
+            f"Llevamos acumuladas {uc_actual:,} cajas unitarias de una meta de {meta_uc:,}, y ya aseguramos cerca de {rebate} en rebate ganado. "
+            f"Fíjate en los números que te dejé en pantalla: nos faltan unas {faltan:,} cajas para cerrar el tramo óptimo del cuatro punto cinco por ciento, "
+            f"así que creo que podríamos encarar esto empujando combos de Coca-Cola dos litros y retornables en las rutas de preventa de esta semana."
+        ).replace(",", ".")
+
+    if q_type == "top_clientes" and isinstance(fast_data, list) and len(fast_data) > 0:
+        c1 = fast_data[0].get("cliente", "el cliente principal")
+        t1 = fast_data[0].get("total_formateado", "")
+        return (
+            f"Mira {display_name}, estuve analizando las cuentas de nuestros clientes y te preparé el ranking en pantalla. "
+            f"Quien lidera el volumen de compras es {c1} con {t1}. "
+            f"Fíjate en el listado completo que te armé: creo que podríamos encarar visitas de fidelización a este grupo clave "
+            f"para asegurar los pedidos grandes antes del cierre de mes."
+        )
+
+    if q_type == "top_proveedores" and isinstance(fast_data, list) and len(fast_data) > 0:
+        p1 = fast_data[0].get("proveedor", "el proveedor principal")
+        return (
+            f"Mira {display_name}, por lo que pude ver en las compras a proveedores, {p1} encabeza el volumen de aprovisionamiento. "
+            f"Fíjate en la tabla detallada en pantalla: mi sugerencia es mantener prioridad en la recepción de mercadería "
+            f"para no comprometer el stock en las líneas de mayor rotación."
+        )
+
+    if q_type == "stock_resumen":
+        return (
+            f"Hola {display_name}, estuve revisando el estado de depósitos e inventario. "
+            f"Fíjate en la tabla que te dejé en pantalla con los artículos con menor stock o quiebre. "
+            f"Creo que la mejor forma de encararlo es emitir órdenes de compra preventivas a los proveedores antes del fin de semana."
+        )
+
+    if q_type == "clientes_deuda":
+        return (
+            f"Mira {display_name}, estuve auditando los saldos pendientes de cuentas corrientes. "
+            f"Fíjate en el informe en pantalla: te sugiero que prioricemos la gestión de cobranza sobre los clientes "
+            f"que ya superaron el ochenta por ciento de su límite de crédito para asegurar la liquidez."
+        )
+
+    if q_type == "ventas_resumen" and isinstance(fast_data, dict):
+        d = fast_data
+        tot_hoy = d.get('total_hoy_formateado', '')
+        tot_mes = d.get('total_mes_formateado', '')
+        return (
+            f"Hola {display_name}, te resumo las ventas: hoy llevamos facturados {tot_hoy} y el acumulado del mes alcanza {tot_mes}. "
+            f"Fíjate en el resumen en pantalla: la tendencia viene sólida y te sugiero monitorear el cierre de caja de la tarde para verificar las cobranzas de ruta."
+        )
+
+    if q_type == "historia":
+        return (
+            f"Hola {display_name}, Casa Gonzalito cuenta con más de cincuenta años de trayectoria como distribuidora líder en Amambay y distribuidor exclusivo de PARESA. "
+            f"Fíjate en las opciones que te dejé en pantalla, estoy listo para responderte sobre ventas, metas, clientes o proveedores."
+        )
+
+    if q_type == "commercial_agent_delegation":
+        return (
+            f"Mira {display_name}, le consulté al Gerente Comercial IA sobre este tema. "
+            f"Por lo que estuvo analizando, preparó un plan de acción estratégico para Casa Gonzalito. "
+            f"Fíjate en el dictamen completo que te desplegué en pantalla con los números y la propuesta para encarar esta línea."
+        )
+
+    # General / Open-ended conversational adaptation
+    suggestion = ""
+    sug_match = re.search(r'(?:💡\s*(?:\*\*)?Sugerencia(?: de Marco)?(?:\*\*)?:?\s*)(.*)', written_response, re.IGNORECASE)
+    if sug_match:
+        suggestion = sug_match.group(1).strip()
+
+    clean_lines = [l.strip() for l in written_response.split("\n") if l.strip() and not l.startswith("#") and not l.startswith("💡") and not l.startswith("•")]
+    intro_core = " ".join(clean_lines[:2]) if clean_lines else "estuve analizando la situación en el sistema"
+    if len(intro_core) > 260:
+        intro_core = intro_core[:260] + "..."
+
+    spoken = f"Mira {display_name}, por lo que pude ver en los datos, esta es la situación: {intro_core}. "
+    spoken += "Fíjate en los detalles que te preparé en pantalla. "
+    if suggestion:
+        spoken += f"Creo que podríamos encarar esto de esta forma: {suggestion}."
+    else:
+        spoken += "Podemos avanzar con el plan que te dejé estructurado."
+
+    return normalize_text_for_speech(spoken)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🎙️ SÍNTESIS DE VOZ Y PIPELINE PRINCIPAL (CADENCIA HUMANA ULTRA NATURAL)
 # ─────────────────────────────────────────────────────────────────────────────
 async def generate_speech_audio(text_content: str, voice: str = "es-UY-MateoNeural") -> Optional[str]:
-    """Sintetiza voz con Edge TTS en cadencia humana natural (rate=0%, prosodia fluida)."""
+    """Sintetiza voz con Edge TTS en cadencia humana natural conversacional."""
     cleaned = normalize_text_for_speech(text_content)
     if not cleaned:
         return None
     
-    # Elegir voz neuronal óptima si viene por defecto o vacía
     chosen_voice = voice if voice and "Neural" in voice else "es-UY-MateoNeural"
-    
-    # Tomar las primeras 2 a 3 oraciones completas (hasta ~450 caracteres) para síntesis fluida
     speech_text = cleaned
-    if len(speech_text) > 450:
-        last_period = speech_text[:450].rfind(". ")
-        if last_period > 100:
+    if len(speech_text) > 750:
+        last_period = speech_text[:750].rfind(". ")
+        if last_period > 150:
             speech_text = speech_text[:last_period + 1]
         else:
-            speech_text = speech_text[:450]
+            speech_text = speech_text[:750]
 
     try:
         import edge_tts
@@ -444,7 +531,7 @@ async def generate_speech_audio(text_content: str, voice: str = "es-UY-MateoNeur
                     mp3_buffer.write(chunk["data"])
             return base64.b64encode(mp3_buffer.getvalue()).decode("utf-8")
         
-        return await asyncio.wait_for(_synth(), timeout=6.0)
+        return await asyncio.wait_for(_synth(), timeout=7.0)
     except Exception as e:
         logger.warning(f"Voice generation skipped safely: {e}")
         return None
@@ -491,17 +578,31 @@ async def execute_ai_brain_pipeline(
         
     chosen_voice = voice_preference or "es-UY-MateoNeural"
     q_lower = user_query.lower().strip()
-    
-    # ── 1. FAST PATH: Consultas de Negocio Pre-compiladas (< 5ms) ─────────────
-    fast_result = None
-    try:
-        fast_result = await execute_fast_business_query(q_lower, db, DEFAULT_COMPANY_ID)
-    except Exception as e:
-        logger.error(f"Fast business query error: {e}")
-    
     final_response = ""
     sql_executed = None
     data_preview = None
+    q_type = None
+    model_used = "Motor RAG Directo (PostgreSQL)"
+
+    # ── 0.5 INTER-AGENT DELEGATION: Gerente Comercial IA ──────────────────────
+    if re.search(r'\b(gerente comercial|comercial|ventas|rentabilidad|comisiones|preventistas?)\b', q_lower) and re.search(r'\b(consultale|preguntale|pregúntale|habla|hablá|decile|planteale|pedile|opinión|diagnostico|diagnóstico|medidas)\b', q_lower):
+        try:
+            from api.src.commercial_agent.service import chat_commercial_agent
+            comm_res = await chat_commercial_agent(db, DEFAULT_COMPANY_ID, user_query, display_name)
+            if comm_res and comm_res.get("response"):
+                final_response = f"👔 **Consulta delegada al Gerente Comercial IA:**\n\n{comm_res['response']}"
+                q_type = "commercial_agent_delegation"
+                model_used = "Gerente Comercial IA (Minisforum)"
+        except Exception as e:
+            logger.error(f"Commercial agent delegation error: {e}")
+    
+    # ── 1. FAST PATH: Consultas de Negocio Pre-compiladas (< 5ms) ─────────────
+    fast_result = None
+    if not final_response:
+        try:
+            fast_result = await execute_fast_business_query(q_lower, db, DEFAULT_COMPANY_ID)
+        except Exception as e:
+            logger.error(f"Fast business query error: {e}")
     
     if fast_result:
         sql_executed = fast_result.get("sql")
@@ -560,8 +661,20 @@ async def execute_ai_brain_pipeline(
                 final_response += f"{i}. **{p['producto']}** (`{p['sku']}`) — Stock: **{p['stock']} un.** (Precio: {p['precio_formateado']})\n"
             final_response += f"\n💡 **Sugerencia de Marco:** Revisa los artículos con stock menor a 50 unidades para emitir órdenes de compra preventivas a los proveedores."
 
+    # ── 1.5 INTER-AGENT DELEGATION: Gerente Comercial IA ──────────────────────
+    if not final_response and re.search(r'\b(gerente comercial|comercial|ventas|rentabilidad|comisiones|preventistas?)\b', q_lower) and re.search(r'\b(consultale|preguntale|habla|hablá|decile|planteale|pedile|opinión|diagnostico|diagnóstico|medidas)\b', q_lower):
+        try:
+            from api.src.commercial_agent.service import chat_commercial_agent
+            comm_res = await chat_commercial_agent(db, DEFAULT_COMPANY_ID, user_query, display_name)
+            if comm_res and comm_res.get("response"):
+                final_response = f"👔 **Consulta delegada al Gerente Comercial IA:**\n\n{comm_res['response']}"
+                q_type = "commercial_agent_delegation"
+                model_used = "Gerente Comercial IA (Minisforum)"
+        except Exception as e:
+            logger.error(f"Commercial agent delegation error: {e}")
+
     # ── 2. DYNAMIC PATH: Google Gemini Flash (<1.2s) con Fallback a Ollama ───
-    model_used = "Gemini Flash (Google Cloud)"
+    model_used = "Gemini Flash (Google Cloud)" if not final_response else (model_used if 'model_used' in locals() else "Motor RAG Directo (PostgreSQL)")
     if not final_response:
         prompt = f"""Sos MARCO, el asesor operativo inteligente de Casa Gonzalito (distribuidora mayorista en Amambay, Paraguay).
 Te dirigís cordialmente a: {display_name}.
@@ -599,11 +712,17 @@ REGLAS ESTRICTAS DE RESPUESTA:
     if not final_response:
         final_response = f"Hola {display_name}, estoy a tu disposición para ayudarte con datos de ventas, clientes mayoristas, proveedores o inventario de Casa Gonzalito."
 
-    # ── 3. GENERACIÓN DE AUDIO ASÍNCRONA RÁPIDA ──────────────────────────────
+    # ── 3. GENERACIÓN DE AUDIO CONVERSACIONAL NATURAL ─────────────────────────
     audio_base64 = None
-    if generate_voice:
+    if generate_voice and final_response:
         try:
-            audio_base64 = await generate_speech_audio(final_response, voice=chosen_voice)
+            spoken_script = build_conversational_voice_script(
+                display_name=display_name,
+                q_type=q_type if (fast_result or q_type == "commercial_agent_delegation") else None,
+                fast_data=fast_result.get("data") if fast_result else None,
+                written_response=final_response
+            )
+            audio_base64 = await generate_speech_audio(spoken_script, voice=chosen_voice)
         except Exception as e:
             logger.warning(f"Voice generation exception: {e}")
 

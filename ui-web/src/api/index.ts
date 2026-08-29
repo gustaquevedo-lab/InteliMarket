@@ -744,6 +744,13 @@ export const api = {
     approve: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/approve`, { approved_by, comments }),
     reject: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/reject`, { approved_by, comments }),
   },
+  commercialAgent: {
+    run: () => client.post<any>("/v1/commercial-agent/run", { company_id: COMPANY_ID }),
+    recommendations: (status?: string) => client.get<any[]>("/v1/commercial-agent/recommendations", { company_id: COMPANY_ID, status }),
+    approve: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/commercial-agent/recommendations/${id}/approve`, { approved_by, comments }),
+    reject: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/commercial-agent/recommendations/${id}/reject`, { approved_by, comments }),
+    chat: (query: string, user_name?: string) => client.post<any>("/v1/commercial-agent/chat", { company_id: COMPANY_ID, query, user_name }),
+  },
   
   accountsPayable: {
     list: (params?: { estado?: string; search?: string; supplier_id?: string }) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-payable`, params as any),
