@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret_key: str = "dev-jwt-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 7
+    jwt_access_token_expire_minutes: int = 60 * 24 * 7  # 7 días para ERP operativo
+    jwt_refresh_token_expire_days: int = 30
 
     # SIFEN
     sifen_api_url: str = "https://ekuatia.set.gov.py/ekuatia/api"

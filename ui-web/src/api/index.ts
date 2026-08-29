@@ -11,6 +11,11 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
   const response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
   if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem("access_token")
+      localStorage.removeItem("user_email")
+      window.dispatchEvent(new CustomEvent("auth:unauthorized"))
+    }
     const error = await response.json().catch(() => ({ detail: "Error desconocido" }))
     throw new Error(error.detail || `HTTP ${response.status}`)
   }
