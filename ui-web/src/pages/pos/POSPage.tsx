@@ -2094,8 +2094,9 @@ export default function POSPage() {
     }
   ) => {
     if (!(window as any).electronAPI?.printEscPos) return
-    const printerName = printTemplate?.nombre_impresora_windows || 'ZKP8008'
-    const feedLines = Math.max(6, printTemplate?.lineas_avance_final ?? 8)
+    const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+    const printerName = tpl.nombre_impresora_windows || 'ZKP8008'
+    const feedLines = Math.max(6, Number(tpl.lineas_avance_final) || 8)
 
     for (let i = 1; i <= cuponData.cantidadCupones; i++) {
       let t = ''
