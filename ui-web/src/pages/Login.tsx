@@ -1,12 +1,12 @@
-﻿import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ShoppingBag, Eye, EyeOff, Loader2, Zap } from "lucide-react"
+import { ShoppingBag, Eye, EyeOff, Loader2, Zap, Building2 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 
 export default function Login() {
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useState("admin@casagonzalito.py")
   const [cedula, setCedula] = useState("")
-  const [password, setPassword] = useState("")
+  const [password, setPassword] = useState("admin123")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
@@ -14,8 +14,14 @@ export default function Login() {
   const [loginTipo, setLoginTipo] = useState<"email" | "cedula">("email")
   const [nombre, setNombre] = useState("")
   const [tenantNombre, setTenantNombre] = useState("")
-  const { login, loginCedula, register, loginDemo } = useAuth()
+  const { user, login, loginCedula, register, loginDemo } = useAuth()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard", { replace: true })
+    }
+  }, [user, navigate])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -37,8 +43,9 @@ export default function Login() {
         }
         await register(email, password, nombre, tenantNombre)
       }
-      navigate("/")
+      navigate("/dashboard", { replace: true })
     } catch (err: unknown) {
+      console.error("[Login] Error en handleSubmit:", err)
       setError(err instanceof Error ? err.message : "Error al autenticar")
     } finally {
       setLoading(false)
@@ -50,14 +57,16 @@ export default function Login() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary-dark shadow-xl shadow-primary/30 mb-4">
-            <ShoppingBag className="w-8 h-8 text-white" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-800 shadow-xl shadow-indigo-600/30 mb-4">
+            <Building2 className="w-8 h-8 text-white" />
           </div>
           <div className="flex items-baseline justify-center gap-0">
-            <span className="text-2xl font-bold text-primary-700 dark:text-primary-300">Inteli</span>
-            <span className="text-2xl font-bold text-accent">market</span>
+            <span className="text-2xl font-black text-gray-900 dark:text-white">Inteli</span>
+            <span className="text-2xl font-black text-teal-500">Market</span>
           </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">ERP para comercios en Paraguay</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-mono">
+            Casa Gonzalito — Distribución Mayorista Amambay
+          </p>
         </div>
 
         {/* Card */}
@@ -85,14 +94,14 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setLoginTipo("email")}
-                  className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition ${loginTipo === "email" ? "bg-white dark:bg-gray-700 shadow text-primary" : "text-gray-500"}`}
+                  className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition ${loginTipo === "email" ? "bg-white dark:bg-gray-700 shadow text-indigo-600 dark:text-indigo-300 font-bold" : "text-gray-500"}`}
                 >
                   Email
                 </button>
                 <button
                   type="button"
                   onClick={() => setLoginTipo("cedula")}
-                  className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition ${loginTipo === "cedula" ? "bg-white dark:bg-gray-700 shadow text-primary" : "text-gray-500"}`}
+                  className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition ${loginTipo === "cedula" ? "bg-white dark:bg-gray-700 shadow text-indigo-600 dark:text-indigo-300 font-bold" : "text-gray-500"}`}
                 >
                   Cédula (vendedores)
                 </button>
@@ -155,7 +164,7 @@ export default function Login() {
                   className="input-field"
                   value={tenantNombre}
                   onChange={(e) => setTenantNombre(e.target.value)}
-                  placeholder="Mi Tienda SA"
+                  placeholder="Casa Gonzalito"
                 />
               </div>
             )}
@@ -169,10 +178,10 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="btn-primary w-full"
+              className="btn-primary w-full bg-indigo-600 hover:bg-indigo-700 font-bold"
             >
               {loading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
+                <Loader2 className="w-5 h-5 animate-spin mx-auto" />
               ) : mode === "login" ? (
                 "Iniciar sesión"
               ) : (
@@ -182,11 +191,11 @@ export default function Login() {
 
             <button
               type="button"
-              onClick={() => { loginDemo(); navigate("/") }}
-              className="btn-outline w-full flex items-center justify-center gap-2 border-green-300 dark:border-green-700 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
+              onClick={() => { loginDemo(); navigate("/dashboard", { replace: true }) }}
+              className="btn-outline w-full flex items-center justify-center gap-2 border-teal-300 dark:border-teal-700 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 font-bold"
             >
               <Zap className="w-4 h-4" />
-              Acceso directo (demo)
+              Acceso directo (Casa Gonzalito)
             </button>
           </form>
 
@@ -196,7 +205,7 @@ export default function Login() {
                 setMode(mode === "login" ? "register" : "login")
                 setError("")
               }}
-              className="text-sm text-primary hover:text-primary-dark font-medium"
+              className="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium"
             >
               {mode === "login"
                 ? "¿No tenés cuenta? Registrate"
@@ -205,8 +214,8 @@ export default function Login() {
           </div>
         </div>
 
-        <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-6">
-          © 2026 IntelliHouse Soluciones
+        <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-6 font-mono">
+          © 2026 InteliMarket • Casa Gonzalito
         </p>
       </div>
     </div>
