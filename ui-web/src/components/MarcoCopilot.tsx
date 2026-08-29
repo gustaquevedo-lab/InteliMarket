@@ -447,6 +447,13 @@ export default function MarcoCopilot() {
         "¿Cuáles son los principales proveedores por facturación?"
       ]
     }
+    if (p.includes("marketing")) {
+      return [
+        "Marco, consultale al Gerente de Marketing qué campañas tenemos para PARESA",
+        "Marco, consultale al Gerente de Marketing los combos para liquidar stock lento",
+        "Marco, consultale al Gerente de Marketing el plan de reactivación de clientes inactivos"
+      ]
+    }
     if (p.includes("clientes") || p.includes("accounts-receivable") || p.includes("deudas")) {
       return ["¿Quiénes son los clientes con mayor deuda vencida?", "¿Cuáles son los últimos pagos registrados?", "¿Qué clientes superaron su límite de crédito?"]
     }

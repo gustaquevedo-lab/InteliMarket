@@ -758,6 +758,12 @@ export const api = {
     reject: (id: string, approved_by: string, comments?: string) => client.post<any>(`/v1/commercial-agent/recommendations/${id}/reject`, { approved_by, comments }),
     chat: (query: string, user_name?: string) => client.post<any>("/v1/commercial-agent/chat", { company_id: COMPANY_ID, query, user_name }),
   },
+  marketingAgent: {
+    dashboard: () => client.get<any>("/v1/marketing-agent/dashboard", { params: { company_id: COMPANY_ID } }),
+    summary: () => client.get<any>("/v1/marketing-agent/summary", { params: { company_id: COMPANY_ID } }),
+    chat: (query: string, user_name?: string) => client.post<any>("/v1/marketing-agent/chat", { query, user_name }, { params: { company_id: COMPANY_ID } }),
+    activateCampaign: (campaignId: string) => client.post<any>(`/v1/marketing-agent/campaigns/${campaignId}/activate`, {}, { params: { company_id: COMPANY_ID } }),
+  },
   
   accountsPayable: {
     list: (params?: { estado?: string; search?: string; supplier_id?: string }) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-payable`, params as any),

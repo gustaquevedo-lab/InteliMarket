@@ -197,7 +197,79 @@ async def query_ollama(prompt: str, system_prompt: str, model: str = DEFAULT_MOD
 async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id: str) -> Optional[Dict[str, Any]]:
     """Ejecuta consultas de negocio pre-compiladas y dinámicas para latencia cero sin exponer SQL al usuario."""
     
-    # 0. HISTORIA / ORIGEN / SOBRE CASA GONZALITO
+    # 0.0 DELEGACIÓN A GERENTE DE MARKETING (CAMPAÑAS, COMBOS, DEMANDA, REBATES EMPUJE)
+    if any(k in q_lower for k in [
+        "marketing", "gerente de marketing", "consultale al gerente de marketing",
+        "que dice el gerente de marketing", "campaña", "campañas", "combo", "combos",
+        "liquidar stock", "reactivar clientes"
+    ]):
+        try:
+            from api.src.marketing_agent.service import chat_marketing_agent, get_marketing_executive_summary
+            mkt_summary = await get_marketing_executive_summary(db, company_id)
+            mkt_chat = await chat_marketing_agent(db, company_id, q_lower, "Gustavo")
+            return {
+                "type": "marketing_agent_delegation",
+                "data": {
+                    "summary": mkt_summary.model_dump() if hasattr(mkt_summary, "model_dump") else mkt_summary.dict(),
+                    "response": mkt_chat.response,
+                    "ventas_campanas": format_gs(mkt_summary.ventas_campanas_gs),
+                    "fardos_traccionados": mkt_summary.fardos_traccionados
+                },
+                "sql": "SELECT ... FROM supplier_kpis / customers / marketing_campaigns"
+            }
+        except Exception as e:
+            logger.error(f"Error delegating to marketing agent: {e}")
+
+    # 0.1 DELEGACIÓN A GERENTE FINANCIERO (CAJA, BANCOS, TESORERÍA, CHEQUES, MORA)
+    if any(k in q_lower for k in [
+        "financiero", "finanzas", "tesoreria", "tesorería", "flujo de caja", 
+        "cheques en cartera", "consultale al gerente financiero", "consultale a finanzas",
+        "que dice el gerente financiero", "que dice finanzas", "situacion de caja",
+        "liquidez bancaria", "bancos y saldos", "cuentas por pagar a proveedores"
+    ]):
+        try:
+            from api.src.finance_agent.service import chat_finance_agent, get_financial_executive_summary
+            fin_summary = await get_financial_executive_summary(db, company_id)
+            fin_chat = await chat_finance_agent(db, company_id, q_lower, "Gustavo")
+            return {
+                "type": "finance_agent_delegation",
+                "data": {
+                    "summary": fin_summary,
+                    "response": fin_chat.get("response", ""),
+                    "liquidez_formateada": format_gs(fin_summary.get("liquidez_bancos_gs", 0)),
+                    "cheques_formateados": format_gs(fin_summary.get("cheques_en_cartera_gs", 0)),
+                    "ar_vencida_formateada": format_gs(fin_summary.get("cuentas_por_cobrar_vencidas_gs", 0)),
+                    "ap_formateada": format_gs(fin_summary.get("cuentas_por_pagar_gs", 0)),
+                    "flujo_neto_formateado": format_gs(fin_summary.get("flujo_neto_proyectado_30d_gs", 0)),
+                    "alertas": fin_summary.get("alertas_criticas", [])
+                },
+                "sql": "SELECT ... FROM bank_accounts / accounts_receivable / supplier_invoices"
+            }
+        except Exception as e:
+            logger.error(f"Error delegating to finance agent: {e}")
+
+    # 0.2 DELEGACIÓN A GERENTE COMERCIAL (ESTRATEGIA, METAS PROVEEDORES, ACCIONES)
+    if any(k in q_lower for k in [
+        "comercial", "gerente comercial", "consultale al gerente comercial",
+        "que dice el gerente comercial", "que dice el comercial", "estrategia comercial",
+        "medidas comerciales", "plan comercial"
+    ]):
+        try:
+            from api.src.commercial_agent.service import chat_commercial_agent
+            comm_chat = await chat_commercial_agent(db, company_id, q_lower, "Gustavo")
+            return {
+                "type": "commercial_agent_delegation",
+                "data": {
+                    "response": comm_chat.get("response", ""),
+                    "diagnostico_key": comm_chat.get("diagnostico_key", ""),
+                    "propuesta": comm_chat.get("propuesta_estrategica", "")
+                },
+                "sql": "SELECT ... FROM supplier_rebate_agreements / sales"
+            }
+        except Exception as e:
+            logger.error(f"Error delegating to commercial agent: {e}")
+
+    # 0.3 HISTORIA / ORIGEN / SOBRE CASA GONZALITO
     if any(k in q_lower for k in ["historia", "origen", "orígenes", "quien es casa gonzalito", "que es casa gonzalito", "fundacion", "fundación", "trayectoria", "anos tiene", "años tiene"]):
         return {
             "type": "historia",
@@ -382,60 +454,20 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing dynamic customer debt lookup: {e}")
 
-    # 8. DELEGACIÓN A GERENTE FINANCIERO (CAJA, BANCOS, TESORERÍA, CHEQUES, MORA)
-    if any(k in q_lower for k in [
-        "financiero", "finanzas", "tesoreria", "tesorería", "flujo de caja", 
-        "cheques en cartera", "consultale al gerente financiero", "consultale a finanzas",
-        "que dice el gerente financiero", "que dice finanzas", "situacion de caja",
-        "liquidez bancaria", "bancos y saldos", "cuentas por pagar a proveedores"
-    ]):
-        try:
-            from api.src.finance_agent.service import chat_finance_agent, get_financial_executive_summary
-            fin_summary = await get_financial_executive_summary(db, company_id)
-            fin_chat = await chat_finance_agent(db, company_id, q_lower, "Gustavo")
-            return {
-                "type": "finance_agent_delegation",
-                "data": {
-                    "summary": fin_summary,
-                    "response": fin_chat.get("response", ""),
-                    "liquidez_formateada": format_gs(fin_summary.get("liquidez_bancos_gs", 0)),
-                    "cheques_formateados": format_gs(fin_summary.get("cheques_en_cartera_gs", 0)),
-                    "ar_vencida_formateada": format_gs(fin_summary.get("cuentas_por_cobrar_vencidas_gs", 0)),
-                    "ap_formateada": format_gs(fin_summary.get("cuentas_por_pagar_gs", 0)),
-                    "flujo_neto_formateado": format_gs(fin_summary.get("flujo_neto_proyectado_30d_gs", 0)),
-                    "alertas": fin_summary.get("alertas_criticas", [])
-                },
-                "sql": "SELECT ... FROM bank_accounts / accounts_receivable / supplier_invoices"
-            }
-        except Exception as e:
-            logger.error(f"Error delegating to finance agent: {e}")
-
-    # 9. DELEGACIÓN A GERENTE COMERCIAL (ESTRATEGIA, METAS PROVEEDORES, ACCIONES)
-    if any(k in q_lower for k in [
-        "comercial", "gerente comercial", "consultale al gerente comercial",
-        "que dice el gerente comercial", "que dice el comercial", "estrategia comercial",
-        "medidas comerciales", "plan comercial"
-    ]):
-        try:
-            from api.src.commercial_agent.service import chat_commercial_agent
-            comm_chat = await chat_commercial_agent(db, company_id, q_lower, "Gustavo")
-            return {
-                "type": "commercial_agent_delegation",
-                "data": {
-                    "response": comm_chat.get("response", ""),
-                    "diagnostico_key": comm_chat.get("diagnostico_key", ""),
-                    "propuesta": comm_chat.get("propuesta_estrategica", "")
-                },
-                "sql": "SELECT ... FROM supplier_rebate_agreements / sales"
-            }
-        except Exception as e:
-            logger.error(f"Error delegating to commercial agent: {e}")
-
     return None
 
 
 def build_conversational_voice_script(display_name: str, q_type: Optional[str], fast_data: Optional[Any], written_response: str) -> str:
     """Genera un guión hablado conversacional, cálido y ejecutivo (sin lectura robótica de viñetas)."""
+    if q_type == "marketing_agent_delegation" and isinstance(fast_data, dict):
+        d = fast_data
+        v_camp = d.get('ventas_campanas', 'cuatrocientos ochenta y cinco millones de guaraníes')
+        fardos = d.get('fardos_traccionados', 3420)
+        return normalize_text_for_speech(
+            f"Gustavo, coordiné con el Gerente de Marketing y tenemos activas campañas quirúrgicas para empujar las metas de PARESA y Chortitzer. "
+            f"Hasta la fecha las campañas han traccionado {v_camp} y movido más de {fardos:,} fardos para asegurar los rebates comerciales. "
+            f"Fíjate en pantalla que además diseñamos combos ancla para acelerar la rotación de stock en depósito y reactivar clientes inactivos con WhatsApp directo."
+        )
     if q_type == "finance_agent_delegation" and isinstance(fast_data, dict):
         d = fast_data
         liq = d.get('liquidez_formateada', 'cuatrocientos diez millones de guaraníes')
