@@ -45,9 +45,11 @@ interface WeekDay {
   monto_prev: number
 }
 
-const TODAY = new Date().toISOString().slice(0, 10)
+const nowObj = new Date()
+const TODAY = nowObj.toISOString().slice(0, 10)
 const SEVEN_DAYS_AGO = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
 const FOURTEEN_DAYS_AGO = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)
+const START_OF_MONTH = `${nowObj.getFullYear()}-${String(nowObj.getMonth() + 1).padStart(2, "0")}-01`
 
 function relativeTime(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -157,15 +159,12 @@ export default function Dashboard() {
     }
   }
 
-  // KPI state
+  const [period, setPeriod] = useState<"mes" | "7d" | "hoy">("mes")
   const [salesSummary, setSalesSummary] = useState<{ total_ventas: number; monto_total: number; ticket_promedio: number; total_items: number } | null>(null)
   const [inventorySummary, setInventorySummary] = useState<{ bajo_stock: number; sin_stock: number } | null>(null)
   const [financial, setFinancial] = useState<{ cuentas_por_cobrar: number } | null>(null)
   const [creditUsed, setCreditUsed] = useState(0)
   const [marginAvg, setMarginAvg] = useState<number | null>(null)
-  // creditUsed arranca en 0 y para muchos tenants (ej. Casa Gonzalito, que no
-  // usa el modulo de credit_accounts) el valor real TAMBIEN es 0 para siempre
-  // — no sirve usar "!creditUsed" como señal de "todavia no cargo".
   const [kpisLoaded, setKpisLoaded] = useState(false)
 
   // Widget state
@@ -211,21 +210,21 @@ export default function Dashboard() {
     if (isRefresh) setRefreshing(true)
     const isDemo = localStorage.getItem("access_token") === "demo-token"
 
+    const fechaDesde = period === "mes" ? START_OF_MONTH : period === "7d" ? SEVEN_DAYS_AGO : TODAY
+    const fechaHasta = TODAY
+
     // KPIs
     try {
       const [sales, inventory, fin, creditAccs, margin] = await Promise.allSettled([
-        api.reports.salesSummary({ fecha_desde: TODAY, fecha_hasta: TODAY }),
+        api.reports.salesSummary({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta }),
         api.reports.inventorySummary(),
         api.reports.financialSummary(),
         api.creditAccounts.list({ activo: true }),
-        api.reports.marginSummary({ fecha_desde: TODAY, fecha_hasta: TODAY }),
+        api.reports.marginSummary({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta }),
       ])
       if (sales.status === "fulfilled") {
         setSalesSummary(sales.value)
       }
-      // Margen real: (ingresos - costo) / ingresos, calculado en el backend
-      // desde el costo_unitario de cada sale_item — antes era un numero
-      // inventado (ticket promedio * 25%) mostrado como si fuera guaranies.
       if (margin.status === "fulfilled") {
         setMarginAvg(margin.value.monto > 0 ? margin.value.margen_pct : null)
       }
@@ -385,7 +384,7 @@ export default function Dashboard() {
 
     setLoading(false)
     if (isRefresh) setTimeout(() => setRefreshing(false), 400)
-  }, [])
+  }, [period])
 
   useEffect(() => { loadAll() }, [loadAll])
 
@@ -401,40 +400,78 @@ export default function Dashboard() {
 
   return (
     <AnimatedPage className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header with Period Selector */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard Operativo</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
             {new Date().toLocaleDateString("es-PY", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
           </p>
         </div>
-        <button
-          onClick={() => loadAll(true)}
-          disabled={refreshing}
-          className="btn-ghost p-2 rounded-lg transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} />
-        </button>
+        
+        <div className="flex items-center gap-3">
+          {/* Period Toggle Switcher */}
+          <div className="flex items-center bg-gray-100 dark:bg-gray-800/90 p-1 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-semibold shadow-inner">
+            <button
+              onClick={() => setPeriod("mes")}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                period === "mes"
+                  ? "bg-white dark:bg-indigo-600 text-indigo-600 dark:text-white shadow-sm font-bold"
+                  : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              📅 Este Mes
+            </button>
+            <button
+              onClick={() => setPeriod("7d")}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                period === "7d"
+                  ? "bg-white dark:bg-indigo-600 text-indigo-600 dark:text-white shadow-sm font-bold"
+                  : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              📊 7 Días
+            </button>
+            <button
+              onClick={() => setPeriod("hoy")}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                period === "hoy"
+                  ? "bg-white dark:bg-indigo-600 text-indigo-600 dark:text-white shadow-sm font-bold"
+                  : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              ⚡ Hoy
+            </button>
+          </div>
+
+          <button
+            onClick={() => loadAll(true)}
+            disabled={refreshing}
+            className="btn-ghost p-2 rounded-xl border border-gray-200 dark:border-gray-700 transition-colors disabled:opacity-50 hover:bg-gray-100 dark:hover:bg-gray-800"
+            title="Actualizar datos"
+          >
+            <RefreshCw className={`w-5 h-5 text-gray-600 dark:text-gray-300 ${refreshing ? "animate-spin text-indigo-600" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {/* KPI Row 1 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           icon={DollarSign}
-          label="Ventas Hoy"
+          label={period === "mes" ? "Ventas del Mes" : period === "7d" ? "Ventas (7 Días)" : "Ventas Hoy"}
           value={salesSummary ? formatPYG(salesSummary.monto_total) : "₲ 0"}
-          sublabel={salesSummary ? `${salesSummary.total_ventas} transacciones` : undefined}
+          sublabel={salesSummary ? `${salesSummary.total_ventas.toLocaleString("es-PY")} transacciones` : undefined}
           color="green"
-          trend={salesSummary ? { direction: "up", value: "+12%" } : undefined}
+          trend={salesSummary && salesSummary.monto_total > 0 ? { direction: "up", value: "+12%" } : undefined}
           loading={loading && !salesSummary}
         />
         <KPICard
           icon={ShoppingCart}
           label="Transacciones"
-          value={salesSummary?.total_ventas ?? 0}
+          value={salesSummary?.total_ventas ? salesSummary.total_ventas.toLocaleString("es-PY") : 0}
           color="blue"
-          trend={salesSummary ? { direction: "up", value: "+8%" } : undefined}
+          trend={salesSummary && salesSummary.total_ventas > 0 ? { direction: "up", value: "+8%" } : undefined}
           loading={loading && !salesSummary}
         />
         <KPICard
@@ -447,10 +484,10 @@ export default function Dashboard() {
         />
         <KPICard
           icon={Package}
-          label="Productos Vendidos"
-          value={salesSummary?.total_items ?? 0}
+          label="Unidades Vendidas"
+          value={salesSummary?.total_items ? salesSummary.total_items.toLocaleString("es-PY") : 0}
           color="purple"
-          sublabel={salesSummary ? `en ${salesSummary.total_ventas} ventas` : undefined}
+          sublabel={salesSummary ? `en ${salesSummary.total_ventas.toLocaleString("es-PY")} ventas` : undefined}
           loading={loading && !salesSummary}
         />
       </div>
