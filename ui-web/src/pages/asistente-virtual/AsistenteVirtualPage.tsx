@@ -6,6 +6,7 @@ import {
   Sparkles, Terminal, Play, Cpu, HardDrive, ShieldCheck
 } from "lucide-react"
 import { api } from "../../api/index"
+import { useAuth } from "../../context/AuthContext"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
@@ -61,6 +62,8 @@ function Spinner() { return <Loader2 className="w-4 h-4 animate-spin" /> }
 // ===== 🧠 CEREBRO IA & VOZ TAB =====
 
 function BrainTab() {
+  const { user } = useAuth()
+  const userName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
   const [query, setQuery] = useState("")
   const [model, setModel] = useState("qwen2.5:14b")
   const [loading, setLoading] = useState(false)
@@ -124,6 +127,7 @@ function BrainTab() {
     try {
       const res = await api.asistenteVirtual.brainChat(COMPANY_ID, {
         query: textQuery,
+        user_name: userName,
         model_preference: model,
         generate_voice: true
       })
@@ -197,6 +201,7 @@ function BrainTab() {
     try {
       const formData = new FormData()
       formData.append("audio", audioBlob, "voice_input.webm")
+      formData.append("user_name", userName)
       formData.append("model_preference", model)
 
       const res = await api.asistenteVirtual.brainVoice(formData)

@@ -6,9 +6,13 @@ import {
 } from "lucide-react"
 import { api } from "../api/index"
 
+import { useAuth } from "../context/AuthContext"
+
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 export default function MarcoCopilot() {
+  const { user } = useAuth()
+  const userName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [model, setModel] = useState("qwen2.5:7b") // default fast model for instant copilot answers
@@ -61,6 +65,7 @@ export default function MarcoCopilot() {
     try {
       const res = await api.asistenteVirtual.brainChat(COMPANY_ID, {
         query: textQuery,
+        user_name: userName,
         model_preference: model,
         generate_voice: true
       })
@@ -85,7 +90,7 @@ export default function MarcoCopilot() {
     } catch (err: any) {
       setHistory(prev => [...prev, {
         id: Date.now(),
-        response: `¡Híjole kp! Ocurrió un error al consultar con Marco: ${err?.message || "Error de conexión con el nodo"}`,
+        response: `Ocurrió un inconveniente al consultar con Marco: ${err?.message || "Error de conexión con el nodo"}`,
         isUser: false,
         isError: true,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -131,6 +136,7 @@ export default function MarcoCopilot() {
     try {
       const formData = new FormData()
       formData.append("audio", blob, "voice.webm")
+      formData.append("user_name", userName)
       formData.append("model_preference", model)
 
       const res = await api.asistenteVirtual.brainVoice(formData)
