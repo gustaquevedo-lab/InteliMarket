@@ -286,3 +286,17 @@ async def registrar_cupones_multiple_endpoint(
         raise HTTPException(status_code=500, detail=f"Error registrando cupones: {e}")
 
 
+@router.get("/buscar-documento/{documento}")
+async def buscar_documento_endpoint(
+    documento: str,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Busca cliente por C.I. o RUC en cascada: Cupones ➔ Customers ➔ Padrón Nacional TSJE.
+    """
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    return await service.buscar_documento_en_cascada(db, cid, documento)
+
+
+

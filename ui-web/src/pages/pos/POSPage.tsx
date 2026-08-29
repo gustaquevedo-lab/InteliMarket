@@ -2051,6 +2051,7 @@ export default function POSPage() {
   // ── CUPONES DE SORTEO EN CAJA (ELECTRON / POS MULTI-CAMPAÑA) ────────────────
   const [showCuponModal, setShowCuponModal] = useState(false)
   const [cuponModalStep, setCuponModalStep] = useState<"pregunta" | "formulario">("pregunta")
+  const [lookingUpDoc, setLookingUpDoc] = useState(false)
   const [pendingCuponData, setPendingCuponData] = useState<{
     saleNumero: string
     montoCompra: number
@@ -2075,8 +2076,56 @@ export default function POSPage() {
     barrio: string
     ciudad: string
     items: any[]
+    origenDoc?: string
+    printInvoiceCallback?: () => Promise<void>
   } | null>(null)
   const [savingCupon, setSavingCupon] = useState(false)
+
+  const handleLookupDoc = async (docStr: string) => {
+    const clean = docStr.trim().replace(/\D/g, "")
+    if (clean.length < 5) return
+    try {
+      setLookingUpDoc(true)
+      const res = await api.cupones.buscarDocumento(clean)
+      if (res && res.encontrado && res.nombre) {
+        setPendingCuponData(prev => {
+          if (!prev) return null
+          let telCod = prev.telCodigo
+          let telNum = prev.telefono
+          if (res.telefono) {
+            const t = res.telefono.trim()
+            if (t.startsWith("55")) {
+              telCod = "55"
+              telNum = t.slice(2)
+            } else if (t.startsWith("595")) {
+              telCod = "595"
+              telNum = t.slice(3)
+            } else {
+              telNum = t
+            }
+          }
+          return {
+            ...prev,
+            doc: clean,
+            nombre: res.nombre || prev.nombre,
+            telCodigo: telCod,
+            telefono: telNum,
+            barrio: res.barrio || prev.barrio,
+            ciudad: res.ciudad || prev.ciudad,
+            origenDoc: res.origen
+          }
+        })
+        toast.info(
+          "Cliente Localizado",
+          `${res.nombre} (${res.origen === "padron_tsje" ? "Padrón Nacional TSJE" : "Base de Clientes"})`
+        )
+      }
+    } catch {
+      // Silencioso
+    } finally {
+      setLookingUpDoc(false)
+    }
+  }
 
   const printCuponesMultiCampanaEscPos = async (
     cuponData: {
@@ -2102,7 +2151,7 @@ export default function POSPage() {
     if (!(window as any).electronAPI?.printEscPos) return
     const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
     const printerName = tpl.nombre_impresora_windows || 'ZKP8008'
-    const feedLines = Math.max(6, Number(tpl.lineas_avance_final) || 8)
+    const feedLines = 1 // Salto exacto de 1 línea entre cupones para máximo ahorro de papel
 
     for (const camp of cuponData.campanasCalificadas) {
       for (let i = 1; i <= camp.cupones_ganados; i++) {
@@ -2111,35 +2160,34 @@ export default function POSPage() {
         t += ESCPOS_ALIGN_CENTER
         t += ESCPOS_BOLD_ON + escposStripAccents(camp.ticket_encabezado || "EXTRA SUPERMERCADO") + ESCPOS_BOLD_OFF + '\n'
         t += "Pedro Juan Caballero - Paraguay\n"
-        t += ESCPOS_BOLD_ON + "*** " + escposStripAccents(camp.nombre) + " ***" + ESCPOS_BOLD_OFF + '\n'
-        if (camp.patrocinador && camp.patrocinador !== "Extra Supermercado") {
-          t += `Patrocinador: ${escposStripAccents(camp.patrocinador)}\n`
-        }
+
+        // Limpiar nombre de campaña para que no desborde asteriscos a nuevas líneas
+        const cleanNombre = escposStripAccents(camp.nombre).trim()
+        t += ESCPOS_BOLD_ON + `*** ${cleanNombre.substring(0, 36)} ***` + ESCPOS_BOLD_OFF + '\n'
+
         if (camp.premio_destacado) {
-          t += `Premio: ${escposStripAccents(camp.premio_destacado)}\n`
+          t += `Premio: ${escposStripAccents(camp.premio_destacado).substring(0, 34)}\n`
         }
-        t += '\n'
 
         t += ESCPOS_DOUBLE_ON + `CUPON ${i} DE ${camp.cupones_ganados}` + ESCPOS_DOUBLE_OFF + '\n'
-        t += escposDashes() + '\n'
-        t += escposTwoCol(`Ticket Venta:`, `#${cuponData.saleNumero}`) + '\n'
-        t += escposTwoCol(`Fecha:`, new Date().toLocaleDateString("es-PY") + " " + new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })) + '\n'
-        t += escposTwoCol(`Monto Compra:`, `Gs. ${formatPYG(cuponData.montoCompra)}`) + '\n'
-        t += escposDashes() + '\n'
+        t += escposDashes(42) + '\n'
+        t += escposTwoCol(`Ticket: #${cuponData.saleNumero}`, `Gs. ${formatPYG(cuponData.montoCompra)}`, 42) + '\n'
+        t += escposTwoCol(`Fecha:`, new Date().toLocaleDateString("es-PY") + " " + new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }), 42) + '\n'
+        t += escposDashes(42) + '\n'
 
         t += ESCPOS_ALIGN_LEFT
-        t += `CLIENTE: ${escposStripAccents(cuponData.nombre).toUpperCase()}\n`
-        t += `DOC: ${cuponData.documento}\n`
-        t += `TEL: ${cuponData.telefono}\n`
-        t += `BARRIO/CIUDAD: ${escposStripAccents(cuponData.barrio)} - ${escposStripAccents(cuponData.ciudad)}\n`
-        t += escposDashes() + '\n'
+        t += `CLIENTE: ${escposStripAccents(cuponData.nombre).toUpperCase().substring(0, 33)}\n`
+        t += `DOC: ${cuponData.documento.padEnd(12)} TEL: ${cuponData.telefono}\n`
+        t += `BARRIO: ${escposStripAccents(cuponData.barrio || "Centro").substring(0, 34)}\n`
+        t += `CIUDAD: ${escposStripAccents(cuponData.ciudad || "Pedro Juan Caballero").substring(0, 34)}\n`
+        t += escposDashes(42) + '\n'
 
         t += ESCPOS_ALIGN_CENTER
         t += ESCPOS_BOLD_ON + (camp.ticket_pie_urna || "¡Deposita este cupon en la urna de la sucursal!") + ESCPOS_BOLD_OFF + '\n'
         t += "Valido para los sorteos de la campana\n"
 
         t += '\n'.repeat(feedLines)
-        t += GS + 'V' + '\x01'
+        t += GS + 'V' + '\x01' // Corte parcial
 
         const escposB64 = escposToBase64(t)
         try {
@@ -2179,6 +2227,12 @@ export default function POSPage() {
         enviar_whatsapp: true
       })
 
+      // Imprimir factura primero
+      if (pendingCuponData.printInvoiceCallback) {
+        await pendingCuponData.printInvoiceCallback()
+      }
+
+      // Luego imprimir cupones
       await printCuponesMultiCampanaEscPos({
         saleNumero: pendingCuponData.saleNumero,
         montoCompra: pendingCuponData.montoCompra,
@@ -2198,6 +2252,14 @@ export default function POSPage() {
     } finally {
       setSavingCupon(false)
     }
+  }
+
+  const handleSkipCupon = async () => {
+    if (pendingCuponData?.printInvoiceCallback) {
+      await pendingCuponData.printInvoiceCallback()
+    }
+    setShowCuponModal(false)
+    setPendingCuponData(null)
   }
 
 
@@ -4314,11 +4376,10 @@ export default function POSPage() {
         if (donacionActiva && montoDonacionEfectiva > 0) {
           t += escposDashes(W) + '\n'
           t += ESCPOS_ALIGN_CENTER
-          t += ESCPOS_BOLD_ON + '* ABRE TU CORAZON *' + ESCPOS_BOLD_OFF + '\n'
-          t += 'Gracias por colaborar con ' + fmtGs(montoDonacionEfectiva) + '\n'
-          t += 'para el Centro Amor y Esperanza.\n'
+          t += ESCPOS_BOLD_ON + escposStripAccents(tpl.donacion_titulo || '* ABRE TU CORAZON *') + ESCPOS_BOLD_OFF + '\n'
+          t += escposStripAccents(tpl.donacion_mensaje || `Gracias por colaborar con ${fmtGs(montoDonacionEfectiva)} para el Centro Amor y Esperanza.`) + '\n'
           t += 'Conoce mas en:\n'
-          t += ESCPOS_BOLD_ON + 'www.centroamoresperanza.org' + ESCPOS_BOLD_OFF + '\n'
+          t += ESCPOS_BOLD_ON + escposStripAccents(tpl.donacion_web || 'www.centroamoresperanza.org') + ESCPOS_BOLD_OFF + '\n'
           t += ESCPOS_ALIGN_LEFT
         }
 
@@ -4334,20 +4395,11 @@ export default function POSPage() {
         t += ESCPOS_ALIGN_CENTER
         if (showQrSifen) t += `Consulte en: ${sifenUrl}\n`
         t += ESCPOS_BOLD_ON + escposStripAccents(msgDespedida) + ESCPOS_BOLD_OFF + '\n'
-        // Antes de cortar hay que sacar el papel bien lejos del cabezal --
-        // la cuchilla esta unos cm mas adelante que donde imprime. Con poco
-        // avance (el feedLinesCount configurado, ej. 2) la cuchilla corta
-        // ENCIMA de las ultimas lineas todavia no salidas (por eso el QR y
-        // el mensaje del club "desaparecian": se estaban imprimiendo bien,
-        // pero la cuchilla los cortaba antes de que asomaran). Se respeta lo
-        // configurado pero nunca menos de 6 lineas de colchon.
         t += '\n'.repeat(Math.max(8, feedLinesCount))
         // Corte automatico (GS V 1 = corte parcial).
         if (tpl.corte_automatico !== false) t += GS + 'V' + '\x01'
 
-        // Guardar el ticket ESC/POS tal cual se imprimió, para que
-        // Reimprimir mande exactamente esto (no el HTML viejo por
-        // Chromium). No bloquea el ticket actual -- se adjunta en paralelo.
+        // Guardar el ticket ESC/POS tal cual se imprimió
         const escposB64ForStorage = escposToBase64(t)
         if (createdSaleId) {
           api.sales.attachTicket(createdSaleId, escposB64ForStorage).catch((e) => console.error("No se pudo guardar el ticket para reimprimir:", e))
@@ -4357,65 +4409,78 @@ export default function POSPage() {
           })
         }
 
-        try {
-          const result = await (window as any).electronAPI.printEscPos(escposB64ForStorage, tpl.nombre_impresora_windows || 'ZKP8008')
-          if (!result?.success) {
-            console.error('Error imprimiendo ESC/POS:', result?.error)
-            toast.error('No se pudo imprimir el ticket', result?.error || 'Revise la impresora.')
+        let printedInvoice = false
+        const executePrintInvoice = async () => {
+          if (printedInvoice) return
+          printedInvoice = true
+          try {
+            const result = await (window as any).electronAPI.printEscPos(escposB64ForStorage, tpl.nombre_impresora_windows || 'ZKP8008')
+            if (!result?.success) {
+              console.error('Error imprimiendo ESC/POS:', result?.error)
+              toast.error('No se pudo imprimir el ticket', result?.error || 'Revise la impresora.')
+            }
+          } catch (printErr) {
+            console.error('Error imprimiendo ESC/POS:', printErr)
           }
-        } catch (printErr) {
-          console.error('Error imprimiendo ESC/POS:', printErr)
+        }
+
+        // ── EVALUACIÓN MULTI-CAMPAÑA DE SORTEOS Y CUPONES ──────────────────
+        let calificaCupones = false
+        try {
+          const itemsEvaluacion = cart.map(item => ({
+            producto_id: item.product_id,
+            sku: item.sku,
+            nombre: item.nombre,
+            cantidad: item.quantity,
+            precio_unitario: item.precio,
+            total: item.precio * item.quantity,
+            codigo_barra: item.codigo_barra
+          }))
+
+          const evalRes = await api.cupones.evaluarCarrito({
+            total_monto: totalPyg,
+            items: itemsEvaluacion
+          })
+
+          if (evalRes && evalRes.total_cupones > 0 && evalRes.campanas_calificadas?.length > 0) {
+            calificaCupones = true
+            let initialTelCod: "595" | "55" = "595"
+            let initialTelNum = customer?.telefono || ""
+            if (initialTelNum.startsWith("55")) {
+              initialTelCod = "55"
+              initialTelNum = initialTelNum.slice(2)
+            } else if (initialTelNum.startsWith("595")) {
+              initialTelCod = "595"
+              initialTelNum = initialTelNum.slice(3)
+            }
+
+            setPendingCuponData({
+              saleNumero: numeroComprobante,
+              montoCompra: totalPyg,
+              totalCupones: evalRes.total_cupones,
+              campanasCalificadas: evalRes.campanas_calificadas,
+              doc: customer?.ci || customer?.ruc || "",
+              nombre: (customer?.nombre && customer?.nombre !== "Consumidor Final") ? customer.nombre : "",
+              telCodigo: initialTelCod,
+              telefono: initialTelNum,
+              barrio: (customer as any)?.barrio || "Centro",
+              ciudad: (customer as any)?.ciudad || "Pedro Juan Caballero",
+              items: itemsEvaluacion,
+              printInvoiceCallback: executePrintInvoice
+            })
+            setCuponModalStep("pregunta")
+            setShowCuponModal(true)
+          }
+        } catch (e) {
+          console.warn("Error evaluando cupones:", e)
+        }
+
+        // Si no califica para sorteo, se imprime la factura de inmediato
+        if (!calificaCupones) {
+          await executePrintInvoice()
         }
       } else if ((window as any).electronAPI?.printReceipt) {
         await (window as any).electronAPI.printReceipt(receiptHtml, paperWidthMm)
-      }
-
-      // ── EVALUACIÓN MULTI-CAMPAÑA DE SORTEOS Y CUPONES ──────────────────
-      try {
-        const itemsEvaluacion = cart.map(item => ({
-          producto_id: item.product_id,
-          sku: item.sku,
-          nombre: item.nombre,
-          cantidad: item.quantity,
-          precio_unitario: item.precio,
-          total: item.precio * item.quantity,
-          codigo_barra: item.codigo_barra
-        }))
-
-        const evalRes = await api.cupones.evaluarCarrito({
-          total_monto: totalPyg,
-          items: itemsEvaluacion
-        })
-
-        if (evalRes && evalRes.total_cupones > 0 && evalRes.campanas_calificadas?.length > 0) {
-          let initialTelCod: "595" | "55" = "595"
-          let initialTelNum = customer?.telefono || ""
-          if (initialTelNum.startsWith("55")) {
-            initialTelCod = "55"
-            initialTelNum = initialTelNum.slice(2)
-          } else if (initialTelNum.startsWith("595")) {
-            initialTelCod = "595"
-            initialTelNum = initialTelNum.slice(3)
-          }
-
-          setPendingCuponData({
-            saleNumero: numeroComprobante,
-            montoCompra: totalPyg,
-            totalCupones: evalRes.total_cupones,
-            campanasCalificadas: evalRes.campanas_calificadas,
-            doc: customer?.ci || customer?.ruc || "",
-            nombre: (customer?.nombre && customer?.nombre !== "Consumidor Final") ? customer.nombre : "",
-            telCodigo: initialTelCod,
-            telefono: initialTelNum,
-            barrio: (customer as any)?.barrio || "Centro",
-            ciudad: (customer as any)?.ciudad || "Pedro Juan Caballero",
-            items: itemsEvaluacion
-          })
-          setCuponModalStep("pregunta")
-          setShowCuponModal(true)
-        }
-      } catch (e) {
-        console.warn("Error evaluando cupones:", e)
       }
 
       setShowPaymentModal(false)
@@ -8557,10 +8622,10 @@ export default function POSPage() {
 
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <button
-                    onClick={() => setShowCuponModal(false)}
+                    onClick={handleSkipCupon}
                     className="py-3 px-4 rounded-2xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                   >
-                    No participar / Omitir
+                    No participar / Imprimir solo Factura
                   </button>
 
                   <button
@@ -8589,7 +8654,7 @@ export default function POSPage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => setShowCuponModal(false)}
+                    onClick={handleSkipCupon}
                     className="text-slate-400 hover:text-slate-600 cursor-pointer"
                   >
                     <X className="w-5 h-5" />
@@ -8597,6 +8662,39 @@ export default function POSPage() {
                 </div>
 
                 <div className="space-y-3 text-xs">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                        Documento C.I. / CPF *
+                      </label>
+                      {lookingUpDoc && (
+                        <span className="text-[10px] text-blue-500 font-bold flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Consultando Padrón...
+                        </span>
+                      )}
+                      {pendingCuponData.origenDoc && !lookingUpDoc && (
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-300 dark:border-emerald-800">
+                          {pendingCuponData.origenDoc === "padron_tsje" ? "🏛️ Padrón Nacional TSJE" : "🏢 Base Clientes"}
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      value={pendingCuponData.doc}
+                      onChange={e => {
+                        const val = e.target.value
+                        setPendingCuponData({ ...pendingCuponData, doc: val })
+                        handleLookupDoc(val)
+                      }}
+                      onBlur={() => handleLookupDoc(pendingCuponData.doc)}
+                      placeholder="Ingrese C.I. (ej: 3657834)"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+
                   <div>
                     <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
                       Nombre y Apellido *
@@ -8608,20 +8706,6 @@ export default function POSPage() {
                       onChange={e => setPendingCuponData({ ...pendingCuponData, nombre: e.target.value })}
                       placeholder="Nombre del cliente"
                       className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                      Documento C.I. / CPF *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={pendingCuponData.doc}
-                      onChange={e => setPendingCuponData({ ...pendingCuponData, doc: e.target.value })}
-                      placeholder="C.I. o CPF"
-                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
                     />
                   </div>
 
@@ -8651,7 +8735,7 @@ export default function POSPage() {
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Barrio (Opcional)</label>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Barrio</label>
                       <input
                         type="text"
                         value={pendingCuponData.barrio}
@@ -8661,7 +8745,7 @@ export default function POSPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Ciudad (Opcional)</label>
+                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Ciudad</label>
                       <input
                         type="text"
                         value={pendingCuponData.ciudad}

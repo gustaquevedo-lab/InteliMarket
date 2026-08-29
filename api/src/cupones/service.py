@@ -2,7 +2,9 @@
 
 import json
 import logging
+import os
 import re
+import sqlite3
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from uuid import UUID
@@ -1159,5 +1161,111 @@ async def registrar_cupones_multiples(
         "total_cupones": total_cupones_creados,
         "tickets": tickets_registrados
     }
+
+
+async def buscar_documento_en_cascada(db: AsyncSession, company_id: UUID, documento: str) -> Dict[str, Any]:
+    """
+    Busca un cliente por documento (CI/RUC) en cascada:
+    1. cupones_clientes (Fidelización Cupones)
+    2. customers (Directorio de Clientes Intelimarket)
+    3. padron.db (Padrón Nacional TSJE con 5.056.228 electores)
+    """
+    doc_clean = str(documento).strip().replace(".", "").replace("-", "")
+    if not doc_clean:
+        return {"encontrado": False, "origen": None, "documento": documento}
+
+    # 1. cupones_clientes
+    q_cup = select(CuponCliente).where(
+        CuponCliente.company_id == company_id,
+        or_(
+            CuponCliente.documento == doc_clean,
+            CuponCliente.documento == documento.strip()
+        )
+    )
+    res_cup = await db.execute(q_cup)
+    cli_cup = res_cup.scalars().first()
+    if cli_cup and cli_cup.nombre and not cli_cup.nombre.startswith("Cliente IZ") and not cli_cup.nombre.startswith("Cliente Extra"):
+        return {
+            "encontrado": True,
+            "origen": "cupones_clientes",
+            "documento": cli_cup.documento,
+            "nombre": cli_cup.nombre,
+            "telefono": cli_cup.telefono or "",
+            "direccion": cli_cup.direccion or "",
+            "barrio": cli_cup.barrio or "Centro",
+            "ciudad": cli_cup.ciudad or "Pedro Juan Caballero",
+        }
+
+    # 2. customers (Intelimarket)
+    q_cust = select(Customer).where(
+        Customer.company_id == company_id,
+        or_(
+            Customer.ci == doc_clean,
+            Customer.ruc == doc_clean,
+            Customer.ruc.like(f"{doc_clean}%"),
+            Customer.ci == documento.strip(),
+            Customer.ruc == documento.strip(),
+        )
+    )
+    res_cust = await db.execute(q_cust)
+    cust = res_cust.scalars().first()
+    if cust and cust.razon_social and cust.razon_social != "CONSUMIDOR FINAL":
+        return {
+            "encontrado": True,
+            "origen": "customers",
+            "documento": cust.ci or cust.ruc or doc_clean,
+            "nombre": cust.razon_social,
+            "telefono": cust.telefono or (cli_cup.telefono if cli_cup else ""),
+            "direccion": cust.direccion or (cli_cup.direccion if cli_cup else ""),
+            "barrio": (cli_cup.barrio if cli_cup else "Centro"),
+            "ciudad": cust.ciudad or (cli_cup.ciudad if cli_cup else "Pedro Juan Caballero"),
+        }
+
+    # 3. Padrón Nacional TSJE
+    if doc_clean.isdigit():
+        padron_paths = [
+            "/home/intellihouse/intelimarket/padron.db",
+            "/Users/gustaquevedo/Library/CloudStorage/OneDrive-Personal/Dev/Bingo30k/padron.db",
+            "padron.db"
+        ]
+        for p in padron_paths:
+            if os.path.exists(p):
+                try:
+                    pconn = sqlite3.connect(p)
+                    cur = pconn.cursor()
+                    cur.execute("SELECT nombre, apellido, depart, distrito FROM electors WHERE ci = ?", (doc_clean,))
+                    row = cur.fetchone()
+                    pconn.close()
+                    if row:
+                        nombre_completo = f"{row[0]} {row[1]}".strip()
+                        distrito = row[3] if row[3] else "Pedro Juan Caballero"
+                        return {
+                            "encontrado": True,
+                            "origen": "padron_tsje",
+                            "documento": doc_clean,
+                            "nombre": nombre_completo,
+                            "telefono": (cli_cup.telefono if cli_cup else ""),
+                            "direccion": (cli_cup.direccion if cli_cup else ""),
+                            "barrio": (cli_cup.barrio if cli_cup else "Centro"),
+                            "ciudad": distrito,
+                        }
+                except Exception as e:
+                    logger.warning(f"Error consultando padron.db: {e}")
+
+    # Si había en cupones_clientes aunque sea nombre genérico pero tiene teléfono
+    if cli_cup:
+        return {
+            "encontrado": True,
+            "origen": "cupones_clientes",
+            "documento": cli_cup.documento,
+            "nombre": cli_cup.nombre,
+            "telefono": cli_cup.telefono or "",
+            "direccion": cli_cup.direccion or "",
+            "barrio": cli_cup.barrio or "Centro",
+            "ciudad": cli_cup.ciudad or "Pedro Juan Caballero",
+        }
+
+    return {"encontrado": False, "origen": None, "documento": doc_clean}
+
 
 

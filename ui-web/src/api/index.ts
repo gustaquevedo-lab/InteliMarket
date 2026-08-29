@@ -631,6 +631,7 @@ export const api = {
         client.post<{ id: string; email: string; nombre: string; rol: string; temporary_password?: string }>("/v1/auth/users", data),
       update: (id: string, data: { nombre?: string; telefono?: string; rol?: string; activo?: boolean; foto_url?: string }) =>
         client.patch<TenantUser>(`/v1/auth/users/${id}`, data),
+      delete: (id: string) => client.delete<{ success: boolean; message: string }>(`/v1/auth/users/${id}`),
       resetPassword: (id: string, newPassword?: string) =>
         client.post<{ temporary_password?: string; message: string }>(`/v1/auth/users/${id}/reset-password`, { new_password: newPassword }),
       uploadPhoto: async (id: string, file: File) => {
@@ -2751,6 +2752,7 @@ export const api = {
     clientes: (params?: any) => client.get<any[]>("/v1/cupones/clientes", params),
     listarClientes: (params?: any) => client.get<any[]>("/v1/cupones/clientes", params),
     lookupCliente: (doc: string) => client.get<any>(`/v1/cupones/clientes/${encodeURIComponent(doc)}`),
+    buscarDocumento: (doc: string) => client.get<{ encontrado: boolean; origen?: string; documento: string; nombre?: string; telefono?: string; direccion?: string; barrio?: string; ciudad?: string }>(`/v1/cupones/buscar-documento/${encodeURIComponent(doc)}`),
     stats: (params?: any) => client.get<any>("/v1/cupones/stats", params),
     getConfig: () => client.get<any>("/v1/cupones/config"),
     updateConfig: (data: any) => client.put<any>("/v1/cupones/config", data),

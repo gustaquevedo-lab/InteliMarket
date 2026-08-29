@@ -5,7 +5,7 @@ import {
   RefreshCcw, Save, Smartphone, QrCode, Banknote, Edit3, Sliders, ToggleLeft, ToggleRight,
   Printer, Sparkles, Image as ImageIcon, FileText, Tag, Award, Gift, Scissors, Eye,
   RotateCcw, Check, MessageSquare, Flame, Star, ShoppingBag, ExternalLink, Trash2,
-  Monitor, Tv, Barcode, Clock, Store, Lock, Trash
+  Monitor, Tv, Barcode, Clock, Store, Lock, Trash, Heart
 } from "lucide-react"
 import { api, COMPANY_ID, type Company } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -121,6 +121,12 @@ export interface ReceiptTemplateConfig {
   mostrar_qr_club: boolean
   qr_url_club: string
 
+  // Campaña Solidaria Abre tu Corazón
+  donacion_activa: boolean
+  donacion_titulo: string
+  donacion_mensaje: string
+  donacion_web: string
+
   // Marketing & Cuponera
   habilitar_mensaje_marketing: boolean
   mensaje_marketing: string
@@ -186,6 +192,11 @@ export const DEFAULT_RECEIPT_CONFIG: ReceiptTemplateConfig = {
   mensaje_invitacion_club: "🎁 ¿Aún no eres socio Extra Club? Regístrate gratis en caja o en club.extrasuper.com.py y acumula puntos para canjear por premios y descuentos exclusivos.",
   mostrar_qr_club: true,
   qr_url_club: "https://club.extrasuper.com.py/registro",
+
+  donacion_activa: true,
+  donacion_titulo: "* ABRE TU CORAZON *",
+  donacion_mensaje: "Gracias por colaborar con el Centro Amor y Esperanza.",
+  donacion_web: "www.centroamoresperanza.org",
 
   habilitar_mensaje_marketing: true,
   mensaje_marketing: "🔥 ¡Miércoles de Carnicería: 15% OFF en cortes seleccionados con Extra Club!",
@@ -419,7 +430,7 @@ export default function SettingsPage() {
   })
 
   // Subpestaña de edición del constructor
-  const [designerSection, setDesignerSection] = useState<"header" | "body" | "totals" | "club" | "marketing" | "footer">("header")
+  const [designerSection, setDesignerSection] = useState<"header" | "body" | "totals" | "club" | "donacion" | "marketing" | "footer">("header")
   
   // Simulador de vista previa: con socio Extra Club o Consumidor Final
   const [previewCustomerType, setPreviewCustomerType] = useState<"socio" | "consumidor_final">("socio")
@@ -950,6 +961,7 @@ export default function SettingsPage() {
                 { id: "body", label: "Cuerpo & Productos", icon: FileText },
                 { id: "totals", label: "Totales & Pagos", icon: DollarSign },
                 { id: "club", label: "Extra Club", icon: Award },
+                { id: "donacion", label: "Abre tu Corazón", icon: Heart },
                 { id: "marketing", label: "Marketing & Cupones", icon: Flame },
                 { id: "footer", label: "Pie & Corte", icon: Scissors },
               ].map(sec => (
@@ -1450,6 +1462,71 @@ export default function SettingsPage() {
               </div>
             )}
 
+            {/* SECCIÓN 5.5: CAMPAÑA SOLIDARIA ABRE TU CORAZÓN */}
+            {designerSection === "donacion" && (
+              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 animate-fade-in">
+                <div className="border-b border-slate-100 dark:border-slate-700 pb-3">
+                  <h3 className="text-sm font-black text-gray-900 dark:text-white flex items-center gap-2">
+                    <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />
+                    Campaña Solidaria "Abre tu Corazón"
+                  </h3>
+                  <p className="text-xs text-gray-500">Personalice el título, mensaje institucional y enlace impreso al pie de factura cuando hay donación.</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-gray-900 dark:text-white block">Imprimir Mensaje Solidario en Factura</span>
+                      <span className="text-[11px] text-gray-500">Aparece automáticamente en el comprobante fiscal cuando el cajero registra una donación voluntaria.</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={receiptConfig.donacion_activa}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, donacion_activa: e.target.checked })}
+                      className="w-4 h-4 text-rose-600 rounded cursor-pointer"
+                    />
+                  </div>
+
+                  {receiptConfig.donacion_activa && (
+                    <div className="space-y-3 pt-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Título del Bloque Solidario:</label>
+                        <input
+                          type="text"
+                          value={receiptConfig.donacion_titulo}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, donacion_titulo: e.target.value })}
+                          placeholder="* ABRE TU CORAZON *"
+                          className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Mensaje de Agradecimiento / Beneficiario:</label>
+                        <input
+                          type="text"
+                          value={receiptConfig.donacion_mensaje}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, donacion_mensaje: e.target.value })}
+                          placeholder="Gracias por colaborar con el Centro Amor y Esperanza."
+                          className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Página Web o Enlace Institucional:</label>
+                        <input
+                          type="text"
+                          value={receiptConfig.donacion_web}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, donacion_web: e.target.value })}
+                          placeholder="www.centroamoresperanza.org"
+                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* SECCIÓN 6: PIE & CORTE DE PAPEL */}
             {designerSection === "footer" && (
               <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 animate-fade-in">
@@ -1811,6 +1888,16 @@ export default function SettingsPage() {
                     </div>
                     <div style={{ fontSize: "9.5px", fontWeight: "bold" }}>{receiptConfig.cupon_descripcion}</div>
                     <div style={{ fontSize: "8.5px", color: "#444" }}>Válido por {receiptConfig.cupon_validez_dias} días en todas nuestras sucursales</div>
+                  </div>
+                )}
+
+                {/* 8.5. CAMPAÑA SOLIDARIA ABRE TU CORAZÓN */}
+                {receiptConfig.donacion_activa && (
+                  <div style={{ borderTop: "1px dashed #000", marginTop: "6px", paddingTop: "4px", textAlign: "center", fontSize: "10px" }}>
+                    <div style={{ fontWeight: "900", letterSpacing: "0.5px" }}>{receiptConfig.donacion_titulo || "* ABRE TU CORAZON *"}</div>
+                    <div style={{ margin: "2px 0", fontSize: "9.5px" }}>{receiptConfig.donacion_mensaje || "Gracias por colaborar con el Centro Amor y Esperanza."}</div>
+                    <div style={{ fontSize: "8.5px" }}>Conoce más en:</div>
+                    <div style={{ fontWeight: "bold", fontSize: "9px" }}>{receiptConfig.donacion_web || "www.centroamoresperanza.org"}</div>
                   </div>
                 )}
 

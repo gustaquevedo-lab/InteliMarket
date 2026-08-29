@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from "react"
 import {
   Users, Plus, Edit, KeyRound, Search, Loader2, Power, Copy, Check,
   ShieldCheck, RefreshCcw, UserPlus, Mail, Phone, Lock, Sparkles,
-  CheckCircle2, XCircle, ChevronRight, Shield, ShoppingCart, Key
+  CheckCircle2, XCircle, ChevronRight, Shield, ShoppingCart, Key,
+  Trash2, AlertTriangle
 } from "lucide-react"
 import { api, type TenantUser, type Role } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -16,7 +17,9 @@ export default function UsuariosPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editingUser, setEditingUser] = useState<TenantUser | null>(null)
+  const [userToDelete, setUserToDelete] = useState<TenantUser | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [tempPasswordFor, setTempPasswordFor] = useState<{ email: string; password: string } | null>(null)
   const toast = useToast()
 
@@ -137,6 +140,21 @@ export default function UsuariosPage() {
       const tempPass = `Extra${Math.floor(1000 + Math.random() * 9000)}*`
       setTempPasswordFor({ email: u.email, password: tempPass })
       toast.success("Contraseña Reseteada", `Nueva clave generada para ${u.email}`)
+    }
+  }
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return
+    setDeleting(true)
+    try {
+      await api.auth.users.delete(userToDelete.id)
+      toast.success("Usuario Eliminado", `${userToDelete.nombre} fue eliminado del sistema.`)
+      setUserToDelete(null)
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error al eliminar", e instanceof Error ? e.message : "No se pudo eliminar el usuario")
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -440,11 +458,18 @@ export default function UsuariosPage() {
                             title={u.activo ? "Suspender acceso" : "Habilitar acceso"}
                             className={`p-1.5 rounded-xl transition cursor-pointer ${
                               u.activo
-                                ? "text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-slate-800"
+                                ? "text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-slate-800"
                                 : "text-emerald-500 hover:bg-emerald-50 dark:hover:bg-slate-800"
                             }`}
                           >
                             <Power className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setUserToDelete(u)}
+                            title="Eliminar usuario de la base de datos"
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
@@ -474,6 +499,47 @@ export default function UsuariosPage() {
       {/* ── MODAL DE CONTRASEÑA TEMPORAL ── */}
       {tempPasswordFor && (
         <TempPasswordModal info={tempPasswordFor} onClose={() => setTempPasswordFor(null)} />
+      )}
+
+      {userToDelete && (
+        <Modal open onClose={() => !deleting && setUserToDelete(null)} title="Confirmar Eliminación" size="sm">
+          <div className="space-y-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 mx-auto flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                ¿Eliminar a {userToDelete.nombre}?
+              </h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Esta acción eliminará el usuario y sus credenciales de acceso de forma permanente.
+              </p>
+            </div>
+            <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl text-left border border-slate-200 dark:border-slate-800 text-xs space-y-1">
+              <div><span className="text-slate-400">Email:</span> <strong className="text-slate-800 dark:text-white font-mono">{userToDelete.email}</strong></div>
+              <div><span className="text-slate-400">Rol:</span> <strong className="text-slate-800 dark:text-white font-mono uppercase">{userToDelete.rol}</strong></div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setUserToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={handleDeleteUser}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white font-bold text-xs hover:bg-rose-700 transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-rose-600/20"
+              >
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                {deleting ? "Eliminando..." : "Sí, Eliminar"}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   )

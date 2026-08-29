@@ -545,18 +545,18 @@ async def admin_update_user(
     if not _is_tenant_admin(token_data):
         raise HTTPException(status_code=403, detail="Solo administradores pueden editar usuarios")
 
-    tenant_id = token_data.get("tenant_id")
-    ut_result = await db.execute(
-        select(UserTenant).where(UserTenant.user_id == user_id, UserTenant.tenant_id == tenant_id)
-    )
-    user_tenant = ut_result.scalar_one_or_none()
-    if not user_tenant:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado en este tenant")
-
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    tenant_id = token_data.get("tenant_id")
+    user_tenant = None
+    if tenant_id:
+        ut_result = await db.execute(
+            select(UserTenant).where(UserTenant.user_id == user_id, UserTenant.tenant_id == tenant_id)
+        )
+        user_tenant = ut_result.scalar_one_or_none()
 
     values = {}
     if body.nombre is not None:
@@ -567,7 +567,8 @@ async def admin_update_user(
         values["activo"] = body.activo
     if body.rol is not None:
         values["rol"] = body.rol
-        user_tenant.rol = body.rol
+        if user_tenant:
+            user_tenant.rol = body.rol
     if body.foto_url is not None:
         values["foto_url"] = body.foto_url
 
@@ -578,15 +579,17 @@ async def admin_update_user(
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
-    rbac_result = await db.execute(
-        text("""
-            SELECT r.name FROM rbac_user_roles ur
-            JOIN rbac_roles r ON r.id = ur.role_id
-            WHERE ur.user_id = :user_id AND ur.tenant_id = :tenant_id
-        """),
-        {"user_id": str(user_id), "tenant_id": tenant_id},
-    )
-    role_names = [row[0] for row in rbac_result.all()]
+    role_names = []
+    if tenant_id:
+        rbac_result = await db.execute(
+            text("""
+                SELECT r.name FROM rbac_user_roles ur
+                JOIN rbac_roles r ON r.id = ur.role_id
+                WHERE ur.user_id = :user_id AND ur.tenant_id = :tenant_id
+            """),
+            {"user_id": str(user_id), "tenant_id": tenant_id},
+        )
+        role_names = [row[0] for row in rbac_result.all()]
 
     return TenantUserResponse(
         id=user.id,
@@ -599,9 +602,46 @@ async def admin_update_user(
         is_superadmin=user.is_superadmin or False,
         last_login=user.last_login,
         created_at=user.created_at,
-        tenant_rol=user_tenant.rol,
+        tenant_rol=user_tenant.rol if user_tenant else user.rol,
         role_names=role_names,
     )
+
+
+@router.delete("/users/{user_id}")
+async def admin_delete_user(
+    user_id: str,
+    token_data: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Elimina permanentemente un usuario o lo desactiva si tiene referencias históricas."""
+    if not _is_tenant_admin(token_data):
+        raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar usuarios")
+
+    current_uid = str(token_data.get("user_id") or token_data.get("sub") or "")
+    if current_uid and str(user_id) == current_uid:
+        raise HTTPException(status_code=400, detail="No puede eliminar su propia cuenta de usuario en uso actual.")
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    try:
+        await db.execute(text("DELETE FROM rbac_user_roles WHERE user_id = :uid"), {"uid": str(user_id)})
+        await db.execute(text("DELETE FROM user_tenants WHERE user_id = :uid"), {"uid": str(user_id)})
+        await db.execute(text("DELETE FROM staff_shifts WHERE user_id = :uid"), {"uid": str(user_id)})
+        await db.execute(delete(User).where(User.id == user_id))
+        await db.commit()
+        return {"success": True, "message": f"Usuario {user.nombre} eliminado correctamente."}
+    except Exception as e:
+        await db.rollback()
+        # Fallback de seguridad si hay ventas asociadas
+        try:
+            await db.execute(update(User).where(User.id == user_id).values(activo=False))
+            await db.commit()
+            return {"success": True, "message": f"Usuario {user.nombre} desactivado por integridad referencial de auditoría."}
+        except Exception as e2:
+            raise HTTPException(status_code=500, detail=f"Error al eliminar usuario: {str(e2)}")
 
 
 @router.post("/users/{user_id}/photo")
