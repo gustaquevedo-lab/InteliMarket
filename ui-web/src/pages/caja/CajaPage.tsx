@@ -4,9 +4,17 @@ import {
   DollarSign, CheckCircle, XCircle, AlertCircle, CreditCard, AlertTriangle,
   Settings, X, ShieldCheck, Clock, EyeOff, Calculator, FileText, Download,
   Layers, Users, RefreshCw, Printer, Check, ChevronRight, Activity, ShieldAlert,
-  Coins, Sparkles, Building2, Store, Lock, KeyRound
+  Coins, Sparkles, Building2, Store, Lock, KeyRound, Heart
 } from "lucide-react"
-import { api, type CashRegister, type CashHandoff } from "../../api"
+import {
+  api,
+  type CashRegister,
+  type CashHandoff,
+  type DonationStats,
+  type DonationLiquidation,
+  type DonationRecord,
+  type CajeroSolidarioRankingItem,
+} from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDateTime } from "../../utils/format"
@@ -101,7 +109,25 @@ const DENOMINACIONES_PYG = [
 
 export default function CajaPage() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "entregas" | "historial" | "cajeros">("registers")
+  const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "entregas" | "historial" | "cajeros" | "donaciones">("registers")
+  
+  // ── DONACIONES & RSE ("ABRE TU CORAZÓN" - CENTRO AMOR Y ESPERANZA) ──
+  const [donationStats, setDonationStats] = useState<DonationStats | null>(null)
+  const [donationRanking, setDonationRanking] = useState<CajeroSolidarioRankingItem[]>([])
+  const [donationLiquidations, setDonationLiquidations] = useState<DonationLiquidation[]>([])
+  const [donationRecent, setDonationRecent] = useState<DonationRecord[]>([])
+  const [donationsLoading, setDonationsLoading] = useState(false)
+  const [showLiquidarModal, setShowLiquidarModal] = useState(false)
+  const [liquidarDesde, setLiquidarDesde] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10))
+  const [liquidarHasta, setLiquidarHasta] = useState(new Date().toISOString().slice(0, 10))
+  const [liquidarEntregadoPor, setLiquidarEntregadoPor] = useState("")
+  const [liquidarRecibidoPor, setLiquidarRecibidoPor] = useState("Lic. María Fernández (Directora)")
+  const [liquidarRecibidoCi, setLiquidarRecibidoCi] = useState("3.456.789")
+  const [liquidarComprobante, setLiquidarComprobante] = useState("")
+  const [liquidarObservaciones, setLiquidarObservaciones] = useState("Entrega de fondos de redondeo solidario clientes Extra Supermercado.")
+  const [liquidating, setLiquidating] = useState(false)
+  const [selectedActaPdf, setSelectedActaPdf] = useState<DonationLiquidation | null>(null)
+
   const [cajeroPerformance, setCajeroPerformance] = useState<{
     cajero_nombre: string
     total_cierres: number
@@ -240,6 +266,59 @@ export default function CajaPage() {
   useEffect(() => {
     if (activeTab === "cajeros" && cajeroPerformance.length === 0) fetchCajeroPerformance()
   }, [activeTab])
+
+  const fetchDonationsData = async () => {
+    setDonationsLoading(true)
+    try {
+      const [st, rk, lq, rc] = await Promise.allSettled([
+        api.donaciones.getStats(),
+        api.donaciones.getRankingCajeros(),
+        api.donaciones.getLiquidaciones(),
+        api.donaciones.getHistorial({ limit: 50 }),
+      ])
+      if (st.status === "fulfilled") setDonationStats(st.value)
+      if (rk.status === "fulfilled") setDonationRanking(rk.value || [])
+      if (lq.status === "fulfilled") setDonationLiquidations(lq.value || [])
+      if (rc.status === "fulfilled") setDonationRecent(rc.value || [])
+    } catch (e) {
+      console.error("Error cargando datos de donaciones:", e)
+    } finally {
+      setDonationsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === "donaciones") fetchDonationsData()
+  }, [activeTab])
+
+  const handleLiquidarDonaciones = async () => {
+    if (!donationStats?.campana_activa?.id) {
+      toast.error("Error", "No hay campaña activa para liquidar")
+      return
+    }
+    setLiquidating(true)
+    try {
+      const res = await api.donaciones.liquidar({
+        company_id: donationStats.campana_activa.company_id,
+        campana_id: donationStats.campana_activa.id,
+        fecha_desde: `${liquidarDesde}T00:00:00Z`,
+        fecha_hasta: `${liquidarHasta}T23:59:59Z`,
+        entregado_por_nombre: liquidarEntregadoPor || user?.nombre || "Gerencia de Operaciones",
+        recibido_por_nombre: liquidarRecibidoPor,
+        recibido_por_ci: liquidarRecibidoCi,
+        comprobante_transferencia: liquidarComprobante,
+        observaciones: liquidarObservaciones,
+      })
+      toast.success("¡Acta Generada!", `Se generó el Acta ${res.numero_acta} por ${formatPYG(res.monto_total_pyg)} para ${donationStats.campana_activa.ong_nombre}.`)
+      setShowLiquidarModal(false)
+      fetchDonationsData()
+      setSelectedActaPdf(res)
+    } catch (err: any) {
+      toast.error("Error al liquidar fondos", err?.message || "Ocurrió un problema")
+    } finally {
+      setLiquidating(false)
+    }
+  }
 
   const [exportingArqueo, setExportingArqueo] = useState(false)
   const handleExportArqueo = async () => {
@@ -625,6 +704,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
           { key: "entregas", label: "Entregas a Bóveda", icon: ShieldCheck, count: pendingHandoffs.length },
           { key: "historial", label: "Historial de Arqueos & Cierres", icon: Clock },
           { key: "cajeros", label: "Scorecard de Cajeros", icon: Users },
+          { key: "donaciones", label: "❤️ Donaciones & RSE", icon: Heart, count: donationStats?.cantidad_donaciones },
         ].map((t) => {
           const Icon = t.icon
           const active = activeTab === t.key
@@ -1084,6 +1164,310 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      {/* TAB 6: DONACIONES & RSE ("ABRE TU CORAZÓN" - CENTRO AMOR Y ESPERANZA) */}
+      {activeTab === "donaciones" && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Panorámico RSE & Termómetro de Meta */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-rose-950 via-slate-900 to-amber-950/80 text-white p-6 sm:p-8 border border-rose-500/20 shadow-2xl shadow-rose-950/30">
+            <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-rose-500/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute bottom-0 left-1/3 -mb-20 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-black tracking-wide">
+                  <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
+                  RESPONSABILIDAD SOCIAL EMPRESARIAL · EXTRA SUPERMERCADO
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-3">
+                  <Heart className="w-8 h-8 text-rose-400 fill-rose-500" />
+                  Campaña Solidaria "Abre tu corazón"
+                </h2>
+                <p className="text-sm text-slate-300 max-w-2xl font-sans">
+                  Recaudación transparente por redondeo de vuelto fraccionario en cajas a beneficio de{" "}
+                  <strong className="text-white">Centro Amor y Esperanza</strong>.
+                </p>
+                <div className="flex items-center gap-3 pt-1">
+                  <a
+                    href={`https://${donationStats?.campana_activa?.ong_web || "www.centroamoresperanza.org"}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition-all"
+                  >
+                    <span>{donationStats?.campana_activa?.ong_web || "www.centroamoresperanza.org"}</span>
+                  </a>
+                  <span className="text-xs text-rose-300/80">
+                    Slogan: <em>"{donationStats?.campana_activa?.slogan || "Ayudanos a ayudar"}"</em>
+                  </span>
+                </div>
+              </div>
+
+              {/* Botón de Liquidación / Entrega Formal */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <button
+                  onClick={() => setShowLiquidarModal(true)}
+                  className="px-5 py-3 rounded-2xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-xl shadow-rose-600/30 transition-all cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Generar Acta de Entrega a la ONG</span>
+                </button>
+                <button
+                  onClick={fetchDonationsData}
+                  disabled={donationsLoading}
+                  className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition-all cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${donationsLoading ? "animate-spin" : ""}`} />
+                  <span>Actualizar</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Termómetro de Meta */}
+            <div className="relative z-10 mt-6 pt-6 border-t border-white/10">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  Progreso hacia la Meta de la Campaña
+                </span>
+                <span className="text-xs font-mono font-black text-rose-300">
+                  {formatPYG(donationStats?.total_recaudado_pyg || 0)} / {formatPYG(donationStats?.meta_pyg || 20000000)} ({donationStats?.progreso_meta_pct || 0}%)
+                </span>
+              </div>
+              <div className="w-full h-3.5 bg-slate-900/80 rounded-full overflow-hidden p-0.5 border border-white/10">
+                <div
+                  className="h-full bg-gradient-to-r from-rose-500 via-pink-500 to-amber-400 rounded-full transition-all duration-1000 shadow-lg shadow-rose-500/50"
+                  style={{ width: `${Math.min(100, donationStats?.progreso_meta_pct || 0)}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Grid de 4 KPIs */}
+            <div className="relative z-10 grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6">
+              <div className="bg-slate-900/70 p-3.5 rounded-2xl border border-rose-500/20">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Recaudado Histórico</span>
+                <div className="text-xl sm:text-2xl font-black font-mono tracking-tight text-white mt-0.5">
+                  {formatPYG(donationStats?.total_recaudado_pyg || 0)}
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  {donationStats?.cantidad_donaciones || 0} micro-donaciones
+                </span>
+              </div>
+
+              <div className="bg-slate-900/70 p-3.5 rounded-2xl border border-rose-500/20">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Recaudación Este Mes</span>
+                <div className="text-xl sm:text-2xl font-black font-mono tracking-tight text-rose-300 mt-0.5">
+                  {formatPYG(donationStats?.total_mes_pyg || 0)}
+                </div>
+                <span className="text-[10px] text-rose-400 font-bold mt-1 block">En curso</span>
+              </div>
+
+              <div className="bg-slate-900/70 p-3.5 rounded-2xl border border-rose-500/20">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Recaudado Hoy en Cajas</span>
+                <div className="text-xl sm:text-2xl font-black font-mono tracking-tight text-emerald-300 mt-0.5">
+                  {formatPYG(donationStats?.total_hoy_pyg || 0)}
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">Cajas activas</span>
+              </div>
+
+              <div className="bg-slate-900/70 p-3.5 rounded-2xl border border-rose-500/20">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Custodia Pendiente de Entrega</span>
+                <div className="text-xl sm:text-2xl font-black font-mono tracking-tight text-amber-300 mt-0.5">
+                  {formatPYG(donationStats?.total_pendiente_pyg || 0)}
+                </div>
+                <span className="text-[10px] text-amber-400 font-bold mt-1 block">Listo para transferir</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Grid de 2 Columnas: Ranking de Cajeros + Actas de Entrega */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Columna 1: Ranking de Cajeros Solidarios */}
+            <div className="card overflow-hidden">
+              <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                    <Award className="w-4 h-4 text-amber-500" />
+                    Scorecard de Cajeros Solidarios
+                  </h3>
+                  <p className="text-xs text-gray-400">Ranking por recaudación y tasa de conversión de redondeo</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-gray-50 dark:bg-slate-800/80 text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                    <tr>
+                      <th className="p-3">Pos.</th>
+                      <th className="p-3">Cajero</th>
+                      <th className="p-3 text-right">Recaudado</th>
+                      <th className="p-3 text-center">Donaciones</th>
+                      <th className="p-3 text-right">Tasa Conversión</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {donationsLoading ? (
+                      <tr><td colSpan={5} className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-rose-600" /></td></tr>
+                    ) : donationRanking.length === 0 ? (
+                      <tr><td colSpan={5} className="p-8 text-center text-gray-400">No hay registros de cajeros aún.</td></tr>
+                    ) : (
+                      donationRanking.map((rk, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                          <td className="p-3 font-bold text-center">
+                            {idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx + 1}`}
+                          </td>
+                          <td className="p-3 font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-bold flex items-center justify-center text-[10px]">
+                              {rk.cajero_nombre.slice(0, 2).toUpperCase()}
+                            </div>
+                            <span>{rk.cajero_nombre}</span>
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-rose-600 dark:text-rose-400">
+                            {formatPYG(rk.total_recaudado_pyg)}
+                          </td>
+                          <td className="p-3 text-center font-mono font-bold text-gray-700 dark:text-gray-300">
+                            {rk.cantidad_donaciones}
+                          </td>
+                          <td className="p-3 text-right">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                              {rk.tasa_adhesion_pct}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Columna 2: Actas de Entrega & Liquidaciones a la ONG */}
+            <div className="card overflow-hidden">
+              <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-500" />
+                    Actas de Entrega a Centro Amor y Esperanza
+                  </h3>
+                  <p className="text-xs text-gray-400">Comprobantes formales de transferencia de fondos</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-gray-50 dark:bg-slate-800/80 text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                    <tr>
+                      <th className="p-3">N° Acta</th>
+                      <th className="p-3">Fecha</th>
+                      <th className="p-3 text-right">Monto</th>
+                      <th className="p-3">Recibido Por</th>
+                      <th className="p-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {donationsLoading ? (
+                      <tr><td colSpan={5} className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-600" /></td></tr>
+                    ) : donationLiquidations.length === 0 ? (
+                      <tr><td colSpan={5} className="p-8 text-center text-gray-400">No se han emitido actas de entrega aún.</td></tr>
+                    ) : (
+                      donationLiquidations.map((lq) => (
+                        <tr key={lq.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                          <td className="p-3 font-mono font-bold text-blue-600 dark:text-blue-400">
+                            {lq.numero_acta}
+                          </td>
+                          <td className="p-3 font-mono text-gray-500">
+                            {formatDateTime(lq.created_at)}
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">
+                            {formatPYG(lq.monto_total_pyg)}
+                          </td>
+                          <td className="p-3 text-gray-700 dark:text-gray-300 truncate max-w-[120px]">
+                            {lq.recibido_por_nombre || "Directora"}
+                          </td>
+                          <td className="p-3 text-center">
+                            <button
+                              onClick={() => setSelectedActaPdf(lq)}
+                              className="px-2 py-1 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 hover:bg-blue-100 text-[10px] font-bold transition"
+                            >
+                              Ver Acta
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabla de Micro-Donaciones Recientes en Cajas */}
+          <div className="card overflow-hidden">
+            <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-emerald-500" />
+                  Registro de Micro-Donaciones en Vivo (Auditoría por Ticket)
+                </h3>
+                <p className="text-xs text-gray-400">Últimos redondeos registrados en cajas y puntos de venta</p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-gray-50 dark:bg-slate-800/80 text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                  <tr>
+                    <th className="p-3">Fecha/Hora</th>
+                    <th className="p-3">N° Ticket</th>
+                    <th className="p-3">Cajero</th>
+                    <th className="p-3">Tipo Origen</th>
+                    <th className="p-3 text-right">Monto Venta</th>
+                    <th className="p-3 text-right">Donación</th>
+                    <th className="p-3 text-center">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {donationsLoading ? (
+                    <tr><td colSpan={7} className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-emerald-600" /></td></tr>
+                  ) : donationRecent.length === 0 ? (
+                    <tr><td colSpan={7} className="p-8 text-center text-gray-400">No hay donaciones registradas aún en el período.</td></tr>
+                  ) : (
+                    donationRecent.map((dc) => (
+                      <tr key={dc.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                        <td className="p-3 font-mono text-gray-500">
+                          {formatDateTime(dc.created_at)}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-200">
+                          {dc.numero_comprobante || "—"}
+                        </td>
+                        <td className="p-3 font-bold text-gray-700 dark:text-gray-300">
+                          {dc.cajero_nombre || "Cajero"}
+                        </td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                            {dc.tipo_origen === "redondeo_vuelto" ? "🪙 Redondeo Vuelto" : dc.tipo_origen}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono text-gray-500">
+                          {formatPYG(dc.monto_total_venta_pyg)}
+                        </td>
+                        <td className="p-3 text-right font-mono font-black text-rose-600 dark:text-rose-400">
+                          +{formatPYG(dc.monto_pyg)}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            dc.estado === "liquidado"
+                              ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                              : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                          }`}>
+                            {dc.estado === "liquidado" ? "Entregado a ONG" : "En Custodia"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -1814,6 +2198,207 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               <button onClick={handleCreateRegister} className="btn-primary text-xs">
                 Crear Caja
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: GENERAR ACTA DE ENTREGA / LIQUIDACIÓN A CENTRO AMOR Y ESPERANZA ── */}
+      {showLiquidarModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="card max-w-lg w-full p-6 space-y-4 shadow-2xl animate-fade-in-up">
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
+              <h3 className="font-black text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Heart className="w-5 h-5 text-rose-600 fill-rose-500" />
+                <span>Liquidación & Acta de Entrega a la ONG</span>
+              </h3>
+              <button onClick={() => setShowLiquidarModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-900/60 text-xs">
+              <div className="font-bold text-rose-800 dark:text-rose-300">
+                Campaña: {donationStats?.campana_activa?.nombre || "Abre tu corazón"}
+              </div>
+              <div className="text-rose-700 dark:text-rose-400 mt-0.5">
+                Beneficiario: <strong>{donationStats?.campana_activa?.ong_nombre || "Centro Amor y Esperanza"}</strong> ({donationStats?.campana_activa?.ong_web || "www.centroamoresperanza.org"})
+              </div>
+              <div className="mt-2 text-xs font-mono font-bold text-rose-900 dark:text-rose-200">
+                Fondos Pendientes en Custodia: {formatPYG(donationStats?.total_pendiente_pyg || 0)}
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="input-label">Fecha Desde</label>
+                  <input
+                    type="date"
+                    className="input-field font-mono"
+                    value={liquidarDesde}
+                    onChange={(e) => setLiquidarDesde(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="input-label">Fecha Hasta</label>
+                  <input
+                    type="date"
+                    className="input-field font-mono"
+                    value={liquidarHasta}
+                    onChange={(e) => setLiquidarHasta(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="input-label">Entregado Por (Representante Extra Supermercado)</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="Ej: Gerencia de Operaciones"
+                  value={liquidarEntregadoPor}
+                  onChange={(e) => setLiquidarEntregadoPor(e.target.value)}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="input-label">Recibido Por (Representante ONG)</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="Ej: Lic. María Fernández (Directora)"
+                    value={liquidarRecibidoPor}
+                    onChange={(e) => setLiquidarRecibidoPor(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="input-label">C.I. del Receptor</label>
+                  <input
+                    type="text"
+                    className="input-field font-mono"
+                    placeholder="Ej: 3.456.789"
+                    value={liquidarRecibidoCi}
+                    onChange={(e) => setLiquidarRecibidoCi(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="input-label">N° Comprobante / Boleta Bancaria (opcional)</label>
+                <input
+                  type="text"
+                  className="input-field font-mono"
+                  placeholder="Ej: TRF-BNF-2026-98124"
+                  value={liquidarComprobante}
+                  onChange={(e) => setLiquidarComprobante(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="input-label">Observaciones</label>
+                <textarea
+                  rows={2}
+                  className="input-field"
+                  value={liquidarObservaciones}
+                  onChange={(e) => setLiquidarObservaciones(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setShowLiquidarModal(false)}
+                className="btn-outline text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleLiquidarDonaciones}
+                disabled={liquidating}
+                className="px-4 py-2 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-rose-600/30"
+              >
+                {liquidating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>Generar Acta & Entregar Fondos</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: VISOR DE ACTA OFICIAL IMPRIMIBLE ── */}
+      {selectedActaPdf && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white text-slate-900 max-w-2xl w-full p-8 rounded-3xl space-y-6 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+              <div>
+                <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">DOCUMENTO OFICIAL DE RENDICIÓN RSE</span>
+                <h2 className="text-xl font-black text-slate-900 font-mono">{selectedActaPdf.numero_acta}</h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => window.print()}
+                  className="px-3 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 hover:bg-slate-800"
+                >
+                  <Printer className="w-3.5 h-3.5" /> Imprimir
+                </button>
+                <button onClick={() => setSelectedActaPdf(null)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="text-center space-y-1">
+              <div className="text-sm font-black text-slate-900 uppercase">EXTRA SUPERMERCADO · RUC 80092451-2</div>
+              <div className="text-xs text-slate-500">ACTA DE ENTREGA DE FONDOS SOLIDARIOS POR REDONDEO DE VUELTO</div>
+              <div className="text-xs font-bold text-rose-600">CAMPAÑA "ABRE TU CORAZÓN" · CENTRO AMOR Y ESPERANZA</div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Monto Total Entregado:</span>
+                <span className="text-base font-black font-mono text-slate-900">{formatPYG(selectedActaPdf.monto_total_pyg)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Cantidad de Micro-Donaciones:</span>
+                <span className="font-mono font-bold text-slate-800">{selectedActaPdf.cantidad_donaciones} tickets</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Período de Recaudación:</span>
+                <span className="font-mono text-slate-800">{formatDateTime(selectedActaPdf.fecha_desde)} al {formatDateTime(selectedActaPdf.fecha_hasta)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Entregado Por:</span>
+                <span className="font-bold text-slate-800">{selectedActaPdf.entregado_por_nombre || "Extra Supermercado"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Recibido Por (ONG):</span>
+                <span className="font-bold text-slate-800">{selectedActaPdf.recibido_por_nombre} (CI: {selectedActaPdf.recibido_por_ci || "-"})</span>
+              </div>
+              {selectedActaPdf.comprobante_transferencia && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Comprobante Bancario:</span>
+                  <span className="font-mono text-slate-800">{selectedActaPdf.comprobante_transferencia}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-8 pt-8 text-center text-xs">
+              <div className="border-t border-slate-400 pt-2">
+                <p className="font-bold text-slate-800">Firma Entregado</p>
+                <p className="text-[10px] text-slate-500">Extra Supermercado</p>
+              </div>
+              <div className="border-t border-slate-400 pt-2">
+                <p className="font-bold text-slate-800">Firma & Sello Receptor</p>
+                <p className="text-[10px] text-slate-500">Centro Amor y Esperanza</p>
+              </div>
+            </div>
+
+            <div className="text-center text-[10px] text-slate-400 pt-4 border-t border-slate-100">
+              Conocé más y auditá las obras de la campaña en: <strong className="text-blue-600">www.centroamoresperanza.org</strong>
             </div>
           </div>
         </div>

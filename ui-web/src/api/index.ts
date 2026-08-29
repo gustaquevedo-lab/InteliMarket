@@ -2775,6 +2775,90 @@ export const api = {
       },
     },
   },
+  donaciones: {
+    getCampanaActiva: (companyId?: string) => client.get<DonationCampaign>("/v1/donaciones/campana-activa", { company_id: companyId || COMPANY_ID }),
+    updateCampana: (id: string, data: any) => client.put<DonationCampaign>(`/v1/donaciones/campana/${id}`, data),
+    registrar: (data: any) => client.post<DonationRecord>("/v1/donaciones/registrar", data),
+    getStats: (params?: any) => client.get<DonationStats>("/v1/donaciones/stats", { company_id: COMPANY_ID, ...params }),
+    getRankingCajeros: (params?: any) => client.get<CajeroSolidarioRankingItem[]>("/v1/donaciones/ranking-cajeros", { company_id: COMPANY_ID, ...params }),
+    getHistorial: (params?: any) => client.get<DonationRecord[]>("/v1/donaciones/historial", { company_id: COMPANY_ID, ...params }),
+    getLiquidaciones: (companyId?: string) => client.get<DonationLiquidation[]>("/v1/donaciones/liquidaciones", { company_id: companyId || COMPANY_ID }),
+    liquidar: (data: any) => client.post<DonationLiquidation>("/v1/donaciones/liquidar", data),
+  },
+}
+
+export interface DonationCampaign {
+  id: string
+  company_id: string
+  nombre: string
+  ong_nombre: string
+  ong_ruc?: string | null
+  ong_web: string
+  slogan?: string | null
+  mensaje_ticket: string
+  meta_recaudacion_pyg: number
+  fecha_inicio: string
+  fecha_fin?: string | null
+  activa: boolean
+  created_at: string
+  updated_at?: string | null
+}
+
+export interface DonationRecord {
+  id: string
+  company_id: string
+  branch_id?: string | null
+  sale_id?: string | null
+  session_id?: string | null
+  user_id?: string | null
+  cajero_nombre?: string | null
+  campana_id: string
+  monto_pyg: number
+  monto_total_venta_pyg: number
+  numero_comprobante?: string | null
+  tipo_origen: string
+  estado: string
+  created_at: string
+}
+
+export interface DonationLiquidation {
+  id: string
+  company_id: string
+  campana_id: string
+  monto_total_pyg: number
+  cantidad_donaciones: number
+  fecha_desde: string
+  fecha_hasta: string
+  numero_acta: string
+  entregado_por_nombre?: string | null
+  recibido_por_nombre?: string | null
+  recibido_por_ci?: string | null
+  comprobante_transferencia?: string | null
+  observaciones?: string | null
+  estado: string
+  created_at: string
+}
+
+export interface DonationStats {
+  total_recaudado_pyg: number
+  total_mes_pyg: number
+  total_hoy_pyg: number
+  total_liquidado_pyg: number
+  total_pendiente_pyg: number
+  cantidad_donaciones: number
+  ticket_promedio_donacion: number
+  meta_pyg: number
+  progreso_meta_pct: number
+  campana_activa?: DonationCampaign | null
+}
+
+export interface CajeroSolidarioRankingItem {
+  user_id?: string | null
+  cajero_nombre: string
+  total_recaudado_pyg: number
+  cantidad_donaciones: number
+  total_ventas_atendidas: number
+  tasa_adhesion_pct: number
 }
 
 export type CuponTicket = any

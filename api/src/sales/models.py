@@ -41,6 +41,11 @@ class Sale(Base):
     total_pagado = Column(Numeric(15, 0), default=0)
     saldo = Column(Numeric(15, 0))
 
+    # Redondeo solidario / Donación (Amor y Esperanza)
+    monto_donacion = Column(Numeric(15, 0), default=0, server_default=text("0"))
+    donacion_campana = Column(String(100), nullable=True)
+    donacion_ong = Column(String(100), nullable=True)
+
     cdc = Column(String(44))
     sifen_estado = Column(String(20))
     sifen_fecha_respuesta = Column(DateTime(timezone=True))

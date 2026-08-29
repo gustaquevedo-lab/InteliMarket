@@ -6,7 +6,7 @@ import {
   Sparkles, RefreshCw, BarChart3, PieChart as PieChartIcon, ShieldAlert,
   Truck, CheckCircle2, Building2, Flame, Layers, Box, Scale, Calendar,
   ArrowRight, Activity, Wallet, Cpu, Bell, CheckCircle, ArrowUpDown,
-  Zap, FileText, Download, ExternalLink, HelpCircle
+  Zap, FileText, Download, ExternalLink, HelpCircle, Heart
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, ComposedChart, Line,
@@ -84,6 +84,7 @@ export default function Dashboard() {
   const [anomalies, setAnomalies] = useState<any[]>([])
   const [churnDashboard, setChurnDashboard] = useState<any>(null)
   const [purchaseSuggestions, setPurchaseSuggestions] = useState<any[]>([])
+  const [donationsStats, setDonationsStats] = useState<any>(null)
 
   // Cache en memoria para transiciones instantáneas (0ms)
   const cacheRef = useMemo(() => new Map<string, { summary: any; byCat: any[]; byProd: any[]; period: any[]; comparison: any[] }>(), [])
@@ -139,7 +140,7 @@ export default function Dashboard() {
   // 2. Carga única de estado operativo general (no bloquea los períodos)
   const loadStaticData = useCallback(async () => {
     try {
-      const [replenishRes, finRes, ordersRes, lowStockRes, agingRes, companyRes, anomaliesRes, churnRes, suggestRes] = await Promise.allSettled([
+      const [replenishRes, finRes, ordersRes, lowStockRes, agingRes, companyRes, anomaliesRes, churnRes, suggestRes, donationsRes] = await Promise.allSettled([
         api.purchases.smartReplenishmentPreview({ dias_cobertura: 30, limit: 100 }),
         api.financial.dashboard(),
         api.purchases.listPOs(),
@@ -149,6 +150,7 @@ export default function Dashboard() {
         api.demandForecast.listAnomalies((user as any)?.company_id || "00000000-0000-0000-0000-000000000010", undefined, undefined),
         api.customer360.getDashboard((user as any)?.company_id || "00000000-0000-0000-0000-000000000010"),
         api.demandForecast.listPurchaseSuggestions((user as any)?.company_id || "00000000-0000-0000-0000-000000000010", "pendiente", 5),
+        api.donaciones.getStats(),
       ])
 
       if (replenishRes.status === "fulfilled") setReplenishmentData(replenishRes.value)
@@ -160,6 +162,7 @@ export default function Dashboard() {
       if (anomaliesRes.status === "fulfilled") setAnomalies((anomaliesRes.value || []).filter((a: any) => !a.reviewed).slice(0, 3))
       if (churnRes.status === "fulfilled") setChurnDashboard(churnRes.value)
       if (suggestRes.status === "fulfilled") setPurchaseSuggestions(suggestRes.value || [])
+      if (donationsRes.status === "fulfilled") setDonationsStats(donationsRes.value)
     } catch {}
   }, [user])
 
@@ -1236,6 +1239,24 @@ export default function Dashboard() {
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-gray-400" />
+            </button>
+
+            <button
+              onClick={() => navigate("/caja")}
+              className="w-full p-3 rounded-xl bg-gradient-to-r from-rose-50 to-amber-50 dark:from-rose-950/40 dark:to-amber-950/30 border border-rose-200 dark:border-rose-800/60 text-left hover:shadow-xs transition-all flex items-center justify-between"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-rose-600 text-white shadow-xs">
+                  <Heart className="w-4 h-4 fill-white" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 dark:text-white">RSE · Abre tu corazón</h4>
+                  <p className="text-[11px] text-rose-700 dark:text-rose-300 font-medium">
+                    {formatPYG(donationsStats?.total_recaudado_pyg || 0)} ({donationsStats?.progreso_meta_pct || 0}% meta Amor y Esperanza)
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-rose-500" />
             </button>
 
             <button

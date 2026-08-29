@@ -119,6 +119,9 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         session_id=data.session_id,
         recibo_html=data.recibo_html,
         recibo_escpos_b64=data.recibo_escpos_b64,
+        monto_donacion=data.monto_donacion or Decimal("0"),
+        donacion_campana=data.donacion_campana,
+        donacion_ong=data.donacion_ong,
     )
     db.add(sale)
     # Ojo: NO se hace flush aca todavia -- subtotal/total (NOT NULL, sin
@@ -184,6 +187,35 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             moneda=p.moneda,
             fecha=now,
         ))
+
+    # ── Registro de Micro-Donación / Redondeo Solidario (Amor y Esperanza) ──
+    if data.monto_donacion and data.monto_donacion > Decimal("0"):
+        from api.src.donaciones.models import DonationRecord
+        from api.src.donaciones.service import get_or_create_default_campaign
+        try:
+            camp = await get_or_create_default_campaign(db, str(data.company_id))
+            user_name = None
+            if data.user_id:
+                u_res = await db.execute(select(User.nombre).where(User.id == data.user_id))
+                user_name = u_res.scalar_one_or_none()
+
+            db.add(DonationRecord(
+                company_id=data.company_id,
+                branch_id=data.branch_id,
+                sale_id=sale.id,
+                session_id=data.session_id,
+                user_id=data.user_id,
+                cajero_nombre=user_name or "Cajero",
+                campana_id=camp.id,
+                monto_pyg=data.monto_donacion,
+                monto_total_venta_pyg=sale.total,
+                numero_comprobante=sale.numero,
+                tipo_origen="redondeo_vuelto",
+                estado="recaudado",
+            ))
+        except Exception as don_err:
+            # Fallback seguro: no bloquear la venta si falla el log de donación
+            print(f"[DONACIONES] Advertencia registrando donacion: {don_err}")
 
     if data.condicion == "credito" and data.customer_id:
         from api.src.credit_accounts.service import get_credit_check, create_approval_request, process_purchase

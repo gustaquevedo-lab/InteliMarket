@@ -42,6 +42,9 @@ class SaleCreate(BaseModel):
     recibo_html: Optional[str] = None
     recibo_escpos_b64: Optional[str] = None
     admin_override_credito: bool = False
+    monto_donacion: Optional[Decimal] = Decimal("0")
+    donacion_campana: Optional[str] = None
+    donacion_ong: Optional[str] = None
 
 
 class SaleResponse(BaseModel):
@@ -69,8 +72,11 @@ class SaleResponse(BaseModel):
     iva_10: Decimal
     iva_5: Decimal
     total: Decimal
-    total_pagado: Decimal
+    total_pagado: Optional[Decimal] = None
     saldo: Optional[Decimal] = None
+    monto_donacion: Optional[Decimal] = Decimal("0")
+    donacion_campana: Optional[str] = None
+    donacion_ong: Optional[str] = None
     cdc: Optional[str] = None
     sifen_estado: Optional[str] = None
     observaciones: Optional[str] = None

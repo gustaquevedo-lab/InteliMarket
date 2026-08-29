@@ -113,6 +113,7 @@ async def get_session_with_summary(db: AsyncSession, session_id: str) -> dict | 
         select(
             func.count(Sale.id).label("total_ventas"),
             func.coalesce(func.sum(Sale.total), 0).label("total_cobrado"),
+            func.coalesce(func.sum(Sale.monto_donacion), 0).label("total_donaciones"),
         ).where(
             Sale.session_id == session_obj.id,
             Sale.fecha >= session_obj.fecha_apertura,
@@ -124,6 +125,7 @@ async def get_session_with_summary(db: AsyncSession, session_id: str) -> dict | 
         "session": session_obj,
         "total_ventas": row.total_ventas if row else 0,
         "total_cobrado": row.total_cobrado if row else 0,
+        "total_donaciones": row.total_donaciones if row else 0,
     }
 
 

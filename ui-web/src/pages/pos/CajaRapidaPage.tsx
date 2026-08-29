@@ -9,7 +9,7 @@ import {
   Maximize2, Eye, Image as ImageIcon, ZoomIn, LogOut, Lock, Unlock,
   Coins, HelpCircle, Package, Flame, ShoppingBag, LayoutGrid, ListFilter,
   Layers, Tag, Boxes, Radio, Activity, ShieldAlert, ArrowUpRight, Sliders, UserPlus, Sparkle, RotateCcw, ExternalLink, Smartphone,
-  Ticket, Scissors
+  Ticket, Scissors, Heart
 } from "lucide-react"
 import { api, type Product, type Customer, type Sale, type Warehouse, API_ORIGIN, COMPANY_ID } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -648,6 +648,10 @@ export default function POSPage() {
 
   // ── MODALES DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO ─────────
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  // Redondeo Solidario & Donación ("Abre tu corazón" - Centro Amor y Esperanza)
+  const [donacionActiva, setDonacionActiva] = useState(false)
+  const [montoDonacionManual, setMontoDonacionManual] = useState<number | null>(null)
+  const [campanaActivaDonacion, setCampanaActivaDonacion] = useState<any>(null)
   // Metodos de cobro activos -- reemplaza el viejo "paymentTab" de
   // seleccion unica (+ una pestana "Pago Mixto" que duplicaba cada campo).
   // Ahora cada metodo es un boton que se prende/apaga: con uno solo activo
@@ -3452,6 +3456,36 @@ export default function POSPage() {
     }
   }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedExtraClubPyg, totalPyg, rates])
 
+  // ── Detección inteligente de redondeo para Centro Amor y Esperanza ("Abre tu corazón") ──
+  const montoSugeridoDonacion = useMemo(() => {
+    if (montoDonacionManual !== null && montoDonacionManual > 0) return montoDonacionManual
+
+    // 1. Si hay vuelto con monedas fraccionarias (ej. 4.300 -> donar los 300 de monedas para entregar 4.000 limpios)
+    if (vueltoPyg > 0) {
+      const resto1000 = vueltoPyg % 1000
+      if (resto1000 > 0) return resto1000
+      const resto5000 = vueltoPyg % 5000
+      if (resto5000 > 0 && resto5000 <= 2000) return resto5000
+      return 500
+    }
+
+    // 2. Si el total a pagar no es múltiplo de 1000 (ej. 5.700 -> redondear a 6.000 -> donar 300)
+    const restoTotal = totalPyg % 1000
+    if (restoTotal > 0) {
+      return 1000 - restoTotal
+    }
+
+    return 500
+  }, [vueltoPyg, totalPyg, montoDonacionManual])
+
+  const montoDonacionEfectiva = donacionActiva ? montoSugeridoDonacion : 0
+  const vueltoFinalPyg = Math.max(0, vueltoPyg - (donacionActiva ? montoDonacionEfectiva : 0))
+
+  // Cargar campaña activa de donación para el POS
+  useEffect(() => {
+    api.donaciones.getCampanaActiva().then(setCampanaActivaDonacion).catch(() => {})
+  }, [])
+
   // Al abrir el modal de cobro, foco directo al campo de Guaraníes (ya viene
   // precargado con el monto exacto) con el texto seleccionado -- así el
   // cajero puede tipear un monto distinto de una sola vez (sobreescribe la
@@ -3577,6 +3611,8 @@ export default function POSPage() {
     setPosVerifiedTxn(null)
     setPosVerifyOpenedAt(new Date().toISOString())
     resetBancardFlow()
+    setDonacionActiva(false)
+    setMontoDonacionManual(null)
     setShowPaymentModal(true)
   }
 
@@ -3836,6 +3872,9 @@ export default function POSPage() {
         items: saleItemsForCreate,
         payments: salePaymentsForCreate,
         admin_override_credito: activeMethods.has("extra_club") ? extraClubAdminOverride : false,
+        monto_donacion: donacionActiva ? montoDonacionEfectiva : 0,
+        donacion_campana: donacionActiva ? (campanaActivaDonacion?.nombre || "Abre tu corazón") : undefined,
+        donacion_ong: donacionActiva ? (campanaActivaDonacion?.ong_nombre || "Centro Amor y Esperanza") : undefined,
       }
 
       let numeroComprobante = saleNumber
@@ -3961,13 +4000,32 @@ export default function POSPage() {
                 <tr><td colspan="2" style="font-size: 8.5px; padding-top: 1px;">${bancardQrResult.nombreTarjeta || ""}</td></tr>
                 <tr><td colspan="2" style="font-size: 8.5px;">Aut. ${bancardQrResult.codigoAutorizacion || "-"} · Boleta ${bancardQrResult.nroBoleta || "-"}</td></tr>
               ` : ""}
+              ${(donacionActiva && montoDonacionEfectiva > 0) ? `
+                <tr style="color: #b45309; font-weight: bold;">
+                  <td style="padding-top: 2px;">DONACIÓN SOLIDARIA:</td>
+                  <td style="text-align: right; padding-top: 2px;">Gs. ${fmtGs(montoDonacionEfectiva)}</td>
+                </tr>
+                <tr>
+                  <td colspan="2" style="font-size: 8px; color: #555; text-align: left;">(Centro Amor y Esperanza - Abre tu corazón)</td>
+                </tr>
+              ` : ""}
               <tr style="font-weight: bold; font-size: 10.5px;">
                 <td style="padding-top: 2px;">VUELTO:</td>
                 <td style="text-align: right; padding-top: 2px; white-space: nowrap;">
-                  Gs. ${fmtGs(vueltoPyg)} ${rates.BRL > 0 ? `(R$ ${(vueltoPyg / rates.BRL).toFixed(2)})` : ''}
+                  Gs. ${fmtGs(vueltoFinalPyg)} ${rates.BRL > 0 ? `(R$ ${(vueltoFinalPyg / rates.BRL).toFixed(2)})` : ''}
                 </td>
               </tr>
             </table>
+          ` : ''}
+
+          ${(donacionActiva && montoDonacionEfectiva > 0) ? `
+            <div style="border: 1px dashed #b45309; background: #fffbeb; padding: 6px; margin: 6px 0; text-align: center; font-size: 9px; font-family: monospace; border-radius: 4px;">
+              <div style="font-weight: 900; font-size: 10px; color: #92400e;">❤️ ¡GRACIAS POR ABRIR TU CORAZÓN!</div>
+              <div style="margin-top: 2px; color: #78350f;">Colaboraste con <b>Gs. ${fmtGs(montoDonacionEfectiva)}</b> para el</div>
+              <div style="font-weight: bold; color: #78350f;">Centro Amor y Esperanza</div>
+              <div style="font-size: 8px; margin-top: 3px; color: #92400e;">Conocé más y auditá en:</div>
+              <div style="font-weight: bold; font-size: 9px; color: #1e40af;">www.centroamoresperanza.org</div>
+            </div>
           ` : ''}
 
           ${isClubMember ? `
@@ -4197,7 +4255,11 @@ export default function POSPage() {
             const montoTxt = p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : fmtGs(p.monto)
             t += escposTwoCol(escposStripAccents(label) + ':', montoTxt) + '\n'
           }
-          t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', fmtGs(vueltoPyg)) + ESCPOS_BOLD_OFF + '\n'
+          if (donacionActiva && montoDonacionEfectiva > 0) {
+            t += ESCPOS_BOLD_ON + escposTwoCol('DONACION SOLIDARIA:', fmtGs(montoDonacionEfectiva)) + ESCPOS_BOLD_OFF + '\n'
+            t += ' (Centro Amor y Esperanza)\n'
+          }
+          t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', fmtGs(vueltoFinalPyg)) + ESCPOS_BOLD_OFF + '\n'
         }
 
         if (isClubMember) {
@@ -4247,6 +4309,17 @@ export default function POSPage() {
 
         if (showMarketing && tpl.mensaje_marketing) {
           t += ESCPOS_ALIGN_CENTER + ESCPOS_BOLD_ON + escposStripAccents(tpl.mensaje_marketing) + ESCPOS_BOLD_OFF + '\n' + ESCPOS_ALIGN_LEFT
+        }
+
+        if (donacionActiva && montoDonacionEfectiva > 0) {
+          t += escposDashes(W) + '\n'
+          t += ESCPOS_ALIGN_CENTER
+          t += ESCPOS_BOLD_ON + '* ABRE TU CORAZON *' + ESCPOS_BOLD_OFF + '\n'
+          t += 'Gracias por colaborar con ' + fmtGs(montoDonacionEfectiva) + '\n'
+          t += 'para el Centro Amor y Esperanza.\n'
+          t += 'Conoce mas en:\n'
+          t += ESCPOS_BOLD_ON + 'www.centroamoresperanza.org' + ESCPOS_BOLD_OFF + '\n'
+          t += ESCPOS_ALIGN_LEFT
         }
 
         if (showCupon) {
@@ -4348,7 +4421,12 @@ export default function POSPage() {
       setShowPaymentModal(false)
       setCart([])
       setCustomer(DEFAULT_CUSTOMER)
-      toast.success("¡Cobro Exitoso!", `Comprobante ${numeroComprobante} emitido. Vuelto: ${formatPYG(vueltoPyg)}` + (puntosEstimados > 0 ? ` -- Sumó ${puntosEstimados} puntos de fidelidad.` : ""))
+      toast.success(
+        "¡Cobro Exitoso!",
+        `Comprobante ${numeroComprobante} emitido. Vuelto: ${formatPYG(vueltoFinalPyg)}` +
+        (donacionActiva && montoDonacionEfectiva > 0 ? ` (Donación: ${formatPYG(montoDonacionEfectiva)})` : "") +
+        (puntosEstimados > 0 ? ` -- Sumó ${puntosEstimados} puntos de fidelidad.` : "")
+      )
     } catch (err: any) {
       toast.error("Error al procesar cobro", err.message)
     } finally {
@@ -4400,6 +4478,9 @@ export default function POSPage() {
       } else if (e.key === "F7") {
         e.preventDefault()
         if (pausedSales.length > 0) setShowPausedModal(true)
+      } else if (e.key === "F8") {
+        e.preventDefault()
+        if (showPaymentModal) setDonacionActiva(prev => !prev)
       } else if (e.key === "F9") {
         e.preventDefault()
         setShowCustomerModal(true)
@@ -6125,13 +6206,114 @@ export default function POSPage() {
               ) : (
                 <div className="relative p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 text-center overflow-hidden shadow-sm">
                   <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
-                  <span className="text-xs font-black text-emerald-600 dark:text-emerald-300 uppercase tracking-wider block mb-1">Vuelto a Entregar</span>
-                  <div className="text-4xl sm:text-5xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 leading-none">{formatPYG(vueltoPyg)}</div>
+                  <span className="text-xs font-black text-emerald-600 dark:text-emerald-300 uppercase tracking-wider block mb-1">
+                    {donacionActiva && montoDonacionEfectiva > 0 ? "Vuelto Limpio a Entregar" : "Vuelto a Entregar"}
+                  </span>
+                  <div className="text-4xl sm:text-5xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 leading-none">{formatPYG(vueltoFinalPyg)}</div>
                   <div className="text-xs font-posMono tabular-nums text-emerald-500 dark:text-emerald-300/80 mt-2">
-                    R$ {(vueltoPyg / rates.BRL).toFixed(2)} · US$ {(vueltoPyg / rates.USD).toFixed(2)}
+                    R$ {(vueltoFinalPyg / rates.BRL).toFixed(2)} · US$ {(vueltoFinalPyg / rates.USD).toFixed(2)}
                   </div>
+                  {donacionActiva && montoDonacionEfectiva > 0 && (
+                    <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold animate-fade-in">
+                      <Heart className="w-3.5 h-3.5 fill-rose-500 animate-pulse" />
+                      <span>Donación de Gs. {formatPYG(montoDonacionEfectiva)} aplicada</span>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* ── CARD INTERACTIVA DE REDONDEO SOLIDARIO (ABRE TU CORAZÓN - CENTRO AMOR Y ESPERANZA) ── */}
+              <div className={`mt-3 p-3.5 rounded-2xl border transition-all duration-200 ${
+                donacionActiva
+                  ? "bg-gradient-to-br from-rose-50/90 to-amber-50/80 dark:from-rose-950/40 dark:to-amber-950/30 border-rose-400/80 dark:border-rose-600/60 shadow-md shadow-rose-500/10"
+                  : "bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+              }`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                      donacionActiva
+                        ? "bg-rose-500 text-white shadow-md shadow-rose-500/30 scale-105"
+                        : "bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    }`}>
+                      <Heart className={`w-4 h-4 ${donacionActiva ? "fill-white animate-pulse" : ""}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-200 truncate">
+                          {campanaActivaDonacion?.nombre || "Abre tu corazón"}
+                        </span>
+                        <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                          Atajo F8
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                        {campanaActivaDonacion?.ong_nombre || "Centro Amor y Esperanza"} · <span className="font-mono text-blue-600 dark:text-blue-400 font-semibold">{campanaActivaDonacion?.ong_web || "www.centroamoresperanza.org"}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDonacionActiva(!donacionActiva)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        donacionActiva ? "bg-rose-600" : "bg-slate-300 dark:bg-slate-700"
+                      }`}
+                      title="Activar o desactivar donación (F8)"
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                          donacionActiva ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Botones de montos rápidos */}
+                <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Donar:</span>
+                    {[
+                      { label: `Sugerido (${formatPYG(montoSugeridoDonacion)})`, val: montoSugeridoDonacion },
+                      { label: "+500", val: 500 },
+                      { label: "+1.000", val: 1000 },
+                      { label: "+2.000", val: 2000 },
+                      { label: "+5.000", val: 5000 },
+                    ].map((btn, idx) => {
+                      const isSelected = donacionActiva && (
+                        montoDonacionManual === btn.val ||
+                        (montoDonacionManual === null && btn.val === montoSugeridoDonacion)
+                      )
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setMontoDonacionManual(btn.val)
+                            setDonacionActiva(true)
+                          }}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-rose-600 text-white shadow-sm"
+                              : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700"
+                          }`}
+                        >
+                          {btn.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {donacionActiva && (
+                    <div className="text-right">
+                      <span className="text-xs font-black text-rose-600 dark:text-rose-400 font-posMono">
+                        ❤️ Gs. {formatPYG(montoDonacionEfectiva)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Metodos de cobro -- por defecto cada boton REEMPLAZA el
