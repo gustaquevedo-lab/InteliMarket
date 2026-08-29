@@ -9,7 +9,10 @@ interface User {
   is_superadmin?: boolean
   tenant_id?: string
   tenant_slug?: string
+  company_id?: string
 }
+
+const DEFAULT_COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 interface AuthContextType {
   user: User | null
@@ -33,7 +36,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const token = localStorage.getItem("access_token")
     if (token === "demo-token") {
-      setUser({ id: "00000000-0000-0000-0000-0000000000d1", email: "demo@intelimarket.py", nombre: "Demo", rol: "admin", is_superadmin: true, tenant_id: "00000000-0000-0000-0000-000000000001", tenant_slug: "supermercado-demo" })
+      setUser({
+        id: "00000000-0000-0000-0000-0000000000d1",
+        email: "demo@intelimarket.py",
+        nombre: "Demo Casa Gonzalito",
+        rol: "admin",
+        is_superadmin: true,
+        tenant_id: "00000000-0000-0000-0000-000000000001",
+        tenant_slug: "distribuidora-gonzalito",
+        company_id: DEFAULT_COMPANY_ID
+      })
       setLoading(false)
     } else if (token) {
       api.auth.me().then((u) => {
@@ -41,7 +53,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser({
           id: u.id, email: u.email, nombre: u.nombre, rol: u.rol,
           is_superadmin: claims.is_superadmin === true,
-          tenant_id: u.tenant_id, tenant_slug: u.tenant_slug,
+          tenant_id: u.tenant_id || "00000000-0000-0000-0000-000000000001",
+          tenant_slug: u.tenant_slug || "distribuidora-gonzalito",
+          company_id: DEFAULT_COMPANY_ID,
         })
       }).catch(() => {
         localStorage.removeItem("access_token")
@@ -71,7 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser({
       id: me.id, email: me.email, nombre: me.nombre, rol: me.rol,
       is_superadmin: claims.is_superadmin === true,
-      tenant_id: me.tenant_id, tenant_slug: me.tenant_slug,
+      tenant_id: me.tenant_id || "00000000-0000-0000-0000-000000000001",
+      tenant_slug: me.tenant_slug || "distribuidora-gonzalito",
+      company_id: DEFAULT_COMPANY_ID,
     })
   }
 
@@ -86,7 +102,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser({
       id: me.id, email: me.email, nombre: me.nombre, rol: me.rol,
       is_superadmin: claims.is_superadmin === true,
-      tenant_id: me.tenant_id, tenant_slug: me.tenant_slug,
+      tenant_id: me.tenant_id || "00000000-0000-0000-0000-000000000001",
+      tenant_slug: me.tenant_slug || "distribuidora-gonzalito",
+      company_id: DEFAULT_COMPANY_ID,
     })
   }
 
@@ -102,7 +120,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser({
       id: me.id, email: me.email, nombre: me.nombre, rol: me.rol,
       is_superadmin: claims.is_superadmin === true,
-      tenant_id: me.tenant_id, tenant_slug: me.tenant_slug,
+      tenant_id: me.tenant_id || "00000000-0000-0000-0000-000000000001",
+      tenant_slug: me.tenant_slug || "distribuidora-gonzalito",
+      company_id: DEFAULT_COMPANY_ID,
     })
   }
 
@@ -117,7 +137,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginDemo = () => {
     localStorage.setItem("access_token", "demo-token")
     localStorage.setItem("user_email", "demo@intelimarket.py")
-    setUser({ id: "00000000-0000-0000-0000-0000000000d1", email: "demo@intelimarket.py", nombre: "Demo", rol: "admin", tenant_id: "00000000-0000-0000-0000-000000000001", tenant_slug: "supermercado-demo" })
+    setUser({
+      id: "00000000-0000-0000-0000-0000000000d1",
+      email: "demo@intelimarket.py",
+      nombre: "Demo Casa Gonzalito",
+      rol: "admin",
+      tenant_id: "00000000-0000-0000-0000-000000000001",
+      tenant_slug: "distribuidora-gonzalito",
+      company_id: DEFAULT_COMPANY_ID
+    })
   }
 
   return (

@@ -32,13 +32,27 @@ async def get_warehouse_stock(warehouse_id: str, db: AsyncSession = Depends(get_
 
 
 @router.get("/companies/{company_id}/stock")
-async def get_company_stock(company_id: str, db: AsyncSession = Depends(get_db)):
-    return await service.get_company_stock(db, company_id)
+async def get_company_stock(
+    company_id: str,
+    search: str | None = Query(None),
+    warehouse_id: str | None = Query(None),
+    limit: int = Query(100, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_company_stock(
+        db, company_id, search=search, warehouse_id=warehouse_id, limit=limit, offset=offset
+    )
 
 
 @router.get("/companies/{company_id}/low-stock")
-async def get_low_stock(company_id: str, db: AsyncSession = Depends(get_db)):
-    return await service.get_low_stock(db, company_id)
+async def get_low_stock(
+    company_id: str,
+    limit: int = Query(100, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_low_stock(db, company_id, limit=limit, offset=offset)
 
 
 @router.post("/inventory/movements", response_model=MovementResponse, status_code=status.HTTP_201_CREATED)

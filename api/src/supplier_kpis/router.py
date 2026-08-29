@@ -16,6 +16,18 @@ from api.src.supplier_kpis.schemas import (
 router = APIRouter(prefix="/api/v1/supplier-kpis", tags=["supplier-kpis"])
 
 
+@router.get("/dashboard")
+async def get_supplier_kpis_dashboard(
+    company_id: str | None = Query(None),
+    mes: str | None = Query(None),
+    branch_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    target_cid = uuid.UUID(company_id or user.get("company_id") or "00000000-0000-0000-0000-000000000010")
+    return await service.get_supplier_kpis_dashboard(db, target_cid, mes, branch_id)
+
+
 @router.post("/periods", response_model=PeriodResponse)
 async def create_period(data: PeriodCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     return await service.create_period(db, uuid.UUID(user["company_id"]), data)

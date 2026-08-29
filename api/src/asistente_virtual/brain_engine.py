@@ -449,3 +449,59 @@ REGLAS ESTRICTAS DE RESPUESTA:
         "model_used": FAST_MODEL,
         "execution_time_seconds": round(elapsed, 2)
     }
+
+
+async def process_brain_chat(
+    db: AsyncSession,
+    company_id: str = DEFAULT_COMPANY_ID,
+    user_message: str = "",
+    conversation_id: Optional[str] = None,
+    model: str = DEFAULT_MODEL,
+    history: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    return await execute_ai_brain_pipeline(
+        user_query=user_message,
+        db=db,
+        user_name="Gustavo",
+        voice_preference="es-AR-TomasNeural",
+        model_preference=model,
+        generate_voice=False,
+    )
+
+
+async def process_voice_interaction(
+    db: AsyncSession,
+    audio_bytes: bytes,
+    company_id: str = DEFAULT_COMPANY_ID,
+    conversation_id: Optional[str] = None,
+    model: str = DEFAULT_MODEL,
+    tts_voice: str = "es-AR-TomasNeural",
+) -> Dict[str, Any]:
+    transcribed_text = transcribe_audio(audio_bytes)
+    return await execute_ai_brain_pipeline(
+        user_query=transcribed_text or "Hola",
+        db=db,
+        user_name="Gustavo",
+        voice_preference=tts_voice,
+        model_preference=model,
+        generate_voice=True,
+    )
+
+
+async def get_brain_status(company_id: str = DEFAULT_COMPANY_ID) -> Dict[str, Any]:
+    return {
+        "status": "ready",
+        "company_id": company_id,
+        "company_name": "Casa Gonzalito S.R.L.",
+        "ai_name": "Marco",
+        "role": "Asesor Operativo Inteligente",
+        "models": {
+            "default": DEFAULT_MODEL,
+            "fast": FAST_MODEL,
+            "stt": "faster-whisper-base-int8",
+            "tts": "edge-tts-neural"
+        },
+        "grounding_active": True,
+        "fast_path_enabled": True
+    }
+

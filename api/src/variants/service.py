@@ -16,6 +16,12 @@ async def create_variant(db: AsyncSession, data: VariantCreate) -> ProductVarian
     return variant
 
 
+async def list_all_variants(db: AsyncSession, limit: int = 100, offset: int = 0) -> list[ProductVariant]:
+    query = select(ProductVariant).where(ProductVariant.activo == True).order_by(ProductVariant.created_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
 async def list_variants(db: AsyncSession, product_id: str) -> list[ProductVariant]:
     query = select(ProductVariant).where(
         ProductVariant.product_id == uuid.UUID(product_id),

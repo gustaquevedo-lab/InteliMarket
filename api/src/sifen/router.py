@@ -17,6 +17,11 @@ async def create_timbrado(body: TimbradoCreate, db: AsyncSession = Depends(get_d
     return await service.create_timbrado(db, body)
 
 
+@router.get("/timbrados", response_model=list[TimbradoResponse])
+async def list_timbrados_default(company_id: str = Query("00000000-0000-0000-0000-000000000010"), db: AsyncSession = Depends(get_db)):
+    return await service.list_timbrados(db, company_id)
+
+
 @router.get("/companies/{company_id}/timbrados", response_model=list[TimbradoResponse])
 async def list_timbrados(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.list_timbrados(db, company_id)

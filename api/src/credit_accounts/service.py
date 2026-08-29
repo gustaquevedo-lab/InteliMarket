@@ -38,14 +38,23 @@ async def create_credit_account(db: AsyncSession, data: CreditAccountCreate) -> 
     return account
 
 
-async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Optional[bool] = None) -> list[dict]:
-    from sqlalchemy import text
+async def list_credit_accounts(
+    db: AsyncSession,
+    company_id: str,
+    activo: Optional[bool] = None,
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
     cid = uuid.UUID(company_id)
     where_stmt = "WHERE ca.company_id = :cid"
-    params = {"cid": cid}
+    params = {"cid": cid, "limit": limit, "offset": offset}
     if activo is not None:
         where_stmt += " AND ca.activo = :activo"
         params["activo"] = activo
+    if search:
+        where_stmt += " AND (c.razon_social ILIKE :search OR c.ruc ILIKE :search OR c.nombre ILIKE :search)"
+        params["search"] = f"%{search}%"
 
     query = text(f"""
         SELECT 
@@ -64,6 +73,7 @@ async def list_credit_accounts(db: AsyncSession, company_id: str, activo: Option
         ) ar ON ar.customer_id = ca.customer_id
         {where_stmt}
         ORDER BY COALESCE(ar.total_deuda, ca.saldo_utilizado, 0) DESC, ca.limite_credito DESC
+        LIMIT :limit OFFSET :offset
     """)
 
     res = await db.execute(query, params)

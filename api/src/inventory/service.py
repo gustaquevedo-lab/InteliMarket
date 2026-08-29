@@ -43,17 +43,28 @@ async def get_stock_by_warehouse(db: AsyncSession, warehouse_id: str) -> list[St
     return list(result.scalars().all())
 
 
-async def get_company_stock(db: AsyncSession, company_id: str) -> list[dict]:
-    """Stock de TODOS los almacenes de la empresa, con nombre/sku reales.
-    No existia un endpoint company-wide — el frontend pegaba a /v1/stock
-    (sin company_id, 404) y la pagina de Almacenes no mostraba nada, pese a
-    tener stock real cargado en la migracion."""
-    result = await db.execute(
+async def get_company_stock(
+    db: AsyncSession,
+    company_id: str,
+    search: str | None = None,
+    warehouse_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Stock de almacenes de la empresa con paginacion y busqueda rapida."""
+    query = (
         select(Stock, Product.nombre, Product.sku, Product.stock_minimo)
         .join(Product, Stock.product_id == Product.id)
         .where(Product.company_id == company_id)
-        .order_by(Product.nombre)
     )
+    if warehouse_id:
+        query = query.where(Stock.warehouse_id == warehouse_id)
+    if search:
+        query = query.where(
+            (Product.nombre.ilike(f"%{search}%")) | (Product.sku.ilike(f"%{search}%"))
+        )
+    query = query.order_by(Product.nombre).offset(offset).limit(limit)
+    result = await db.execute(query)
     rows = result.fetchall()
     return [
         {
@@ -71,15 +82,24 @@ async def get_company_stock(db: AsyncSession, company_id: str) -> list[dict]:
     ]
 
 
-async def get_low_stock(db: AsyncSession, company_id: str) -> list[dict]:
-    result = await db.execute(
+async def get_low_stock(
+    db: AsyncSession,
+    company_id: str,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    query = (
         select(Stock, Product.nombre, Product.stock_minimo, Product.sku)
         .join(Product, Stock.product_id == Product.id)
         .where(
             Stock.cantidad <= Product.stock_minimo,
             Product.company_id == company_id,
         )
+        .order_by(Product.nombre)
+        .offset(offset)
+        .limit(limit)
     )
+    result = await db.execute(query)
     rows = result.fetchall()
     return [
         {

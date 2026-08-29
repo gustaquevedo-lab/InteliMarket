@@ -89,7 +89,7 @@ export default function SuscripcionesPage() {
   const [plans, setPlans] = useState<any[]>(DUMMY_PLANS)
   const [statusFilter, setStatusFilter] = useState("")
   const [freqFilter, setFreqFilter] = useState("")
-  const { toast } = useToast()
+  const toast = useToast()
 
   const [newPlan, setNewPlan] = useState({
     customer_name: "", customer_phone: "", customer_email: "",

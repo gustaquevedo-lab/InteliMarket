@@ -115,3 +115,57 @@ async def get_dashboard(
     user=Depends(require_auth),
 ):
     return await service.get_dashboard(db, user["company_id"])
+
+
+from fastapi import UploadFile, File, Form
+from api.src.asistente_virtual.brain_engine import (
+    process_brain_chat,
+    process_voice_interaction,
+    get_brain_status,
+)
+
+
+@router.get("/brain/status")
+async def brain_status(company_id: Optional[str] = Query(None), user=Depends(require_auth)):
+    cid = company_id or user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    return await get_brain_status(cid)
+
+
+@router.post("/brain/chat")
+async def brain_chat(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = data.get("company_id") or user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    return await process_brain_chat(
+        db,
+        company_id=cid,
+        user_message=data.get("message", ""),
+        conversation_id=data.get("conversation_id"),
+        model=data.get("model", "qwen2.5:7b"),
+        history=data.get("history", []),
+    )
+
+
+@router.post("/brain/voice")
+async def brain_voice(
+    audio: UploadFile = File(...),
+    company_id: Optional[str] = Form(None),
+    model: Optional[str] = Form("qwen2.5:7b"),
+    conversation_id: Optional[str] = Form(None),
+    tts_voice: Optional[str] = Form("es-PY-MarioNeural"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    audio_bytes = await audio.read()
+    cid = company_id or user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    return await process_voice_interaction(
+        db,
+        audio_bytes=audio_bytes,
+        company_id=cid,
+        conversation_id=conversation_id,
+        model=model,
+        tts_voice=tts_voice,
+    )
+

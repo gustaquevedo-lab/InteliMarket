@@ -16,6 +16,16 @@ def _excel_response(data: bytes, filename: str):
     return StreamingResponse(io.BytesIO(data), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers=headers)
 
 
+@router.get("/companies/{company_id}/dashboard-all-kpis")
+async def dashboard_all_kpis(company_id: str, branch_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    return await service.get_dashboard_all_kpis(db, company_id, branch_id)
+
+
+@router.get("/companies/{company_id}/dashboard-quick-kpis")
+async def dashboard_quick_kpis(company_id: str, timeframe: str = Query("mes"), db: AsyncSession = Depends(get_db)):
+    return await service.get_dashboard_quick_kpis(db, company_id, timeframe)
+
+
 @router.get("/sales/summary")
 async def sales_summary(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), branch_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     return await service.get_sales_summary(db, fecha_desde, fecha_hasta, branch_id)

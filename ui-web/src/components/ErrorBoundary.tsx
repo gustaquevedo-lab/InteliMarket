@@ -3,6 +3,9 @@ import { AlertTriangle, RefreshCw } from "lucide-react";
 
 interface Props {
   children?: ReactNode;
+  moduleName?: string;
+  compact?: boolean;
+  onReset?: () => void | Promise<void>;
 }
 
 interface State {

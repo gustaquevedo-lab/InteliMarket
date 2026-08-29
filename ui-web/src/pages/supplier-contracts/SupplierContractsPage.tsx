@@ -45,6 +45,7 @@ interface AgreementFormData {
   condiciones_pago: string; plazo_pago_dias: number; moneda: string; monto_minimo_orden: number | ""
   monto_total_acordado: number | ""; volumen_minimo_mensual: number | ""
   aplica_rebate: boolean; tipo_rebate: string; umbral_rebate_1: number | ""; porcentaje_rebate_1: number | ""
+  frecuencia_liquidacion_rebate?: string
   exclusividad: boolean; zona_exclusividad: string; renovacion_automatica: boolean
   dias_aviso_renovacion: number; objeto: string; observaciones: string; archivo_url: string
   items: Array<{ id?: string; product_id: string; producto_nombre: string; precio_acordado: number | ""; descuento_pct: number | ""; cantidad_minima: number | ""; bono_pct: number | ""; lead_time_dias: number | "" }>
@@ -549,9 +550,9 @@ export default function SupplierContractsPage() {
               <div className="col-span-2"><label className="input-label">Condiciones de pago</label><input className="input-field" value={form.condiciones_pago} onChange={e => setForm(f => ({ ...f, condiciones_pago: e.target.value }))} placeholder="Ej: 30% anticipo, 70% contra entrega" /></div>
               <div><label className="input-label">Plazo pago (días)</label><input type="number" className="input-field" value={form.plazo_pago_dias} onChange={e => setForm(f => ({ ...f, plazo_pago_dias: +e.target.value }))} /></div>
               <div><label className="input-label">Días aviso renovación</label><input type="number" className="input-field" value={form.dias_aviso_renovacion} onChange={e => setForm(f => ({ ...f, dias_aviso_renovacion: +e.target.value }))} /></div>
-              <div><label className="input-label">Monto total acordado</label><input type="number" className="input-field" value={form.monto_total_acordado} onChange={e => setForm(f => ({ ...f, monto_total_acordado: e.target.value }))} /></div>
-              <div><label className="input-label">Monto mínimo por orden</label><input type="number" className="input-field" value={form.monto_minimo_orden} onChange={e => setForm(f => ({ ...f, monto_minimo_orden: e.target.value }))} /></div>
-              <div><label className="input-label">Volumen mínimo mensual</label><input type="number" className="input-field" value={form.volumen_minimo_mensual} onChange={e => setForm(f => ({ ...f, volumen_minimo_mensual: e.target.value }))} /></div>
+              <div><label className="input-label">Monto total acordado</label><input type="number" className="input-field" value={form.monto_total_acordado} onChange={e => setForm(f => ({ ...f, monto_total_acordado: e.target.value === "" ? "" : Number(e.target.value) }))} /></div>
+              <div><label className="input-label">Monto mínimo por orden</label><input type="number" className="input-field" value={form.monto_minimo_orden} onChange={e => setForm(f => ({ ...f, monto_minimo_orden: e.target.value === "" ? "" : Number(e.target.value) }))} /></div>
+              <div><label className="input-label">Volumen mínimo mensual</label><input type="number" className="input-field" value={form.volumen_minimo_mensual} onChange={e => setForm(f => ({ ...f, volumen_minimo_mensual: e.target.value === "" ? "" : Number(e.target.value) }))} /></div>
               <div className="col-span-2"><label className="input-label">Objeto del acuerdo</label><textarea className="input-field" rows={2} value={form.objeto} onChange={e => setForm(f => ({ ...f, objeto: e.target.value }))} placeholder="Descripción del alcance..." /></div>
               <div className="col-span-2 flex items-center justify-between p-3 bg-gray-50 dark:bg-slate-700 rounded-xl">
                 <div className="flex items-center gap-3"><Shield className="w-5 h-5 text-primary" /><div><p className="text-sm font-bold">Exclusividad</p><p className="text-xs text-gray-400">El proveedor se compromete a no vender a competidores</p></div></div>
@@ -619,8 +620,8 @@ export default function SupplierContractsPage() {
                     <div><label className="input-label">Frec. liquidación</label><select className="input-field" value={form.frecuencia_liquidacion_rebate || "anual"} onChange={e => setForm(f => ({ ...f, frecuencia_liquidacion_rebate: e.target.value }))}><option value="anual">Anual</option><option value="trimestral">Trimestral</option><option value="mensual">Mensual</option></select></div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="input-label">Umbral ($)</label><input type="number" className="input-field" value={form.umbral_rebate_1} onChange={e => setForm(f => ({ ...f, umbral_rebate_1: e.target.value }))} placeholder="Monto mínimo para aplicar" /></div>
-                    <div><label className="input-label">Porcentaje (%)</label><input type="number" className="input-field" value={form.porcentaje_rebate_1} onChange={e => setForm(f => ({ ...f, porcentaje_rebate_1: e.target.value }))} placeholder="% sobre el monto ejecutado" /></div>
+                    <div><label className="input-label">Umbral ($)</label><input type="number" className="input-field" value={form.umbral_rebate_1} onChange={e => setForm(f => ({ ...f, umbral_rebate_1: e.target.value === "" ? "" : Number(e.target.value) }))} placeholder="Monto mínimo para aplicar" /></div>
+                    <div><label className="input-label">Porcentaje (%)</label><input type="number" className="input-field" value={form.porcentaje_rebate_1} onChange={e => setForm(f => ({ ...f, porcentaje_rebate_1: e.target.value === "" ? "" : Number(e.target.value) }))} placeholder="% sobre el monto ejecutado" /></div>
                   </div>
                 </div>
               )}

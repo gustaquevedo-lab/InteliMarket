@@ -120,7 +120,7 @@ export default function SupplierDashboard() {
               <div className="bg-white dark:bg-gray-800 rounded-xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
                 <p className="text-sm text-gray-500">Total O/C</p>
                 <p className="text-3xl font-bold text-gray-700 mt-1">
-                  {Object.values(dashboard?.order_counts || {}).reduce((a: number, b: number) => a + b, 0)}
+                  {Object.values(dashboard?.order_counts || {}).reduce((a: number, b: any) => a + Number(b || 0), 0)}
                 </p>
               </div>
             </div>

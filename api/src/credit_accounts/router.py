@@ -33,11 +33,33 @@ async def create_account(
 
 @router.get("", response_model=list[CreditAccountResponse])
 async def list_accounts(
+    company_id: str | None = Query(None),
     activo: bool | None = None,
+    search: str | None = None,
+    limit: int = Query(100, le=1000),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_credit_accounts(db, user["company_id"], activo=activo)
+    target_company_id = company_id or user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    return await service.list_credit_accounts(
+        db, target_company_id, activo=activo, search=search, limit=limit, offset=offset
+    )
+
+
+@router.get("/companies/{company_id}", response_model=list[CreditAccountResponse])
+async def list_accounts_by_company(
+    company_id: str,
+    activo: bool | None = None,
+    search: str | None = None,
+    limit: int = Query(100, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_credit_accounts(
+        db, company_id, activo=activo, search=search, limit=limit, offset=offset
+    )
 
 
 @router.get("/customer/{customer_id}", response_model=CreditAccountResponse | None)
