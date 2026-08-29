@@ -35,6 +35,8 @@ interface AgreementItem {
   supplier_id: string
   supplier_razon_social: string
   supplier_ruc?: string
+  branch_id?: string
+  branch_nombre?: string
   periodo: string
   nombre_acuerdo?: string
   meta_monto_gs: number
@@ -718,9 +720,16 @@ export default function SupplierKpisPage() {
                               {p.supplier_razon_social.charAt(0)}
                             </div>
                             <div>
-                              <p className="font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 transition-colors">
-                                {p.supplier_razon_social}
-                              </p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 transition-colors">
+                                  {p.supplier_razon_social}
+                                </p>
+                                {p.branch_nombre && (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                    🏢 {p.branch_nombre}
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-[10px] text-gray-400 font-mono">
                                 RUC: {p.supplier_ruc || "N/D"} • {p.skus_vendidos_count} SKUs
                               </p>

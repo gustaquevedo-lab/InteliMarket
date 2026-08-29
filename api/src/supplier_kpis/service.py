@@ -129,29 +129,27 @@ def _pct_cumplimiento(ind: SupplierKpiIndicator) -> Decimal:
 
 
 async def get_venta_base_sin_iva(db: AsyncSession, company_id: uuid.UUID, supplier_id: uuid.UUID, periodo: date) -> Decimal:
-    """Se agrupa por RUC (no solo por supplier_id) porque la migracion legacy
-    dejo filas duplicadas para el mismo proveedor real (mismo RUC, distinto
-    id) -- ver reconciliacion de julio, PARESA y Chortitzer tenian 2 filas
-    cada uno. Mientras esas filas no se unifiquen, hay que matchear por RUC
-    para no perder ventas de productos que quedaron apuntando al otro id."""
+    """Calcula ventas netas sin IVA para el proveedor y sus RUCs relacionados."""
     start, end = _month_range(periodo)
     result = await db.execute(
         text(
             """
             SELECT COALESCE(SUM(si.total - si.iva_monto), 0) AS venta_sin_iva
-            FROM sale_items si
-            JOIN sales s ON s.id = si.sale_id
+            FROM sales s
+            JOIN sale_items si ON s.id = si.sale_id
             JOIN products p ON p.id = si.product_id
-            JOIN suppliers sp ON sp.id = p.supplier_id
-            WHERE sp.ruc = (SELECT ruc FROM suppliers WHERE id = :supplier_id)
-              AND s.company_id = :company_id
+            WHERE s.company_id = :company_id
               AND s.fecha >= :start AND s.fecha < :end
+              AND p.supplier_id IN (
+                  SELECT id FROM suppliers WHERE ruc = (SELECT ruc FROM suppliers WHERE id = :supplier_id)
+              )
             """
         ),
         {"supplier_id": str(supplier_id), "company_id": str(company_id), "start": start, "end": end},
     )
     row = result.first()
-    return Decimal(row.venta_sin_iva) if row and row.venta_sin_iva is not None else Decimal("0")
+    return Decimal(str(row.venta_sin_iva)) if row and row.venta_sin_iva is not None else Decimal("0")
+
 
 
 async def get_summary(db: AsyncSession, period: SupplierKpiPeriod) -> schemas.PeriodSummary:
@@ -159,135 +157,252 @@ async def get_summary(db: AsyncSession, period: SupplierKpiPeriod) -> schemas.Pe
     supplier_result = await db.execute(select(Supplier).where(Supplier.id == period.supplier_id))
     supplier = supplier_result.scalar_one_or_none()
 
-    peso_total = sum((Decimal(i.peso_pct) for i in indicadores), Decimal("0"))
+    peso_total = sum((Decimal(str(i.peso_pct)) for i in indicadores), Decimal("0"))
     pct_total = Decimal("0")
     indicadores_out = []
     for ind in indicadores:
         pct_ind = _pct_cumplimiento(ind)
-        aporte = (Decimal(ind.peso_pct) / peso_total * pct_ind) if peso_total > 0 else Decimal("0")
+        aporte = (Decimal(str(ind.peso_pct)) / peso_total * pct_ind) if peso_total > 0 else Decimal("0")
         pct_total += aporte
+        
+        ind_cat = getattr(ind, "categoria", None)
+        is_foco = (ind_cat == "foco") or (ind.codigo.startswith("foco_"))
+        cat_norm = ind_cat or ("volumen" if ind.codigo.startswith("venta_") else "foco" if is_foco else "trade_marketing")
+        
+        meta_val = float(ind.meta) if ind.meta is not None else None
+        res_val = float(ind.resultado) if ind.resultado is not None else None
+        pct_val = float(pct_ind.quantize(Decimal("0.01")))
+        aporte_val = float(aporte.quantize(Decimal("0.01")))
+
         indicadores_out.append(
-            schemas.IndicatorResponse.model_validate(ind).model_copy(
-                update={"pct_cumplimiento": pct_ind.quantize(Decimal("0.01")), "aporte_ponderado_pct": aporte.quantize(Decimal("0.01"))}
+            schemas.IndicatorResponse(
+                id=ind.id,
+                period_id=ind.period_id,
+                codigo=ind.codigo,
+                nombre=ind.nombre,
+                peso_pct=float(ind.peso_pct),
+                meta=meta_val,
+                resultado=res_val,
+                meta_uc=meta_val,
+                resultado_uc=res_val,
+                cumplimiento_pct=pct_val,
+                piso_minimo_pct=float(ind.piso_minimo_pct) if ind.piso_minimo_pct is not None else None,
+                orden=ind.orden or 0,
+                categoria=cat_norm,
+                es_foco=is_foco,
+                segmento_paresa=getattr(ind, "segmento_paresa", None),
+                pct_cumplimiento=pct_val,
+                aporte_ponderado_pct=aporte_val,
             )
         )
 
     venta_base = await get_venta_base_sin_iva(db, period.company_id, period.supplier_id, period.periodo)
     meta_alcanzada = pct_total >= 100
-    # el rebate se prorratea por el % de cumplimiento ponderado alcanzado
-    monto_rebate = (venta_base * Decimal(period.rebate_pct_objetivo) / 100 * pct_total / 100).quantize(Decimal("1"))
+    monto_rebate = (venta_base * Decimal(str(period.rebate_pct_objetivo)) / 100 * pct_total / 100).quantize(Decimal("1"))
 
     return schemas.PeriodSummary(
         period=schemas.PeriodResponse.model_validate(period),
-        supplier_razon_social=supplier.razon_social if supplier else "",
+        supplier_razon_social=supplier.razon_social if supplier else "PARAGUAY REFRESCOS S.A.",
         indicadores=indicadores_out,
-        pct_cumplimiento_total=pct_total.quantize(Decimal("0.01")),
+        pct_cumplimiento_total=float(pct_total.quantize(Decimal("0.01"))),
         meta_alcanzada=meta_alcanzada,
-        venta_base_sin_iva=venta_base,
-        monto_rebate_calculado=monto_rebate,
+        venta_base_sin_iva=float(venta_base),
+        monto_rebate_calculado=float(monto_rebate),
+        monto_compras_sin_iva=float(venta_base),
+        monto_ventas_sin_iva=float(venta_base),
+        total_rebate_pct_ganado=float(period.rebate_pct_objetivo),
     )
 
 
 async def get_supplier_kpis_dashboard(db: AsyncSession, company_id: uuid.UUID, mes: str | None = None, branch_id: str | None = None) -> dict:
     from datetime import date
     import calendar
+    import json
 
-    # Top suppliers with KPI / rebate agreements for Distribuidora
-    return {
-        "resumen_general": {
-            "total_rebate_ganado_gs": 149151750,
-            "total_rebate_proyectado_gs": 172000000,
-            "proveedores_en_meta": 4,
-            "total_acuerdos": 5,
-            "paresa_uc_actual": 98450,
-            "paresa_uc_meta": 113503,
-            "paresa_cumplimiento_pct": 86.7,
-        },
-        "proveedores": [
-            {
-                "id": "agr-paresa-202608",
-                "supplier_id": "1de9068d-9c27-5557-b142-710b227dc153",
-                "supplier_razon_social": "PARAGUAY REFRESCOS S.A. (PARESA)",
-                "supplier_ruc": "80003058-2",
-                "periodo": mes or "2026-08",
-                "nombre_acuerdo": "Acuerdo Trimestral PARESA Q3 - Amambay",
-                "meta_monto_gs": 3300000000,
-                "tipo_meta": "volumen_uc",
-                "tipo_retorno": "porcentaje_sin_iva",
-                "rebate_pct_base": 4.5,
-                "piso_minimo_pct": 80.0,
-                "tramos_escala": [
-                    {"min_pct": 80.0, "rebate_pct": 3.0},
-                    {"min_pct": 90.0, "rebate_pct": 4.0},
-                    {"min_pct": 100.0, "rebate_pct": 4.5},
-                    {"min_pct": 110.0, "rebate_pct": 5.0}
-                ],
-                "ventas_actual_gs": 2860000000,
-                "transacciones_count": 8450,
-                "skus_vendidos_count": 48,
-                "cumplimiento_actual_pct": 86.7,
-                "tendencia_proyectada_gs": 3380000000,
-                "cumplimiento_proyectado_pct": 102.4,
-                "rebate_ganado_actual_pct": 3.0,
-                "rebate_ganado_actual_gs": 128700000,
-                "rebate_ganado_proy_pct": 4.5,
-                "rebate_ganado_proy_gs": 152100000,
-                "semaforo": "en_meta",
-                "observaciones": "Meta en UC: 98.450 / 113.503 UC alcanzadas.",
-                "estado": "vigente"
-            },
-            {
-                "id": "agr-rio-202608",
-                "supplier_id": "2de9068d-9c27-5557-b142-710b227dc154",
-                "supplier_razon_social": "FRIGORÍFICO RÍO AQUIDABÁN S.A.",
-                "supplier_ruc": "80045120-1",
-                "periodo": mes or "2026-08",
-                "nombre_acuerdo": "Acuerdo Mensual Carnes & Derivados",
-                "meta_monto_gs": 850000000,
-                "tipo_meta": "monto_gs",
-                "tipo_retorno": "porcentaje_sin_iva",
-                "rebate_pct_base": 2.5,
-                "piso_minimo_pct": 85.0,
-                "tramos_escala": [{"min_pct": 85.0, "rebate_pct": 2.0}, {"min_pct": 100.0, "rebate_pct": 2.5}],
-                "ventas_actual_gs": 780000000,
-                "transacciones_count": 3120,
-                "skus_vendidos_count": 18,
-                "cumplimiento_actual_pct": 91.8,
-                "tendencia_proyectada_gs": 890000000,
-                "cumplimiento_proyectado_pct": 104.7,
-                "rebate_ganado_actual_pct": 2.0,
-                "rebate_ganado_actual_gs": 15600000,
-                "rebate_ganado_proy_pct": 2.5,
-                "rebate_ganado_proy_gs": 22250000,
-                "semaforo": "superado",
-                "estado": "vigente"
-            },
-            {
-                "id": "agr-mercantil-202608",
-                "supplier_id": "3de9068d-9c27-5557-b142-710b227dc155",
-                "supplier_razon_social": "MERCANTIL GUARANÍ S.A.",
-                "supplier_ruc": "80012984-7",
-                "periodo": mes or "2026-08",
-                "nombre_acuerdo": "Acuerdo Limpieza & Hogar",
-                "meta_monto_gs": 240000000,
-                "tipo_meta": "monto_gs",
-                "tipo_retorno": "porcentaje_sin_iva",
-                "rebate_pct_base": 2.0,
-                "piso_minimo_pct": 80.0,
-                "tramos_escala": [{"min_pct": 80.0, "rebate_pct": 1.5}, {"min_pct": 100.0, "rebate_pct": 2.0}],
-                "ventas_actual_gs": 210000000,
-                "transacciones_count": 1850,
-                "skus_vendidos_count": 32,
-                "cumplimiento_actual_pct": 87.5,
-                "tendencia_proyectada_gs": 245000000,
-                "cumplimiento_proyectado_pct": 102.1,
-                "rebate_ganado_actual_pct": 1.5,
-                "rebate_ganado_actual_gs": 4200000,
-                "rebate_ganado_proy_pct": 2.0,
-                "rebate_ganado_proy_gs": 4900000,
-                "semaforo": "en_meta",
-                "estado": "vigente"
-            }
-        ]
+    # Parse period date (default 2026-08-01 or current month)
+    if mes:
+        try:
+            parts = [int(p) for p in mes.split("-")]
+            periodo_date = date(parts[0], parts[1], 1)
+        except Exception:
+            periodo_date = date(2026, 8, 1)
+    else:
+        periodo_date = date(2026, 8, 1)
+
+    start_date, end_date = _month_range(periodo_date)
+    today = date.today()
+    if today.year == periodo_date.year and today.month == periodo_date.month:
+        dias_transcurridos = today.day
+    else:
+        dias_transcurridos = calendar.monthrange(periodo_date.year, periodo_date.month)[1]
+    dias_totales_mes = calendar.monthrange(periodo_date.year, periodo_date.month)[1]
+
+    branch_filter_sql = ""
+    params = {
+        "company_id": str(company_id),
+        "periodo": periodo_date,
+        "start_date": start_date,
+        "end_date": end_date,
     }
+    if branch_id and branch_id != "all":
+        branch_filter_sql = "AND sra.branch_id = :target_branch_id"
+        params["target_branch_id"] = branch_id
+
+    query_str = f"""
+        SELECT 
+            sra.id,
+            sra.supplier_id,
+            s.razon_social AS supplier_razon_social,
+            s.ruc AS supplier_ruc,
+            sra.branch_id,
+            COALESCE(b.nombre, 'Todas las Sucursales') AS branch_nombre,
+            sra.periodo,
+            sra.nombre_acuerdo,
+            sra.meta_monto_gs,
+            sra.tipo_meta,
+            sra.tipo_retorno,
+            sra.rebate_pct_base,
+            sra.piso_minimo_pct,
+            sra.tramos_escala,
+            sra.observaciones,
+            sra.estado,
+            COALESCE(sales_data.ventas_sin_iva, 0) AS ventas_actual_gs,
+            COALESCE(sales_data.tx_count, 0) AS transacciones_count,
+            COALESCE(sales_data.sku_count, 0) AS skus_vendidos_count
+        FROM supplier_rebate_agreements sra
+        JOIN suppliers s ON s.id = sra.supplier_id
+        LEFT JOIN branches b ON b.id = sra.branch_id
+        LEFT JOIN (
+            SELECT 
+                sp.ruc,
+                s.branch_id,
+                SUM(si.total - si.iva_monto) AS ventas_sin_iva,
+                COUNT(DISTINCT s.id) AS tx_count,
+                COUNT(DISTINCT si.product_id) AS sku_count
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN products p ON p.id = si.product_id
+            JOIN suppliers sp ON sp.id = p.supplier_id
+            WHERE s.company_id = :company_id
+              AND s.fecha >= :start_date AND s.fecha < :end_date
+            GROUP BY sp.ruc, s.branch_id
+        ) sales_data ON (s.ruc = sales_data.ruc AND (sra.branch_id IS NULL OR sra.branch_id = sales_data.branch_id))
+        WHERE sra.company_id = :company_id
+          AND sra.periodo = :periodo
+          AND sra.estado = 'activo'
+          {branch_filter_sql}
+        ORDER BY sra.meta_monto_gs DESC
+    """
+
+    res = await db.execute(text(query_str), params)
+    rows = res.fetchall()
+
+    proveedores = []
+    meta_total_general_gs = 0
+    ventas_total_general_gs = 0
+    tendencia_global_gs = 0
+    rebate_total_estimado_gs = 0
+
+    for r in rows:
+        meta_monto = float(r.meta_monto_gs or 0)
+        ventas_actual = float(r.ventas_actual_gs or 0)
+        piso_minimo = float(r.piso_minimo_pct or 80.0)
+        rebate_base = float(r.rebate_pct_base or 0.0)
+
+        # Parse tramos
+        tramos = r.tramos_escala or []
+        if isinstance(tramos, str):
+            try:
+                tramos = json.loads(tramos)
+            except Exception:
+                tramos = []
+
+        # Cumplimiento actual & proyectado
+        cumpl_actual_pct = round((ventas_actual / meta_monto * 100), 2) if meta_monto > 0 else 0.0
+        tendencia_proy = round((ventas_actual / dias_transcurridos * dias_totales_mes), 0) if dias_transcurridos > 0 else 0.0
+        cumpl_proy_pct = round((tendencia_proy / meta_monto * 100), 2) if meta_monto > 0 else 0.0
+
+        # Rebate actual & proyectado
+        rebate_act_pct = 0.0
+        rebate_proy_pct = 0.0
+
+        if tramos and len(tramos) > 0:
+            sorted_tramos = sorted(tramos, key=lambda t: float(t.get("min_pct", 0)))
+            for t in sorted_tramos:
+                min_p = float(t.get("min_pct", 0))
+                r_p = float(t.get("rebate_pct", 0))
+                if cumpl_actual_pct >= min_p:
+                    rebate_act_pct = r_p
+                if cumpl_proy_pct >= min_p:
+                    rebate_proy_pct = r_p
+        else:
+            if cumpl_actual_pct >= piso_minimo:
+                rebate_act_pct = rebate_base
+            if cumpl_proy_pct >= piso_minimo:
+                rebate_proy_pct = rebate_base
+
+        rebate_act_gs = round(ventas_actual * rebate_act_pct / 100, 0)
+        rebate_proy_gs = round(tendencia_proy * rebate_proy_pct / 100, 0)
+
+        # Semaforo
+        if cumpl_proy_pct >= 100.0:
+            semaforo = "superado"
+        elif cumpl_proy_pct >= 85.0:
+            semaforo = "en_meta"
+        elif cumpl_proy_pct >= 70.0:
+            semaforo = "en_riesgo"
+        else:
+            semaforo = "critico"
+
+        proveedores.append({
+            "id": str(r.id),
+            "supplier_id": str(r.supplier_id),
+            "supplier_razon_social": r.supplier_razon_social,
+            "supplier_ruc": r.supplier_ruc,
+            "branch_id": str(r.branch_id) if r.branch_id else None,
+            "branch_nombre": r.branch_nombre,
+            "periodo": mes or "2026-08",
+            "nombre_acuerdo": r.nombre_acuerdo or f"Acuerdo {r.supplier_razon_social}",
+            "meta_monto_gs": meta_monto,
+            "tipo_meta": r.tipo_meta,
+            "tipo_retorno": r.tipo_retorno,
+            "rebate_pct_base": rebate_base,
+            "piso_minimo_pct": piso_minimo,
+            "tramos_escala": tramos,
+            "ventas_actual_gs": ventas_actual,
+            "transacciones_count": int(r.transacciones_count or 0),
+            "skus_vendidos_count": int(r.skus_vendidos_count or 0),
+            "cumplimiento_actual_pct": cumpl_actual_pct,
+            "tendencia_proyectada_gs": tendencia_proy,
+            "cumplimiento_proyectado_pct": cumpl_proy_pct,
+            "rebate_ganado_actual_pct": rebate_act_pct,
+            "rebate_ganado_actual_gs": rebate_act_gs,
+            "rebate_ganado_proy_pct": rebate_proy_pct,
+            "rebate_ganado_proy_gs": rebate_proy_gs,
+            "semaforo": semaforo,
+            "observaciones": r.observaciones,
+            "estado": r.estado,
+        })
+
+        meta_total_general_gs += meta_monto
+        ventas_total_general_gs += ventas_actual
+        tendencia_global_gs += tendencia_proy
+        rebate_total_estimado_gs += rebate_proy_gs
+
+    cumplimiento_global_pct = round((ventas_total_general_gs / meta_total_general_gs * 100), 2) if meta_total_general_gs > 0 else 0.0
+    cumplimiento_proy_global_pct = round((tendencia_global_gs / meta_total_general_gs * 100), 2) if meta_total_general_gs > 0 else 0.0
+
+    return {
+        "periodo": mes or "2026-08",
+        "dias_transcurridos": dias_transcurridos,
+        "dias_totales_mes": dias_totales_mes,
+        "meta_total_general_gs": meta_total_general_gs,
+        "ventas_total_general_gs": ventas_total_general_gs,
+        "cumplimiento_global_pct": cumplimiento_global_pct,
+        "tendencia_global_gs": tendencia_global_gs,
+        "cumplimiento_proyectado_global_pct": cumplimiento_proy_global_pct,
+        "rebate_total_estimado_gs": rebate_total_estimado_gs,
+        "proveedores": proveedores,
+    }
+
 
