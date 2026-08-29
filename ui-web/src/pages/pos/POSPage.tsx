@@ -2170,42 +2170,54 @@ export default function POSPage() {
     if (!(window as any).electronAPI?.printEscPos) return
     const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
     const printerName = tpl.nombre_impresora_windows || 'ZKP8008'
-    const feedLines = 1 // Salto exacto de 1 línea entre cupones para máximo ahorro de papel
+    const W = ESCPOS_LINE_WIDTH // 48 columnas térmicas
 
     for (const camp of cuponData.campanasCalificadas) {
       for (let i = 1; i <= camp.cupones_ganados; i++) {
         let t = ''
         t += ESCPOS_INIT
         t += ESCPOS_ALIGN_CENTER
-        t += ESCPOS_BOLD_ON + escposStripAccents(camp.ticket_encabezado || "EXTRA SUPERMERCADO") + ESCPOS_BOLD_OFF + '\n'
-        t += "Pedro Juan Caballero - Paraguay\n"
 
-        // Limpiar nombre de campaña para que no desborde asteriscos a nuevas líneas
-        const cleanNombre = escposStripAccents(camp.nombre).trim()
-        t += ESCPOS_BOLD_ON + `*** ${cleanNombre.substring(0, 36)} ***` + ESCPOS_BOLD_OFF + '\n'
+        // 1. Encabezado configurable
+        const encabezado = camp.ticket_encabezado?.trim() || tpl.nombre_fantasia || "EXTRA SUPERMERCADO MAYORISTA"
+        t += ESCPOS_BOLD_ON + escposStripAccents(encabezado) + ESCPOS_BOLD_OFF + '\n'
+        t += "Pedro Juan Caballero · Paraguay\n"
+        t += escposDashes(W) + '\n'
+
+        // 2. Subtítulo del Sorteo y Premio
+        const subtitulo = camp.ticket_subtitulo?.trim() || `*** ${escposStripAccents(camp.nombre).trim().toUpperCase()} ***`
+        t += ESCPOS_BOLD_ON + escposStripAccents(subtitulo) + ESCPOS_BOLD_OFF + '\n'
 
         if (camp.premio_destacado) {
-          t += `Premio: ${escposStripAccents(camp.premio_destacado).substring(0, 34)}\n`
+          t += `Premio: ${escposStripAccents(camp.premio_destacado)}\n`
+        }
+        if (camp.patrocinador && camp.patrocinador !== "Extra Supermercado") {
+          t += `Patrocinador: ${escposStripAccents(camp.patrocinador)}\n`
         }
 
-        t += ESCPOS_DOUBLE_ON + `CUPON ${i} DE ${camp.cupones_ganados}` + ESCPOS_DOUBLE_OFF + '\n'
-        t += escposDashes(42) + '\n'
-        t += escposTwoCol(`Ticket: #${cuponData.saleNumero}`, `Gs. ${formatPYG(cuponData.montoCompra)}`, 42) + '\n'
-        t += escposTwoCol(`Fecha:`, new Date().toLocaleDateString("es-PY") + " " + new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }), 42) + '\n'
-        t += escposDashes(42) + '\n'
+        // 3. Número de cupón destacado
+        t += escposDashes(W) + '\n'
+        t += ESCPOS_BOLD_ON + ESCPOS_DOUBLE_ON + `CUPON ${i} DE ${camp.cupones_ganados}` + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
+        t += escposDashes(W) + '\n'
 
+        // 4. Datos del Ticket
+        t += escposTwoCol(`Ticket: #${cuponData.saleNumero}`, `Gs. ${formatPYG(cuponData.montoCompra)}`, W) + '\n'
+        t += escposTwoCol(`Fecha: ${new Date().toLocaleDateString("es-PY")} ${new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}`, `Boca: ${puntoEmision || "012"}`, W) + '\n'
+        t += escposDashes(W) + '\n'
+
+        // 5. Datos del Participante
         t += ESCPOS_ALIGN_LEFT
-        t += `CLIENTE: ${escposStripAccents(cuponData.nombre).toUpperCase().substring(0, 33)}\n`
-        t += `DOC: ${cuponData.documento.padEnd(12)} TEL: ${cuponData.telefono}\n`
-        t += `BARRIO: ${escposStripAccents(cuponData.barrio || "Centro").substring(0, 34)}\n`
-        t += `CIUDAD: ${escposStripAccents(cuponData.ciudad || "Pedro Juan Caballero").substring(0, 34)}\n`
-        t += escposDashes(42) + '\n'
+        t += `CLIENTE:  ${escposStripAccents(cuponData.nombre).toUpperCase().substring(0, 36)}\n`
+        t += `DOC / CI: ${cuponData.documento.padEnd(12)} TEL: ${cuponData.telefono}\n`
+        t += `BARRIO:   ${escposStripAccents(cuponData.barrio || "Centro").substring(0, 36)}\n`
+        t += `CIUDAD:   ${escposStripAccents(cuponData.ciudad || "Pedro Juan Caballero").substring(0, 36)}\n`
+        t += escposDashes(W) + '\n'
 
+        // 6. Pie de Urna y Validez
         t += ESCPOS_ALIGN_CENTER
-        t += ESCPOS_BOLD_ON + (camp.ticket_pie_urna || "¡Deposita este cupon en la urna de la sucursal!") + ESCPOS_BOLD_OFF + '\n'
+        t += ESCPOS_BOLD_ON + escposStripAccents(camp.ticket_pie_urna || "¡Deposita este cupon en la urna de la sucursal!") + ESCPOS_BOLD_OFF + '\n'
         t += "Valido para los sorteos de la campana\n"
-
-        t += '\n'.repeat(feedLines)
+        t += '\n'.repeat(Math.max(4, tpl.lineas_salto_corte || 4))
         t += GS + 'V' + '\x01' // Corte parcial
 
         const escposB64 = escposToBase64(t)

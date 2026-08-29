@@ -1797,60 +1797,78 @@ export default function CapturaCuponesPage() {
                   <span className="text-[9px] font-mono text-slate-400">ESC/POS Thermal</span>
                 </div>
 
-                {/* Visualizador Monocromo Fidedigno */}
-                <div className="bg-[#f7f6f2] text-black p-5 rounded-2xl shadow-inner border border-slate-300 font-mono text-[11px] leading-tight select-none space-y-2">
-                  <div className="text-center font-bold text-sm">
-                    {campanaEditando.ticket_encabezado || "EXTRA SUPERMERCADO"}
-                  </div>
-                  <div className="text-center text-[10px]">
-                    Pedro Juan Caballero - Paraguay
-                  </div>
-                  <div className="text-center font-bold text-xs pt-1">
-                    {campanaEditando.ticket_subtitulo || `*** ${campanaEditando.nombre?.toUpperCase() || "SORTEO"} ***`}
-                  </div>
-                  {campanaEditando.premio_destacado && (
-                    <div className="text-center font-bold text-[10px] text-slate-800">
-                      Premio: {campanaEditando.premio_destacado}
-                    </div>
-                  )}
+                {/* Visualizador Monocromo Fidedigno de Rollo Térmico 80mm */}
+                <div className="relative select-none filter drop-shadow-md">
+                  {/* Borde dentado superior */}
+                  <div 
+                    className="h-2 w-full bg-[#FAFAF7]" 
+                    style={{
+                      clipPath: "polygon(0% 100%, 3% 0%, 6% 100%, 9% 0%, 12% 100%, 15% 0%, 18% 100%, 21% 0%, 24% 100%, 27% 0%, 30% 100%, 33% 0%, 36% 100%, 39% 0%, 42% 100%, 45% 0%, 48% 100%, 51% 0%, 54% 100%, 57% 0%, 60% 100%, 63% 0%, 66% 100%, 69% 0%, 72% 100%, 75% 0%, 78% 100%, 81% 0%, 84% 100%, 87% 0%, 90% 100%, 93% 0%, 96% 100%, 100% 0%)"
+                    }}
+                  />
 
-                  <div className="border-t border-dashed border-black my-1 pt-1 text-center font-black text-sm">
-                    CUPON 1 DE 3
+                  <div className="bg-[#FAFAF7] text-black px-4 py-3 font-mono text-[11px] leading-tight border-x border-slate-300 space-y-2">
+                    {/* Encabezado */}
+                    <div className="text-center font-black text-xs uppercase tracking-wide">
+                      {campanaEditando.ticket_encabezado?.trim() || "EXTRA SUPERMERCADO MAYORISTA"}
+                    </div>
+                    <div className="text-center text-[9.5px]">
+                      Pedro Juan Caballero · Paraguay
+                    </div>
+
+                    <div className="border-t border-dashed border-black pt-1 text-center font-bold text-xs">
+                      {campanaEditando.ticket_subtitulo?.trim() || `*** ${campanaEditando.nombre?.toUpperCase() || "GRAN SORTEO"} ***`}
+                    </div>
+
+                    {campanaEditando.premio_destacado && (
+                      <div className="text-center text-[10px] font-bold text-slate-900">
+                        Premio: {campanaEditando.premio_destacado}
+                      </div>
+                    )}
+                    {campanaEditando.patrocinador && campanaEditando.patrocinador !== "Extra Supermercado" && (
+                      <div className="text-center text-[9.5px]">
+                        Patrocinador: {campanaEditando.patrocinador}
+                      </div>
+                    )}
+
+                    <div className="border-t-2 border-black py-1 text-center font-black text-sm tracking-wider">
+                      CUPON 1 DE 3
+                    </div>
+
+                    <div className="border-t border-dashed border-black pt-1 space-y-0.5 text-[9.5px]">
+                      <div className="flex justify-between">
+                        <span>Ticket Venta: #001-012-0048291</span>
+                        <span className="font-bold">Gs. 150.000</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Fecha: {new Date().toLocaleDateString("es-PY")} {new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}</span>
+                        <span>Boca: 012</span>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-dashed border-black pt-1 space-y-0.5 text-[9.5px]">
+                      <div className="font-bold">DATOS DEL PARTICIPANTE:</div>
+                      <div>CLIENTE:  PEDRO RAMIREZ GONZALEZ</div>
+                      <div>DOC / CI: 3.657.834       TEL: +595 981 123456</div>
+                      <div>BARRIO:   San Gerardo</div>
+                      <div>CIUDAD:   Pedro Juan Caballero</div>
+                    </div>
+
+                    <div className="border-t border-dashed border-black pt-1 text-center space-y-0.5">
+                      <div className="font-black text-[9.5px]">
+                        {campanaEditando.ticket_pie_urna?.trim() || "¡Deposita este cupon en la urna de la sucursal!"}
+                      </div>
+                      <div className="text-[8.5px] text-slate-700">Valido para los sorteos de la campana</div>
+                    </div>
                   </div>
 
-                  <div className="space-y-0.5 text-[10px]">
-                    <div className="flex justify-between">
-                      <span>Ticket Venta:</span>
-                      <span>#001-002-0004567</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Fecha:</span>
-                      <span>{new Date().toLocaleDateString("es-PY")}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Patrocinador:</span>
-                      <span>{campanaEditando.patrocinador || "Extra Supermercado"}</span>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-dashed border-black my-1 pt-1 space-y-0.5 text-[10px]">
-                    <div>CLIENTE: JUAN PÉREZ</div>
-                    <div>DOC: 4.567.890</div>
-                    <div>TEL: +595 981 123456</div>
-                    <div>BARRIO: San Gerardo</div>
-                  </div>
-
-                  <div className="border-t border-dashed border-black my-1 pt-2 text-center space-y-0.5">
-                    <div className="font-bold text-[10px]">
-                      {campanaEditando.ticket_pie_urna || "¡Deposita este cupon en la urna de la sucursal!"}
-                    </div>
-                    <div className="text-[9px]">Valido para los sorteos de la campana</div>
-                  </div>
-
-                  <div className="border-t-2 border-dotted border-red-500 pt-1 text-center text-[9px] text-red-600 font-sans font-bold flex items-center justify-center gap-1">
-                    <Scissors className="w-3 h-3" />
-                    <span>CORTE AUTOMÁTICO DE PAPEL ENTRE CUPONES</span>
-                  </div>
+                  {/* Borde dentado inferior */}
+                  <div 
+                    className="h-2 w-full bg-[#FAFAF7]" 
+                    style={{
+                      clipPath: "polygon(0% 0%, 3% 100%, 6% 0%, 9% 100%, 12% 0%, 15% 100%, 18% 0%, 21% 100%, 24% 0%, 27% 100%, 30% 0%, 33% 100%, 36% 0%, 39% 100%, 42% 0%, 45% 100%, 48% 0%, 51% 100%, 54% 0%, 57% 100%, 60% 0%, 63% 100%, 66% 0%, 69% 100%, 72% 0%, 75% 100%, 78% 0%, 81% 100%, 84% 0%, 87% 100%, 90% 0%, 93% 100%, 96% 0%, 100% 100%)"
+                    }}
+                  />
                 </div>
               </div>
             </div>
