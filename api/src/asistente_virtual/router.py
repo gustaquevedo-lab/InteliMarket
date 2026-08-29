@@ -138,12 +138,21 @@ async def brain_chat(
     user=Depends(require_auth),
 ):
     cid = data.get("company_id") or user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    user_query = data.get("query") or data.get("message") or ""
+    user_name = data.get("user_name") or user.get("nombre") or user.get("email", "").split("@")[0] or "Gustavo"
+    voice_pref = data.get("voice_preference") or data.get("voice") or "es-AR-TomasNeural"
+    model_pref = data.get("model_preference") or data.get("model") or "qwen2.5:7b"
+    gen_voice = data.get("generate_voice", True)
+
     return await process_brain_chat(
         db,
         company_id=cid,
-        user_message=data.get("message", ""),
+        user_message=user_query,
+        user_name=user_name,
         conversation_id=data.get("conversation_id"),
-        model=data.get("model", "qwen2.5:7b"),
+        model=model_pref,
+        voice_preference=voice_pref,
+        generate_voice=gen_voice,
         history=data.get("history", []),
     )
 
@@ -152,20 +161,29 @@ async def brain_chat(
 async def brain_voice(
     audio: UploadFile = File(...),
     company_id: Optional[str] = Form(None),
-    model: Optional[str] = Form("qwen2.5:7b"),
+    user_name: Optional[str] = Form(None),
+    voice_preference: Optional[str] = Form(None),
+    model_preference: Optional[str] = Form(None),
+    tts_voice: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
     conversation_id: Optional[str] = Form(None),
-    tts_voice: Optional[str] = Form("es-PY-MarioNeural"),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
     audio_bytes = await audio.read()
     cid = company_id or user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    chosen_user = user_name or user.get("nombre") or user.get("email", "").split("@")[0] or "Gustavo"
+    chosen_voice = voice_preference or tts_voice or "es-AR-TomasNeural"
+    chosen_model = model_preference or model or "qwen2.5:7b"
+
     return await process_voice_interaction(
         db,
         audio_bytes=audio_bytes,
         company_id=cid,
+        user_name=chosen_user,
         conversation_id=conversation_id,
-        model=model,
-        tts_voice=tts_voice,
+        model=chosen_model,
+        tts_voice=chosen_voice,
     )
+
 

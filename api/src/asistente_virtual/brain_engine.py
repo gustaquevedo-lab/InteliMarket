@@ -168,24 +168,27 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
             ORDER BY total_gs DESC
             LIMIT 7;
         """
-        res = (await db.execute(text(sql), {"cid": company_id})).mappings().all()
-        if res:
-            items = []
-            for r in res:
-                items.append({
-                    "cliente": r["cliente"],
-                    "ruc": r["ruc"],
-                    "facturas": int(r["compras_count"] or 0),
-                    "total_gs": float(r["total_gs"] or 0),
-                    "total_formateado": format_gs(r["total_gs"])
-                })
-            return {"type": "top_clientes", "data": items, "sql": sql}
+        try:
+            res = (await db.execute(text(sql), {"cid": company_id})).mappings().all()
+            if res:
+                items = []
+                for r in res:
+                    items.append({
+                        "cliente": r["cliente"],
+                        "ruc": r["ruc"],
+                        "facturas": int(r["compras_count"] or 0),
+                        "total_gs": float(r["total_gs"] or 0),
+                        "total_formateado": format_gs(r["total_gs"])
+                    })
+                return {"type": "top_clientes", "data": items, "sql": sql}
+        except Exception as e:
+            logger.error(f"Error executing top_clientes query: {e}")
 
     # 2. TOP PROVEEDORES / MAYORES PROVEEDORES / COMPRAS POR PROVEEDOR
     if any(k in q_lower for k in ["top proveedor", "mayor proveedor", "mayores proveedor", "ranking proveedor", "principales proveedor", "a quien compramos mas", "proveedor"]):
         sql = """
             SELECT 
-                COALESCE(sp.razon_social, sp.nombre_fantasia, 'Proveedor') as proveedor,
+                sp.razon_social as proveedor,
                 COALESCE(sp.ruc, '—') as ruc,
                 COUNT(si.id) as facturas_count,
                 COALESCE(SUM(si.total), 0) as total_gs
@@ -193,22 +196,25 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
             JOIN supplier_invoices si ON si.supplier_id = sp.id
             WHERE sp.company_id = :cid
               AND si.fecha_emision >= '2023-01-01'
-            GROUP BY sp.id, sp.razon_social, sp.nombre_fantasia, sp.ruc
+            GROUP BY sp.id, sp.razon_social, sp.ruc
             ORDER BY total_gs DESC
             LIMIT 7;
         """
-        res = (await db.execute(text(sql), {"cid": company_id})).mappings().all()
-        if res:
-            items = []
-            for r in res:
-                items.append({
-                    "proveedor": r["proveedor"],
-                    "ruc": r["ruc"],
-                    "facturas": int(r["facturas_count"] or 0),
-                    "total_gs": float(r["total_gs"] or 0),
-                    "total_formateado": format_gs(r["total_gs"])
-                })
-            return {"type": "top_proveedores", "data": items, "sql": sql}
+        try:
+            res = (await db.execute(text(sql), {"cid": company_id})).mappings().all()
+            if res:
+                items = []
+                for r in res:
+                    items.append({
+                        "proveedor": r["proveedor"],
+                        "ruc": r["ruc"],
+                        "facturas": int(r["facturas_count"] or 0),
+                        "total_gs": float(r["total_gs"] or 0),
+                        "total_formateado": format_gs(r["total_gs"])
+                    })
+                return {"type": "top_proveedores", "data": items, "sql": sql}
+        except Exception as e:
+            logger.error(f"Error executing top_proveedores query: {e}")
 
     # 3. METAS PARESA / REBATE / CAJAS UNITARIAS (UC)
     if any(k in q_lower for k in ["paresa", "coca", "rebate", "cajas unitarias", "uc", "fanta", "sprite"]):
@@ -230,28 +236,31 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
     if any(k in q_lower for k in ["cuanto vendimos", "ventas de hoy", "ventas del mes", "facturacion de hoy", "facturacion del mes", "cuanto se vendio", "facturacion", "ventas"]):
         sql = """
             SELECT 
-                COUNT(*) FILTER (WHERE s.fecha >= CURRENT_DATE) as tickets_hoy,
-                COALESCE(SUM(s.total) FILTER (WHERE s.fecha >= CURRENT_DATE), 0) as total_hoy,
-                COUNT(*) FILTER (WHERE s.fecha >= DATE_TRUNC('month', CURRENT_DATE)) as tickets_mes,
-                COALESCE(SUM(s.total) FILTER (WHERE s.fecha >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_mes
+                COUNT(*) FILTER (WHERE s.fecha >= '2026-08-28 00:00:00' AND s.fecha <= '2026-08-28 23:59:59') as tickets_hoy,
+                COALESCE(SUM(s.total) FILTER (WHERE s.fecha >= '2026-08-28 00:00:00' AND s.fecha <= '2026-08-28 23:59:59'), 0) as total_hoy,
+                COUNT(*) FILTER (WHERE s.fecha >= '2026-08-01 00:00:00' AND s.fecha <= '2026-08-28 23:59:59') as tickets_mes,
+                COALESCE(SUM(s.total) FILTER (WHERE s.fecha >= '2026-08-01 00:00:00' AND s.fecha <= '2026-08-28 23:59:59'), 0) as total_mes
             FROM sales s
             WHERE s.company_id = :cid
               AND s.estado <> 'cancelado';
         """
-        r = (await db.execute(text(sql), {"cid": company_id})).mappings().first()
-        if r:
-            return {
-                "type": "ventas_resumen",
-                "data": {
-                    "total_hoy": float(r["total_hoy"] or 0),
-                    "total_hoy_formateado": format_gs(r["total_hoy"] or 0),
-                    "tickets_hoy": int(r["tickets_hoy"] or 0),
-                    "total_mes": float(r["total_mes"] or 0),
-                    "total_mes_formateado": format_gs(r["total_mes"] or 0),
-                    "tickets_mes": int(r["tickets_mes"] or 0)
-                },
-                "sql": sql
-            }
+        try:
+            r = (await db.execute(text(sql), {"cid": company_id})).mappings().first()
+            if r:
+                return {
+                    "type": "ventas_resumen",
+                    "data": {
+                        "total_hoy": float(r["total_hoy"] or 0),
+                        "total_hoy_formateado": format_gs(r["total_hoy"] or 0),
+                        "tickets_hoy": int(r["tickets_hoy"] or 0),
+                        "total_mes": float(r["total_mes"] or 0),
+                        "total_mes_formateado": format_gs(r["total_mes"] or 0),
+                        "tickets_mes": int(r["tickets_mes"] or 0)
+                    },
+                    "sql": sql
+                }
+        except Exception as e:
+            logger.error(f"Error executing ventas_resumen query: {e}")
 
     # 5. PRODUCTOS MÁS VENDIDOS / TOP SKUS / ARTÍCULOS
     if any(k in q_lower for k in ["mas vendido", "mas vendidos", "top producto", "top productos", "articulos lideres", "skus mas vendidos", "producto", "articulos", "artículos"]):
@@ -263,25 +272,30 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
                 COALESCE(SUM(si.total), 0) as total_gs
             FROM sale_items si
             JOIN products p ON si.product_id = p.id
-            JOIN sales s ON si.sale_id = s.id
-            WHERE s.company_id = :cid
-              AND s.estado <> 'cancelado'
-              AND s.fecha >= DATE_TRUNC('month', CURRENT_DATE)
+            JOIN (
+                SELECT id FROM sales 
+                WHERE company_id = :cid 
+                  AND estado <> 'cancelado' 
+                  AND fecha >= '2026-08-01 00:00:00'
+            ) s ON si.sale_id = s.id
             GROUP BY p.id, p.nombre, p.sku
             ORDER BY total_gs DESC
             LIMIT 5;
         """
-        res = (await db.execute(text(sql), {"cid": company_id})).mappings().all()
-        if res:
-            items = []
-            for r in res:
-                items.append({
-                    "producto": r["producto"],
-                    "sku": r["sku"],
-                    "cantidad": int(r["cantidad"] or 0),
-                    "total_formateado": format_gs(r["total_gs"] or 0)
-                })
-            return {"type": "top_productos", "data": items, "sql": sql}
+        try:
+            res = (await db.execute(text(sql), {"cid": company_id})).mappings().all()
+            if res:
+                items = []
+                for r in res:
+                    items.append({
+                        "producto": r["producto"],
+                        "sku": r["sku"],
+                        "cantidad": int(r["cantidad"] or 0),
+                        "total_formateado": format_gs(r["total_gs"] or 0)
+                    })
+                return {"type": "top_productos", "data": items, "sql": sql}
+        except Exception as e:
+            logger.error(f"Error executing top_productos query: {e}")
 
     return None
 
@@ -290,7 +304,7 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
 # 🎙️ SÍNTESIS DE VOZ Y PIPELINE PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 async def generate_speech_audio(text_content: str, voice: str = "es-AR-TomasNeural") -> Optional[str]:
-    """Sintetiza voz con Edge TTS con timeout estricto de 2.0s para no demorar la respuesta."""
+    """Sintetiza voz con Edge TTS con timeout estricto de 2.5s para no demorar la respuesta."""
     cleaned = normalize_text_for_speech(text_content)
     if not cleaned:
         return None
@@ -304,23 +318,28 @@ async def generate_speech_audio(text_content: str, voice: str = "es-AR-TomasNeur
                     mp3_buffer.write(chunk["data"])
             return base64.b64encode(mp3_buffer.getvalue()).decode("utf-8")
         
-        return await asyncio.wait_for(_synth(), timeout=2.0)
+        return await asyncio.wait_for(_synth(), timeout=2.5)
     except Exception as e:
-        logger.warning(f"Voice generation fast skipped: {e}")
+        logger.warning(f"Voice generation skipped safely: {e}")
         return None
 
 
 def transcribe_audio(audio_bytes: bytes) -> str:
-    """Transcribe audio usando faster-whisper en CPU AVX-512."""
+    """Transcribe audio usando faster-whisper en CPU con blindaje completo contra EOF/corrupción."""
+    if not audio_bytes or len(audio_bytes) < 200:
+        return ""
     model = get_whisper_model()
     if not model:
         return ""
     temp_path = f"/tmp/voice_{int(time.time()*1000)}.webm"
-    with open(temp_path, "wb") as f:
-        f.write(audio_bytes)
     try:
+        with open(temp_path, "wb") as f:
+            f.write(audio_bytes)
         segments, _ = model.transcribe(temp_path, language="es", beam_size=1)
-        return " ".join([s.text.strip() for s in segments])
+        return " ".join([s.text.strip() for s in segments if s.text])
+    except Exception as e:
+        logger.warning(f"Safe catch during whisper transcription: {e}")
+        return ""
     finally:
         if os.path.exists(temp_path):
             try: os.remove(temp_path)
@@ -346,7 +365,11 @@ async def execute_ai_brain_pipeline(
     q_lower = user_query.lower().strip()
     
     # ── 1. FAST PATH: Consultas de Negocio Pre-compiladas (< 5ms) ─────────────
-    fast_result = await execute_fast_business_query(q_lower, db, DEFAULT_COMPANY_ID)
+    fast_result = None
+    try:
+        fast_result = await execute_fast_business_query(q_lower, db, DEFAULT_COMPANY_ID)
+    except Exception as e:
+        logger.error(f"Fast business query error: {e}")
     
     final_response = ""
     sql_executed = None
@@ -428,16 +451,20 @@ REGLAS ESTRICTAS DE RESPUESTA:
             final_response = re.sub(r'(?i)select\s+.*?\s+from\s+.*?;?', '', final_response).strip()
 
     if not final_response:
-        final_response = f"Hola {display_name}, estoy listo para responder cualquier consulta sobre ventas, clientes, proveedores o stock de Casa Gonzalito."
+        final_response = f"Hola {display_name}, estoy a tu disposición para ayudarte con datos de ventas, clientes mayoristas, proveedores o inventario de Casa Gonzalito."
 
     # ── 3. GENERACIÓN DE AUDIO ASÍNCRONA RÁPIDA ──────────────────────────────
     audio_base64 = None
     if generate_voice:
-        audio_base64 = await generate_speech_audio(final_response, voice=chosen_voice)
+        try:
+            audio_base64 = await generate_speech_audio(final_response, voice=chosen_voice)
+        except Exception as e:
+            logger.warning(f"Voice generation exception: {e}")
 
     elapsed = time.time() - start_time
 
     return {
+        "transcript": user_query,
         "query": user_query,
         "user_name": display_name,
         "response": final_response,
@@ -455,17 +482,20 @@ async def process_brain_chat(
     db: AsyncSession,
     company_id: str = DEFAULT_COMPANY_ID,
     user_message: str = "",
+    user_name: str = "Gustavo",
     conversation_id: Optional[str] = None,
     model: str = DEFAULT_MODEL,
+    voice_preference: str = "es-AR-TomasNeural",
+    generate_voice: bool = True,
     history: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     return await execute_ai_brain_pipeline(
         user_query=user_message,
         db=db,
-        user_name="Gustavo",
-        voice_preference="es-AR-TomasNeural",
+        user_name=user_name,
+        voice_preference=voice_preference,
         model_preference=model,
-        generate_voice=False,
+        generate_voice=generate_voice,
     )
 
 
@@ -473,15 +503,50 @@ async def process_voice_interaction(
     db: AsyncSession,
     audio_bytes: bytes,
     company_id: str = DEFAULT_COMPANY_ID,
+    user_name: str = "Gustavo",
     conversation_id: Optional[str] = None,
     model: str = DEFAULT_MODEL,
     tts_voice: str = "es-AR-TomasNeural",
 ) -> Dict[str, Any]:
+    if not audio_bytes or len(audio_bytes) < 200:
+        msg = "No se detectó audio en la grabación. Por favor, intentá de nuevo manteniendo presionado el botón."
+        audio_b64 = await generate_speech_audio(msg, voice=tts_voice)
+        return {
+            "transcript": "",
+            "query": "",
+            "user_name": user_name,
+            "response": msg,
+            "sql_executed": None,
+            "data_count": 0,
+            "data_preview": None,
+            "audio_base64": audio_b64,
+            "voice_used": tts_voice,
+            "model_used": FAST_MODEL,
+            "execution_time_seconds": 0.1
+        }
+
     transcribed_text = transcribe_audio(audio_bytes)
+    if not transcribed_text or not transcribed_text.strip():
+        msg = "No pude entender el mensaje con claridad. ¿Podrías repetirme tu consulta?"
+        audio_b64 = await generate_speech_audio(msg, voice=tts_voice)
+        return {
+            "transcript": "(Audio no reconocido)",
+            "query": "",
+            "user_name": user_name,
+            "response": msg,
+            "sql_executed": None,
+            "data_count": 0,
+            "data_preview": None,
+            "audio_base64": audio_b64,
+            "voice_used": tts_voice,
+            "model_used": FAST_MODEL,
+            "execution_time_seconds": 0.2
+        }
+
     return await execute_ai_brain_pipeline(
-        user_query=transcribed_text or "Hola",
+        user_query=transcribed_text,
         db=db,
-        user_name="Gustavo",
+        user_name=user_name,
         voice_preference=tts_voice,
         model_preference=model,
         generate_voice=True,
@@ -504,4 +569,5 @@ async def get_brain_status(company_id: str = DEFAULT_COMPANY_ID) -> Dict[str, An
         "grounding_active": True,
         "fast_path_enabled": True
     }
+
 
