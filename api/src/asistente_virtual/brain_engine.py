@@ -120,7 +120,9 @@ def normalize_text_for_speech(raw_text: str) -> str:
     return t
 
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+from api.src.config import settings
+
+GEMINI_API_KEY = settings.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
 
 
 async def query_gemini(prompt: str, system_prompt: str) -> Optional[str]:

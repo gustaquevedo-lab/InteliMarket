@@ -57,7 +57,8 @@ class Settings(BaseSettings):
     sueldok_api_url: str = "https://api.sueldok.com"
     sueldok_api_key: str = ""
 
-    # Anthropic
+    # AI / LLM
+    gemini_api_key: str = ""
     anthropic_api_key: str = ""
 
     # Conector Ñemuha (ConceptoComercial/FlexPDV) — legacy MySQL del cliente, vía VM puente
