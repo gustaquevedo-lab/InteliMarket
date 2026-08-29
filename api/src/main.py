@@ -173,8 +173,9 @@ app.add_middleware(RequestLoggingMiddleware)
 
 
 @app.get("/api/health")
+@app.get("/api/v1/health")
 async def health_check():
-    return {"status": "ok", "version": "0.3.0"}
+    return {"status": "ok", "version": "0.3.0", "service": "InteliMarket Backend"}
 
 
 app.include_router(auth_router)
