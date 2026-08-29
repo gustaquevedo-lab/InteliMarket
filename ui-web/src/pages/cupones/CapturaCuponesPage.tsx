@@ -1566,6 +1566,9 @@ export default function CapturaCuponesPage() {
                   )}
 
                   <div className="border-t border-dashed border-black my-1 pt-1 text-center font-black text-sm">
+                    CUPON 1 DE 3
+                  </div>
+
                   <div className="space-y-0.5 text-[10px]">
                     <div className="flex justify-between">
                       <span>Ticket Venta:</span>
