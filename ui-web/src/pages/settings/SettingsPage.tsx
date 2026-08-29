@@ -1387,8 +1387,13 @@ export default function SettingsPage() {
                       type="text"
                       value={receiptConfig.mensaje_despedida}
                       onChange={e => setReceiptConfig({ ...receiptConfig, mensaje_despedida: e.target.value })}
+                      className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white font-bold text-center"
+                    />
+                  </div>
+                </div>
               </div>
-            )}
+            </div>
+
           </div>
 
           {/* PANEL DERECHO: VISTA PREVIA EN VIVO REALISTA (SIMULADOR FOTORREALISTA 80MM TÉRMICO) (5 COLS) */}
