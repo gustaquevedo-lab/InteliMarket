@@ -120,8 +120,50 @@ def normalize_text_for_speech(raw_text: str) -> str:
     return t
 
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+
+async def query_gemini(prompt: str, system_prompt: str) -> Optional[str]:
+    """Llamada ultra rápida a Google Gemini Flash (<1.2s)."""
+    if not GEMINI_API_KEY:
+        return None
+
+    models = ["models/gemini-3.1-flash-lite", "models/gemini-3.5-flash", "models/gemini-3-flash-preview"]
+    for model_id in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/{model_id}:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": f"{system_prompt}\n\n{prompt}"}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.25,
+                "maxOutputTokens": 350
+            }
+        }
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.post(url, json=payload)
+                if res.status_code == 200:
+                    data = res.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        text_parts = candidates[0].get("content", {}).get("parts", [])
+                        if text_parts:
+                            return text_parts[0].get("text", "").strip()
+                elif res.status_code in [429, 503]:
+                    logger.warning(f"Gemini {model_id} busy ({res.status_code}), trying next model...")
+                    continue
+        except Exception as e:
+            logger.warning(f"Gemini error on {model_id}: {e}")
+            continue
+    return None
+
+
 async def query_ollama(prompt: str, system_prompt: str, model: str = DEFAULT_MODEL) -> str:
-    """Llamada directa ultra rápida a Ollama con timeout ampliado y keep_alive permanente."""
+    """Llamada directa a Ollama local como fallback."""
     url = f"{OLLAMA_BASE_URL}/api/generate"
     payload = {
         "model": model,
@@ -162,7 +204,7 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         }
 
     # 1. METAS PARESA / REBATE / CAJAS UNITARIAS (UC) / COCA-COLA
-    if any(k in q_lower for k in ["paresa", "coca", "rebate", "cajas unitarias", "uc", "fanta", "sprite", "monster", "powerade"]):
+    if re.search(r'\b(paresa|coca|coca-cola|coca cola|rebate|rebates|cajas unitarias|uc|fanta|sprite|monster|powerade)\b', q_lower):
         return {
             "type": "paresa_status",
             "data": {
@@ -339,7 +381,7 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
             logger.error(f"Error executing dynamic customer debt lookup: {e}")
 
     # 7. BÚSQUEDA DINÁMICA DE STOCK / INVENTARIO
-    if any(k in q_lower for k in ["stock", "inventario", "deposito", "depósito", "cuanto queda", "existencia", "articulos", "productos"]):
+    if re.search(r'\b(stock|inventario|existencia|existencias|cuanto queda|cuánto queda|quiebre de stock|quiebres|faltante|faltantes)\b', q_lower):
         sql_stock = """
             SELECT p.nombre, COALESCE(p.sku, '—') as sku,
                    p.precio_venta,
@@ -381,18 +423,26 @@ async def generate_speech_audio(text_content: str, voice: str = "es-UY-MateoNeur
     # Elegir voz neuronal óptima si viene por defecto o vacía
     chosen_voice = voice if voice and "Neural" in voice else "es-UY-MateoNeural"
     
+    # Tomar las primeras 2 a 3 oraciones completas (hasta ~450 caracteres) para síntesis fluida
+    speech_text = cleaned
+    if len(speech_text) > 450:
+        last_period = speech_text[:450].rfind(". ")
+        if last_period > 100:
+            speech_text = speech_text[:last_period + 1]
+        else:
+            speech_text = speech_text[:450]
+
     try:
         import edge_tts
         async def _synth():
-            # Cadencia natural sin apresuramiento
-            communicate = edge_tts.Communicate(cleaned[:400], chosen_voice, rate="+0%", pitch="+0Hz")
+            communicate = edge_tts.Communicate(speech_text, chosen_voice, rate="+0%", pitch="+0Hz")
             mp3_buffer = io.BytesIO()
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
                     mp3_buffer.write(chunk["data"])
             return base64.b64encode(mp3_buffer.getvalue()).decode("utf-8")
         
-        return await asyncio.wait_for(_synth(), timeout=3.5)
+        return await asyncio.wait_for(_synth(), timeout=6.0)
     except Exception as e:
         logger.warning(f"Voice generation skipped safely: {e}")
         return None
@@ -506,7 +556,8 @@ async def execute_ai_brain_pipeline(
                 final_response += f"{i}. **{p['producto']}** (`{p['sku']}`) — Stock: **{p['stock']} un.** (Precio: {p['precio_formateado']})\n"
             final_response += f"\n💡 **Sugerencia de Marco:** Revisa los artículos con stock menor a 50 unidades para emitir órdenes de compra preventivas a los proveedores."
 
-    # ── 2. DYNAMIC PATH: LLM Ultra Rápido (Qwen 2.5:7b / 14b) ──────────────────────
+    # ── 2. DYNAMIC PATH: Google Gemini Flash (<1.2s) con Fallback a Ollama ───
+    model_used = "Gemini Flash (Google Cloud)"
     if not final_response:
         prompt = f"""Sos MARCO, el asesor operativo inteligente de Casa Gonzalito (distribuidora mayorista en Amambay, Paraguay).
 Te dirigís cordialmente a: {display_name}.
@@ -522,14 +573,22 @@ REGLAS ESTRICTAS DE RESPUESTA:
 4. Si la pregunta es sobre productos o marcas, hacé referencia a PARESA (Coca-Cola, Fanta, Sprite, Monster), Lácteos Trébol, Arroz Tío Nico, o proveedores de Casa Gonzalito.
 5. Finalizá con una breve "💡 Sugerencia de Marco:" proactiva.
 """
-        final_response = await query_ollama(
-            prompt=prompt,
-            system_prompt="Sos MARCO, asistente ejecutivo de Casa Gonzalito en Pedro Juan Caballero. Respondes con datos comerciales precisos en Guaraníes sin inventar productos ajenos.",
-            model=FAST_MODEL
-        )
+        system_prompt = "Sos MARCO, asistente ejecutivo de Casa Gonzalito en Pedro Juan Caballero. Respondes con datos comerciales precisos en Guaraníes sin inventar productos ajenos."
+        
+        # 2.1 Intentar con Google Gemini Flash
+        final_response = await query_gemini(prompt=prompt, system_prompt=system_prompt)
+        
+        # 2.2 Si Gemini no está disponible o falla, fallback a Ollama local
+        if not final_response:
+            model_used = f"Ollama {FAST_MODEL} (Local)"
+            final_response = await query_ollama(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=FAST_MODEL
+            )
         
         # Limpieza final de seguridad contra cualquier residuo de SQL
-        if "select " in final_response.lower() or "from " in final_response.lower():
+        if final_response and ("select " in final_response.lower() or "from " in final_response.lower()):
             final_response = re.sub(r'```[\s\S]*?```', '', final_response)
             final_response = re.sub(r'(?i)select\s+.*?\s+from\s+.*?;?', '', final_response).strip()
 
@@ -556,7 +615,7 @@ REGLAS ESTRICTAS DE RESPUESTA:
         "data_preview": data_preview,
         "audio_base64": audio_base64,
         "voice_used": chosen_voice,
-        "model_used": FAST_MODEL,
+        "model_used": model_used if not fast_result else "Motor RAG Directo (PostgreSQL)",
         "execution_time_seconds": round(elapsed, 2)
     }
 
