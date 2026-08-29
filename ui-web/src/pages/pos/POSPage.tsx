@@ -7188,8 +7188,7 @@ export default function POSPage() {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* ── 9. MODAL DE CLIENTES (F9) CON BÚSQUEDA EN VIVO Y ALTA RÁPIDA ───────── */}
       {showCustomerModal && (
