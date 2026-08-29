@@ -40,13 +40,27 @@ async def list_customers(
 ) -> list[Customer]:
     query = select(Customer).where(Customer.company_id == company_id)
     if search:
-        query = query.where(
-            (Customer.razon_social.ilike(f"%{search}%")) |
-            (Customer.ruc.ilike(f"%{search}%")) |
-            (Customer.ci.ilike(f"%{search}%")) |
-            (Customer.telefono.ilike(f"%{search}%")) |
-            (Customer.extra_club_numero.ilike(f"%{search}%"))
-        )
+        search_terms = search.strip().split()
+        if len(search_terms) == 1:
+            term = search_terms[0]
+            query = query.where(
+                (Customer.razon_social.ilike(f"%{term}%")) |
+                (Customer.ruc.ilike(f"%{term}%")) |
+                (Customer.ci.ilike(f"%{term}%")) |
+                (Customer.telefono.ilike(f"%{term}%")) |
+                (Customer.extra_club_numero.ilike(f"%{term}%"))
+            )
+        elif len(search_terms) > 1:
+            term_conditions = []
+            for term in search_terms:
+                term_conditions.append(
+                    (Customer.razon_social.ilike(f"%{term}%")) |
+                    (Customer.ruc.ilike(f"%{term}%")) |
+                    (Customer.ci.ilike(f"%{term}%")) |
+                    (Customer.telefono.ilike(f"%{term}%")) |
+                    (Customer.extra_club_numero.ilike(f"%{term}%"))
+                )
+            query = query.where(and_(*term_conditions))
     if activo is not None:
         query = query.where(Customer.activo == activo)
     if tipo:

@@ -2082,49 +2082,66 @@ export default function POSPage() {
   } | null>(null)
   const [savingCupon, setSavingCupon] = useState(false)
 
-  const handleLookupDoc = async (docStr: string) => {
+  const lastLookedUpDocRef = useRef<string>("")
+  const lookupDocTimerRef = useRef<any>(null)
+
+  const handleLookupDoc = (docStr: string, immediate = false) => {
     const clean = docStr.trim().replace(/\D/g, "")
     if (clean.length < 5) return
-    try {
-      setLookingUpDoc(true)
-      const res = await api.cupones.buscarDocumento(clean)
-      if (res && res.encontrado && res.nombre) {
-        setPendingCuponData(prev => {
-          if (!prev) return null
-          let telCod = prev.telCodigo
-          let telNum = prev.telefono
-          if (res.telefono) {
-            const t = res.telefono.trim()
-            if (t.startsWith("55")) {
-              telCod = "55"
-              telNum = t.slice(2)
-            } else if (t.startsWith("595")) {
-              telCod = "595"
-              telNum = t.slice(3)
-            } else {
-              telNum = t
+    if (lastLookedUpDocRef.current === clean && !immediate) return
+
+    if (lookupDocTimerRef.current) clearTimeout(lookupDocTimerRef.current)
+
+    const doLookup = async () => {
+      if (lastLookedUpDocRef.current === clean) return
+      try {
+        setLookingUpDoc(true)
+        const res = await api.cupones.buscarDocumento(clean)
+        lastLookedUpDocRef.current = clean
+        if (res && res.encontrado && res.nombre) {
+          setPendingCuponData(prev => {
+            if (!prev) return null
+            let telCod = prev.telCodigo
+            let telNum = prev.telefono
+            if (res.telefono) {
+              const t = res.telefono.trim()
+              if (t.startsWith("55")) {
+                telCod = "55"
+                telNum = t.slice(2)
+              } else if (t.startsWith("595")) {
+                telCod = "595"
+                telNum = t.slice(3)
+              } else {
+                telNum = t
+              }
             }
-          }
-          return {
-            ...prev,
-            doc: clean,
-            nombre: res.nombre || prev.nombre,
-            telCodigo: telCod,
-            telefono: telNum,
-            barrio: res.barrio || prev.barrio,
-            ciudad: res.ciudad || prev.ciudad,
-            origenDoc: res.origen
-          }
-        })
-        toast.info(
-          "Cliente Localizado",
-          `${res.nombre} (${res.origen === "padron_tsje" ? "Padrón Nacional TSJE" : "Base de Clientes"})`
-        )
+            return {
+              ...prev,
+              doc: clean,
+              nombre: res.nombre || prev.nombre,
+              telCodigo: telCod,
+              telefono: telNum,
+              barrio: res.barrio || prev.barrio,
+              ciudad: res.ciudad || prev.ciudad,
+              origenDoc: res.origen
+            }
+          })
+          toast.info(
+            "Cliente Localizado",
+            `${res.nombre} (${res.origen === "padron_tsje" ? "Padrón Nacional TSJE" : "Base de Clientes"})`
+          )
+        }
+      } catch {
+        // Silencioso
+      } finally {
+        setLookingUpDoc(false)
       }
-    } catch {
-      // Silencioso
-    } finally {
-      setLookingUpDoc(false)
+    }
+
+    if (immediate) {
+      doLookup()
+    } else {
+      lookupDocTimerRef.current = setTimeout(doLookup, 400)
     }
   }
 
@@ -3544,6 +3561,23 @@ export default function POSPage() {
   const montoDonacionEfectiva = donacionActiva ? montoSugeridoDonacion : 0
   const vueltoFinalPyg = Math.max(0, vueltoPyg - (donacionActiva ? montoDonacionEfectiva : 0))
 
+  const handleToggleDonacion = (nextActiva: boolean, customMonto?: number) => {
+    setDonacionActiva(nextActiva)
+    if (customMonto !== undefined) {
+      setMontoDonacionManual(customMonto)
+    }
+    const monto = customMonto !== undefined ? customMonto : (montoDonacionManual !== null ? montoDonacionManual : montoSugeridoDonacion)
+    const currentCash = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
+    const oldTotal = totalPyg + (donacionActiva ? montoDonacionEfectiva : 0)
+    if (!hasClickedQuickCash || currentCash === totalPyg || currentCash === oldTotal) {
+      if (nextActiva) {
+        setPayCashPyg((totalPyg + monto).toLocaleString("es-PY"))
+      } else {
+        setPayCashPyg(totalPyg.toLocaleString("es-PY"))
+      }
+    }
+  }
+
   // Cargar campaña activa de donación para el POS
   useEffect(() => {
     api.donaciones.getCampanaActiva().then(setCampanaActivaDonacion).catch(() => {})
@@ -4548,7 +4582,7 @@ export default function POSPage() {
         if (pausedSales.length > 0) setShowPausedModal(true)
       } else if (e.key === "F8") {
         e.preventDefault()
-        if (showPaymentModal) setDonacionActiva(prev => !prev)
+        if (showPaymentModal) handleToggleDonacion(!donacionActiva)
       } else if (e.key === "F9") {
         e.preventDefault()
         setShowCustomerModal(true)
@@ -4801,8 +4835,15 @@ export default function POSPage() {
             <div className="flex items-center gap-2 truncate">
               <User className="w-4 h-4 text-blue-500 shrink-0" />
               <div className="truncate">
-                <div className={`font-bold text-xs truncate ${textHeading}`}>
-                  {customer.nombre}
+                <div className="flex items-center gap-1.5 truncate">
+                  <div className={`font-bold text-xs truncate ${textHeading}`}>
+                    {customer.nombre}
+                  </div>
+                  {((customer as any).extra_club_numero || (customer as any).extra_club_activo || isClubMember) && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-600 dark:text-purple-300 text-[9px] font-black uppercase tracking-wider shrink-0 border border-purple-500/30 flex items-center gap-0.5">
+                      <Star className="w-2.5 h-2.5 fill-purple-500" /> Extra Club
+                    </span>
+                  )}
                 </div>
                 <div className={`text-[10px] font-posMono tabular-nums ${textMuted}`}>
                   {customer.ruc || customer.ci || "Sin RUC"} · {customer.razon_social || "Consumidor Final"}
@@ -6331,8 +6372,15 @@ export default function POSPage() {
                   <div className="flex items-center gap-2 min-w-0">
                     <User className="w-4 h-4 text-slate-400 shrink-0" />
                     <div className="min-w-0">
-                      <div className="font-bold text-slate-800 dark:text-slate-200 truncate text-[11px]">
-                        {customer?.nombre || "Consumidor Final"}
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-slate-800 dark:text-slate-200 truncate text-[11px] block">
+                          {customer?.nombre || "Consumidor Final"}
+                        </span>
+                        {((customer as any)?.extra_club_numero || (customer as any)?.extra_club_activo || isClubMember) && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-600 dark:text-purple-300 text-[8px] font-black uppercase tracking-wider shrink-0 border border-purple-500/30">
+                            ★ Extra Club
+                          </span>
+                        )}
                       </div>
                       <div className="text-[9px] font-mono text-slate-500 truncate">
                         {customer?.ruc || customer?.ci ? `Doc: ${customer.ruc || customer.ci}` : "Sin RUC (Boleta Simple)"}
@@ -6368,7 +6416,7 @@ export default function POSPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setDonacionActiva(!donacionActiva)}
+                      onClick={() => handleToggleDonacion(!donacionActiva)}
                       className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
                         donacionActiva ? "bg-rose-600" : "bg-slate-300 dark:bg-slate-700"
                       }`}
@@ -6396,10 +6444,7 @@ export default function POSPage() {
                         <button
                           key={idx}
                           type="button"
-                          onClick={() => {
-                            setMontoDonacionManual(btn.val)
-                            setDonacionActiva(true)
-                          }}
+                          onClick={() => handleToggleDonacion(true, btn.val)}
                           className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
                             isSelected
                               ? "bg-rose-600 text-white"
@@ -8494,9 +8539,9 @@ export default function POSPage() {
                       onChange={e => {
                         const val = e.target.value
                         setPendingCuponData({ ...pendingCuponData, doc: val })
-                        handleLookupDoc(val)
+                        handleLookupDoc(val, false)
                       }}
-                      onBlur={() => handleLookupDoc(pendingCuponData.doc)}
+                      onBlur={() => handleLookupDoc(pendingCuponData.doc, true)}
                       placeholder="Ingrese C.I. (ej: 3657834)"
                       className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
                     />

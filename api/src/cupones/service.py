@@ -1055,9 +1055,9 @@ async def registrar_cupones_multiples(
             direccion=data.direccion,
             barrio=data.barrio or "Centro",
             ciudad=data.ciudad or "Pedro Juan Caballero",
-            total_gastado=data.monto_compra,
+            total_gastado=float(data.monto_compra or 0),
             cantidad_compras=1,
-            ticket_promedio=data.monto_compra,
+            ticket_promedio=float(data.monto_compra or 0),
             ultimo_consumo=datetime.now(timezone.utc)
         )
         db.add(cliente)
@@ -1070,10 +1070,10 @@ async def registrar_cupones_multiples(
             cliente.barrio = data.barrio
         if data.ciudad:
             cliente.ciudad = data.ciudad
-        cliente.total_gastado = (cliente.total_gastado or 0) + data.monto_compra
-        cliente.cantidad_compras = (cliente.cantidad_compras or 0) + 1
+        cliente.total_gastado = float(cliente.total_gastado or 0) + float(data.monto_compra or 0)
+        cliente.cantidad_compras = int(cliente.cantidad_compras or 0) + 1
         if cliente.cantidad_compras > 0:
-            cliente.ticket_promedio = cliente.total_gastado / cliente.cantidad_compras
+            cliente.ticket_promedio = round(float(cliente.total_gastado) / cliente.cantidad_compras, 2)
         cliente.ultimo_consumo = datetime.now(timezone.utc)
 
     # 2. Registrar cada lote de cupones por campaña
