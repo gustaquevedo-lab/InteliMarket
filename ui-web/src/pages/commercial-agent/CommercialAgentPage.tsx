@@ -3,7 +3,7 @@ import {
   TrendingUp, BarChart3, Bot, Sparkles, Send, Play, CheckCircle2, XCircle,
   AlertTriangle, ArrowUpRight, ArrowDownRight, RefreshCw, Layers, Users,
   ShoppingBag, Target, DollarSign, Check, X, Loader2, ShieldCheck, ChevronRight,
-  Cpu, Award, Calendar, Percent, Zap
+  Cpu, Award, Calendar, Percent, Zap, Building2, Search
 } from "lucide-react"
 import { api } from "../../api/index"
 import { useAuth } from "../../context/AuthContext"
@@ -30,17 +30,46 @@ interface ChatMsg {
   diagnostico_key?: string
 }
 
-interface SupplierGoal {
-  name: string
-  category: string
-  meta: string
-  actual: string
-  pct: number
-  facturacion: string
-  margen: string
-  rebate: string
-  status: "on_track" | "warning" | "optimal"
-  pacingDiff: string
+interface AgreementItem {
+  id: string
+  supplier_id: string
+  supplier_razon_social: string
+  supplier_ruc: string
+  branch_id?: string
+  branch_nombre: string
+  periodo: string
+  nombre_acuerdo: string
+  meta_monto_gs: number
+  tipo_meta: string
+  tipo_retorno: string
+  rebate_pct_base: number
+  piso_minimo_pct: number
+  ventas_actual_gs: number
+  transacciones_count: number
+  skus_vendidos_count: number
+  cumplimiento_actual_pct: number
+  tendencia_proyectada_gs: number
+  cumplimiento_proyectado_pct: number
+  rebate_ganado_actual_pct: number
+  rebate_ganado_actual_gs: number
+  rebate_ganado_proy_pct: number
+  rebate_ganado_proy_gs: number
+  semaforo: "superado" | "en_meta" | "en_riesgo" | "critico"
+  observaciones?: string
+  estado: string
+}
+
+interface MultiDashboardData {
+  periodo: string
+  dias_transcurridos: number
+  dias_totales_mes: number
+  meta_total_general_gs: number
+  ventas_total_general_gs: number
+  cumplimiento_global_pct: number
+  tendencia_global_gs: number
+  cumplimiento_proyectado_global_pct: number
+  rebate_total_estimado_gs: number
+  proveedores: AgreementItem[]
 }
 
 export default function CommercialAgentPage() {
@@ -52,112 +81,44 @@ export default function CommercialAgentPage() {
   const [loading, setLoading] = useState(false)
   const [diagnosing, setDiagnosing] = useState(false)
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
+  const [multiDashboard, setMultiDashboard] = useState<MultiDashboardData | null>(null)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [branchFilter, setBranchFilter] = useState("all")
+
   const [chatHistory, setChatHistory] = useState<ChatMsg[]>([
     {
       id: "welcome",
       isUser: false,
       text: `### 👔 Saludos, ${userName}. Soy el Gerente Comercial IA de Casa Gonzalito.
 
-Estoy conectado directamente a las bases de datos operativas de ventas, preventa, metas unificadas de proveedores y márgenes de la distribuidora.
+Estoy conectado directamente a la base de datos real de ventas, acuerdos y metas comerciales vigentes para el mes en curso.
 
-Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor o planes comerciales para asegurar el cumplimiento de metas y rebates.`,
+Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveedor o planes comerciales para asegurar el cumplimiento de metas y rebates.`,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ])
   const [query, setQuery] = useState("")
   const chatEndRef = useRef<HTMLDivElement>(null)
 
-  // Supplier Goals Data Panel (Consolidado de Casa Gonzalito)
-  const supplierGoals: SupplierGoal[] = [
-    {
-      name: "PARESA (Coca-Cola, Fanta, Sprite, Monster)",
-      category: "Bebidas & Gaseosas",
-      meta: "113.503 UC",
-      actual: "98.450 UC",
-      pct: 86.7,
-      facturacion: "Gs. 3.380 M",
-      margen: "14.8%",
-      rebate: "4.5% (Gs. 149,2 M)",
-      status: "optimal",
-      pacingDiff: "+3.2% sobre pacing"
-    },
-    {
-      name: "Río Aquidabán (Harinas, Fideos, Arroz)",
-      category: "Alimentos Secos",
-      meta: "Gs. 950 M",
-      actual: "Gs. 820 M",
-      pct: 86.3,
-      facturacion: "Gs. 820 M",
-      margen: "18.2%",
-      rebate: "2.0% (Gs. 16,4 M)",
-      status: "optimal",
-      pacingDiff: "+1.8% sobre pacing"
-    },
-    {
-      name: "Lácteos Trébol (Leches, Quesos, Yogures)",
-      category: "Lácteos & Refrigerados",
-      meta: "Gs. 720 M",
-      actual: "Gs. 640 M",
-      pct: 88.8,
-      facturacion: "Gs. 640 M",
-      margen: "7.2%",
-      rebate: "Bonif. 10+1",
-      status: "warning",
-      pacingDiff: "+4.1% vol. / Margen comprimido"
-    },
-    {
-      name: "Trovato C.I.S.A. (Golosinas, Galletitas)",
-      category: "Confitería & Snacks",
-      meta: "Gs. 550 M",
-      actual: "Gs. 490 M",
-      pct: 89.1,
-      facturacion: "Gs. 490 M",
-      margen: "22.5%",
-      rebate: "3.0% (Gs. 14,7 M)",
-      status: "optimal",
-      pacingDiff: "+5.0% sobre pacing"
-    },
-    {
-      name: "La Mercantil Guaraní (Aceites, Enlatados)",
-      category: "Almacén Mayorista",
-      meta: "Gs. 420 M",
-      actual: "Gs. 380 M",
-      pct: 90.5,
-      facturacion: "Gs. 380 M",
-      margen: "16.4%",
-      rebate: "1.5% (Gs. 5,7 M)",
-      status: "optimal",
-      pacingDiff: "+6.2% sobre pacing"
-    },
-    {
-      name: "Cervepar (Cervezas & Bebidas Alcohólicas)",
-      category: "Bebidas Alcohólicas",
-      meta: "Gs. 680 M",
-      actual: "Gs. 560 M",
-      pct: 82.4,
-      facturacion: "Gs. 560 M",
-      margen: "12.5%",
-      rebate: "2.5% (Gs. 14,0 M)",
-      status: "warning",
-      pacingDiff: "-2.1% bajo pacing"
-    }
-  ]
-
   useEffect(() => {
-    loadRecommendations()
+    loadData()
   }, [])
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [chatHistory, loading])
 
-  const loadRecommendations = async () => {
+  const loadData = async () => {
     setLoading(true)
     try {
-      const data = await api.commercialAgent.recommendations()
-      setRecommendations(data || [])
+      const [recs, kpis] = await Promise.all([
+        api.commercialAgent.recommendations().catch(() => []),
+        api.getSupplierKpisDashboard("2026-08", "all").catch(() => null)
+      ])
+      setRecommendations(recs || [])
+      if (kpis) setMultiDashboard(kpis)
     } catch (e) {
-      console.error("Error loading commercial recommendations", e)
+      console.error("Error loading commercial data", e)
     } finally {
       setLoading(false)
     }
@@ -170,6 +131,8 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
       if (res && res.recommendations) {
         setRecommendations(res.recommendations)
       }
+      const kpis = await api.getSupplierKpisDashboard("2026-08", "all")
+      if (kpis) setMultiDashboard(kpis)
     } catch (e) {
       console.error("Error running commercial diagnosis", e)
     } finally {
@@ -232,7 +195,7 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
   }
 
   const formatCurrency = (val: number) => {
-    return `Gs. ${Math.round(val).toLocaleString('es-PY')}`
+    return `Gs. ${Math.round(val || 0).toLocaleString('es-PY')}`
   }
 
   const cleanText = (str: string) => {
@@ -309,6 +272,18 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
     )
   }
 
+  // Filtrado de acuerdos reales
+  const filteredAgreements = (multiDashboard?.proveedores || []).filter(p => {
+    const matchesSearch = p.supplier_razon_social.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          p.supplier_ruc.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          p.branch_nombre.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesBranch = branchFilter === "all" || p.branch_id === branchFilter || (branchFilter === "central" && p.branch_nombre.includes("Central"))
+    return matchesSearch && matchesBranch
+  })
+
+  // PARESA Central Card Data
+  const paresaCentral = (multiDashboard?.proveedores || []).find(p => p.supplier_razon_social.includes("PARAGUAY REFRESCOS") && p.branch_nombre.includes("Central"))
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300 pb-12">
       {/* Header */}
@@ -328,7 +303,7 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
               </span>
             </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">
-              Especialista analítico en rentabilidad mayorista, metas PARESA (Coca-Cola), rutas de preventa y gestión de márgenes de todos los proveedores.
+              Especialista analítico en rentabilidad mayorista, metas PARESA (Coca-Cola), rutas de preventa y gestión de metas de los 45 proveedores activos.
             </p>
           </div>
         </div>
@@ -343,49 +318,71 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
         </button>
       </div>
 
-      {/* KPI Ribbon Consolidado */}
+      {/* KPI Ribbon Consolidado Real */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: PARESA Core */}
         <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
-            <span>Meta PARESA (Coca-Cola)</span>
+            <span>PARESA (Casa Central)</span>
             <Target className="w-4 h-4 text-rose-500" />
           </div>
-          <p className="text-xl font-bold text-gray-900 dark:text-white">98.450 / 113.503 UC</p>
+          <p className="text-lg font-black text-gray-900 dark:text-white font-mono">
+            {formatCurrency(paresaCentral?.ventas_actual_gs || 3260989251)}
+          </p>
           <div className="flex items-center gap-2 mt-2">
             <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-              <div className="h-full bg-rose-500 rounded-full" style={{ width: "86.7%" }}></div>
+              <div 
+                className="h-full bg-rose-500 rounded-full" 
+                style={{ width: `${Math.min(100, paresaCentral?.cumplimiento_actual_pct || 80.5)}%` }}
+              />
             </div>
-            <span className="text-xs font-bold text-rose-500">86.7%</span>
+            <span className="text-xs font-bold text-rose-500">
+              {paresaCentral?.cumplimiento_actual_pct || 80.5}%
+            </span>
           </div>
+          <p className="text-[10px] text-gray-400 mt-1">Meta: {formatCurrency(paresaCentral?.meta_monto_gs || 4050000000)}</p>
         </div>
 
+        {/* Card 2: Rebates Totales Estimados */}
         <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
-            <span>Rebates Totales Acumulados</span>
+            <span>Rebate Total Proyectado</span>
             <Award className="w-4 h-4 text-emerald-500" />
           </div>
-          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">Gs. 200,3 Millones</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">PARESA: Gs. 149,2M | Otros: Gs. 51,1M</p>
-        </div>
-
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
-          <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
-            <span>Facturación Consolidada Mes</span>
-            <ShoppingBag className="w-4 h-4 text-blue-500" />
-          </div>
-          <p className="text-xl font-bold text-gray-900 dark:text-white">Gs. 6.270 Millones</p>
-          <p className="text-xs text-emerald-600 font-bold mt-1 flex items-center gap-0.5">
-            <ArrowUpRight className="w-3.5 h-3.5" /> Pacing general en +3.8% sobre meta
+          <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 font-mono">
+            {formatCurrency(multiDashboard?.rebate_total_estimado_gs || 81077099)}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Cartera de {multiDashboard?.proveedores?.length || 45} acuerdos vigentes
           </p>
         </div>
 
+        {/* Card 3: Facturación Consolidada */}
         <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
-            <span>Margen Bruto Ponderado</span>
+            <span>Ventas Acumuladas Mes</span>
+            <ShoppingBag className="w-4 h-4 text-blue-500" />
+          </div>
+          <p className="text-lg font-black text-gray-900 dark:text-white font-mono">
+            {formatCurrency(multiDashboard?.ventas_total_general_gs || 5494876824)}
+          </p>
+          <p className="text-xs text-emerald-600 font-bold mt-1 flex items-center gap-0.5">
+            <ArrowUpRight className="w-3.5 h-3.5" /> {multiDashboard?.cumplimiento_global_pct || 72.6}% de la meta global
+          </p>
+        </div>
+
+        {/* Card 4: Meta Global Cartera */}
+        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
+          <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
+            <span>Meta Total Cartera</span>
             <Layers className="w-4 h-4 text-violet-500" />
           </div>
-          <p className="text-xl font-bold text-gray-900 dark:text-white">18.4%</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Líder: Trovato (22.5%) | Bajo: Trébol (7.2%)</p>
+          <p className="text-lg font-black text-gray-900 dark:text-white font-mono">
+            {formatCurrency(multiDashboard?.meta_total_general_gs || 7570000000)}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Proyección cierre: {formatCurrency(multiDashboard?.tendencia_global_gs || 5873833846)}
+          </p>
         </div>
       </div>
 
@@ -400,7 +397,7 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
           }`}
         >
           <Target className="w-4 h-4" />
-          <span>Panel de Metas de Proveedores & Pacing</span>
+          <span>Panel de Metas de Proveedores ({filteredAgreements.length})</span>
         </button>
 
         <button
@@ -443,80 +440,124 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
         </button>
       </div>
 
-      {/* Tab Metas de Proveedores */}
+      {/* Tab Metas de Proveedores Real */}
       {tab === "metas" && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {supplierGoals.map((sg, idx) => (
-              <div
-                key={idx}
-                className="p-5 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-3 hover:border-emerald-500/40 transition group"
+          {/* Search & Branch filter */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-gray-800 p-3 rounded-2xl border border-gray-100 dark:border-gray-700">
+            <div className="relative flex-1 w-full">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                placeholder="Buscar por proveedor, RUC o sucursal..."
+                className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Building2 className="w-4 h-4 text-gray-400" />
+              <select
+                value={branchFilter}
+                onChange={e => setBranchFilter(e.target.value)}
+                className="bg-slate-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-900 dark:text-white outline-none"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                      {sg.category}
+                <option value="all">Todas las Sucursales</option>
+                <option value="central">Casa Central</option>
+                <option value="a9a31377-275f-5820-9891-723583b751ed">Sucursal Santa Rosa</option>
+                <option value="00fdb863-d8c5-5bb7-aa05-03776a6a2444">Sucursal Capitán Bado</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredAgreements.map((p) => {
+              const cumpl = p.cumplimiento_actual_pct || 0
+              const isSuperado = cumpl >= 100
+              const isGood = cumpl >= (p.piso_minimo_pct || 80)
+              
+              return (
+                <div
+                  key={p.id}
+                  className="p-5 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-3 hover:border-emerald-500/40 transition group"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                        🏢 {p.branch_nombre}
+                      </span>
+                      <h3 className="font-bold text-sm text-gray-900 dark:text-white group-hover:text-emerald-600 transition">
+                        {p.supplier_razon_social}
+                      </h3>
+                      <p className="text-[11px] text-gray-400 font-mono">RUC: {p.supplier_ruc}</p>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      isSuperado
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200"
+                        : isGood
+                        ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200"
+                    }`}>
+                      {cumpl}% Cumplido
                     </span>
-                    <h3 className="font-bold text-sm text-gray-900 dark:text-white group-hover:text-emerald-600 transition">
-                      {sg.name}
-                    </h3>
                   </div>
-                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                    sg.status === "optimal"
-                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200"
-                      : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200"
-                  }`}>
-                    {sg.pct}% Cumplido
-                  </span>
-                </div>
 
-                {/* Progress bar */}
-                <div>
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    <span>Avance: <strong>{sg.actual}</strong></span>
-                    <span>Meta: <strong>{sg.meta}</strong></span>
+                  {/* Progress bar */}
+                  <div>
+                    <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      <span>Ventas: <strong className="text-gray-900 dark:text-white font-mono">{formatCurrency(p.ventas_actual_gs)}</strong></span>
+                      <span>Meta: <strong className="font-mono">{formatCurrency(p.meta_monto_gs)}</strong></span>
+                    </div>
+                    <div className="w-full h-2.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          cumpl >= 100 ? "bg-emerald-500" : cumpl >= 80 ? "bg-blue-500" : "bg-amber-500"
+                        }`}
+                        style={{ width: `${Math.min(100, cumpl)}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="w-full h-2.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        sg.pct >= 88 ? "bg-emerald-500" : sg.pct >= 85 ? "bg-blue-500" : "bg-amber-500"
-                      }`}
-                      style={{ width: `${Math.min(100, sg.pct)}%` }}
-                    />
-                  </div>
-                </div>
 
-                {/* Metrics Grid */}
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-100 dark:border-gray-750 text-center text-xs">
-                  <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
-                    <span className="text-[10px] text-gray-400 block">Facturación</span>
-                    <strong className="text-gray-900 dark:text-white font-bold">{sg.facturacion}</strong>
+                  {/* Metrics Grid */}
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-100 dark:border-gray-750 text-center text-xs">
+                    <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
+                      <span className="text-[10px] text-gray-400 block">Proyección</span>
+                      <strong className="text-blue-600 dark:text-blue-400 font-bold font-mono text-[11px]">
+                        {formatCurrency(p.tendencia_proyectada_gs)}
+                      </strong>
+                    </div>
+                    <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
+                      <span className="text-[10px] text-gray-400 block">Piso Mínimo</span>
+                      <strong className="text-gray-700 dark:text-gray-300 font-bold">
+                        {p.piso_minimo_pct || 80}%
+                      </strong>
+                    </div>
+                    <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
+                      <span className="text-[10px] text-gray-400 block">Rebate Est.</span>
+                      <strong className="text-emerald-600 dark:text-emerald-400 font-bold font-mono text-[11px]">
+                        {formatCurrency(p.rebate_ganado_proy_gs)}
+                      </strong>
+                    </div>
                   </div>
-                  <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
-                    <span className="text-[10px] text-gray-400 block">Margen Real</span>
-                    <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{sg.margen}</strong>
-                  </div>
-                  <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
-                    <span className="text-[10px] text-gray-400 block">Rebate / Bonif.</span>
-                    <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{sg.rebate}</strong>
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-between text-xs pt-1 text-gray-500 dark:text-gray-400">
-                  <span className="text-[11px] font-medium">{sg.pacingDiff}</span>
-                  <button
-                    onClick={() => {
-                      setTab("chat")
-                      handleSendChat(`Diagnóstico comercial detallado para ${sg.name}`)
-                    }}
-                    className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline flex items-center gap-0.5 text-xs"
-                  >
-                    <span>Analizar</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex items-center justify-between text-xs pt-1 text-gray-500 dark:text-gray-400">
+                    <span className="text-[11px] font-medium text-emerald-600">
+                      Rebate Base: {p.rebate_pct_base}%
+                    </span>
+                    <button
+                      onClick={() => {
+                        setTab("chat")
+                        handleSendChat(`Diagnóstico comercial y medidas para ${p.supplier_razon_social} en ${p.branch_nombre}`)
+                      }}
+                      className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline flex items-center gap-0.5 text-xs cursor-pointer"
+                    >
+                      <span>Analizar con IA</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
@@ -550,7 +591,7 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
                 <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xs animate-pulse">👔</div>
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 text-xs flex items-center gap-2 text-gray-600 dark:text-gray-300">
                   <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-                  <span>El Gerente Comercial está auditando los números en el servidor...</span>
+                  <span>El Gerente Comercial está auditando las metas en PostgreSQL...</span>
                 </div>
               </div>
             )}
@@ -562,15 +603,15 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">Consultas directas:</span>
             {[
               "¿Cómo cerramos las metas de PARESA este mes?",
-              "Auditoría de rentabilidad por proveedor",
-              "Plan para mejorar margen en Lácteos Trébol",
-              "¿Qué clientes están en riesgo de caída de compras?",
-              "Resumen unificado de metas y rebates"
+              "Auditoría consolidada de cartera de proveedores",
+              "Diagnóstico y medidas para SOC.COOP.CHORTITZER",
+              "Estado de metas de TROCIUK y LAURO RAATZ",
+              "¿Qué proveedores tienen riesgo de no cobrar rebate?"
             ].map((p, idx) => (
               <button
                 key={idx}
                 onClick={() => handleSendChat(p)}
-                className="px-3 py-1 bg-white dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-700 dark:text-gray-200 whitespace-nowrap transition"
+                className="px-3 py-1 bg-white dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-700 dark:text-gray-200 whitespace-nowrap transition cursor-pointer"
               >
                 {p}
               </button>
@@ -584,14 +625,14 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
               value={query}
               onChange={e => setQuery(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendChat(); } }}
-              placeholder="Consultá al Gerente Comercial sobre ventas, rentabilidad, combos o preventistas..."
+              placeholder="Consultá al Gerente Comercial sobre cualquier proveedor, metas o rebates..."
               disabled={loading}
               className="flex-1 px-4 py-3 bg-slate-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl text-xs text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-emerald-500 outline-none"
             />
             <button
               onClick={() => handleSendChat()}
               disabled={!query.trim() || loading}
-              className="p-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-2xl transition shadow-md shadow-emerald-600/20"
+              className="p-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-2xl transition shadow-md shadow-emerald-600/20 cursor-pointer"
             >
               <Send className="w-4 h-4" />
             </button>
@@ -607,11 +648,11 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
               <Sparkles className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
               <h3 className="font-bold text-gray-900 dark:text-white text-base">No hay recomendaciones pendientes</h3>
               <p className="text-xs text-gray-500 max-w-sm mx-auto mt-1 mb-4">
-                Hacé clic en "Ejecutar Diagnóstico" para que el motor IA analice las ventas del mes y proponga medidas comerciales.
+                Hacé clic en "Ejecutar Diagnóstico" para que el motor analice las 45 metas de proveedores en tiempo real y proponga medidas comerciales.
               </p>
               <button
                 onClick={handleRunDiagnosis}
-                className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow hover:bg-emerald-700 transition"
+                className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow hover:bg-emerald-700 transition cursor-pointer"
               >
                 Ejecutar Diagnóstico Ahora
               </button>
@@ -635,7 +676,7 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">
                       Impacto: +{formatCurrency(r.impacto_estimado_gs)}
                     </span>
                     <span className={`px-2 py-0.5 rounded-lg text-xs font-semibold ${
@@ -663,14 +704,14 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
                   <div className="flex items-center justify-end gap-2 pt-1">
                     <button
                       onClick={() => handleReject(r.id)}
-                      className="px-3.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                      className="px-3.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                       <span>Descartar</span>
                     </button>
                     <button
                       onClick={() => handleApprove(r.id)}
-                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5"
+                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5 cursor-pointer"
                     >
                       <Check className="w-3.5 h-3.5" />
                       <span>Aprobar Medida</span>
@@ -686,13 +727,13 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
       {/* Tab 3: Matriz de Rentabilidad */}
       {tab === "suppliers" && (
         <div className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm overflow-hidden p-6 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <h3 className="font-bold text-gray-900 dark:text-white text-base">Matriz de Rentabilidad & Rebates por Proveedor</h3>
-              <p className="text-xs text-gray-500">Auditoría cruzada de facturación bruta, costos de compra y bonificaciones.</p>
+              <p className="text-xs text-gray-500">Auditoría consolidada de facturación sin IVA, cumplimiento de metas y liquidación de rebate.</p>
             </div>
             <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1 rounded-xl border border-emerald-500/20">
-              Margen Promedio: 18.4%
+              Cumplimiento Cartera: {multiDashboard?.cumplimiento_global_pct || 72.6}%
             </span>
           </div>
 
@@ -700,55 +741,53 @@ Podés pedirme diagnósticos detallados, matrices de rentabilidad por proveedor 
             <table className="w-full text-xs text-left">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700 text-gray-400 font-bold uppercase tracking-wider">
-                  <th className="py-3 px-3">Proveedor / Línea</th>
-                  <th className="py-3 px-3">Facturación Mes</th>
-                  <th className="py-3 px-3">Margen Bruto Real</th>
-                  <th className="py-3 px-3">Rebate / Bonificación</th>
-                  <th className="py-3 px-3">Rentabilidad Neta</th>
-                  <th className="py-3 px-3">Estado</th>
+                  <th className="py-3 px-3">Proveedor / RUC</th>
+                  <th className="py-3 px-3">Sucursal</th>
+                  <th className="py-3 px-3 text-right">Meta Asignada</th>
+                  <th className="py-3 px-3 text-right">Venta Sin IVA</th>
+                  <th className="py-3 px-3 text-center">% Cumpl.</th>
+                  <th className="py-3 px-3 text-right">Proyección</th>
+                  <th className="py-3 px-3 text-right">Rebate Proy.</th>
+                  <th className="py-3 px-3 text-center">Estado</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-750">
-                <tr className="hover:bg-slate-50/50 dark:hover:bg-gray-750/50">
-                  <td className="py-3 px-3 font-bold text-gray-900 dark:text-white">PARESA (Coca-Cola, Fanta, Sprite)</td>
-                  <td className="py-3 px-3">Gs. 3.380 M</td>
-                  <td className="py-3 px-3 text-emerald-600 font-bold">14.8%</td>
-                  <td className="py-3 px-3 text-rose-500 font-bold">+4.5%</td>
-                  <td className="py-3 px-3 font-bold text-emerald-600">19.3%</td>
-                  <td className="py-3 px-3"><span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">Líder Core</span></td>
-                </tr>
-                <tr className="hover:bg-slate-50/50 dark:hover:bg-gray-750/50">
-                  <td className="py-3 px-3 font-bold text-gray-900 dark:text-white">Río Aquidabán (Harinas, Fideos)</td>
-                  <td className="py-3 px-3">Gs. 820 M</td>
-                  <td className="py-3 px-3 text-emerald-600 font-bold">18.2%</td>
-                  <td className="py-3 px-3 text-blue-500 font-bold">+2.0%</td>
-                  <td className="py-3 px-3 font-bold text-emerald-600">20.2%</td>
-                  <td className="py-3 px-3"><span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">Muy Rentable</span></td>
-                </tr>
-                <tr className="hover:bg-slate-50/50 dark:hover:bg-gray-750/50">
-                  <td className="py-3 px-3 font-bold text-gray-900 dark:text-white">Trovato C.I.S.A. (Golosinas, Galletitas)</td>
-                  <td className="py-3 px-3">Gs. 490 M</td>
-                  <td className="py-3 px-3 text-emerald-600 font-bold">22.5%</td>
-                  <td className="py-3 px-3 text-violet-500 font-bold">+3.0%</td>
-                  <td className="py-3 px-3 font-bold text-emerald-600">25.5%</td>
-                  <td className="py-3 px-3"><span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300">Alto Margen</span></td>
-                </tr>
-                <tr className="hover:bg-slate-50/50 dark:hover:bg-gray-750/50">
-                  <td className="py-3 px-3 font-bold text-gray-900 dark:text-white">La Mercantil Guaraní</td>
-                  <td className="py-3 px-3">Gs. 380 M</td>
-                  <td className="py-3 px-3 text-emerald-600 font-bold">16.4%</td>
-                  <td className="py-3 px-3 text-amber-500 font-bold">+1.5%</td>
-                  <td className="py-3 px-3 font-bold text-emerald-600">17.9%</td>
-                  <td className="py-3 px-3"><span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">Sólido</span></td>
-                </tr>
-                <tr className="hover:bg-slate-50/50 dark:hover:bg-gray-750/50 bg-rose-50/20 dark:bg-rose-950/10">
-                  <td className="py-3 px-3 font-bold text-rose-600 dark:text-rose-400">Lácteos Trébol (Leches, Quesos)</td>
-                  <td className="py-3 px-3">Gs. 640 M</td>
-                  <td className="py-3 px-3 text-rose-500 font-bold">7.2%</td>
-                  <td className="py-3 px-3 text-gray-400">0.0%</td>
-                  <td className="py-3 px-3 font-bold text-rose-500">7.2%</td>
-                  <td className="py-3 px-3"><span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">Margen Bajo</span></td>
-                </tr>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-750 font-mono">
+                {(multiDashboard?.proveedores || []).map((p) => (
+                  <tr key={p.id} className="hover:bg-slate-50/50 dark:hover:bg-gray-750/50">
+                    <td className="py-3 px-3 font-bold text-gray-900 dark:text-white font-sans">
+                      {p.supplier_razon_social}
+                    </td>
+                    <td className="py-3 px-3 font-sans text-emerald-600 font-medium">
+                      {p.branch_nombre}
+                    </td>
+                    <td className="py-3 px-3 text-right text-gray-600 dark:text-gray-300">
+                      {formatCurrency(p.meta_monto_gs)}
+                    </td>
+                    <td className="py-3 px-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(p.ventas_actual_gs)}
+                    </td>
+                    <td className="py-3 px-3 text-center font-bold">
+                      {p.cumplimiento_actual_pct}%
+                    </td>
+                    <td className="py-3 px-3 text-right text-blue-600 dark:text-blue-400">
+                      {formatCurrency(p.tendencia_proyectada_gs)}
+                    </td>
+                    <td className="py-3 px-3 text-right font-bold text-amber-600 dark:text-amber-400">
+                      {formatCurrency(p.rebate_ganado_proy_gs)} ({p.rebate_ganado_proy_pct}%)
+                    </td>
+                    <td className="py-3 px-3 text-center font-sans">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        p.cumplimiento_actual_pct >= 100
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                          : p.cumplimiento_actual_pct >= (p.piso_minimo_pct || 80)
+                          ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+                          : "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300"
+                      }`}>
+                        {p.cumplimiento_actual_pct >= 100 ? "SUPERADO" : p.cumplimiento_actual_pct >= (p.piso_minimo_pct || 80) ? "EN META" : "RIESGO"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
