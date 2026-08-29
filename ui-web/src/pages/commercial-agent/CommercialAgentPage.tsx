@@ -1,25 +1,57 @@
 import { useState, useEffect, useRef } from "react"
 import {
-  TrendingUp, BarChart3, Bot, Sparkles, Send, Play, CheckCircle2, XCircle,
-  AlertTriangle, ArrowUpRight, ArrowDownRight, RefreshCw, Layers, Users,
-  ShoppingBag, Target, DollarSign, Check, X, Loader2, ShieldCheck, ChevronRight,
-  Cpu, Award, Calendar, Percent, Zap, Building2, Search
+  TrendingUp, Award, DollarSign, Bot, Sparkles, CheckCircle2, XCircle,
+  Loader2, Search, Filter, Layers, Target, ShoppingBag,
+  ArrowUpRight, ArrowDownRight, Send, AlertTriangle, ChevronRight, HelpCircle
 } from "lucide-react"
-import { api } from "../../api/index"
+import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 
 interface Recommendation {
   id: string
-  categoria: string
+  supplier_id?: string
+  proveedor_nombre?: string
+  branch_nombre?: string
+  tipo: string
   titulo: string
-  diagnostico: string
-  accion_propuesta: string
+  descripcion: string
   impacto_estimado_gs: number
-  urgencia: string
   estado: string
+  piso_cumplimiento_pct?: number
+  created_at: string
   approved_by?: string
-  approved_at?: string
-  rejection_reason?: string
+}
+
+interface MultiSupplierItem {
+  agreement_id: string
+  supplier_id: string
+  supplier_razon_social: string
+  supplier_ruc: string
+  branch_id: string
+  branch_nombre: string
+  meta_monto_gs: number
+  piso_minimo_pct: number
+  rebate_pct_base: number
+  rebate_pct_adicional: number
+  ventas_actual_gs: number
+  cumplimiento_actual_pct: number
+  tendencia_proyectada_gs: number
+  cumplimiento_proyectado_pct: number
+  rebate_ganado_actual_gs: number
+  rebate_ganado_proy_gs: number
+  brecha_para_piso_gs: number
+  estado_meta: "alcanzado" | "en_riesgo" | "critico"
+}
+
+interface MultiDashboardData {
+  mes_consultado: string
+  meta_total_general_gs: number
+  ventas_total_general_gs: number
+  cumplimiento_global_pct: number
+  tendencia_global_gs: number
+  rebate_total_estimado_gs: number
+  total_acuerdos_activos: number
+  proveedores: MultiSupplierItem[]
 }
 
 interface ChatMsg {
@@ -30,54 +62,12 @@ interface ChatMsg {
   diagnostico_key?: string
 }
 
-interface AgreementItem {
-  id: string
-  supplier_id: string
-  supplier_razon_social: string
-  supplier_ruc: string
-  branch_id?: string
-  branch_nombre: string
-  periodo: string
-  nombre_acuerdo: string
-  meta_monto_gs: number
-  tipo_meta: string
-  tipo_retorno: string
-  rebate_pct_base: number
-  piso_minimo_pct: number
-  ventas_actual_gs: number
-  transacciones_count: number
-  skus_vendidos_count: number
-  cumplimiento_actual_pct: number
-  tendencia_proyectada_gs: number
-  cumplimiento_proyectado_pct: number
-  rebate_ganado_actual_pct: number
-  rebate_ganado_actual_gs: number
-  rebate_ganado_proy_pct: number
-  rebate_ganado_proy_gs: number
-  semaforo: "superado" | "en_meta" | "en_riesgo" | "critico"
-  observaciones?: string
-  estado: string
-}
-
-interface MultiDashboardData {
-  periodo: string
-  dias_transcurridos: number
-  dias_totales_mes: number
-  meta_total_general_gs: number
-  ventas_total_general_gs: number
-  cumplimiento_global_pct: number
-  tendencia_global_gs: number
-  cumplimiento_proyectado_global_pct: number
-  rebate_total_estimado_gs: number
-  proveedores: AgreementItem[]
-}
-
 export default function CommercialAgentPage() {
   const { user } = useAuth()
   const rawName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
-  const userName = rawName.toLowerCase().includes("admin") ? "Gustavo" : rawName
+  const userName = rawName.toLowerCase().includes("admin") || rawName.toLowerCase().includes("casa") ? "Gustavo" : rawName
 
-  const [tab, setTab] = useState<"chat" | "metas" | "recommendations" | "suppliers">("metas")
+  const [tab, setTab] = useState<"metas" | "chat" | "recommendations">("metas")
   const [loading, setLoading] = useState(false)
   const [diagnosing, setDiagnosing] = useState(false)
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
@@ -89,11 +79,13 @@ export default function CommercialAgentPage() {
     {
       id: "welcome",
       isUser: false,
-      text: `### 👔 Saludos, ${userName}. Soy el Gerente Comercial IA de Casa Gonzalito.
+      text: `### 👔 Dictamen Comercial — Casa Gonzalito S.R.L.
+Saludos, ${userName}. Soy el Gerente Comercial IA de Casa Gonzalito.
 
-Estoy conectado directamente a la base de datos real de ventas, acuerdos y metas comerciales vigentes para el mes en curso.
+Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y los 45 acuerdos de proveedores vigentes.
 
-Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveedor o planes comerciales para asegurar el cumplimiento de metas y rebates.`,
+• **Metas y Rebates:** Podés pedirme auditorías de avance, proyección de cierre y cálculo de brechas para PARESA, Chortitzer, Trociuk y demás líneas.
+• **Acciones Sugeridas:** Propondré combos promocionales y planes para asegurar el cobro de rebates comerciales antes del fin de mes.`,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ])
@@ -207,7 +199,7 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
     return parts.map((part, i) => {
       if (part.startsWith("**") && part.endsWith("**")) {
         const text = part.slice(2, -2).replace(/\*/g, "")
-        return <strong key={i} className="font-bold text-gray-900 dark:text-white">{text}</strong>
+        return <strong key={i} className="font-bold text-slate-950 dark:text-white">{text}</strong>
       }
       const clean = part.replace(/\*/g, "")
       return <span key={i}>{clean}</span>
@@ -217,14 +209,14 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
   const renderMarkdownText = (content: string) => {
     const lines = content.split('\n').filter(l => l.trim().length > 0)
     return (
-      <div className="space-y-2.5 text-xs leading-relaxed">
+      <div className="space-y-2 text-xs leading-relaxed text-slate-800 dark:text-slate-200">
         {lines.map((line, idx) => {
           const trimmed = line.trim()
           
           if (trimmed.startsWith('###') || trimmed.startsWith('##')) {
             const hText = cleanText(trimmed.replace(/^#+\s*/, ''))
             return (
-              <h4 key={idx} className="font-bold text-gray-900 dark:text-white text-xs mt-3 mb-1 flex items-center gap-1.5 border-b border-gray-100 dark:border-gray-700/60 pb-1">
+              <h4 key={idx} className="font-black text-slate-950 dark:text-white text-xs mt-3 mb-1.5 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700/80 pb-1">
                 <span>{hText}</span>
               </h4>
             )
@@ -233,9 +225,9 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
           if (trimmed.startsWith('•') || trimmed.startsWith('-') || (trimmed.startsWith('*') && !trimmed.startsWith('**'))) {
             const bulletContent = trimmed.replace(/^[•\-*]\s*/, '')
             return (
-              <div key={idx} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/60">
+              <div key={idx} className="flex items-start gap-2 p-2 bg-slate-100/80 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700/70 shadow-2xs">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0"></span>
-                <div className="flex-1 text-gray-800 dark:text-gray-200">
+                <div className="flex-1 text-slate-800 dark:text-slate-200">
                   {renderInlineFormatting(bulletContent)}
                 </div>
               </div>
@@ -247,11 +239,11 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
             const num = numMatch[1]
             const rest = numMatch[2]
             return (
-              <div key={idx} className="flex items-start gap-2 p-2.5 bg-slate-50 dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/60">
-                <span className="w-4 h-4 rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+              <div key={idx} className="flex items-start gap-2.5 p-2.5 bg-slate-100/80 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700/70 shadow-2xs">
+                <span className="w-4 h-4 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 font-black text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
                   {num}
                 </span>
-                <div className="flex-1 text-gray-800 dark:text-gray-200">
+                <div className="flex-1 text-slate-800 dark:text-slate-200">
                   {renderInlineFormatting(rest)}
                 </div>
               </div>
@@ -259,11 +251,11 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
           }
 
           if (trimmed === '---' || trimmed === '--') {
-            return <hr key={idx} className="border-gray-200 dark:border-gray-700 my-2" />
+            return <hr key={idx} className="border-slate-200 dark:border-slate-700 my-2" />
           }
 
           return (
-            <p key={idx} className="text-gray-800 dark:text-gray-200">
+            <p key={idx} className="text-slate-800 dark:text-slate-200 font-normal">
               {renderInlineFormatting(trimmed)}
             </p>
           )
@@ -286,229 +278,210 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300 pb-12">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-emerald-900/40 via-teal-900/30 to-slate-900/60 p-6 rounded-3xl border border-emerald-500/20 backdrop-blur-xl">
+      {/* Header Banner - High Contrast Deep Theme */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 p-6 rounded-3xl border border-slate-800 shadow-xl text-white">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/20 border border-white/20">
-            <TrendingUp className="w-7 h-7" />
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/20 font-black">
+            <TrendingUp className="w-7 h-7 stroke-[2.5]" />
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Gerente Comercial IA</h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                Casa Gonzalito S.R.L.
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center gap-1">
-                <Cpu className="w-3 h-3" /> Minisforum Local (0 Tokens Gemini)
+              <h1 className="text-2xl font-black text-white tracking-tight">Gerente Comercial IA</h1>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                CASA GONZALITO S.R.L.
               </span>
             </div>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">
-              Especialista analítico en rentabilidad mayorista, metas PARESA (Coca-Cola), rutas de preventa y gestión de metas de los 45 proveedores activos.
+            <p className="text-xs text-slate-300 mt-1">
+              Supervisión de Acuerdos de Rebate, Metas por Proveedor, Pacing Comercial y Planes de Acción
             </p>
           </div>
         </div>
 
-        <button
-          onClick={handleRunDiagnosis}
-          disabled={diagnosing}
-          className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-2xl shadow-lg shadow-emerald-600/30 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
-        >
-          {diagnosing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-          <span>{diagnosing ? "Auditando Datos..." : "Ejecutar Diagnóstico"}</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleRunDiagnosis}
+            disabled={diagnosing}
+            className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-500/20 hover:scale-[1.02] cursor-pointer"
+          >
+            {diagnosing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            <span>{diagnosing ? "Auditando Datos..." : "Ejecutar Diagnóstico IA"}</span>
+          </button>
+          <button
+            onClick={loadData}
+            className="px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold transition flex items-center gap-2 border border-white/10 text-white"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Actualizar"}
+          </button>
+        </div>
       </div>
 
       {/* KPI Ribbon Consolidado Real */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: PARESA Core */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
-          <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
+        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-rose-500">
+          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>PARESA (Casa Central)</span>
             <Target className="w-4 h-4 text-rose-500" />
           </div>
-          <p className="text-lg font-black text-gray-900 dark:text-white font-mono">
+          <p className="text-xl font-black text-slate-900 dark:text-white font-mono">
             {formatCurrency(paresaCentral?.ventas_actual_gs || 3260989251)}
           </p>
           <div className="flex items-center gap-2 mt-2">
-            <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div className="flex-1 h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
               <div 
                 className="h-full bg-rose-500 rounded-full" 
                 style={{ width: `${Math.min(100, paresaCentral?.cumplimiento_actual_pct || 80.5)}%` }}
               />
             </div>
-            <span className="text-xs font-bold text-rose-500">
+            <span className="text-xs font-black text-rose-600 dark:text-rose-400">
               {paresaCentral?.cumplimiento_actual_pct || 80.5}%
             </span>
           </div>
-          <p className="text-[10px] text-gray-400 mt-1">Meta: {formatCurrency(paresaCentral?.meta_monto_gs || 4050000000)}</p>
+          <p className="text-[11px] text-slate-400 mt-1 font-medium">Meta: {formatCurrency(paresaCentral?.meta_monto_gs || 4050000000)}</p>
         </div>
 
         {/* Card 2: Rebates Totales Estimados */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
-          <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
+        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-emerald-500">
+          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Rebate Total Proyectado</span>
             <Award className="w-4 h-4 text-emerald-500" />
           </div>
-          <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 font-mono">
+          <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
             {formatCurrency(multiDashboard?.rebate_total_estimado_gs || 81077099)}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">
             Cartera de {multiDashboard?.proveedores?.length || 45} acuerdos vigentes
           </p>
         </div>
 
         {/* Card 3: Facturación Consolidada */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
-          <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
+        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-blue-500">
+          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Ventas Acumuladas Mes</span>
             <ShoppingBag className="w-4 h-4 text-blue-500" />
           </div>
-          <p className="text-lg font-black text-gray-900 dark:text-white font-mono">
+          <p className="text-xl font-black text-slate-900 dark:text-white font-mono">
             {formatCurrency(multiDashboard?.ventas_total_general_gs || 5494876824)}
           </p>
-          <p className="text-xs text-emerald-600 font-bold mt-1 flex items-center gap-0.5">
+          <p className="text-xs text-blue-600 dark:text-blue-400 font-bold mt-1 flex items-center gap-0.5">
             <ArrowUpRight className="w-3.5 h-3.5" /> {multiDashboard?.cumplimiento_global_pct || 72.6}% de la meta global
           </p>
         </div>
 
         {/* Card 4: Meta Global Cartera */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
-          <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-medium mb-1">
+        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-violet-500">
+          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Meta Total Cartera</span>
             <Layers className="w-4 h-4 text-violet-500" />
           </div>
-          <p className="text-lg font-black text-gray-900 dark:text-white font-mono">
+          <p className="text-xl font-black text-slate-900 dark:text-white font-mono">
             {formatCurrency(multiDashboard?.meta_total_general_gs || 7570000000)}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Proyección cierre: {formatCurrency(multiDashboard?.tendencia_global_gs || 5873833846)}
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">
+            Proyección: {formatCurrency(multiDashboard?.tendencia_global_gs || 5873833846)}
           </p>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700 pb-2 overflow-x-auto">
+      {/* Navigation Tabs */}
+      <div className="flex gap-2 border-b border-slate-200 dark:border-slate-700 pb-2 overflow-x-auto">
         <button
           onClick={() => setTab("metas")}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             tab === "metas"
               ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
-              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50"
+              : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50"
           }`}
         >
           <Target className="w-4 h-4" />
           <span>Panel de Metas de Proveedores ({filteredAgreements.length})</span>
         </button>
-
         <button
           onClick={() => setTab("chat")}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             tab === "chat"
               ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
-              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50"
+              : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50"
           }`}
         >
           <Bot className="w-4 h-4" />
-          <span>Consola Analítica (Chat IA)</span>
+          <span>Consola de Chat IA</span>
         </button>
-
         <button
           onClick={() => setTab("recommendations")}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             tab === "recommendations"
               ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
-              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50"
+              : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50"
           }`}
         >
-          <Zap className="w-4 h-4" />
-          <span>Medidas & Recomendaciones</span>
-          <span className="px-1.5 py-0.2 text-[10px] bg-white/20 rounded-full font-mono">
-            {recommendations.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setTab("suppliers")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-            tab === "suppliers"
-              ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
-              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50"
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          <span>Matriz de Rentabilidad Detallada</span>
+          <Sparkles className="w-4 h-4" />
+          <span>Planes y Recomendaciones ({recommendations.length})</span>
         </button>
       </div>
 
-      {/* Tab Metas de Proveedores Real */}
+      {/* Tab: Metas de Proveedores */}
       {tab === "metas" && (
         <div className="space-y-4">
-          {/* Search & Branch filter */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-gray-800 p-3 rounded-2xl border border-gray-100 dark:border-gray-700">
+          {/* Controls: Search and Branch Filter */}
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
             <div className="relative flex-1 w-full">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
+                placeholder="Buscar proveedor por nombre o RUC..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                placeholder="Buscar por proveedor, RUC o sucursal..."
-                className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full pl-10 pr-4 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
               />
             </div>
+
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <Building2 className="w-4 h-4 text-gray-400" />
+              <Filter className="w-4 h-4 text-slate-400" />
               <select
                 value={branchFilter}
                 onChange={e => setBranchFilter(e.target.value)}
-                className="bg-slate-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-900 dark:text-white outline-none"
+                className="select select-bordered select-sm text-xs bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium"
               >
-                <option value="all">Todas las Sucursales</option>
-                <option value="central">Casa Central</option>
-                <option value="a9a31377-275f-5820-9891-723583b751ed">Sucursal Santa Rosa</option>
-                <option value="00fdb863-d8c5-5bb7-aa05-03776a6a2444">Sucursal Capitán Bado</option>
+                <option value="all">Todas las Sucursales ({multiDashboard?.proveedores?.length || 0})</option>
+                <option value="central">Solo Casa Central</option>
               </select>
             </div>
           </div>
 
+          {/* Agreements Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredAgreements.map((p) => {
-              const cumpl = p.cumplimiento_actual_pct || 0
-              const isSuperado = cumpl >= 100
-              const isGood = cumpl >= (p.piso_minimo_pct || 80)
-              
+            {filteredAgreements.map(p => {
+              const cumpl = Math.round(p.cumplimiento_actual_pct || 0)
+              const estadoBadge = p.estado_meta === "alcanzado"
+                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40"
+                : p.estado_meta === "en_riesgo"
+                ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40"
+                : "bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/40"
+
               return (
-                <div
-                  key={p.id}
-                  className="p-5 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-3 hover:border-emerald-500/40 transition group"
-                >
-                  <div className="flex items-start justify-between gap-2">
+                <div key={p.agreement_id} className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 hover:border-emerald-500/50 transition">
+                  <div className="flex justify-between items-start">
                     <div>
-                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
-                        🏢 {p.branch_nombre}
-                      </span>
-                      <h3 className="font-bold text-sm text-gray-900 dark:text-white group-hover:text-emerald-600 transition">
+                      <h4 className="font-bold text-xs text-slate-900 dark:text-white leading-tight">
                         {p.supplier_razon_social}
-                      </h3>
-                      <p className="text-[11px] text-gray-400 font-mono">RUC: {p.supplier_ruc}</p>
+                      </h4>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        RUC: {p.supplier_ruc} • {p.branch_nombre}
+                      </p>
                     </div>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                      isSuperado
-                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200"
-                        : isGood
-                        ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200"
-                        : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200"
-                    }`}>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black border uppercase ${estadoBadge}`}>
                       {cumpl}% Cumplido
                     </span>
                   </div>
 
                   {/* Progress bar */}
                   <div>
-                    <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      <span>Ventas: <strong className="text-gray-900 dark:text-white font-mono">{formatCurrency(p.ventas_actual_gs)}</strong></span>
-                      <span>Meta: <strong className="font-mono">{formatCurrency(p.meta_monto_gs)}</strong></span>
+                    <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mb-1">
+                      <span>Ventas: <strong className="text-slate-900 dark:text-white font-mono">{formatCurrency(p.ventas_actual_gs)}</strong></span>
+                      <span>Meta: <strong className="font-mono text-slate-700 dark:text-slate-300">{formatCurrency(p.meta_monto_gs)}</strong></span>
                     </div>
-                    <div className="w-full h-2.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all ${
                           cumpl >= 100 ? "bg-emerald-500" : cumpl >= 80 ? "bg-blue-500" : "bg-amber-500"
@@ -519,29 +492,29 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
                   </div>
 
                   {/* Metrics Grid */}
-                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-100 dark:border-gray-750 text-center text-xs">
-                    <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
-                      <span className="text-[10px] text-gray-400 block">Proyección</span>
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-center text-xs">
+                    <div className="p-2 bg-slate-50 dark:bg-slate-800/80 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block font-bold">Proyección</span>
                       <strong className="text-blue-600 dark:text-blue-400 font-bold font-mono text-[11px]">
                         {formatCurrency(p.tendencia_proyectada_gs)}
                       </strong>
                     </div>
-                    <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
-                      <span className="text-[10px] text-gray-400 block">Piso Mínimo</span>
-                      <strong className="text-gray-700 dark:text-gray-300 font-bold">
+                    <div className="p-2 bg-slate-50 dark:bg-slate-800/80 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block font-bold">Piso Mínimo</span>
+                      <strong className="text-slate-700 dark:text-slate-200 font-bold">
                         {p.piso_minimo_pct || 80}%
                       </strong>
                     </div>
-                    <div className="p-2 bg-slate-50 dark:bg-gray-750 rounded-xl">
-                      <span className="text-[10px] text-gray-400 block">Rebate Est.</span>
+                    <div className="p-2 bg-slate-50 dark:bg-slate-800/80 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block font-bold">Rebate Est.</span>
                       <strong className="text-emerald-600 dark:text-emerald-400 font-bold font-mono text-[11px]">
                         {formatCurrency(p.rebate_ganado_proy_gs)}
                       </strong>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-xs pt-1 text-gray-500 dark:text-gray-400">
-                    <span className="text-[11px] font-medium text-emerald-600">
+                  <div className="flex items-center justify-between text-xs pt-1">
+                    <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
                       Rebate Base: {p.rebate_pct_base}%
                     </span>
                     <button
@@ -562,25 +535,44 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
         </div>
       )}
 
-      {/* Tab 1: Chat Analítico */}
+      {/* Tab: Chat Analítico */}
       {tab === "chat" && (
-        <div className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm flex flex-col h-[560px] overflow-hidden">
+        <div className="bg-slate-900 text-slate-100 rounded-3xl border border-slate-800 shadow-xl flex flex-col h-[600px] overflow-hidden">
+          {/* Chat Header */}
+          <div className="p-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-black">
+                👔
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                  Gerente Comercial IA
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                </h3>
+                <p className="text-[11px] text-slate-400">Auditor de Metas, Acuerdos y Estrategia</p>
+              </div>
+            </div>
+            <div className="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">
+              PostgreSQL + Ollama Local
+            </div>
+          </div>
+
           {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50/40 dark:bg-gray-900/40">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900/60">
             {chatHistory.map((m) => (
               <div key={m.id} className={`flex gap-3 ${m.isUser ? "justify-end" : "justify-start"}`}>
                 {!m.isUser && (
-                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shadow flex-shrink-0">
-                    👔
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold shrink-0">
+                    IA
                   </div>
                 )}
-                <div className={`max-w-[85%] rounded-2xl p-4 shadow-sm ${
+                <div className={`max-w-[85%] rounded-2xl p-4 text-xs leading-relaxed ${
                   m.isUser
-                    ? "bg-emerald-600 text-white rounded-tr-none font-medium"
-                    : "bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200/80 dark:border-gray-700/80 rounded-tl-none"
+                    ? "bg-emerald-600 text-white rounded-br-none shadow-md font-medium"
+                    : "bg-slate-800 border border-slate-700 text-slate-200 rounded-bl-none shadow-md"
                 }`}>
                   {m.isUser ? <p className="text-xs whitespace-pre-wrap">{m.text}</p> : renderMarkdownText(m.text)}
-                  <span className={`block text-[10px] mt-2 ${m.isUser ? "text-emerald-100" : "text-gray-400"}`}>
+                  <span className={`block text-[10px] mt-2 text-right ${m.isUser ? "text-emerald-100" : "text-slate-400"}`}>
                     {m.time}
                   </span>
                 </div>
@@ -588,9 +580,9 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
             ))}
             {loading && (
               <div className="flex gap-3 items-center">
-                <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xs animate-pulse">👔</div>
-                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 text-xs flex items-center gap-2 text-gray-600 dark:text-gray-300">
-                  <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold animate-pulse">👔</div>
+                <div className="bg-slate-800 border border-slate-700 rounded-2xl p-3 text-xs flex items-center gap-2 text-slate-300">
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
                   <span>El Gerente Comercial está auditando las metas en PostgreSQL...</span>
                 </div>
               </div>
@@ -599,8 +591,8 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
           </div>
 
           {/* Quick Prompts */}
-          <div className="px-4 py-2 bg-gray-50/80 dark:bg-gray-850 border-t border-gray-200/60 dark:border-gray-700/60 flex items-center gap-2 overflow-x-auto">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">Consultas directas:</span>
+          <div className="px-4 py-2 bg-slate-950/80 border-t border-slate-800 flex items-center gap-2 overflow-x-auto text-[11px]">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Consultas:</span>
             {[
               "¿Cómo cerramos las metas de PARESA este mes?",
               "Auditoría consolidada de cartera de proveedores",
@@ -611,7 +603,7 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
               <button
                 key={idx}
                 onClick={() => handleSendChat(p)}
-                className="px-3 py-1 bg-white dark:bg-gray-800 hover:bg-emerald-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-700 dark:text-gray-200 whitespace-nowrap transition cursor-pointer"
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-lg border border-slate-700 whitespace-nowrap transition cursor-pointer"
               >
                 {p}
               </button>
@@ -619,7 +611,7 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
           </div>
 
           {/* Chat Input */}
-          <div className="p-3 bg-white dark:bg-gray-800 border-t border-gray-200/80 dark:border-gray-700/80 flex items-center gap-2">
+          <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
             <input
               type="text"
               value={query}
@@ -627,12 +619,12 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendChat(); } }}
               placeholder="Consultá al Gerente Comercial sobre cualquier proveedor, metas o rebates..."
               disabled={loading}
-              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl text-xs text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
             <button
               onClick={() => handleSendChat()}
               disabled={!query.trim() || loading}
-              className="p-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-2xl transition shadow-md shadow-emerald-600/20 cursor-pointer"
+              className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold rounded-xl transition shadow-md shadow-emerald-500/20 cursor-pointer"
             >
               <Send className="w-4 h-4" />
             </button>
@@ -640,157 +632,69 @@ Podés pedirme diagnósticos detallados, auditorías de rentabilidad por proveed
         </div>
       )}
 
-      {/* Tab 2: Recomendaciones */}
+      {/* Tab: Recomendaciones */}
       {tab === "recommendations" && (
         <div className="space-y-4">
           {recommendations.length === 0 ? (
-            <div className="p-12 text-center bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700">
+            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
               <Sparkles className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
-              <h3 className="font-bold text-gray-900 dark:text-white text-base">No hay recomendaciones pendientes</h3>
-              <p className="text-xs text-gray-500 max-w-sm mx-auto mt-1 mb-4">
-                Hacé clic en "Ejecutar Diagnóstico" para que el motor analice las 45 metas de proveedores en tiempo real y proponga medidas comerciales.
+              <h3 className="font-bold text-slate-900 dark:text-white text-base">No hay recomendaciones pendientes</h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
+                Hacé clic en <strong>Ejecutar Diagnóstico IA</strong> para que el Gerente Comercial analice las 45 metas y proponga acciones de venta.
               </p>
               <button
                 onClick={handleRunDiagnosis}
-                className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow hover:bg-emerald-700 transition cursor-pointer"
+                disabled={diagnosing}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-2"
               >
-                Ejecutar Diagnóstico Ahora
+                {diagnosing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                Generar Recomendaciones Ahora
               </button>
             </div>
           ) : (
-            recommendations.map((r) => (
-              <div
-                key={r.id}
-                className="p-5 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-3"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5">
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                      r.urgencia === "alta"
-                        ? "bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200"
-                        : "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400 border border-amber-200"
-                    }`}>
-                      Urgencia {r.urgencia}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {recommendations.map(r => (
+                <div key={r.id} className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 border-l-4 border-l-emerald-500">
+                  <div className="flex justify-between items-start">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 uppercase">
+                      {r.tipo}
                     </span>
-                    <h3 className="font-bold text-gray-900 dark:text-white text-sm">{r.titulo}</h3>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                      Impacto: +{formatCurrency(r.impacto_estimado_gs)}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-lg text-xs font-semibold ${
-                      r.estado === "aprobada"
-                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300"
-                        : r.estado === "rechazada"
-                        ? "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
-                        : "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
-                    }`}>
-                      {r.estado.toUpperCase()}
+                    <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                      Impacto: {formatCurrency(r.impacto_estimado_gs)}
                     </span>
                   </div>
-                </div>
 
-                <div className="p-3 bg-slate-50 dark:bg-gray-900/60 rounded-2xl border border-gray-100 dark:border-gray-700/60 text-xs space-y-1.5">
-                  <p className="text-gray-600 dark:text-gray-300">
-                    <strong className="text-gray-900 dark:text-white">Diagnóstico:</strong> {r.diagnostico}
-                  </p>
-                  <p className="text-emerald-700 dark:text-emerald-300 font-medium">
-                    <strong>Acción Propuesta:</strong> {r.accion_propuesta}
-                  </p>
-                </div>
+                  <h4 className="font-bold text-sm text-slate-900 dark:text-white">{r.titulo}</h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{r.descripcion}</p>
 
-                {r.estado === "pendiente" && (
-                  <div className="flex items-center justify-end gap-2 pt-1">
-                    <button
-                      onClick={() => handleReject(r.id)}
-                      className="px-3.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                      <span>Descartar</span>
-                    </button>
-                    <button
-                      onClick={() => handleApprove(r.id)}
-                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Aprobar Medida</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      )}
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-xs">
+                    <span className="text-slate-400 text-[11px]">{new Date(r.created_at).toLocaleDateString('es-PY')}</span>
 
-      {/* Tab 3: Matriz de Rentabilidad */}
-      {tab === "suppliers" && (
-        <div className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm overflow-hidden p-6 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="font-bold text-gray-900 dark:text-white text-base">Matriz de Rentabilidad & Rebates por Proveedor</h3>
-              <p className="text-xs text-gray-500">Auditoría consolidada de facturación sin IVA, cumplimiento de metas y liquidación de rebate.</p>
-            </div>
-            <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1 rounded-xl border border-emerald-500/20">
-              Cumplimiento Cartera: {multiDashboard?.cumplimiento_global_pct || 72.6}%
-            </span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700 text-gray-400 font-bold uppercase tracking-wider">
-                  <th className="py-3 px-3">Proveedor / RUC</th>
-                  <th className="py-3 px-3">Sucursal</th>
-                  <th className="py-3 px-3 text-right">Meta Asignada</th>
-                  <th className="py-3 px-3 text-right">Venta Sin IVA</th>
-                  <th className="py-3 px-3 text-center">% Cumpl.</th>
-                  <th className="py-3 px-3 text-right">Proyección</th>
-                  <th className="py-3 px-3 text-right">Rebate Proy.</th>
-                  <th className="py-3 px-3 text-center">Estado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-750 font-mono">
-                {(multiDashboard?.proveedores || []).map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50/50 dark:hover:bg-gray-750/50">
-                    <td className="py-3 px-3 font-bold text-gray-900 dark:text-white font-sans">
-                      {p.supplier_razon_social}
-                    </td>
-                    <td className="py-3 px-3 font-sans text-emerald-600 font-medium">
-                      {p.branch_nombre}
-                    </td>
-                    <td className="py-3 px-3 text-right text-gray-600 dark:text-gray-300">
-                      {formatCurrency(p.meta_monto_gs)}
-                    </td>
-                    <td className="py-3 px-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
-                      {formatCurrency(p.ventas_actual_gs)}
-                    </td>
-                    <td className="py-3 px-3 text-center font-bold">
-                      {p.cumplimiento_actual_pct}%
-                    </td>
-                    <td className="py-3 px-3 text-right text-blue-600 dark:text-blue-400">
-                      {formatCurrency(p.tendencia_proyectada_gs)}
-                    </td>
-                    <td className="py-3 px-3 text-right font-bold text-amber-600 dark:text-amber-400">
-                      {formatCurrency(p.rebate_ganado_proy_gs)} ({p.rebate_ganado_proy_pct}%)
-                    </td>
-                    <td className="py-3 px-3 text-center font-sans">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        p.cumplimiento_actual_pct >= 100
-                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                          : p.cumplimiento_actual_pct >= (p.piso_minimo_pct || 80)
-                          ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
-                          : "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300"
-                      }`}>
-                        {p.cumplimiento_actual_pct >= 100 ? "SUPERADO" : p.cumplimiento_actual_pct >= (p.piso_minimo_pct || 80) ? "EN META" : "RIESGO"}
+                    {r.estado === "pendiente" ? (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleReject(r.id)}
+                          className="px-3 py-1.5 bg-rose-100 dark:bg-rose-950/50 hover:bg-rose-200 text-rose-700 dark:text-rose-300 rounded-lg font-bold flex items-center gap-1 text-xs"
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Descartar
+                        </button>
+                        <button
+                          onClick={() => handleApprove(r.id)}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold flex items-center gap-1 text-xs shadow-sm"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Aprobar Plan
+                        </button>
+                      </div>
+                    ) : (
+                      <span className={`font-bold capitalize text-xs ${r.estado === "aprobada" ? "text-emerald-600" : "text-rose-600"}`}>
+                        {r.estado === "aprobada" ? `✓ Aprobado por ${r.approved_by || userName}` : "✗ Descartado"}
                       </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -53,17 +53,94 @@ export default function FinanceAgentPage() {
     {
       id: "welcome",
       isUser: false,
-      text: `### 💼 Saludos, Gustavo. Soy el Gerente Financiero IA de Casa Gonzalito.
+      text: `### 💼 Auditoría de Tesorería & Caja — Casa Gonzalito S.R.L.
+Saludos, Gustavo. Soy el Gerente Financiero IA de Casa Gonzalito.
 
-Estoy conectado directamente a la base de datos de tesorería, cuentas por cobrar, cuentas por pagar a proveedores y cartera de cheques.
+Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cobrar, cuentas por pagar a proveedores y cartera de cheques.
 
-Podés pedirme auditorías de liquidez bancaria, reportes de mora de clientes mayoristas, proyecciones de flujo de caja a 30 días o el calendario de vencimientos con proveedores para asegurar los rebates comerciales.`,
+• **Liquidez y Bancos:** Podés pedirme auditorías de saldos disponibles en los 5 bancos y estados de posición diaria.
+• **Mora de Clientes:** Reportes detallados de cartera vencida y créditos en calle.
+• **Proyecciones y Rebates:** Flujo de caja a 30 días y calendario de pagos a proveedores clave.`,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ])
   const [query, setQuery] = useState("")
   const [sendingChat, setSendingChat] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
+
+  const cleanText = (str: string) => {
+    return str.replace(/\*\*/g, "").replace(/\*/g, "").replace(/`/g, "").trim()
+  }
+
+  const renderInlineFormatting = (str: string) => {
+    const parts = str.split(/(\*\*.*?\*\*)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        const text = part.slice(2, -2).replace(/\*/g, "")
+        return <strong key={i} className="font-bold text-slate-950 dark:text-white">{text}</strong>
+      }
+      const clean = part.replace(/\*/g, "")
+      return <span key={i}>{clean}</span>
+    })
+  }
+
+  const renderMarkdownText = (content: string) => {
+    const lines = content.split('\n').filter(l => l.trim().length > 0)
+    return (
+      <div className="space-y-2 text-xs leading-relaxed text-slate-800 dark:text-slate-200">
+        {lines.map((line, idx) => {
+          const trimmed = line.trim()
+          
+          if (trimmed.startsWith('###') || trimmed.startsWith('##')) {
+            const hText = cleanText(trimmed.replace(/^#+\s*/, ''))
+            return (
+              <h4 key={idx} className="font-black text-slate-950 dark:text-white text-xs mt-3 mb-1.5 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700/80 pb-1">
+                <span>{hText}</span>
+              </h4>
+            )
+          }
+
+          if (trimmed.startsWith('•') || trimmed.startsWith('-') || (trimmed.startsWith('*') && !trimmed.startsWith('**'))) {
+            const bulletContent = trimmed.replace(/^[•\-*]\s*/, '')
+            return (
+              <div key={idx} className="flex items-start gap-2 p-2 bg-slate-100/80 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700/70 shadow-2xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 flex-shrink-0"></span>
+                <div className="flex-1 text-slate-800 dark:text-slate-200">
+                  {renderInlineFormatting(bulletContent)}
+                </div>
+              </div>
+            )
+          }
+
+          const numMatch = trimmed.match(/^(\d+)\.\s*(.*)/)
+          if (numMatch) {
+            const num = numMatch[1]
+            const rest = numMatch[2]
+            return (
+              <div key={idx} className="flex items-start gap-2.5 p-2.5 bg-slate-100/80 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700/70 shadow-2xs">
+                <span className="w-4 h-4 rounded-md bg-amber-500/20 text-amber-600 dark:text-amber-300 font-black text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+                  {num}
+                </span>
+                <div className="flex-1 text-slate-800 dark:text-slate-200">
+                  {renderInlineFormatting(rest)}
+                </div>
+              </div>
+            )
+          }
+
+          if (trimmed === '---' || trimmed === '--') {
+            return <hr key={idx} className="border-slate-200 dark:border-slate-700 my-2" />
+          }
+
+          return (
+            <p key={idx} className="text-slate-800 dark:text-slate-200 font-normal">
+              {renderInlineFormatting(trimmed)}
+            </p>
+          )
+        })}
+      </div>
+    )
+  }
 
   // Deposit Modal State
   const [showDepositModal, setShowDepositModal] = useState(false)
@@ -473,10 +550,8 @@ Podés pedirme auditorías de liquidez bancaria, reportes de mora de clientes ma
                         : "bg-slate-800 border border-slate-700 text-slate-200 rounded-bl-none shadow-md"
                     }`}
                   >
-                    <div className="whitespace-pre-wrap font-sans text-xs">
-                      {m.text}
-                    </div>
-                    <div className="mt-2 text-[10px] opacity-60 text-right">
+                    {m.isUser ? <p className="text-xs whitespace-pre-wrap">{m.text}</p> : renderMarkdownText(m.text)}
+                    <div className={`mt-2 text-[10px] text-right ${m.isUser ? "text-amber-100" : "text-slate-400"}`}>
                       {m.time}
                     </div>
                   </div>
