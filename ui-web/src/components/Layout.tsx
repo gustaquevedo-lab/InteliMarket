@@ -14,6 +14,7 @@ import { useTheme } from "../context/ThemeContext"
 import { useFeatures } from "../context/FeatureContext"
 import Logo from "./Logo"
 import NotificationBell from "./NotificationBell"
+import MarcoCopilot from "./MarcoCopilot"
 
 const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
 
@@ -79,7 +80,7 @@ const navGroups: NavGroup[] = [
       { icon: Shield, label: "Scoring Crédito", path: "/credit-scoring", feature: "credit_scoring" },
       { icon: Lightbulb, label: "Oportunidades", path: "/oportunidades", feature: "comerciales" },
       { icon: Thermometer, label: "Cadena de Frío", path: "/cold-chain", feature: "cold_chain" },
-      { icon: Bot, label: "Asistente Virtual", path: "/asistente-virtual", feature: "asistente_virtual" },
+      { icon: Bot, label: "Marco IA (Cerebro)", path: "/asistente-virtual", feature: "asistente_virtual" },
       { icon: Users, label: "Clientes", path: "/clientes", feature: "clientes_fidelizacion" },
       { icon: PieChart, label: "Customer 360", path: "/customer360", feature: "customer360" },
       { icon: Clock, label: "Turnos", path: "/schedule", feature: "schedule" },
@@ -445,6 +446,9 @@ export default function Layout() {
         </header>
         <main className="flex-1 overflow-y-auto p-4 lg:p-6"><Outlet /></main>
       </div>
+
+      {/* Global AI Copilot (Marco) */}
+      <MarcoCopilot />
     </div>
   )
 }

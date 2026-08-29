@@ -2,36 +2,43 @@ import { useState, useEffect, useRef } from "react"
 import {
   BarChart3, MessageCircle, Ticket, BrainCircuit, Send, Plus, Search, Loader2,
   Zap, CheckCircle, XCircle, Clock, RefreshCcw, Bot, User, ThumbsUp, ThumbsDown,
-  Star, Phone, Mail, ArrowLeft, Settings, Activity,
+  Star, Phone, Mail, ArrowLeft, Settings, Activity, Mic, MicOff, Volume2, Database,
+  Sparkles, Terminal, Play, Cpu, HardDrive, ShieldCheck
 } from "lucide-react"
 import { api } from "../../api/index"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 export default function AsistenteVirtualPage() {
-  const [tab, setTab] = useState("dashboard")
+  const [tab, setTab] = useState("brain")
 
   return (
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Asistente Virtual IA</h1>
-          <p className="text-sm text-gray-500 mt-1">Chatbot IA + WhatsApp — pedidos, consultas, reclamos, derivación a humano</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Marco — El Cerebro de Casa Gonzalito</h1>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Minisforum Local
+            </span>
+          </div>
+          <p className="text-sm text-gray-500 mt-1">Compañero y mano derecha inteligente para todos los sectores: Ventas, Depósito, Cobranzas, Reparto y Compras.</p>
         </div>
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
         <div className="flex gap-1 overflow-x-auto px-4 border-b border-gray-100 dark:border-gray-700">
           {[
-            { key: "dashboard",      label: "Dashboard",    icon: BarChart3 },
-            { key: "chat",           label: "Chat",         icon: MessageCircle },
-            { key: "conversaciones", label: "Conversaciones", icon: Activity },
-            { key: "tickets",        label: "Tickets",       icon: Ticket },
-            { key: "configuracion",  label: "Config",        icon: Settings },
+            { key: "brain",          label: "🧠 Hablar con Marco (Voz & SQL)", icon: Sparkles },
+            { key: "dashboard",      label: "Dashboard Operativo",             icon: BarChart3 },
+            { key: "chat",           label: "Chat Clientes",       icon: MessageCircle },
+            { key: "conversaciones", label: "Historial Conversaciones", icon: Activity },
+            { key: "tickets",        label: "Tickets Soporte",     icon: Ticket },
+            { key: "configuracion",  label: "Configuración",       icon: Settings },
           ].map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition
-                ${tab === t.key ? "border-blue-500 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+                ${tab === t.key ? "border-indigo-600 text-indigo-600 dark:text-indigo-400 font-semibold" : "border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"}`}
             >
               <t.icon className="w-4 h-4" />{t.label}
             </button>
@@ -39,6 +46,7 @@ export default function AsistenteVirtualPage() {
         </div>
       </div>
 
+      {tab === "brain"          && <BrainTab />}
       {tab === "dashboard"      && <DashboardTab />}
       {tab === "chat"           && <ChatTab />}
       {tab === "conversaciones" && <ConversacionesTab />}
@@ -50,44 +58,449 @@ export default function AsistenteVirtualPage() {
 
 function Spinner() { return <Loader2 className="w-4 h-4 animate-spin" /> }
 
-function KpiCard({ icon: Icon, label, value, sub, color = "blue" }: any) {
-  const colors: Record<string, string> = {
-    blue: "bg-blue-50 text-blue-600", green: "bg-green-50 text-green-600",
-    red: "bg-red-50 text-red-600", yellow: "bg-yellow-50 text-yellow-600",
-    purple: "bg-purple-50 text-purple-600", indigo: "bg-indigo-50 text-indigo-600",
+// ===== 🧠 CEREBRO IA & VOZ TAB =====
+
+function BrainTab() {
+  const [query, setQuery] = useState("")
+  const [model, setModel] = useState("qwen2.5:14b")
+  const [loading, setLoading] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [status, setStatus] = useState<any>(null)
+  const [history, setHistory] = useState<any[]>([])
+  const [openSqlIdx, setOpenSqlIdx] = useState<number | null>(null)
+  const [openDataIdx, setOpenDataIdx] = useState<number | null>(null)
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const chatEndRef = useRef<HTMLDivElement>(null)
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => {
+    loadStatus()
+  }, [])
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [history, loading])
+
+  const loadStatus = () => {
+    api.asistenteVirtual.brainStatus(COMPANY_ID)
+      .then(setStatus)
+      .catch((err) => console.error("Error loading brain status", err))
   }
+
+  const playBase64Audio = (base64Audio: string) => {
+    if (!base64Audio) return
+    try {
+      const audioUrl = `data:audio/mp3;base64,${base64Audio}`
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.src = audioUrl
+        audioPlayerRef.current.play()
+      } else {
+        const audio = new Audio(audioUrl)
+        audio.play()
+      }
+    } catch (e) {
+      console.error("Error playing audio", e)
+    }
+  }
+
+  const handleSendQuery = async (textToSend?: string) => {
+    const textQuery = textToSend || query
+    if (!textQuery.trim() || loading) return
+
+    setQuery("")
+    setLoading(true)
+
+    // Optimistic user message
+    const tempId = Date.now()
+    setHistory(prev => [...prev, {
+      id: tempId,
+      user_query: textQuery,
+      isUser: true,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }])
+
+    try {
+      const res = await api.asistenteVirtual.brainChat(COMPANY_ID, {
+        query: textQuery,
+        model_preference: model,
+        generate_voice: true
+      })
+
+      setHistory(prev => [...prev, {
+        id: Date.now(),
+        user_query: textQuery,
+        response: res.response,
+        sql_executed: res.sql_executed,
+        data_preview: res.data_preview,
+        data_count: res.data_count,
+        audio_base64: res.audio_base64,
+        model_used: res.model_used,
+        execution_time_seconds: res.execution_time_seconds,
+        isUser: false,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }])
+
+      if (res.audio_base64) {
+        playBase64Audio(res.audio_base64)
+      }
+    } catch (err: any) {
+      setHistory(prev => [...prev, {
+        id: Date.now(),
+        response: `⚠️ Ocurrió un error al consultar el Cerebro de IA: ${err?.message || "Error de conexión con el servidor"}`,
+        isUser: false,
+        isError: true,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Voice recording handlers
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioChunksRef.current = []
+      const mediaRecorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = mediaRecorder
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
+        }
+      }
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" })
+        stream.getTracks().forEach(track => track.stop())
+        await handleSendVoiceAudio(audioBlob)
+      }
+
+      mediaRecorder.start()
+      setRecording(true)
+    } catch (err) {
+      alert("No se pudo acceder al micrófono. Por favor permití el acceso.")
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.stop()
+      setRecording(false)
+    }
+  }
+
+  const handleSendVoiceAudio = async (audioBlob: Blob) => {
+    setLoading(true)
+    try {
+      const formData = new FormData()
+      formData.append("audio", audioBlob, "voice_input.webm")
+      formData.append("model_preference", model)
+
+      const res = await api.asistenteVirtual.brainVoice(formData)
+
+      // Add user transcript
+      setHistory(prev => [
+        ...prev,
+        {
+          id: Date.now() - 1,
+          user_query: res.transcript || "(Audio de voz)",
+          isUser: true,
+          isVoice: true,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        },
+        {
+          id: Date.now(),
+          user_query: res.transcript,
+          response: res.response,
+          sql_executed: res.sql_executed,
+          data_preview: res.data_preview,
+          data_count: res.data_count,
+          audio_base64: res.audio_base64,
+          model_used: res.model_used,
+          execution_time_seconds: res.execution_time_seconds,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ])
+
+      if (res.audio_base64) {
+        playBase64Audio(res.audio_base64)
+      }
+    } catch (err: any) {
+      setHistory(prev => [...prev, {
+        id: Date.now(),
+        response: `⚠️ Error al procesar audio de voz: ${err?.message || "Error"}`,
+        isUser: false,
+        isError: true,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const SUGGESTIONS = [
+    "¿Cuáles son los 5 clientes con mayor crédito o deuda?",
+    "¿Qué productos tenemos registrados en el catálogo?",
+    "¿Cuáles son las últimas 5 ventas registradas?",
+    "¿Quiénes son los vendedores con más operaciones?",
+  ]
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-      <div className="flex items-center gap-3">
-        <div className={`p-2.5 rounded-lg ${colors[color] || colors.blue}`}>
-          <Icon className="w-5 h-5" />
+    <div className="space-y-6">
+      <audio ref={audioPlayerRef} className="hidden" />
+
+      {/* Hardware & Engine Live Bar */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 shadow-md border border-indigo-900/50">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+              <Cpu className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-base tracking-tight">Nodo Local Minisforum (AMD Ryzen 7 + AVX-512)</h3>
+                <span className="bg-emerald-500/20 text-emerald-300 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-emerald-500/40">
+                  {status?.ollama_connected ? "● Ollama Online" : "Desconectado"}
+                </span>
+              </div>
+              <p className="text-xs text-indigo-200/70 mt-0.5">
+                Modelos disponibles: {status?.models_available?.join(", ") || "qwen2.5:14b, qwen2.5:7b"} • Motor Voz: Faster-Whisper + Neural TTS
+              </p>
+            </div>
+          </div>
+
+          {/* Model Switcher */}
+          <div className="flex items-center gap-2 bg-black/40 p-1.5 rounded-xl border border-white/10">
+            <button
+              onClick={() => setModel("qwen2.5:14b")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                model === "qwen2.5:14b"
+                  ? "bg-indigo-600 text-white shadow"
+                  : "text-gray-400 hover:text-white"
+              }`}
+            >
+              🧠 Qwen 2.5 (14B) — Razonamiento SQL
+            </button>
+            <button
+              onClick={() => setModel("qwen2.5:7b")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                model === "qwen2.5:7b"
+                  ? "bg-indigo-600 text-white shadow"
+                  : "text-gray-400 hover:text-white"
+              }`}
+            >
+              ⚡ Qwen 2.5 (7B) — Voz Ultra Rápida
+            </button>
+          </div>
         </div>
-        <div>
-          <p className="text-xs text-gray-500">{label}</p>
-          <p className="text-lg font-bold text-gray-900 dark:text-white">{value ?? "—"}</p>
-          {sub && <p className="text-xs text-gray-400">{sub}</p>}
+      </div>
+
+      {/* Main Conversation & Voice Arena */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col h-[650px]">
+        {/* Messages List */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50 dark:bg-gray-900/30">
+          {history.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-12">
+              <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-4">
+                <Sparkles className="w-8 h-8" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Hablá o escribile al Cerebro de Casa Gonzalito</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                Conectado directamente a la base de datos PostgreSQL con 14 años de historial. Podés preguntar sobre clientes, ventas, deudas, stock o pedir análisis ejecutivos.
+              </p>
+
+              <div className="grid grid-cols-1 gap-2 mt-6 w-full text-left">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Consultas sugeridas:</p>
+                {SUGGESTIONS.map((sug, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSendQuery(sug)}
+                    className="text-xs bg-white dark:bg-gray-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 p-3 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 transition text-left flex items-center justify-between group"
+                  >
+                    <span>{sug}</span>
+                    <span className="text-indigo-500 opacity-0 group-hover:opacity-100 transition">→</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            history.map((msg, idx) => (
+              <div key={idx} className={`flex gap-3 ${msg.isUser ? "justify-end" : "justify-start"}`}>
+                {!msg.isUser && (
+                  <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex-shrink-0 flex items-center justify-center shadow-sm">
+                    <Bot className="w-5 h-5" />
+                  </div>
+                )}
+
+                <div className={`max-w-2xl rounded-2xl p-4 shadow-sm ${
+                  msg.isUser
+                    ? "bg-indigo-600 text-white ml-12"
+                    : msg.isError
+                    ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800"
+                    : "bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-900 dark:text-gray-100 mr-12"
+                }`}>
+                  {msg.isUser ? (
+                    <div className="flex items-center gap-2">
+                      {msg.isVoice && <Mic className="w-3.5 h-3.5 text-indigo-200" />}
+                      <p className="text-sm">{msg.user_query}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.response}</p>
+
+                      {/* Audio Controls & Metadata Badges */}
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                        {msg.audio_base64 && (
+                          <button
+                            onClick={() => playBase64Audio(msg.audio_base64)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:bg-indigo-100 transition"
+                          >
+                            <Volume2 className="w-3.5 h-3.5" /> Escuchar Voz
+                          </button>
+                        )}
+
+                        {msg.sql_executed && (
+                          <button
+                            onClick={() => setOpenSqlIdx(openSqlIdx === idx ? null : idx)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium hover:bg-slate-200 transition"
+                          >
+                            <Database className="w-3.5 h-3.5 text-amber-500" /> SQL Postgres
+                          </button>
+                        )}
+
+                        {msg.data_preview && msg.data_preview.length > 0 && (
+                          <button
+                            onClick={() => setOpenDataIdx(openDataIdx === idx ? null : idx)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium hover:bg-slate-200 transition"
+                          >
+                            <BarChart3 className="w-3.5 h-3.5 text-blue-500" /> {msg.data_count} filas obtenidas
+                          </button>
+                        )}
+
+                        {msg.execution_time_seconds && (
+                          <span className="text-[11px] text-gray-400 ml-auto flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> {msg.execution_time_seconds}s ({msg.model_used})
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Collapsible SQL Query */}
+                      {openSqlIdx === idx && msg.sql_executed && (
+                        <div className="bg-slate-900 text-emerald-400 p-3 rounded-xl text-xs font-mono overflow-x-auto border border-slate-800 animate-fade-in">
+                          <div className="flex items-center justify-between text-gray-400 text-[10px] mb-1 font-sans">
+                            <span>CONSULTA EJECUTADA EN POSTGRESQL</span>
+                            <span className="text-emerald-500">Read-Only Safe</span>
+                          </div>
+                          <code>{msg.sql_executed}</code>
+                        </div>
+                      )}
+
+                      {/* Collapsible Data Preview */}
+                      {openDataIdx === idx && msg.data_preview && (
+                        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-2 overflow-x-auto text-xs animate-fade-in">
+                          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+                            <thead>
+                              <tr>
+                                {Object.keys(msg.data_preview[0] || {}).map((col) => (
+                                  <th key={col} className="px-2 py-1 text-left font-semibold text-gray-500 uppercase text-[10px]">
+                                    {col}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                              {msg.data_preview.map((row: any, rIdx: number) => (
+                                <tr key={rIdx} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                  {Object.values(row).map((val: any, cIdx: number) => (
+                                    <td key={cIdx} className="px-2 py-1 text-gray-700 dark:text-gray-300">
+                                      {String(val ?? "—")}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {msg.isUser && (
+                  <div className="w-9 h-9 rounded-xl bg-slate-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 flex-shrink-0 flex items-center justify-center">
+                    <User className="w-5 h-5" />
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+
+          {loading && (
+            <div className="flex gap-3 items-center">
+              <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center animate-pulse">
+                <Bot className="w-5 h-5" />
+              </div>
+              <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl p-4 shadow-sm flex items-center gap-3">
+                <Spinner />
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {recording ? "Escuchando voz..." : "El Cerebro está consultando PostgreSQL y procesando la respuesta con voz..."}
+                </span>
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Input & Voice Controls Bar */}
+        <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+          <div className="flex items-center gap-2">
+            {/* Microphone Button */}
+            <button
+              onClick={recording ? stopRecording : startRecording}
+              disabled={loading && !recording}
+              className={`p-3.5 rounded-xl flex items-center justify-center transition shadow-sm ${
+                recording
+                  ? "bg-red-600 text-white animate-bounce shadow-red-500/50"
+                  : "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+              }`}
+              title={recording ? "Detener grabación" : "Hablar con voz"}
+            >
+              {recording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </button>
+
+            {/* Text input */}
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSendQuery()
+                }
+              }}
+              placeholder={recording ? "🎙️ Escuchando... presiona el micrófono al terminar" : "Escribí tu consulta o hablá por el micrófono..."}
+              disabled={loading || recording}
+              className="flex-1 px-4 py-3 bg-slate-100 dark:bg-gray-900 border-none rounded-xl text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 outline-none"
+            />
+
+            {/* Send Button */}
+            <button
+              onClick={() => handleSendQuery()}
+              disabled={!query.trim() || loading}
+              className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-medium rounded-xl text-sm transition flex items-center gap-2 shadow-sm"
+            >
+              <Send className="w-4 h-4" /> Enviar
+            </button>
+          </div>
         </div>
       </div>
     </div>
   )
-}
-
-function IntentBadge({ intent }: { intent?: string }) {
-  const colors: Record<string, string> = {
-    saludo: "bg-green-100 text-green-700", catalogo: "bg-blue-100 text-blue-700",
-    pedido_status: "bg-purple-100 text-purple-700", credito: "bg-yellow-100 text-yellow-700",
-    comprar: "bg-indigo-100 text-indigo-700", reclamo: "bg-red-100 text-red-700",
-    humano: "bg-orange-100 text-orange-700", despedida: "bg-gray-100 text-gray-700",
-    unknown: "bg-gray-100 text-gray-500",
-  }
-  const labels: Record<string, string> = {
-    saludo: "Saludo", catalogo: "Catálogo", pedido_status: "Pedido",
-    credito: "Crédito", comprar: "Compra", reclamo: "Reclamo",
-    humano: "Humano", despedida: "Despedida", unknown: "?",
-  }
-  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[intent || "unknown"] || colors.unknown}`}>
-    {labels[intent || "unknown"] || intent}
-  </span>
 }
 
 // ===== DASHBOARD =====
@@ -199,71 +612,68 @@ function ChatTab() {
             <div className="flex items-center gap-2">
               <Bot className="w-5 h-5 text-blue-600" />
               <span className="text-sm font-medium">Asistente Virtual IA</span>
-              {convId && <span className="text-xs text-gray-400">ID: {convId.slice(0, 8)}</span>}
             </div>
-            <button onClick={clearChat} className="text-xs text-gray-400 hover:text-red-500">Nuevo chat</button>
+            <button onClick={clearChat} className="text-xs text-gray-500 hover:text-gray-700">Nueva conversación</button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {messages.length === 0 && (
-              <div className="text-center text-gray-400 py-12">
-                <Bot className="w-16 h-16 mx-auto mb-3 text-gray-300" />
+              <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                <Bot className="w-12 h-12 mb-2" />
                 <p className="text-sm">Iniciá una conversación con el asistente virtual</p>
-                <p className="text-xs mt-1">Consultá precios, pedidos, saldo, o hacé un reclamo</p>
               </div>
             )}
             {messages.map((m: any) => (
-              <div key={m.id} className={`flex gap-3 ${m.role === "user" ? "justify-end" : ""}`}>
-                {m.role === "assistant" && <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0"><Bot className="w-4 h-4 text-blue-600" /></div>}
-                <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${m.role === "user" ? "bg-blue-600 text-white" : "bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"}`}>
+              <div key={m.id} className={`flex ${m.sender === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[75%] rounded-xl px-3.5 py-2.5 text-sm ${m.sender === "user" ? "bg-blue-600 text-white" : "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white"}`}>
                   <p className="whitespace-pre-wrap">{m.content}</p>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <span className={`text-[10px] ${m.role === "user" ? "text-blue-200" : "text-gray-400"}`}>
-                      {m.created_at ? new Date(m.created_at).toLocaleTimeString() : ""}
-                    </span>
-                    {m.intent && m.role === "assistant" && <IntentBadge intent={m.intent} />}
-                    {m.needs_human && <span className="text-xs text-orange-500">→ Humano</span>}
+                  <div className="flex items-center justify-between mt-1 text-[10px] opacity-70">
+                    <span>{m.intent_detected && <IntentBadge intent={m.intent_detected} />}</span>
+                    <span>{m.created_at ? new Date(m.created_at).toLocaleTimeString() : ""}</span>
                   </div>
                 </div>
-                {m.role === "user" && <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0"><User className="w-4 h-4 text-gray-600" /></div>}
               </div>
             ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 rounded-xl px-3.5 py-2.5"><Spinner /></div>
+              </div>
+            )}
             <div ref={endRef} />
           </div>
 
-          <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700">
-            <div className="flex gap-2 items-center">
-              <input value={customerId} onChange={e => setCustomerId(e.target.value)} placeholder="Customer ID"
-                className="w-40 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-700 hidden lg:block" />
-              <input value={message} onChange={e => setMessage(e.target.value)} onKeyDown={handleKeyDown}
-                placeholder="Escribí tu mensaje..."
-                className="flex-1 border border-gray-200 dark:border-gray-600 rounded-lg px-4 py-2.5 text-sm bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 outline-none" />
-              <button onClick={send} disabled={loading || !message.trim()}
-                className="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                {loading ? <Spinner /> : <Send className="w-4 h-4" />}
-              </button>
-            </div>
+          <div className="p-3 border-t border-gray-100 dark:border-gray-700 flex gap-2">
+            <input
+              type="text"
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Escribí tu mensaje..."
+              className="flex-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+            />
+            <button onClick={send} disabled={loading || !message.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+              <Send className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="hidden lg:block space-y-2">
+      <div className="space-y-4">
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Sugerencias</h3>
-          {[
-            "Hola",
-            "Mostrame el catálogo",
-            "¿Cuánto tengo de crédito?",
-            "Consultar pedidos",
-            "Quiero hacer un pedido",
-            "Abrir un reclamo",
-            "Hablar con un operador",
-          ].map((s) => (
-            <button key={s} onClick={() => { setMessage(s) }}
-              className="block w-full text-left px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 rounded-lg transition">
-              {s}
-            </button>
-          ))}
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Contexto del Cliente</h3>
+          <div className="space-y-2">
+            <div>
+              <label className="text-xs text-gray-500">Nombre</label>
+              <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)}
+                className="w-full text-xs rounded border border-gray-200 dark:border-gray-600 bg-transparent p-1.5 mt-0.5" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">ID Cliente</label>
+              <input type="text" value={customerId} onChange={e => setCustomerId(e.target.value)}
+                className="w-full text-xs rounded border border-gray-200 dark:border-gray-600 bg-transparent p-1.5 mt-0.5 font-mono" />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -275,77 +685,77 @@ function ChatTab() {
 function ConversacionesTab() {
   const [conv, setConv] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<any | null>(null)
   const [messages, setMessages] = useState<any[]>([])
 
-  const load = () => {
-    setLoading(true)
+  useEffect(() => {
     api.asistenteVirtual.listConversations(COMPANY_ID).then(setConv).catch(() => {}).finally(() => setLoading(false))
-  }
+  }, [])
 
-  useEffect(() => { load() }, [])
-
-  const viewMessages = async (id: string) => {
-    setSelected(id)
+  const selectConv = async (c: any) => {
+    setSelected(c)
     try {
-      const msgs = await api.asistenteVirtual.getMessages(COMPANY_ID, id)
+      const msgs = await api.asistenteVirtual.getMessages(COMPANY_ID, c.id)
       setMessages(msgs)
-    } catch { setMessages([]) }
+    } catch {}
   }
 
-  const endConv = async (id: string) => {
+  const closeConv = async (id: string) => {
     try {
       await api.asistenteVirtual.endConversation(COMPANY_ID, id, false)
-      load()
-      if (selected === id) { setSelected(null); setMessages([]) }
-    } catch (e: any) { alert(e.message) }
+      setConv(prev => prev.map(c => c.id === id ? { ...c, status: "closed" } : c))
+      if (selected?.id === id) setSelected((prev: any) => ({ ...prev, status: "closed" }))
+    } catch {}
   }
 
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div>
-        {loading ? <Spinner /> : conv.length === 0
-          ? <p className="text-center text-gray-500 py-8">Sin conversaciones</p>
-          : <div className="space-y-2">
-              {conv.map((c: any) => (
-                <div key={c.id}
-                  className={`bg-white dark:bg-gray-800 rounded-xl border p-4 cursor-pointer hover:shadow-md transition ${selected === c.id ? "border-blue-500" : "border-gray-100 dark:border-gray-700"}`}
-                  onClick={() => viewMessages(c.id)}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium">{c.customer_name || "Anónimo"}</p>
-                      <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
-                        <span className={`px-1.5 py-0.5 rounded text-xs ${c.status === "active" ? "bg-green-100 text-green-700" : c.status === "waiting_human" ? "bg-orange-100 text-orange-700" : "bg-gray-100 text-gray-700"}`}>
-                          {c.status}
-                        </span>
-                        <IntentBadge intent={c.current_intent} />
-                        <span>{c.message_count} msgs</span>
-                      </div>
-                    </div>
-                    {c.status !== "resolved" && c.status !== "ended" && (
-                      <button onClick={(e) => { e.stopPropagation(); endConv(c.id) }}
-                        className="px-2 py-1 bg-red-100 text-red-600 rounded text-xs hover:bg-red-200">Cerrar</button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-        }
-      </div>
+  if (loading) return <div className="flex justify-center py-12"><Spinner /></div>
 
-      <div>
-        {selected && (
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 max-h-[600px] overflow-y-auto">
-            <h3 className="text-sm font-semibold mb-3">Mensajes</h3>
-            {messages.map((m: any) => (
-              <div key={m.id} className={`flex gap-2 mb-3 ${m.role === "user" ? "justify-end" : ""}`}>
-                <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm ${m.role === "user" ? "bg-blue-600 text-white" : "bg-gray-50 dark:bg-gray-700"}`}>
-                  <p className="text-xs">{m.content}</p>
-                  <span className="text-[10px] text-gray-400 mt-1 block">{m.created_at ? new Date(m.created_at).toLocaleString() : ""}</span>
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Conversaciones</h3>
+        {conv.length === 0 ? <p className="text-xs text-gray-400">Sin conversaciones</p> : (
+          <div className="space-y-2">
+            {conv.map((c: any) => (
+              <div key={c.id} onClick={() => selectConv(c)}
+                className={`p-3 rounded-lg border cursor-pointer transition text-xs ${selected?.id === c.id ? "border-blue-500 bg-blue-50/50" : "border-gray-100 hover:bg-gray-50"}`}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-medium">{c.customer_name || "Anónimo"}</span>
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${c.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>{c.status}</span>
+                </div>
+                <div className="flex items-center justify-between text-gray-400 text-[10px]">
+                  <span>{c.channel}</span>
+                  <span>{c.total_messages} msgs</span>
                 </div>
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      <div className="lg:col-span-2">
+        {selected ? (
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+            <div className="flex items-center justify-between border-b pb-3 mb-3">
+              <div>
+                <h4 className="text-sm font-semibold">{selected.customer_name || "Anónimo"}</h4>
+                <p className="text-xs text-gray-400">{selected.id}</p>
+              </div>
+              {selected.status === "active" && (
+                <button onClick={() => closeConv(selected.id)} className="px-3 py-1 bg-red-600 text-white rounded text-xs">Cerrar</button>
+              )}
+            </div>
+            <div className="space-y-2 max-h-[450px] overflow-y-auto">
+              {messages.map((m: any) => (
+                <div key={m.id} className={`p-2.5 rounded text-xs ${m.sender === "user" ? "bg-blue-50 text-blue-900 ml-4" : "bg-gray-50 text-gray-900 mr-4"}`}>
+                  <p className="font-semibold text-[10px] text-gray-500 mb-0.5">{m.sender}</p>
+                  <p>{m.content}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center h-48 text-gray-400 text-xs">Seleccioná una conversación</div>
         )}
       </div>
     </div>
@@ -367,16 +777,20 @@ function TicketsTab() {
 
   const updateStatus = async (id: string, status: string) => {
     try { await api.asistenteVirtual.updateTicket(COMPANY_ID, id, status); load() }
-    catch (e: any) { alert(e.message) }
+    catch {}
   }
 
-  const priorityColor = (p: string) =>
-    p === "high" ? "text-red-600 bg-red-50" : p === "medium" ? "text-yellow-600 bg-yellow-50" : "text-green-600 bg-green-50"
+  const priorityColor = (p: string) => ({
+    urgent: "bg-red-100 text-red-700",
+    high: "bg-orange-100 text-orange-700",
+    medium: "bg-yellow-100 text-yellow-700",
+    low: "bg-gray-100 text-gray-600",
+  }[p] || "bg-gray-100 text-gray-600")
 
   return (
-    <div>
+    <div className="space-y-4">
       {loading ? <Spinner /> : tickets.length === 0
-        ? <p className="text-center text-gray-500 py-8">Sin tickets generados</p>
+        ? <p className="text-xs text-gray-400">Sin tickets de reclamo registrados.</p>
         : <div className="space-y-2">
             {tickets.map((t: any) => (
               <div key={t.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
@@ -459,4 +873,44 @@ function ConfigTab() {
       </div>
     </div>
   )
+}
+
+function KpiCard({ icon: Icon, label, value, sub, color = "blue" }: any) {
+  const colors: Record<string, string> = {
+    blue: "bg-blue-50 text-blue-600", green: "bg-green-50 text-green-600",
+    red: "bg-red-50 text-red-600", yellow: "bg-yellow-50 text-yellow-600",
+    purple: "bg-purple-50 text-purple-600", indigo: "bg-indigo-50 text-indigo-600",
+  }
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+      <div className="flex items-center gap-3">
+        <div className={`p-2.5 rounded-lg ${colors[color] || colors.blue}`}>
+          <Icon className="w-5 h-5" />
+        </div>
+        <div>
+          <p className="text-xs text-gray-500">{label}</p>
+          <p className="text-lg font-bold text-gray-900 dark:text-white">{value ?? "—"}</p>
+          {sub && <p className="text-xs text-gray-400">{sub}</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function IntentBadge({ intent }: { intent?: string }) {
+  const colors: Record<string, string> = {
+    saludo: "bg-green-100 text-green-700", catalogo: "bg-blue-100 text-blue-700",
+    pedido_status: "bg-purple-100 text-purple-700", credito: "bg-yellow-100 text-yellow-700",
+    comprar: "bg-indigo-100 text-indigo-700", reclamo: "bg-red-100 text-red-700",
+    humano: "bg-orange-100 text-orange-700", despedida: "bg-gray-100 text-gray-700",
+    unknown: "bg-gray-100 text-gray-500",
+  }
+  const labels: Record<string, string> = {
+    saludo: "Saludo", catalogo: "Catálogo", pedido_status: "Pedido",
+    credito: "Crédito", comprar: "Compra", reclamo: "Reclamo",
+    humano: "Humano", despedida: "Despedida", unknown: "?",
+  }
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[intent || "unknown"] || colors.unknown}`}>
+    {labels[intent || "unknown"] || intent}
+  </span>
 }

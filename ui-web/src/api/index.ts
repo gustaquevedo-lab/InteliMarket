@@ -1418,6 +1418,12 @@ export const api = {
     seedTemplates: (companyId: string) => client.post<any>("/v1/asistente-virtual/templates/seed", { company_id: companyId }),
 
     getDashboard: (companyId: string) => client.get<any>("/v1/asistente-virtual/dashboard", { company_id: companyId }),
+    brainChat: (companyId: string, data: { query: string; model_preference?: string; generate_voice?: boolean }) =>
+      client.post<any>("/v1/asistente-virtual/brain/chat", { company_id: companyId, ...data }),
+    brainVoice: (formData: FormData) =>
+      client.post<any>("/v1/asistente-virtual/brain/voice", formData),
+    brainStatus: (companyId: string) =>
+      client.get<any>("/v1/asistente-virtual/brain/status", { company_id: companyId }),
   },
 
   // ===== Clientes — Fidelización & Segmentación =====
