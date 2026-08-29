@@ -6228,200 +6228,110 @@ export default function POSPage() {
 
       {/* ── 8. MODAL DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO (F12) ── */}
       {showPaymentModal && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-5xl w-full shadow-2xl text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col max-h-[92vh]">
+        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-4xl w-full shadow-2xl text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col">
             
             {/* 1. HEADER BAR */}
-            <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-slate-950 shrink-0 shadow-lg shadow-orange-500/20 font-black text-lg">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-slate-950 shrink-0 shadow-sm font-black text-base">
                   ₲
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">
+                    <h2 className="text-base font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">
                       Liquidación y Cobro
                     </h2>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-mono">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-mono">
                       Caja Activa
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Seleccione el medio de pago o tipee el importe recibido directamente.
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Seleccione medio de pago o ingrese el monto recibido.
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="hidden sm:inline-block text-[11px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800/60 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
-                  ESC para volver
-                </span>
-                <button
-                  onClick={() => setShowPaymentModal(false)}
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
+                title="Cerrar [ESC]"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
             {/* 2. BODY SPLIT (2 COLUMNS) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-y-auto flex-1 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
               
               {/* ── COLUMNA IZQUIERDA: RESUMEN FINANCIERO Y VUELTO (5 COLS) ── */}
-              <div className="lg:col-span-5 p-5 bg-slate-50/50 dark:bg-slate-950/40 space-y-3.5 flex flex-col justify-between">
-                <div className="space-y-3">
-                  {/* Hero Total Venta */}
-                  <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                      <span>Total a Cobrar</span>
-                      <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md font-mono">
-                        {cart.length} {cart.length === 1 ? "ítem" : "ítems"}
-                      </span>
-                    </div>
-                    <div className="text-3xl sm:text-4xl font-black font-posMono tabular-nums text-slate-950 dark:text-white tracking-tight">
-                      {formatPYG(totalPyg)}
-                    </div>
-                    <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/80 text-xs font-posMono tabular-nums text-slate-500 dark:text-slate-400">
-                      <span className="flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
-                        <FlagBR /> R$ {totalBrl}
-                      </span>
-                      <span>·</span>
-                      <span className="flex items-center gap-1 font-semibold text-blue-600 dark:text-blue-400">
-                        <FlagUS /> US$ {totalUsd}
-                      </span>
-                    </div>
+              <div className="lg:col-span-5 p-4 bg-slate-50/60 dark:bg-slate-950/40 space-y-2.5">
+                {/* Hero Total Venta */}
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    <span>Total a Cobrar</span>
+                    <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md font-mono">
+                      {cart.length} {cart.length === 1 ? "ítem" : "ítems"}
+                    </span>
                   </div>
-
-                  {/* Recibido Parcial si hay múltiples pagos */}
-                  {totalRecibidoPyg > 0 && totalRecibidoPyg < totalPyg && (
-                    <div className="p-3 rounded-2xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 flex items-center justify-between text-xs font-bold">
-                      <span className="text-blue-700 dark:text-blue-300 uppercase text-[10px]">Total Recibido:</span>
-                      <span className="font-posMono text-sm text-blue-700 dark:text-blue-300 font-black">{formatPYG(totalRecibidoPyg)}</span>
-                    </div>
-                  )}
-
-                  {/* Hero Vuelto / Saldo Restante */}
-                  {saldoRestantePyg > 0 ? (
-                    <div className="p-4 rounded-2xl border-2 border-rose-500 bg-rose-50/80 dark:bg-rose-950/40 text-center shadow-sm space-y-1">
-                      <span className="text-xs font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider block">
-                        Falta Cobrar
-                      </span>
-                      <div className="text-3xl sm:text-4xl font-black font-posMono tabular-nums text-rose-600 dark:text-rose-400 leading-tight">
-                        {formatPYG(saldoRestantePyg)}
-                      </div>
-                      <div className="text-[11px] font-posMono tabular-nums text-rose-500 dark:text-rose-300/80 pt-1">
-                        ≈ R$ {(saldoRestantePyg / rates.BRL).toFixed(2)} · US$ {(saldoRestantePyg / rates.USD).toFixed(2)}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-center shadow-sm space-y-1">
-                      <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
-                        {donacionActiva && montoDonacionEfectiva > 0 ? "Vuelto Limpio a Entregar" : "Vuelto a Entregar"}
-                      </span>
-                      <div className="text-3xl sm:text-4xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 leading-tight">
-                        {formatPYG(vueltoFinalPyg)}
-                      </div>
-                      <div className="text-[11px] font-posMono tabular-nums text-emerald-600 dark:text-emerald-300 pt-1">
-                        R$ {(vueltoFinalPyg / rates.BRL).toFixed(2)} · US$ {(vueltoFinalPyg / rates.USD).toFixed(2)}
-                      </div>
-                      {donacionActiva && montoDonacionEfectiva > 0 && (
-                        <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-bold">
-                          <Heart className="w-3.5 h-3.5 fill-rose-500 animate-pulse" />
-                          <span>Donación de Gs. {formatPYG(montoDonacionEfectiva)} aplicada</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Abre tu Corazón - Redondeo Solidario F8 */}
-                  <div className={`p-3.5 rounded-2xl border transition-all duration-200 ${
-                    donacionActiva
-                      ? "bg-gradient-to-br from-rose-50/90 to-amber-50/80 dark:from-rose-950/50 dark:to-amber-950/40 border-rose-400 dark:border-rose-600 shadow-sm"
-                      : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300"
-                  }`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all shrink-0 ${
-                          donacionActiva
-                            ? "bg-rose-500 text-white shadow-md shadow-rose-500/30"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
-                        }`}>
-                          <Heart className={`w-4 h-4 ${donacionActiva ? "fill-white animate-pulse" : ""}`} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-black text-slate-800 dark:text-slate-200 truncate">
-                              {campanaActivaDonacion?.nombre || "Abre tu corazón"}
-                            </span>
-                            <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                              F8
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                            {campanaActivaDonacion?.ong_nombre || "Centro Amor y Esperanza"}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setDonacionActiva(!donacionActiva)}
-                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                          donacionActiva ? "bg-rose-600" : "bg-slate-300 dark:bg-slate-700"
-                        }`}
-                        title="Activar o desactivar donación (F8)"
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
-                            donacionActiva ? "translate-x-4" : "translate-x-0"
-                          }`}
-                        />
-                      </button>
-                    </div>
-
-                    {/* Chips de montos rápidos */}
-                    <div className="mt-2.5 pt-2 border-t border-slate-200/60 dark:border-slate-800 flex items-center gap-1 flex-wrap">
-                      {[
-                        { label: `Sugerido (${formatPYG(montoSugeridoDonacion)})`, val: montoSugeridoDonacion },
-                        { label: "+500", val: 500 },
-                        { label: "+1.000", val: 1000 },
-                        { label: "+2.000", val: 2000 },
-                        { label: "+5.000", val: 5000 },
-                      ].map((btn, idx) => {
-                        const isSelected = donacionActiva && (
-                          montoDonacionManual === btn.val ||
-                          (montoDonacionManual === null && btn.val === montoSugeridoDonacion)
-                        )
-                        return (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => {
-                              setMontoDonacionManual(btn.val)
-                              setDonacionActiva(true)
-                            }}
-                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
-                              isSelected
-                                ? "bg-rose-600 text-white shadow-xs"
-                                : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
-                            }`}
-                          >
-                            {btn.label}
-                          </button>
-                        )
-                      })}
-                    </div>
+                  <div className="text-3xl font-black font-posMono tabular-nums text-slate-950 dark:text-white tracking-tight">
+                    {formatPYG(totalPyg)}
+                  </div>
+                  <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800 text-[11px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
+                      <FlagBR /> R$ {totalBrl}
+                    </span>
+                    <span>·</span>
+                    <span className="flex items-center gap-1 font-bold text-blue-600 dark:text-blue-400">
+                      <FlagUS /> US$ {totalUsd}
+                    </span>
                   </div>
                 </div>
 
+                {/* Recibido Parcial si hay múltiples pagos */}
+                {totalRecibidoPyg > 0 && totalRecibidoPyg < totalPyg && (
+                  <div className="p-2.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 flex items-center justify-between text-xs font-bold">
+                    <span className="text-blue-700 dark:text-blue-300 uppercase text-[10px]">Total Recibido:</span>
+                    <span className="font-posMono text-sm text-blue-700 dark:text-blue-300 font-black">{formatPYG(totalRecibidoPyg)}</span>
+                  </div>
+                )}
+
+                {/* Hero Vuelto / Saldo Restante */}
+                {saldoRestantePyg > 0 ? (
+                  <div className="p-3 rounded-2xl border-2 border-rose-500 bg-rose-50/80 dark:bg-rose-950/40 text-center shadow-sm space-y-0.5">
+                    <span className="text-[11px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider block">
+                      Falta Cobrar
+                    </span>
+                    <div className="text-2xl sm:text-3xl font-black font-posMono tabular-nums text-rose-600 dark:text-rose-400 leading-tight">
+                      {formatPYG(saldoRestantePyg)}
+                    </div>
+                    <div className="text-[10px] font-posMono tabular-nums text-rose-500 dark:text-rose-300/80">
+                      ≈ R$ {(saldoRestantePyg / rates.BRL).toFixed(2)} · US$ {(saldoRestantePyg / rates.USD).toFixed(2)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-center shadow-sm space-y-0.5">
+                    <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                      {donacionActiva && montoDonacionEfectiva > 0 ? "Vuelto Limpio a Entregar" : "Vuelto a Entregar"}
+                    </span>
+                    <div className="text-2xl sm:text-3xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 leading-tight">
+                      {formatPYG(vueltoFinalPyg)}
+                    </div>
+                    <div className="text-[10px] font-posMono tabular-nums text-emerald-600 dark:text-emerald-300">
+                      R$ {(vueltoFinalPyg / rates.BRL).toFixed(2)} · US$ {(vueltoFinalPyg / rates.USD).toFixed(2)}
+                    </div>
+                  </div>
+                )}
+
                 {/* Cliente Seleccionado Card */}
-                <div className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2 min-w-0">
                     <User className="w-4 h-4 text-slate-400 shrink-0" />
                     <div className="min-w-0">
-                      <div className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                      <div className="font-bold text-slate-800 dark:text-slate-200 truncate text-[11px]">
                         {customer?.nombre || "Consumidor Final"}
                       </div>
-                      <div className="text-[10px] font-mono text-slate-500 truncate">
+                      <div className="text-[9px] font-mono text-slate-500 truncate">
                         {customer?.ruc || customer?.ci ? `Doc: ${customer.ruc || customer.ci}` : "Sin RUC (Boleta Simple)"}
                       </div>
                     </div>
@@ -6434,190 +6344,254 @@ export default function POSPage() {
                     Cambiar (F9)
                   </button>
                 </div>
+
+                {/* Abre tu Corazón - Redondeo Solidario F8 */}
+                <div className={`p-2.5 rounded-xl border transition-all ${
+                  donacionActiva
+                    ? "bg-gradient-to-br from-rose-50/90 to-amber-50/80 dark:from-rose-950/50 dark:to-amber-950/40 border-rose-400 dark:border-rose-600"
+                    : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                }`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Heart className={`w-3.5 h-3.5 shrink-0 ${donacionActiva ? "fill-rose-500 text-rose-500" : "text-slate-400"}`} />
+                      <div className="min-w-0">
+                        <span className="text-[11px] font-black text-slate-800 dark:text-slate-200 truncate block leading-tight">
+                          Abre tu corazón <span className="text-[9px] font-bold text-rose-500">(F8)</span>
+                        </span>
+                        <p className="text-[9px] text-slate-400 truncate">
+                          {campanaActivaDonacion?.ong_nombre || "Centro Amor y Esperanza"}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDonacionActiva(!donacionActiva)}
+                      className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                        donacionActiva ? "bg-rose-600" : "bg-slate-300 dark:bg-slate-700"
+                      }`}
+                    >
+                      <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition ${
+                        donacionActiva ? "translate-x-3" : "translate-x-0"
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* Chips de montos rápidos */}
+                  <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1 flex-wrap">
+                    {[
+                      { label: `Sugerido (${formatPYG(montoSugeridoDonacion)})`, val: montoSugeridoDonacion },
+                      { label: "+500", val: 500 },
+                      { label: "+1.000", val: 1000 },
+                      { label: "+2.000", val: 2000 },
+                      { label: "+5.000", val: 5000 },
+                    ].map((btn, idx) => {
+                      const isSelected = donacionActiva && (
+                        montoDonacionManual === btn.val ||
+                        (montoDonacionManual === null && btn.val === montoSugeridoDonacion)
+                      )
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setMontoDonacionManual(btn.val)
+                            setDonacionActiva(true)
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-rose-600 text-white"
+                              : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
+                          {btn.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
 
               {/* ── COLUMNA DERECHA: SELECCIÓN DE MÉTODO Y ENTRADA DE PAGO (7 COLS) ── */}
-              <div className="lg:col-span-7 p-5 space-y-4 flex flex-col justify-between">
-                <div className="space-y-3.5">
-                  {/* Selector de Métodos de Pago */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                        Método de Pago:
-                      </span>
-                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={allowMixedPayment}
-                          onChange={(e) => {
-                            const on = e.target.checked
-                            setAllowMixedPayment(on)
-                            if (!on) {
-                              setActiveMethods(prev => new Set([prev.values().next().value || "cash"]))
-                            }
-                          }}
-                          className="w-3.5 h-3.5 text-blue-600 rounded cursor-pointer"
-                        />
-                        <span>Pago mixto</span>
-                      </label>
-                    </div>
-
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                      {(() => {
-                        let pMethods: any[] = []
-                        try {
-                          const saved = localStorage.getItem("pos_payment_methods")
-                          if (saved) pMethods = JSON.parse(saved)
-                        } catch (e) {}
-
-                        const isEnabled = (key: string) => {
-                          if (!pMethods || pMethods.length === 0) return true
-                          const found = pMethods.find((p: any) => p.codigo.toUpperCase().includes(key) || key.includes(p.codigo.toUpperCase()))
-                          return found ? found.activo !== false : true
-                        }
-
-                        const allTabs = [
-                          { id: "cash", key: "1", label: "Efectivo", icon: Banknote, show: isEnabled("EFECTIVO") },
-                          { id: "bancard", key: "2", label: "Bancard", icon: CreditCard, show: isEnabled("BANCARD") },
-                          { id: "dinelco", key: "3", label: "Dinelco", icon: CreditCard, show: isEnabled("DINELCO") },
-                          { id: "qr", key: "4", label: "QR Zimple", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
-                          { id: "plugpay_pix", key: "5", label: "PIX Brasil", icon: Smartphone, show: true },
-                          { id: "plugpay_credito", key: "6", label: "Crédito BRL", icon: CreditCard, show: true },
-                          { id: "extra_club", key: "7", label: "Extra Club", icon: Star, show: isEnabled("EXTRA_CLUB") },
-                        ]
-
-                        return allTabs.filter(t => t.show).map((m) => {
-                          const isActive = activeMethods.has(m.id as any)
-                          return (
-                            <button
-                              key={m.id}
-                              onClick={() => toggleActiveMethod(m.id as any)}
-                              className={`relative p-2.5 rounded-2xl border font-bold text-xs flex flex-col items-center gap-1 transition-all cursor-pointer select-none ${
-                                isActive
-                                  ? "bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/20 scale-[1.02]"
-                                  : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white"
-                              }`}
-                            >
-                              <span className={`absolute top-1 left-2 text-[9px] font-black font-mono ${isActive ? "text-emerald-200" : "text-slate-400"}`}>
-                                {m.key}
-                              </span>
-                              <m.icon className="w-4 h-4 mt-0.5" />
-                              <span className="text-center leading-tight truncate w-full">{m.label}</span>
-                            </button>
-                          )
-                        })
-                      })()}
-                    </div>
-                    {isMultiPayment && (
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
-                        Pago dividido entre {activeMethods.size} métodos -- complete el monto de cada línea hasta cubrir el total.
-                      </p>
-                    )}
+              <div className="lg:col-span-7 p-4 space-y-3">
+                {/* Selector de Métodos de Pago */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      Método de Pago:
+                    </span>
+                    <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={allowMixedPayment}
+                        onChange={(e) => {
+                          const on = e.target.checked
+                          setAllowMixedPayment(on)
+                          if (!on) {
+                            setActiveMethods(prev => new Set([prev.values().next().value || "cash"]))
+                          }
+                        }}
+                        className="w-3.5 h-3.5 text-blue-600 rounded cursor-pointer"
+                      />
+                      <span>Pago mixto</span>
+                    </label>
                   </div>
 
-                  {/* Panel Activo por Método */}
-                  <div className="space-y-3">
-                    
-                    {/* 1. EFECTIVO MULTIMONEDA */}
-                    {activeMethods.has("cash") && (
-                      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                            <Banknote className="w-4 h-4 text-emerald-600" /> Ingreso de Efectivo
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            Enter / Tab salta entre monedas
-                          </span>
-                        </div>
+                  <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                    {(() => {
+                      let pMethods: any[] = []
+                      try {
+                        const saved = localStorage.getItem("pos_payment_methods")
+                        if (saved) pMethods = JSON.parse(saved)
+                      } catch (e) {}
 
-                        <div className="grid grid-cols-3 gap-2.5 items-end">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
-                              <FlagPY /> Guaraníes (₲):
-                            </label>
-                            <input
-                              ref={payCashPygInputRef}
-                              type="text"
-                              value={payCashPyg}
-                              onChange={(e) => {
-                                const clean = e.target.value.replace(/\D/g, "")
-                                setPayCashPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
-                              }}
-                              onKeyDown={(e) => handleCashFieldKeyDown(e, payCashBrlInputRef, "BRL")}
-                              onFocus={(e) => e.target.select()}
-                              onClick={(e) => e.currentTarget.select()}
-                              placeholder="0"
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-posMono tabular-nums font-black text-sm text-emerald-600 dark:text-emerald-400 outline-none focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
-                              <FlagBR /> Reales (R$ x{rates.BRL}):
-                            </label>
-                            <input
-                              ref={payCashBrlInputRef}
-                              type="text"
-                              value={payCashBrl}
-                              onChange={(e) => setPayCashBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
-                              onKeyDown={(e) => handleCashFieldKeyDown(e, payCashUsdInputRef, "USD")}
-                              onFocus={(e) => e.target.select()}
-                              onClick={(e) => e.currentTarget.select()}
-                              placeholder="0.00"
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-posMono tabular-nums font-bold text-sm text-amber-600 dark:text-amber-400 outline-none focus:border-amber-500 focus:bg-white dark:focus:bg-slate-900 transition"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
-                              <FlagUS /> Dólares (US$ x{rates.USD}):
-                            </label>
-                            <input
-                              ref={payCashUsdInputRef}
-                              type="text"
-                              value={payCashUsd}
-                              onChange={(e) => setPayCashUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
-                              onKeyDown={(e) => handleCashFieldKeyDown(e, payCashPygInputRef, "PYG")}
-                              onFocus={(e) => e.target.select()}
-                              onClick={(e) => e.currentTarget.select()}
-                              placeholder="0.00"
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-slate-900 transition"
-                            />
-                          </div>
-                        </div>
+                      const isEnabled = (key: string) => {
+                        if (!pMethods || pMethods.length === 0) return true
+                        const found = pMethods.find((p: any) => p.codigo.toUpperCase().includes(key) || key.includes(p.codigo.toUpperCase()))
+                        return found ? found.activo !== false : true
+                      }
 
-                        {/* Billetes Rápidos Táctiles */}
-                        <div className="pt-1">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
-                            Billetes Rápidos:
-                          </span>
-                          <div className="flex flex-wrap gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleQuickCashClick(totalPyg)}
-                              className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-posMono tabular-nums font-black text-xs rounded-xl cursor-pointer shadow-md shadow-orange-500/20 transition-all active:scale-95"
-                            >
-                              Exacto ({formatPYG(totalPyg)})
-                            </button>
-                            {[
-                              { label: "100.000", val: 100000 },
-                              { label: "50.000", val: 50000 },
-                              { label: "20.000", val: 20000 },
-                              { label: "10.000", val: 10000 },
-                              { label: "5.000", val: 5000 },
-                              { label: "2.000", val: 2000 },
-                            ].map((b) => (
-                              <button
-                                key={b.label}
-                                type="button"
-                                onClick={() => handleQuickCashClick(b.val)}
-                                className="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-posMono tabular-nums font-bold rounded-xl cursor-pointer border border-slate-200 dark:border-slate-700 transition-all active:scale-95"
-                              >
-                                {b.label}
-                              </button>
-                            ))}
-                          </div>
+                      const allTabs = [
+                        { id: "cash", key: "1", label: "Efectivo", icon: Banknote, show: isEnabled("EFECTIVO") },
+                        { id: "bancard", key: "2", label: "Bancard", icon: CreditCard, show: isEnabled("BANCARD") },
+                        { id: "dinelco", key: "3", label: "Dinelco", icon: CreditCard, show: isEnabled("DINELCO") },
+                        { id: "qr", key: "4", label: "QR Zimple", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
+                        { id: "plugpay_pix", key: "5", label: "PIX Brasil", icon: Smartphone, show: true },
+                        { id: "plugpay_credito", key: "6", label: "Crédito BRL", icon: CreditCard, show: true },
+                        { id: "extra_club", key: "7", label: "Extra Club", icon: Star, show: isEnabled("EXTRA_CLUB") },
+                      ]
+
+                      return allTabs.filter(t => t.show).map((m) => {
+                        const isActive = activeMethods.has(m.id as any)
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={() => toggleActiveMethod(m.id as any)}
+                            className={`relative p-2 rounded-xl border font-bold text-[11px] flex flex-col items-center gap-0.5 transition-all cursor-pointer select-none ${
+                              isActive
+                                ? "bg-emerald-600 text-white border-emerald-500 shadow-sm"
+                                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                            }`}
+                          >
+                            <span className={`absolute top-0.5 left-1.5 text-[8px] font-black font-mono ${isActive ? "text-emerald-200" : "text-slate-400"}`}>
+                              {m.key}
+                            </span>
+                            <m.icon className="w-3.5 h-3.5 mt-0.5" />
+                            <span className="text-center leading-tight truncate w-full">{m.label}</span>
+                          </button>
+                        )
+                      })
+                    })()}
+                  </div>
+                  {isMultiPayment && (
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                      Pago dividido entre {activeMethods.size} métodos -- complete el monto de cada línea.
+                    </p>
+                  )}
+                </div>
+
+                {/* Panel Activo por Método */}
+                <div>
+                  
+                  {/* 1. EFECTIVO MULTIMONEDA */}
+                  {activeMethods.has("cash") && (
+                    <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <Banknote className="w-4 h-4 text-emerald-600" /> Ingreso de Efectivo
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          Enter / Tab salta entre monedas
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 items-end">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
+                            <FlagPY /> Guaraníes (₲):
+                          </label>
+                          <input
+                            ref={payCashPygInputRef}
+                            type="text"
+                            value={payCashPyg}
+                            onChange={(e) => {
+                              const clean = e.target.value.replace(/\D/g, "")
+                              setPayCashPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
+                            }}
+                            onKeyDown={(e) => handleCashFieldKeyDown(e, payCashBrlInputRef, "BRL")}
+                            onFocus={(e) => e.target.select()}
+                            onClick={(e) => e.currentTarget.select()}
+                            placeholder="0"
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-black text-sm text-emerald-600 dark:text-emerald-400 outline-none focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
+                            <FlagBR /> Reales (R$ x{rates.BRL}):
+                          </label>
+                          <input
+                            ref={payCashBrlInputRef}
+                            type="text"
+                            value={payCashBrl}
+                            onChange={(e) => setPayCashBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                            onKeyDown={(e) => handleCashFieldKeyDown(e, payCashUsdInputRef, "USD")}
+                            onFocus={(e) => e.target.select()}
+                            onClick={(e) => e.currentTarget.select()}
+                            placeholder="0.00"
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-amber-600 dark:text-amber-400 outline-none focus:border-amber-500 focus:bg-white dark:focus:bg-slate-900 transition"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1 mb-1">
+                            <FlagUS /> Dólares (US$ x{rates.USD}):
+                          </label>
+                          <input
+                            ref={payCashUsdInputRef}
+                            type="text"
+                            value={payCashUsd}
+                            onChange={(e) => setPayCashUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
+                            onKeyDown={(e) => handleCashFieldKeyDown(e, payCashPygInputRef, "PYG")}
+                            onFocus={(e) => e.target.select()}
+                            onClick={(e) => e.currentTarget.select()}
+                            placeholder="0.00"
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-slate-900 transition"
+                          />
                         </div>
                       </div>
-                    )}
+
+                      {/* Billetes Rápidos Táctiles - Grid Uniforme */}
+                      <div className="pt-1">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
+                          Billetes Rápidos:
+                        </span>
+                        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleQuickCashClick(totalPyg)}
+                            className="col-span-2 sm:col-span-1 py-2 px-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-posMono tabular-nums font-black text-[11px] rounded-xl cursor-pointer shadow-sm transition-all active:scale-95 text-center truncate"
+                          >
+                            Exacto
+                          </button>
+                          {[
+                            { label: "100.000", val: 100000 },
+                            { label: "50.000", val: 50000 },
+                            { label: "20.000", val: 20000 },
+                            { label: "10.000", val: 10000 },
+                            { label: "5.000", val: 5000 },
+                            { label: "2.000", val: 2000 },
+                          ].map((b) => (
+                            <button
+                              key={b.label}
+                              type="button"
+                              onClick={() => handleQuickCashClick(b.val)}
+                              className="py-2 px-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-[11px] font-posMono tabular-nums font-bold rounded-xl cursor-pointer border border-slate-200 dark:border-slate-700 transition-all active:scale-95 text-center"
+                            >
+                              {b.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                     {/* 2. POS BANCARD INFONET */}
                     {activeMethods.has("bancard") && (
@@ -7160,14 +7134,15 @@ export default function POSPage() {
               </div>
 
               {/* 3. FOOTER ACTION BAR */}
-              <div className="flex items-stretch gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
+              <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
                 <button
                   type="button"
                   onClick={() => setShowPaymentModal(false)}
-                  className="w-52 shrink-0 rounded-2xl border-2 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-black text-sm hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-400 dark:hover:border-slate-600 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1.5 shadow-xs"
                 >
-                  <ArrowLeft className="w-4 h-4" />
-                  <span>Volver [ESC]</span>
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Volver al Carrito</span>
+                  <span className="text-[10px] font-mono bg-slate-100 dark:bg-slate-900 px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-700 text-slate-500">ESC</span>
                 </button>
 
                 <button
@@ -7198,14 +7173,15 @@ export default function POSPage() {
                     handleProcessCheckout()
                   }}
                   disabled={submitting}
-                  className="flex-1 py-4 px-8 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-base shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-3 transition-all cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                  className="flex-1 max-w-lg py-3 px-6 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm shadow-md shadow-emerald-600/30 flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99] disabled:opacity-50"
                 >
                   {submitting ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <>
-                      <Printer className="w-5 h-5" />
-                      <span>Confirmar Cobro e Imprimir Factura [F12]</span>
+                      <Printer className="w-4 h-4" />
+                      <span>Confirmar Cobro e Imprimir Factura</span>
+                      <span className="text-[10px] font-mono bg-emerald-700/80 px-1.5 py-0.5 rounded border border-emerald-400/40 text-emerald-100">F12 / Enter</span>
                     </>
                   )}
                 </button>
