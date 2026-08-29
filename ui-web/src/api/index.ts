@@ -628,6 +628,8 @@ export const api = {
     costComparison: () => client.get<CostComparisonReport[]>("/api/reports/inventory/cost-comparison"),
     fiscalBook: (params?: { tipo_libro?: string; fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/fiscal/book", params),
     financialSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) => client.get<any>("/api/reports/financial/summary", params),
+    dashboardAllKpis: (companyId: string = COMPANY_ID, branchId?: string) => client.get<any>(`/api/reports/companies/${companyId}/dashboard-all-kpis`, branchId ? { branch_id: branchId } : undefined),
+    dashboardQuickKpis: (companyId: string = COMPANY_ID, timeframe: string = "mes") => client.get<any>(`/api/reports/companies/${companyId}/dashboard-quick-kpis`, { timeframe }),
     exportSalesByPeriod: (params?: { fecha_desde?: string; fecha_hasta?: string; agrupar_por?: string }) => client.get<Blob>("/api/reports/export/sales-by-period", params),
     exportInventory: () => client.get<Blob>("/api/reports/export/inventory"),
     exportFifo: () => client.get<Blob>("/api/reports/export/fifo"),
