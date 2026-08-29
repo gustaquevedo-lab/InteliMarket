@@ -96,8 +96,8 @@ export default function SalonOperacionesPwaPage() {
 
   // ── ESTADOS DE PANADERÍA & TRANSFORMACIONES ──
   const [transformaciones, setTransformaciones] = useState<TransformacionPanaderia[]>([
-    { id: "tr-201", origen_nombre: "Pan Francés (Día anterior)", destino: "Pan Rallado Fino Extra", kg_sobrante: 18, kg_obtenidos: 17.1, fecha: "Hoy 07:00", responsable: "Rosa Benítez", estado: "completado" },
-    { id: "tr-202", origen_nombre: "Medialunas (Sobrante ayer)", destino: "Budín de Pan Artesanal", kg_sobrante: 6, kg_obtenidos: 7.2, fecha: "Hoy 07:30", responsable: "Rosa Benítez", estado: "completado" },
+    { id: "tr-201", origen_nombre: "Pan Francés (Día anterior)", destino_nombre: "Pan Rallado Fino Extra", kg_sobrante: 18, kg_obtenidos: 17.1, fecha: "Hoy 07:00", responsable: "Rosa Benítez", estado: "completado" },
+    { id: "tr-202", origen_nombre: "Medialunas (Sobrante ayer)", destino_nombre: "Budín de Pan Artesanal", kg_sobrante: 6, kg_obtenidos: 7.2, fecha: "Hoy 07:30", responsable: "Rosa Benítez", estado: "completado" },
   ])
   const [selectedSugTransform, setSelectedSugTransform] = useState(SUGERENCIAS_TRANSFORMACION_PAN[0])
   const [formKgSobrantePan, setFormKgSobrantePan] = useState("")
@@ -124,7 +124,7 @@ export default function SalonOperacionesPwaPage() {
   useEffect(() => {
     setLoading(true)
     api.products.list({ limit: 80 })
-      .then((res) => setProducts(res?.items || []))
+      .then((res) => setProducts(Array.isArray(res) ? res : ((res as any)?.items || [])))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -229,10 +229,11 @@ export default function SalonOperacionesPwaPage() {
     e.preventDefault()
     const code = scannerCode.trim()
     if (!code) return
-    const match = products.find((p) => (p.codigo_barras && p.codigo_barras.includes(code)) || p.nombre.toLowerCase().includes(code.toLowerCase()))
+    const match = products.find((p) => (p.codigo_barra && p.codigo_barra.includes(code)) || p.nombre.toLowerCase().includes(code.toLowerCase()))
     if (match) {
-      setScannedItem({ product: match, precio_gondola: match.precio_unitario })
-      setPriceGondolaInput(String(match.precio_unitario))
+      const pUnit = match.precio_venta || match.precio || 0
+      setScannedItem({ product: match, precio_gondola: pUnit })
+      setPriceGondolaInput(String(pUnit))
       toast.success("Producto Encontrado", match.nombre)
     } else {
       toast.error("No encontrado", `No se halló ningún producto con código ${code}`)
@@ -785,7 +786,7 @@ export default function SalonOperacionesPwaPage() {
                       {scannedItem.product.nombre}
                     </div>
                     <div className="text-xs text-slate-500 font-mono">
-                      Cód: {scannedItem.product.codigo_barras || scannedItem.product.id}
+                      Cód: {scannedItem.product.codigo_barra || scannedItem.product.id}
                     </div>
                   </div>
 
@@ -793,7 +794,7 @@ export default function SalonOperacionesPwaPage() {
                     <div>
                       <div className="text-[10px] font-black uppercase text-slate-400">Precio Activo Sistema:</div>
                       <div className="font-black text-2xl text-emerald-600 dark:text-emerald-400" style={monoFont}>
-                        {formatPYG(scannedItem.product.precio_unitario)}
+                        {formatPYG(scannedItem.product.precio_venta || scannedItem.product.precio || 0)}
                       </div>
                     </div>
                     <div>

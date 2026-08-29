@@ -215,7 +215,7 @@ export default function CarniceriaTvDigitalPage() {
   const fetchLivePrices = useCallback(async () => {
     try {
       const res = await api.products.list({ limit: 100 })
-      const dbProducts = res?.items || []
+      const dbProducts = Array.isArray(res) ? res : ((res as any)?.items || [])
       
       // Mapear y actualizar precios y stock en vivo
       setCortes((prev) =>
@@ -227,7 +227,7 @@ export default function CarniceriaTvDigitalPage() {
           if (match) {
             return {
               ...c,
-              precio: match.precio_unitario || c.precio,
+              precio: match.precio_venta || match.precio || c.precio,
               stock_kg: match.stock !== undefined ? match.stock : c.stock_kg,
             }
           }
