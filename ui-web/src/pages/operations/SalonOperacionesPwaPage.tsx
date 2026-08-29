@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import {
   Beef, UtensilsCrossed, Carrot, ChefHat, Tag, Monitor, ShieldCheck,
   Plus, Check, X, AlertTriangle, RefreshCcw, Camera, Upload, Trash2,
@@ -1081,7 +1081,7 @@ export default function SalonOperacionesPwaPage() {
                         <div className="text-[10px] font-black uppercase text-slate-400 px-2 py-1">
                           Resultados del Catálogo ({filteredCatalogProducts.length}):
                         </div>
-                        {filteredCatalogProducts.map((p) => (
+                        {filteredCatalogProducts.map((p: Product) => (
                           <div
                             key={p.id}
                             onClick={() => handleAddCatalogProductToTv(p)}
@@ -1113,7 +1113,7 @@ export default function SalonOperacionesPwaPage() {
                   <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
                     {[...DEFAULT_CORTES, ...(tvConfig.custom_products || [])].map((c) => {
                       const isVisible = tvConfig.productos_visibles_ids.includes(c.id)
-                      const dbMatch = products.find((p) => p.id === c.id || p.nombre.toLowerCase() === c.nombre.toLowerCase())
+                      const dbMatch = products.find((p: Product) => p.id === c.id || p.nombre.toLowerCase() === c.nombre.toLowerCase())
                       const realPrice = dbMatch?.precio_venta || dbMatch?.precio || c.precio
 
                       return (
