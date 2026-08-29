@@ -252,15 +252,11 @@ export default function SettingsPage() {
       const data = await api.posTerminals.list()
       setPosTerminals(Array.isArray(data) ? data : [])
     } catch (e: any) {
-      toast.error("No se pudieron cargar las cajas asignadas", e?.message || "Intente nuevamente.")
+      console.error("Error al cargar cajas asignadas:", e)
     } finally {
       setLoadingPosTerminals(false)
     }
-  }, [toast])
-
-  useEffect(() => {
-    if (tab === "cajas") fetchPosTerminals()
-  }, [tab, fetchPosTerminals])
+  }, [])
 
   const handleCreatePosTerminal = async () => {
     if (!newTerminalHostname.trim() && !newTerminalIp.trim()) {
@@ -318,14 +314,10 @@ export default function SettingsPage() {
   }
 
   // ── NUMERACIÓN DE NOTAS DE CRÉDITO POR PUNTO DE EMISIÓN ─────────────────
-  // Somos autoimpresor -- no se declara CDC/SIFEN, pero cada devolución sí
-  // necesita un número de NC real y correlativo por caja, igual que ya pasa
-  // con la numeración de venta. Se asigna acá, junto con el resto de la
-  // configuración de puntos de emisión, no en el mostrador.
   const [ncSequences, setNcSequences] = useState<{ punto_emision: string; numero_actual: number; numero_final: number; disponibles: number; timbrado_numero: string; timbrado_vencido: boolean }[]>([])
   const [loadingNcSequences, setLoadingNcSequences] = useState(false)
   const [activeTimbradoId, setActiveTimbradoId] = useState<string | null>(null)
-  const [newNcPunto, setNewNcPunto] = useState("012")
+  const [newNcPunto, setNewNcPunto] = useState("011")
   const [newNcDesde, setNewNcDesde] = useState("1")
   const [newNcHasta, setNewNcHasta] = useState("5000")
   const [savingNcSequence, setSavingNcSequence] = useState(false)
@@ -339,15 +331,18 @@ export default function SettingsPage() {
       const activo = (timbrados || []).find((t: any) => t.activo)
       setActiveTimbradoId(activo?.id || null)
     } catch (e: any) {
-      toast.error("No se pudo cargar la numeración de NC", e?.message || "Intente nuevamente.")
+      console.error("Error al cargar secuencias NC:", e)
     } finally {
       setLoadingNcSequences(false)
     }
-  }, [toast])
+  }, [])
 
   useEffect(() => {
-    if (tab === "cajas") fetchNcSequences()
-  }, [tab, fetchNcSequences])
+    if (tab === "cajas") {
+      fetchPosTerminals()
+      fetchNcSequences()
+    }
+  }, [tab, fetchPosTerminals, fetchNcSequences])
 
   const handleCreateNcSequence = async () => {
     if (!activeTimbradoId) {
