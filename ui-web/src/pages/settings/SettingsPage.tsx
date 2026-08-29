@@ -429,9 +429,6 @@ export default function SettingsPage() {
     return DEFAULT_KIOSK_CONFIG
   })
 
-  // Subpestaña de edición del constructor
-  const [designerSection, setDesignerSection] = useState<"header" | "body" | "totals" | "club" | "donacion" | "marketing" | "footer">("header")
-  
   // Simulador de vista previa: con socio Extra Club o Consumidor Final
   const [previewCustomerType, setPreviewCustomerType] = useState<"socio" | "consumidor_final">("socio")
 
@@ -951,630 +948,421 @@ export default function SettingsPage() {
       {tab === "receipt_builder" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
-          {/* PANEL IZQUIERDO: FORMULARIO Y CONTROLES DEL CONSTRUCTOR (7 COLS) */}
-          <div className="lg:col-span-7 space-y-4">
+          {/* PANEL IZQUIERDO: FORMULARIO Y CONTROLES DEL CONSTRUCTOR EN 6 BLOQUES COHERENTES (7 COLS) */}
+          <div className="lg:col-span-7 space-y-5">
             
-            {/* Sub-pestañas de edición del ticket */}
-            <div className="flex gap-1 bg-white dark:bg-slate-800/80 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 overflow-x-auto">
-              {[
-                { id: "header", label: "Cabecera & Logo", icon: Building2 },
-                { id: "body", label: "Cuerpo & Productos", icon: FileText },
-                { id: "totals", label: "Totales & Pagos", icon: DollarSign },
-                { id: "club", label: "Extra Club", icon: Award },
-                { id: "donacion", label: "Abre tu Corazón", icon: Heart },
-                { id: "marketing", label: "Marketing & Cupones", icon: Flame },
-                { id: "footer", label: "Pie & Corte", icon: Scissors },
-              ].map(sec => (
-                <button
-                  key={sec.id}
-                  onClick={() => setDesignerSection(sec.id as any)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                    designerSection === sec.id
-                      ? "bg-blue-600 text-white shadow-xs"
-                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
-                  }`}
-                >
-                  <sec.icon className="w-3.5 h-3.5" />
-                  {sec.label}
-                </button>
-              ))}
-            </div>
+            {/* BLOQUE 1: CABECERA & IDENTIDAD COMERCIAL */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/80 pb-3">
+                <div className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">1. Cabecera & Identidad Comercial</h3>
+                  <p className="text-xs text-slate-500">Logotipo, nombre comercial, contacto y ubicación impresos en el encabezado.</p>
+                </div>
+              </div>
 
-            {/* SECCIÓN 1: CABECERA & LOGO */}
-            {designerSection === "header" && (
-              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 animate-fade-in">
-                <div className="border-b border-slate-100 dark:border-slate-700 pb-3">
-                  <h3 className="text-sm font-black text-gray-900 dark:text-white">Identidad Visual & Encabezado de la Factura</h3>
-                  <p className="text-xs text-gray-500">Personalice los datos de la empresa, timbrado, logotipo y contacto que encabezan el ticket.</p>
+              <div className="space-y-3">
+                {/* Switch Logotipo */}
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-slate-900 dark:text-white block">Imprimir Logotipo en la Cabecera</span>
+                    <span className="text-[11px] text-slate-500">Convierte el logo a matriz térmica monocromo de alta nitidez</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={receiptConfig.mostrar_logo}
+                    onChange={e => setReceiptConfig({ ...receiptConfig, mostrar_logo: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                  />
                 </div>
 
-                <div className="space-y-3">
-                  {/* Switch Logotipo */}
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-gray-900 dark:text-white block">Imprimir Logotipo de Empresa en Ticket</span>
-                      <span className="text-[11px] text-gray-500">Utiliza el logotipo configurado en la pestaña "Datos Fiscales de la Empresa"</span>
+                {receiptConfig.mostrar_logo && (
+                  <div className="p-3 rounded-xl bg-slate-50/60 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 flex items-center justify-center overflow-hidden shrink-0">
+                        {company.logo_url ? (
+                          <img src={company.logo_url} alt="Logo" className="max-w-full max-h-full object-contain p-0.5" />
+                        ) : (
+                          <span className="text-[9px] text-slate-400 font-bold text-center">Sin Logo</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                          {company.logo_url ? "Logotipo Activo" : "No has subido un logotipo aún"}
+                        </span>
+                        <span className="text-[11px] text-slate-500">
+                          Puedes subirlo en la pestaña <button type="button" onClick={() => setTab("company")} className="text-blue-600 dark:text-blue-400 font-bold underline cursor-pointer">Datos Fiscales</button>
+                        </span>
+                      </div>
                     </div>
+
+                    <div className="text-right">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ancho en Ticket (px):</label>
+                      <input
+                        type="number"
+                        value={receiptConfig.logo_ancho_px}
+                        onChange={e => setReceiptConfig({ ...receiptConfig, logo_ancho_px: Number(e.target.value) })}
+                        className="w-24 text-xs font-mono font-bold p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nombre Comercial de Fantasía:</label>
                     <input
-                      type="checkbox"
-                      checked={receiptConfig.mostrar_logo}
-                      onChange={e => setReceiptConfig({ ...receiptConfig, mostrar_logo: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                      type="text"
+                      value={receiptConfig.nombre_fantasia}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, nombre_fantasia: e.target.value })}
+                      className="w-full text-xs font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
                     />
                   </div>
-
-                  {receiptConfig.mostrar_logo && (
-                    <div className="p-3 rounded-xl bg-slate-50/60 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 flex items-center justify-center overflow-hidden shrink-0">
-                          {company.logo_url ? (
-                            <img src={company.logo_url} alt="Logo" className="max-w-full max-h-full object-contain p-0.5" />
-                          ) : (
-                            <span className="text-[9px] text-slate-400 font-bold text-center">Sin Logo</span>
-                          )}
-                        </div>
-                        <div>
-                          <span className="text-xs font-bold text-gray-800 dark:text-slate-200 block">
-                            {company.logo_url ? "Logotipo Activo" : "No has subido un logotipo aún"}
-                          </span>
-                          <span className="text-[11px] text-gray-500">
-                            Puedes subirlo en la pestaña <button type="button" onClick={() => setTab("company")} className="text-blue-600 dark:text-blue-400 font-bold underline cursor-pointer">Datos Fiscales</button>
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Ancho en Ticket (px):</label>
-                        <input
-                          type="number"
-                          value={receiptConfig.logo_ancho_px}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, logo_ancho_px: Number(e.target.value) })}
-                          className="w-24 text-xs font-mono font-bold p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Nombre Comercial de Fantasía:</label>
-                      <input
-                        type="text"
-                        value={receiptConfig.nombre_fantasia}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, nombre_fantasia: e.target.value })}
-                        className="w-full text-xs font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Razón Social Fiscal:</label>
-                      <input
-                        type="text"
-                        value={receiptConfig.razon_social}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, razon_social: e.target.value })}
-                        className="w-full text-xs font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Slogan Comercial:</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.slogan}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, slogan: e.target.value })}
+                      placeholder="¡Ahorro de verdad!"
+                      className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                    />
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Dirección del Local:</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.direccion}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, direccion: e.target.value })}
+                      className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ciudad / País:</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.ciudad}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, ciudad: e.target.value })}
+                      className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Teléfono / WhatsApp de Contacto:</label>
+                  <input
+                    type="text"
+                    value={receiptConfig.telefono}
+                    onChange={e => setReceiptConfig({ ...receiptConfig, telefono: e.target.value })}
+                    className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* BLOQUE 2: TRANSACCIÓN & DATOS DE LA VENTA */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/80 pb-3">
+                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">2. Transacción & Datos de Venta</h3>
+                  <p className="text-xs text-slate-500">Información del cajero, cliente y códigos impresos en el cuerpo del ticket.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {[
+                  { key: "mostrar_cajero", label: "Mostrar Nombre del Cajero y Boca" },
+                  { key: "mostrar_caja", label: "Mostrar Punto de Expedición" },
+                  { key: "mostrar_cliente", label: "Mostrar Nombre del Cliente" },
+                  { key: "mostrar_ruc_cliente", label: "Mostrar RUC / C.I. del Cliente" },
+                  { key: "mostrar_sku", label: "Mostrar Código SKU / Barra en ítems" },
+                  { key: "usar_numero_interno_venta", label: "Imprimir Nº Interno de Venta" },
+                ].map(opt => (
+                  <div key={opt.key} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">{opt.label}</span>
+                    <input
+                      type="checkbox"
+                      checked={(receiptConfig as any)[opt.key]}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, [opt.key]: e.target.checked })}
+                      className="w-4 h-4 text-emerald-600 rounded cursor-pointer"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* BLOQUE 3: TOTALES, MULTIMONEDA & LIQUIDACIÓN DE IVA */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/80 pb-3">
+                <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                  <DollarSign className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">3. Totales, Multimoneda & Liquidación de IVA</h3>
+                  <p className="text-xs text-slate-500">Conversiones de frontera (Reales/Dólares), desglose de pagos y cuadro impositivo.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {[
+                  { key: "mostrar_multimoneda", label: "Cuadro Multimoneda de Totales" },
+                  { key: "mostrar_equivalente_brl", label: "Equivalente en Reales (R$)" },
+                  { key: "mostrar_equivalente_usd", label: "Equivalente en Dólares (US$)" },
+                  { key: "mostrar_desglose_pagos", label: "Desglose de Formas de Pago" },
+                  { key: "mostrar_vuelto_extranjero", label: "Detalle de Vuelto en Reales/Dólares" },
+                  { key: "mostrar_liquidacion_iva", label: "Liquidación Legal de IVA (10%, 5%, Exentas)" },
+                ].map(opt => (
+                  <div key={opt.key} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">{opt.label}</span>
+                    <input
+                      type="checkbox"
+                      checked={(receiptConfig as any)[opt.key]}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, [opt.key]: e.target.checked })}
+                      className="w-4 h-4 text-indigo-600 rounded cursor-pointer"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* BLOQUE 4: FIDELIZACIÓN EXTRA CLUB */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/80 pb-3">
+                <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">4. Fidelización Extra Club</h3>
+                  <p className="text-xs text-slate-500">Muestra el saldo de puntos al socio o la invitación a registrarse para consumidores finales.</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-amber-900 dark:text-amber-300 block">Habilitar Módulo Extra Club en el Ticket</span>
+                    <span className="text-[11px] text-amber-700 dark:text-amber-400">Habilita también la opción de pago Extra Club en caja</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={receiptConfig.habilitar_extra_club}
+                    onChange={e => setReceiptConfig({ ...receiptConfig, habilitar_extra_club: e.target.checked })}
+                    className="w-4 h-4 text-amber-600 rounded cursor-pointer"
+                  />
+                </div>
+
+                {receiptConfig.habilitar_extra_club && (
+                  <div className="space-y-3 pt-1">
                     <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">RUC Emisor:</label>
-                      <input
-                        type="text"
-                        value={receiptConfig.ruc}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, ruc: e.target.value })}
-                        className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Timbrado Nº:</label>
-                      <input
-                        type="text"
-                        value={receiptConfig.timbrado}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, timbrado: e.target.value })}
-                        className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Validez Timbrado:</label>
-                      <input
-                        type="text"
-                        value={receiptConfig.timbrado_vencimiento}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, timbrado_vencimiento: e.target.value })}
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                        Mensaje para Cliente Socio (Puntos Ganados y Saldo):
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={receiptConfig.mensaje_socio_club}
+                        onChange={e => setReceiptConfig({ ...receiptConfig, mensaje_socio_club: e.target.value })}
                         className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
                       />
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Dirección del Local:</label>
-                      <input
-                        type="text"
-                        value={receiptConfig.direccion}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, direccion: e.target.value })}
-                        className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                        Mensaje de Invitación para No Socios (* UNITE AL EXTRA CLUB *):
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={receiptConfig.mensaje_invitacion_club}
+                        onChange={e => setReceiptConfig({ ...receiptConfig, mensaje_invitacion_club: e.target.value })}
+                        className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
                       />
                     </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Ciudad / País:</label>
-                      <input
-                        type="text"
-                        value={receiptConfig.ciudad}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, ciudad: e.target.value })}
-                        className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                      />
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Teléfono / Celular:</label>
-                      <input
-                        type="text"
-                        value={receiptConfig.telefono}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, telefono: e.target.value })}
-                        className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Slogan Comercial:</label>
-                      <input
-                        type="text"
-                        value={receiptConfig.slogan}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, slogan: e.target.value })}
-                        className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* SECCIÓN 2: CUERPO & PRODUCTOS */}
-            {designerSection === "body" && (
-              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 animate-fade-in">
-                <div className="border-b border-slate-100 dark:border-slate-700 pb-3">
-                  <h3 className="text-sm font-black text-gray-900 dark:text-white">Calibración de Impresión, Márgenes & Tipografía</h3>
-                  <p className="text-xs text-gray-500">Ajuste libremente el ancho útil, márgenes físicos y fuentes para evitar cualquier corte o desborde en su impresora térmica.</p>
-                </div>
-
-                <div className="space-y-4">
-                  {/* Fila 1: Calibración Física de Ancho y Márgenes */}
-                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-gray-900 dark:text-white">Calibración Dimensional del Cabezal Térmico:</span>
-                      <span className="text-[11px] text-gray-500 font-mono">Impresora 80mm / 58mm</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Ancho Útil (mm):</label>
-                        <input
-                          type="number"
-                          min={40}
-                          max={90}
-                          step={1}
-                          value={receiptConfig.ancho_imprimible_mm || 68}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, ancho_imprimible_mm: Number(e.target.value) })}
-                          className="w-full text-xs font-mono font-black p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white text-center"
-                        />
-                        <span className="text-[9px] text-gray-400 block mt-0.5">Sugerido: 68-72mm</span>
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Margen Izq. (mm):</label>
-                        <input
-                          type="number"
-                          min={-5}
-                          max={15}
-                          step={0.5}
-                          value={receiptConfig.margen_izq_mm || 0}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, margen_izq_mm: Number(e.target.value) })}
-                          className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white text-center"
-                        />
-                        <span className="text-[9px] text-gray-400 block mt-0.5">0 = Sin gap</span>
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Margen Der. (mm):</label>
-                        <input
-                          type="number"
-                          min={-5}
-                          max={15}
-                          step={0.5}
-                          value={receiptConfig.margen_der_mm || 0}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, margen_der_mm: Number(e.target.value) })}
-                          className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white text-center"
-                        />
-                        <span className="text-[9px] text-gray-400 block mt-0.5">0 = Borde total</span>
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Interlineado:</label>
-                        <input
-                          type="number"
-                          min={1.0}
-                          max={2.0}
-                          step={0.05}
-                          value={receiptConfig.interlineado || 1.22}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, interlineado: Number(e.target.value) })}
-                          className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white text-center"
-                        />
-                        <span className="text-[9px] text-gray-400 block mt-0.5">Normal: 1.15-1.25</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Fila 2: Tipografía & Tamaño */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Rollo de Papel:</label>
-                      <select
-                        value={receiptConfig.ancho_papel}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, ancho_papel: e.target.value as any })}
-                        className="w-full text-xs font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                      >
-                        <option value="80mm">80 mm (Estándar Supermercado)</option>
-                        <option value="58mm">58 mm (Compacto / Punto Móvil)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Tipografía ESC/POS:</label>
-                      <select
-                        value={receiptConfig.fuente_ticket}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, fuente_ticket: e.target.value as any })}
-                        className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                      >
-                        <option value="Consolas">Consolas (Recomendada / Nitidez)</option>
-                        <option value="Courier New">Courier New (Clásica)</option>
-                        <option value="Segoe UI">Segoe UI (Moderna Proporcional)</option>
-                        <option value="Lucida Console">Lucida Console</option>
-                        <option value="Monospace">Monospace Genérico</option>
-                        <option value="Arial">Arial (Sans-serif)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Tamaño Fuente (px):</label>
-                      <input
-                        type="number"
-                        min={8}
-                        max={16}
-                        step={0.5}
-                        value={receiptConfig.tamano_fuente_px}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, tamano_fuente_px: Number(e.target.value) })}
-                        className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white text-center"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    {[
-                      { key: "mostrar_cajero", label: "Mostrar Nombre del Cajero" },
-                      { key: "mostrar_caja", label: "Mostrar Punto de Expedición (Caja)" },
-                      { key: "mostrar_cliente", label: "Mostrar Nombre del Cliente" },
-                      { key: "mostrar_ruc_cliente", label: "Mostrar RUC / C.I. del Cliente" },
-                      { key: "mostrar_sku", label: "Mostrar Código SKU en cada ítem" },
-                      { key: "mostrar_balanza_origen", label: "Distinguir Ítems Pesados en Balanza" },
-                    ].map(opt => (
-                      <div key={opt.key} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                        <span className="text-xs font-bold text-gray-900 dark:text-white">{opt.label}</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-900 dark:text-white">Imprimir QR de Registro Club</span>
                         <input
                           type="checkbox"
-                          checked={(receiptConfig as any)[opt.key]}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, [opt.key]: e.target.checked })}
+                          checked={receiptConfig.mostrar_qr_club}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, mostrar_qr_club: e.target.checked })}
                           className="w-4 h-4 text-blue-600 rounded cursor-pointer"
                         />
                       </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* SECCIÓN 3: TOTALES & PAGOS */}
-            {designerSection === "totals" && (
-              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 animate-fade-in">
-                <div className="border-b border-slate-100 dark:border-slate-700 pb-3">
-                  <h3 className="text-sm font-black text-gray-900 dark:text-white">Desglose de Totales, Multimoneda y Pagos</h3>
-                  <p className="text-xs text-gray-500">Defina qué monedas secundarias, cuadros tributarios y medios de pago se detallan en el ticket.</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { key: "mostrar_multimoneda", label: "Cuadro Multimoneda de Totales" },
-                    { key: "mostrar_equivalente_brl", label: "Equivalente en Reales Brasileños (R$)" },
-                    { key: "mostrar_equivalente_usd", label: "Equivalente en Dólares (US$)" },
-                    { key: "mostrar_liquidacion_iva", label: "Liquidación Legal de IVA (10%, 5%, Exentas)" },
-                    { key: "mostrar_desglose_pagos", label: "Desglose de Formas de Pago (Lote/Voucher)" },
-                    { key: "mostrar_vuelto_extranjero", label: "Detalle de Vuelto en Reales/Dólares" },
-                  ].map(opt => (
-                    <div key={opt.key} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                      <span className="text-xs font-bold text-gray-900 dark:text-white">{opt.label}</span>
-                      <input
-                        type="checkbox"
-                        checked={(receiptConfig as any)[opt.key]}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, [opt.key]: e.target.checked })}
-                        className="w-4 h-4 text-blue-600 rounded cursor-pointer"
-                      />
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">URL de Registro en QR:</label>
+                        <input
+                          type="text"
+                          value={receiptConfig.qr_url_club}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, qr_url_club: e.target.value })}
+                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                        />
+                      </div>
                     </div>
-                  ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* BLOQUE 5: CAMPAÑA SOLIDARIA "ABRE TU CORAZÓN" */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/80 pb-3">
+                <div className="p-2 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                  <Heart className="w-5 h-5 fill-rose-500 text-rose-500" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">5. Campaña Solidaria "Abre tu Corazón"</h3>
+                  <p className="text-xs text-slate-500">Mensaje institucional impreso al pie del comprobante cuando hay donación.</p>
                 </div>
               </div>
-            )}
 
-            {/* SECCIÓN 4: FIDELIZACIÓN EXTRA CLUB */}
-            {designerSection === "club" && (
-              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 animate-fade-in">
-                <div className="border-b border-slate-100 dark:border-slate-700 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Award className="w-5 h-5 text-amber-500" />
-                    <h3 className="text-sm font-black text-gray-900 dark:text-white">Programa de Fidelización Extra Club en Ticket</h3>
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-slate-900 dark:text-white block">Imprimir Mensaje Solidario en Factura</span>
+                    <span className="text-[11px] text-slate-500">Activa también el botón interactivo y atajo F8 en la caja</span>
                   </div>
-                  <p className="text-xs text-gray-500">Premie a los clientes con puntos automáticos o invítelos a sumarse directamente desde la factura.</p>
+                  <input
+                    type="checkbox"
+                    checked={receiptConfig.donacion_activa}
+                    onChange={e => setReceiptConfig({ ...receiptConfig, donacion_activa: e.target.checked })}
+                    className="w-4 h-4 text-rose-600 rounded cursor-pointer"
+                  />
                 </div>
 
-                <div className="space-y-3">
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+                {receiptConfig.donacion_activa && (
+                  <div className="space-y-3 pt-1">
                     <div>
-                      <span className="text-xs font-bold text-amber-900 dark:text-amber-300 block">Habilitar Módulo Extra Club en el Ticket</span>
-                      <span className="text-[11px] text-amber-700 dark:text-amber-400">Imprime el saldo de puntos del socio o la invitación a registrarse</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={receiptConfig.habilitar_extra_club}
-                      onChange={e => setReceiptConfig({ ...receiptConfig, habilitar_extra_club: e.target.checked })}
-                      className="w-4 h-4 text-amber-600 rounded cursor-pointer"
-                    />
-                  </div>
-
-                  {receiptConfig.habilitar_extra_club && (
-                    <>
-                      <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">
-                          Mensaje para Cliente Socio (Muestra Puntos Ganados y Saldo Total):
-                        </label>
-                        <textarea
-                          rows={2}
-                          value={receiptConfig.mensaje_socio_club}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, mensaje_socio_club: e.target.value })}
-                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">
-                          Mensaje para Consumidor Final (Invitación a Registrarse):
-                        </label>
-                        <textarea
-                          rows={3}
-                          value={receiptConfig.mensaje_invitacion_club}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, mensaje_invitacion_club: e.target.value })}
-                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                          <span className="text-xs font-bold text-gray-900 dark:text-white">Imprimir QR de Registro Club</span>
-                          <input
-                            type="checkbox"
-                            checked={receiptConfig.mostrar_qr_club}
-                            onChange={e => setReceiptConfig({ ...receiptConfig, mostrar_qr_club: e.target.checked })}
-                            className="w-4 h-4 text-blue-600 rounded cursor-pointer"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">URL de Registro en QR:</label>
-                          <input
-                            type="text"
-                            value={receiptConfig.qr_url_club}
-                            onChange={e => setReceiptConfig({ ...receiptConfig, qr_url_club: e.target.value })}
-                            className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                          />
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* SECCIÓN 5: MARKETING & CUPONERA */}
-            {designerSection === "marketing" && (
-              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 animate-fade-in">
-                <div className="border-b border-slate-100 dark:border-slate-700 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Flame className="w-5 h-5 text-rose-500" />
-                    <h3 className="text-sm font-black text-gray-900 dark:text-white">Promociones, Avisos de Marketing & Cuponera</h3>
-                  </div>
-                  <p className="text-xs text-gray-500">Incentive la recompra entregando cupones con fecha de vencimiento al pie del comprobante.</p>
-                </div>
-
-                <div className="space-y-4">
-                  {/* Mensaje de Marketing General */}
-                  <div className="space-y-2">
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                      <span className="text-xs font-bold text-gray-900 dark:text-white">Imprimir Mensaje / Promoción de Marketing</span>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Título del Bloque Solidario:</label>
                       <input
-                        type="checkbox"
-                        checked={receiptConfig.habilitar_mensaje_marketing}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, habilitar_mensaje_marketing: e.target.checked })}
-                        className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                        type="text"
+                        value={receiptConfig.donacion_titulo}
+                        onChange={e => setReceiptConfig({ ...receiptConfig, donacion_titulo: e.target.value })}
+                        placeholder="* ABRE TU CORAZON *"
+                        className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
                       />
                     </div>
-                    {receiptConfig.habilitar_mensaje_marketing && (
-                      <textarea
-                        rows={2}
-                        value={receiptConfig.mensaje_marketing}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, mensaje_marketing: e.target.value })}
-                        placeholder="Ej: ¡Miércoles de Carnicería: 15% OFF en cortes seleccionados!"
+
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Mensaje de Agradecimiento / Beneficiario:</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.donacion_mensaje}
+                        onChange={e => setReceiptConfig({ ...receiptConfig, donacion_mensaje: e.target.value })}
+                        placeholder="Gracias por colaborar con el Centro Amor y Esperanza."
+                        className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Página Web o Enlace Institucional:</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.donacion_web}
+                        onChange={e => setReceiptConfig({ ...receiptConfig, donacion_web: e.target.value })}
+                        placeholder="www.centroamoresperanza.org"
                         className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
                       />
-                    )}
-                  </div>
-
-                  {/* Cuponera de Recompra */}
-                  <div className="space-y-2 border-t border-slate-100 dark:border-slate-700 pt-3">
-                    <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-bold text-purple-900 dark:text-purple-300 block">Generar Cupón de Descuento para Próxima Visita</span>
-                        <span className="text-[11px] text-purple-700 dark:text-purple-400">Imprime un cupón recortable con código y validez</span>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={receiptConfig.habilitar_cupon_descuento}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, habilitar_cupon_descuento: e.target.checked })}
-                        className="w-4 h-4 text-purple-600 rounded cursor-pointer"
-                      />
                     </div>
-
-                    {receiptConfig.habilitar_cupon_descuento && (
-                      <div className="grid grid-cols-3 gap-3 p-3 rounded-xl bg-slate-50/60 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
-                        <div>
-                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Código del Cupón:</label>
-                          <input
-                            type="text"
-                            value={receiptConfig.cupon_codigo}
-                            onChange={e => setReceiptConfig({ ...receiptConfig, cupon_codigo: e.target.value })}
-                            className="w-full text-xs font-mono font-black p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white uppercase"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Beneficio / Descripción:</label>
-                          <input
-                            type="text"
-                            value={receiptConfig.cupon_descripcion}
-                            onChange={e => setReceiptConfig({ ...receiptConfig, cupon_descripcion: e.target.value })}
-                            className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Validez (Días):</label>
-                          <input
-                            type="number"
-                            value={receiptConfig.cupon_validez_dias}
-                            onChange={e => setReceiptConfig({ ...receiptConfig, cupon_validez_dias: Number(e.target.value) })}
-                            className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
-                        </div>
-                      </div>
-                    )}
                   </div>
+                )}
+              </div>
+            </div>
+
+            {/* BLOQUE 6: MARKETING, CUPÓN DE RECOMPRA & DESPEDIDA */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/80 pb-3">
+                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                  <Flame className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">6. Marketing, Cupón de Recompra & Pie Fiscal</h3>
+                  <p className="text-xs text-slate-500">Avisos promocionales, cupón con validez recortable, consulta SIFEN y despedida.</p>
                 </div>
               </div>
-            )}
 
-            {/* SECCIÓN 5.5: CAMPAÑA SOLIDARIA ABRE TU CORAZÓN */}
-            {designerSection === "donacion" && (
-              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 animate-fade-in">
-                <div className="border-b border-slate-100 dark:border-slate-700 pb-3">
-                  <h3 className="text-sm font-black text-gray-900 dark:text-white flex items-center gap-2">
-                    <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />
-                    Campaña Solidaria "Abre tu Corazón"
-                  </h3>
-                  <p className="text-xs text-gray-500">Personalice el título, mensaje institucional y enlace impreso al pie de factura cuando hay donación.</p>
+              <div className="space-y-4">
+                {/* Mensaje de Marketing */}
+                <div className="space-y-2">
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">Imprimir Mensaje / Promoción de Marketing</span>
+                    <input
+                      type="checkbox"
+                      checked={receiptConfig.habilitar_mensaje_marketing}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, habilitar_mensaje_marketing: e.target.checked })}
+                      className="w-4 h-4 text-purple-600 rounded cursor-pointer"
+                    />
+                  </div>
+                  {receiptConfig.habilitar_mensaje_marketing && (
+                    <textarea
+                      rows={2}
+                      value={receiptConfig.mensaje_marketing}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, mensaje_marketing: e.target.value })}
+                      placeholder="Ej: ¡Miércoles de Carnicería: 15% OFF en cortes seleccionados!"
+                      className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                    />
+                  )}
                 </div>
 
-                <div className="space-y-3">
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                {/* Cuponera de Recompra */}
+                <div className="space-y-2 border-t border-slate-100 dark:border-slate-700 pt-3">
+                  <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-gray-900 dark:text-white block">Imprimir Mensaje Solidario en Factura</span>
-                      <span className="text-[11px] text-gray-500">Aparece automáticamente en el comprobante fiscal cuando el cajero registra una donación voluntaria.</span>
+                      <span className="text-xs font-bold text-purple-900 dark:text-purple-300 block">Generar Cupón de Descuento para Próxima Visita</span>
+                      <span className="text-[11px] text-purple-700 dark:text-purple-400">Imprime un cupón recortable con código y validez</span>
                     </div>
                     <input
                       type="checkbox"
-                      checked={receiptConfig.donacion_activa}
-                      onChange={e => setReceiptConfig({ ...receiptConfig, donacion_activa: e.target.checked })}
-                      className="w-4 h-4 text-rose-600 rounded cursor-pointer"
+                      checked={receiptConfig.habilitar_cupon_descuento}
+                      onChange={e => setReceiptConfig({ ...receiptConfig, habilitar_cupon_descuento: e.target.checked })}
+                      className="w-4 h-4 text-purple-600 rounded cursor-pointer"
                     />
                   </div>
 
-                  {receiptConfig.donacion_activa && (
-                    <div className="space-y-3 pt-2">
+                  {receiptConfig.habilitar_cupon_descuento && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-xl bg-slate-50/60 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
                       <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Título del Bloque Solidario:</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Código del Cupón:</label>
                         <input
                           type="text"
-                          value={receiptConfig.donacion_titulo}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, donacion_titulo: e.target.value })}
-                          placeholder="* ABRE TU CORAZON *"
-                          className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                          value={receiptConfig.cupon_codigo}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, cupon_codigo: e.target.value })}
+                          className="w-full text-xs font-mono font-black p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white uppercase"
                         />
                       </div>
-
                       <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Mensaje de Agradecimiento / Beneficiario:</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Beneficio / Descripción:</label>
                         <input
                           type="text"
-                          value={receiptConfig.donacion_mensaje}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, donacion_mensaje: e.target.value })}
-                          placeholder="Gracias por colaborar con el Centro Amor y Esperanza."
+                          value={receiptConfig.cupon_descripcion}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, cupon_descripcion: e.target.value })}
                           className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
                         />
                       </div>
-
                       <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Página Web o Enlace Institucional:</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Validez (Días):</label>
                         <input
-                          type="text"
-                          value={receiptConfig.donacion_web}
-                          onChange={e => setReceiptConfig({ ...receiptConfig, donacion_web: e.target.value })}
-                          placeholder="www.centroamoresperanza.org"
-                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
+                          type="number"
+                          value={receiptConfig.cupon_validez_dias}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, cupon_validez_dias: Number(e.target.value) })}
+                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
                       </div>
                     </div>
                   )}
                 </div>
-              </div>
-            )}
 
-            {/* SECCIÓN 6: PIE & CORTE DE PAPEL */}
-            {designerSection === "footer" && (
-              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 animate-fade-in">
-                <div className="border-b border-slate-100 dark:border-slate-700 pb-3">
-                  <h3 className="text-sm font-black text-gray-900 dark:text-white">Pie de Comprobante, SIFEN y Guillotina</h3>
-                  <p className="text-xs text-gray-500">Configuración de consulta tributaria digital y saltos de papel para corte sin roturas.</p>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700/50 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-gray-900 dark:text-white block">Facturación Electrónica (SIFEN) Activa</span>
-                      <span className="text-[10px] text-gray-500 dark:text-gray-400">Mientras esté apagado, el ticket dice "Factura Contado" o "Factura Crédito" (según Extra Club) en vez de "Factura Electrónica" — no rotula como electrónico un comprobante que todavía no lo es. Cuando se active SIFEN, prender este switch (sin tocar código).</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={receiptConfig.facturacion_electronica}
-                      onChange={e => setReceiptConfig({ ...receiptConfig, facturacion_electronica: e.target.checked })}
-                      className="w-4 h-4 text-amber-600 rounded cursor-pointer shrink-0 ml-3"
-                    />
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-gray-900 dark:text-white block">Número Impreso: Interno de Venta (en vez del correlativo del ticket)</span>
-                      <span className="text-[10px] text-gray-500 dark:text-gray-400">Prendido (default): el ticket muestra el mismo número que después aparece al Reimprimir (espera ~0.2s a que el servidor confirme la venta). Apagado: imprime el correlativo local al instante, pero ese número NO va a coincidir con el que se ve en Reimprimir.</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={receiptConfig.usar_numero_interno_venta}
-                      onChange={e => setReceiptConfig({ ...receiptConfig, usar_numero_interno_venta: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 rounded cursor-pointer shrink-0 ml-3"
-                    />
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                    <span className="text-xs font-bold text-gray-900 dark:text-white">Mostrar Número de Comprobante en el Ticket</span>
-                    <input
-                      type="checkbox"
-                      checked={receiptConfig.mostrar_numero_comprobante}
-                      onChange={e => setReceiptConfig({ ...receiptConfig, mostrar_numero_comprobante: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 rounded cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
+                {/* SIFEN & Despedida */}
+                <div className="space-y-3 border-t border-slate-100 dark:border-slate-700 pt-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                      <span className="text-xs font-bold text-gray-900 dark:text-white">QR de Consulta Fiscal SIFEN</span>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">QR de Consulta Fiscal SIFEN</span>
                       <input
                         type="checkbox"
                         checked={receiptConfig.mostrar_qr_sifen}
@@ -1583,7 +1371,7 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">URL de Consulta Tributaria:</label>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">URL de Consulta SIFEN:</label>
                       <input
                         type="text"
                         value={receiptConfig.sifen_consulta_url}
@@ -1594,52 +1382,11 @@ export default function SettingsPage() {
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Mensaje de Despedida:</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Mensaje de Despedida:</label>
                     <input
                       type="text"
                       value={receiptConfig.mensaje_despedida}
                       onChange={e => setReceiptConfig({ ...receiptConfig, mensaje_despedida: e.target.value })}
-                      className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">
-                        Líneas de Salto / Avance antes del Corte (Feed lines):
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={10}
-                        value={receiptConfig.lineas_salto_corte}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, lineas_salto_corte: Number(e.target.value) })}
-                        className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                    </div>
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                      <span className="text-xs font-bold text-gray-900 dark:text-white">Línea Punteada de Corte Visual</span>
-                      <input
-                        type="checkbox"
-                        checked={receiptConfig.mostrar_linea_corte_visual}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, mostrar_linea_corte_visual: e.target.checked })}
-                        className="w-4 h-4 text-blue-600 rounded cursor-pointer"
-                      />
-                    </div>
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-bold text-gray-900 dark:text-white block">Corte Automático de Papel</span>
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400">Apagar solo si la impresora no tiene cuchilla automática (haría un ruido/movimiento raro sin cortar).</span>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={receiptConfig.corte_automatico}
-                        onChange={e => setReceiptConfig({ ...receiptConfig, corte_automatico: e.target.checked })}
-                        className="w-4 h-4 text-blue-600 rounded cursor-pointer shrink-0 ml-3"
-                      />
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -1899,7 +1646,7 @@ export default function SettingsPage() {
                         </>
                       ) : (
                         <>
-                          <div className="font-black text-[10px]">★ ÚNETE AL EXTRA CLUB ★</div>
+                          <div className="font-black text-[10px]">★ UNITE AL EXTRA CLUB ★</div>
                           <div className="text-[8.5px] leading-tight">
                             {receiptConfig.mensaje_invitacion_club || "Acumula puntos en cada compra para canjear por premios y descuentos directos."}
                           </div>

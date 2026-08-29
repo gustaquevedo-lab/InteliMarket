@@ -4408,7 +4408,7 @@ export default function POSPage() {
             t += ESCPOS_BOLD_ON + '* CLUB FIDELIDAD EXTRA *' + ESCPOS_BOLD_OFF + '\n'
             t += escposStripAccents(msgSocio) + '\n'
           } else {
-            t += ESCPOS_BOLD_ON + '* UNETE AL EXTRA CLUB *' + ESCPOS_BOLD_OFF + '\n'
+            t += ESCPOS_BOLD_ON + '* UNITE AL EXTRA CLUB *' + ESCPOS_BOLD_OFF + '\n'
             t += escposStripAccents(msgInvitacion) + '\n'
             if (tpl.mostrar_qr_club && tpl.qr_url_club) {
               t += escposQr(tpl.qr_url_club) + '\n'
