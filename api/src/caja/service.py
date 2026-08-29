@@ -133,7 +133,15 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
     register_id = data["cash_register_id"]
     existing = await get_open_session(db, str(register_id))
     if existing:
-        raise ValueError("Ya existe una sesión abierta para esta caja")
+        if data.get("user_id"):
+            existing.user_id = data["user_id"]
+        if data.get("cajero_nombre"):
+            existing.cajero_nombre = data.get("cajero_nombre")
+        if data.get("monto_apertura") and (not existing.monto_apertura or existing.monto_apertura == 0):
+            existing.monto_apertura = data.get("monto_apertura")
+        await db.flush()
+        await db.refresh(existing)
+        return existing
 
     session_obj = CashSession(
         register_id=register_id,

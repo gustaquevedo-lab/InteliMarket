@@ -1862,8 +1862,9 @@ export default function POSPage() {
         "¡Caja Habilitada con Éxito!",
         `${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision} abierta para operar.`
       )
-    } catch (err) {
-      toast.error("No se pudo abrir la caja", "Verifique la conexión con el servidor e intente de nuevo.")
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || "Verifique la conexión con el servidor e intente de nuevo."
+      toast.error("No se pudo abrir la caja", msg)
     } finally {
       setSubmittingApertura(false)
     }
