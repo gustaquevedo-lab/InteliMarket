@@ -508,7 +508,7 @@ export default function CapturaCuponesPage() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in-up pb-20 max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8 font-sans">
+    <div className="space-y-6 animate-fade-in-up pb-16">
       
       {/* ──────────────────────────────────────────────────────────────────────────
           🌟 LUXURY COMMAND DECK HEADER (ALINEADO AL SISTEMA DE DISEÑO)
