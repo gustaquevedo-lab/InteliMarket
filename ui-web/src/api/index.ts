@@ -116,8 +116,20 @@ export interface FinanceAgentRun { id: string; company_id: string; started_at: s
 export interface FinanceRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
 export interface Supplier { id: string; company_id?: string; ruc?: string; razon_social?: string; nombre_fantasia?: string; direccion?: string; telefono?: string; email?: string; contacto?: string; contacto_nombre?: string; contacto_telefono?: string; plazo_pago_dias?: number; tipo?: string; activo?: boolean; created_at?: string; updated_at?: string }
 export interface SupplierKpiPeriod { id: string; company_id: string; supplier_id: string; periodo: string; rebate_pct_objetivo: number; estado: string; observaciones?: string | null; created_at: string; updated_at: string }
-export interface SupplierKpiIndicator { id: string; period_id: string; codigo: string; nombre: string; peso_pct: number; meta?: number | null; resultado?: number | null; piso_minimo_pct?: number | null; orden: number; pct_cumplimiento?: number | null; aporte_ponderado_pct?: number | null }
-export interface SupplierKpiSummary { period: SupplierKpiPeriod; supplier_razon_social: string; indicadores: SupplierKpiIndicator[]; pct_cumplimiento_total: number; meta_alcanzada: boolean; venta_base_sin_iva: number; monto_rebate_calculado: number }
+export interface SupplierKpiIndicator {
+  id: string; period_id: string; codigo: string; nombre: string; peso_pct: number;
+  meta?: number | null; meta_uc?: number | null; resultado?: number | null; resultado_uc?: number | null;
+  proyeccion_uc?: number | null; proyeccion_pct?: number | null; cumplimiento_pct?: number | null;
+  rebate_ganado_pct?: number | null; piso_minimo_pct?: number | null; orden: number;
+  pct_cumplimiento?: number | null; aporte_ponderado_pct?: number | null;
+  categoria?: string; segmento_paresa?: string; es_foco?: boolean;
+  descripcion_skus?: string; reglas_escala?: any;
+}
+export interface SupplierKpiSummary {
+  period: SupplierKpiPeriod; supplier_razon_social: string; indicadores: SupplierKpiIndicator[];
+  pct_cumplimiento_total: number; meta_alcanzada: boolean; venta_base_sin_iva: number;
+  monto_rebate_calculado: number; monto_compras_sin_iva?: number; total_rebate_pct_ganado?: number;
+}
 export interface Quote { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_vencimiento?: string; valido_hasta?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; observaciones?: string; condiciones_pago?: string; descuento_total?: number; iva_10?: number; iva_5?: number; sale_id?: string; items?: QuoteItem[]; created_at?: string; updated_at?: string }
 export interface QuoteItem { id?: string; cotizacion_id?: string; producto_id?: string; producto?: Product; product?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; descripcion?: string; created_at?: string }
 export interface Discount { id: string; company_id?: string; nombre?: string; descripcion?: string; tipo?: string; valor?: number; aplica_a?: string; monto_minimo?: number; monto_maximo?: number; cantidad_minima?: number; fecha_inicio?: string; fecha_fin?: string; producto_ids?: string[]; categoria_ids?: string[]; cliente_ids?: string[]; activo?: boolean; created_at?: string; updated_at?: string }
@@ -2118,13 +2130,16 @@ export const api = {
     createPeriod: (data: { supplier_id: string; periodo: string; rebate_pct_objetivo?: number; observaciones?: string }) =>
       client.post<SupplierKpiPeriod>("/v1/supplier-kpis/periods", data),
     getSummary: (periodId: string, branchId?: string) => client.get<SupplierKpiSummary>(`/v1/supplier-kpis/periods/${periodId}/summary`, { branch_id: branchId }),
-    getDashboard: (companyId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: companyId || COMPANY_ID }),
+    getDashboard: (companyIdOrMes?: string, branchId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: COMPANY_ID, mes: companyIdOrMes, branch_id: branchId }),
     updateIndicator: (id: string, data: { meta?: number; resultado?: number; peso_pct?: number; meta_uc?: number; resultado_uc?: number }) =>
       client.put<SupplierKpiIndicator>(`/v1/supplier-kpis/indicators/${id}`, data),
     bulkUpdateIndicators: (periodId: string, data: any) => client.put<any>(`/v1/supplier-kpis/periods/${periodId}/indicators/bulk`, data),
     deleteIndicator: (id: string) => client.delete<void>(`/v1/supplier-kpis/indicators/${id}`),
     addIndicator: (periodId: string, data: { codigo: string; nombre: string; peso_pct: number; meta_uc?: number; resultado_uc?: number }) =>
       client.post<SupplierKpiIndicator>(`/v1/supplier-kpis/periods/${periodId}/indicators`, data),
+  },
+  supplierRebates: {
+    getDashboard: (mes?: string, branchId?: string) => client.get<any>("/v1/supplier-kpis/dashboard", { company_id: COMPANY_ID, mes, branch_id: branchId }),
   },
   // Distribuidora: devoluciones A proveedores (mercaderia vencida/danada).
   // NUNCA renombrar esto de vuelta a "supplierReturns" -- esa clave ya la usa
