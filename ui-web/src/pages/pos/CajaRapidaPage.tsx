@@ -3552,16 +3552,12 @@ export default function POSPage() {
   const montoSugeridoDonacion = useMemo(() => {
     if (montoDonacionManual !== null && montoDonacionManual > 0) return montoDonacionManual
 
-    // 1. Si hay vuelto con monedas fraccionarias (ej. 4.300 -> donar los 300 de monedas para entregar 4.000 limpios)
+    // 1. Si el cajero ingresó un billete mayor (ej. 102.000 para 100.577 -> sugerir primero la diferencia total de 1.423)
     if (vueltoPyg > 0) {
-      const resto1000 = vueltoPyg % 1000
-      if (resto1000 > 0) return resto1000
-      const resto5000 = vueltoPyg % 5000
-      if (resto5000 > 0 && resto5000 <= 2000) return resto5000
-      return 500
+      return vueltoPyg
     }
 
-    // 2. Si el total a pagar no es múltiplo de 1000 (ej. 5.700 -> redondear a 6.000 -> donar 300)
+    // 2. Si no hay vuelto o monto exacto, sugerir el redondeo de compra al próximo millar (ej. 100.577 -> 423)
     const restoTotal = totalPyg % 1000
     if (restoTotal > 0) {
       return 1000 - restoTotal
@@ -3570,18 +3566,21 @@ export default function POSPage() {
     return 500
   }, [vueltoPyg, totalPyg, montoDonacionManual])
 
-  const montoDonacionEfectiva = donacionActiva ? montoSugeridoDonacion : 0
-  const vueltoFinalPyg = Math.max(0, vueltoPyg - (donacionActiva ? montoDonacionEfectiva : 0))
+  const montoDonacionEfectiva = donacionActiva ? (montoDonacionManual !== null ? montoDonacionManual : montoSugeridoDonacion) : 0
+  const vueltoFinalPyg = Math.max(0, vueltoPyg - montoDonacionEfectiva)
 
   const handleToggleDonacion = (nextActiva: boolean, customMonto?: number) => {
     setDonacionActiva(nextActiva)
     if (customMonto !== undefined) {
       setMontoDonacionManual(customMonto)
+    } else if (!nextActiva) {
+      setMontoDonacionManual(null)
     }
     const monto = customMonto !== undefined ? customMonto : (montoDonacionManual !== null ? montoDonacionManual : montoSugeridoDonacion)
     const currentCash = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
-    const oldTotal = totalPyg + (donacionActiva ? montoDonacionEfectiva : 0)
-    if (!hasClickedQuickCash || currentCash === totalPyg || currentCash === oldTotal) {
+    
+    // Solo actualizar el campo de efectivo si el cajero estaba en el monto exacto base sin haber ingresado un billete mayor
+    if (currentCash <= totalPyg) {
       if (nextActiva) {
         setPayCashPyg((totalPyg + monto).toLocaleString("es-PY"))
       } else {
@@ -6458,34 +6457,53 @@ export default function POSPage() {
                         </button>
                       </div>
 
-                      {/* Chips de montos rápidos */}
+                      {/* Chips de montos rápidos inteligentes */}
                       <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1 flex-wrap">
-                        {[
-                          { label: `Sugerido (${formatPYG(montoSugeridoDonacion)})`, val: montoSugeridoDonacion },
-                          { label: "+500", val: 500 },
-                          { label: "+1.000", val: 1000 },
-                          { label: "+2.000", val: 2000 },
-                          { label: "+5.000", val: 5000 },
-                        ].map((btn, idx) => {
-                          const isSelected = donacionActiva && (
-                            montoDonacionManual === btn.val ||
-                            (montoDonacionManual === null && btn.val === montoSugeridoDonacion)
+                        {(() => {
+                          const rawCash = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
+                          const vueltoSinDonar = Math.max(0, rawCash - totalPyg)
+                          const restoCompra = totalPyg % 1000
+                          const redondeoCompra = restoCompra > 0 ? 1000 - restoCompra : 500
+
+                          const quickChips: Array<{ label: string; val: number }> = []
+
+                          if (vueltoSinDonar > 0) {
+                            quickChips.push({ label: `Vuelto Total (${formatPYG(vueltoSinDonar)})`, val: vueltoSinDonar })
+                            if (redondeoCompra !== vueltoSinDonar) {
+                              quickChips.push({ label: `Redondeo Compra (${formatPYG(redondeoCompra)})`, val: redondeoCompra })
+                            }
+                          } else {
+                            quickChips.push({ label: `Sugerido (${formatPYG(redondeoCompra)})`, val: redondeoCompra })
+                          }
+
+                          quickChips.push(
+                            { label: "+500", val: 500 },
+                            { label: "+1.000", val: 1000 },
+                            { label: "+2.000", val: 2000 },
+                            { label: "+5.000", val: 5000 }
                           )
-                          return (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => handleToggleDonacion(true, btn.val)}
-                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
-                                isSelected
-                                  ? "bg-rose-600 text-white"
-                                  : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
-                              }`}
-                            >
-                              {btn.label}
-                            </button>
-                          )
-                        })}
+
+                          return quickChips.map((btn, idx) => {
+                            const isSelected = donacionActiva && (
+                              montoDonacionManual === btn.val ||
+                              (montoDonacionManual === null && btn.val === montoSugeridoDonacion)
+                            )
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => handleToggleDonacion(true, btn.val)}
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
+                                  isSelected
+                                    ? "bg-rose-600 text-white shadow-sm"
+                                    : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                                }`}
+                              >
+                                {btn.label}
+                              </button>
+                            )
+                          })
+                        })()}
                       </div>
                     </div>
                   )
