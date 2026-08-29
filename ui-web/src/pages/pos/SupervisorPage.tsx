@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import {
   ShieldCheck, LogOut, RefreshCcw, Wallet, AlertTriangle, Clock, Loader2,
   CheckCircle2, ChevronRight, X, Banknote, ShieldAlert, Check, Eye, EyeOff,
   Sun, Moon, Home, Users, Landmark, TrendingDown, Inbox, ArrowDownToLine,
-  User as UserIcon, ArrowLeft,
+  User as UserIcon, ArrowLeft, Volume2, VolumeX, Sparkles, Send,
+  DollarSign, Smartphone, ArrowUpRight, Flame
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -26,6 +27,7 @@ interface SessionSummary {
   register_id: string
   cajero_nombre: string | null
   fecha_apertura: string
+  fecha_cierre?: string | null
   monto_apertura: number
   monto_cobrado: number
   estado: string
@@ -94,9 +96,12 @@ interface CajeroPerf {
   ultimo_cierre: string | null
 }
 
-const formatPYG = (n: number) => `₲ ${Math.round(n).toLocaleString("es-PY")}`
+const formatPYG = (n: number) => `₲ ${Math.round(n || 0).toLocaleString("es-PY")}`
+const formatUSD = (n: number) => `US$ ${(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const formatBRL = (n: number) => `R$ ${(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 function timeSince(iso: string) {
+  if (!iso) return "reciente"
   const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000))
   if (secs < 60) return `hace ${secs}s`
   const mins = Math.floor(secs / 60)
@@ -105,28 +110,71 @@ function timeSince(iso: string) {
   return `hace ${hs}h ${mins % 60}min`
 }
 
-const displayFont = { fontFamily: "'Archivo Expanded', sans-serif" }
-const monoFont = { fontFamily: "'IBM Plex Mono', monospace" }
+const displayFont = { fontFamily: "'Archivo Expanded', system-ui, sans-serif" }
+const monoFont = { fontFamily: "'IBM Plex Mono', 'SF Mono', monospace" }
 
 type Tab = "inicio" | "cajas" | "boveda" | "equipo"
 
-// Ítem unificado para la cola de "Pendientes" en Inicio -- une pedidos de
-// autorización de caja y aprobaciones de depósito a bóveda, que hoy viven en
-// dos sistemas separados pero para la supervisora son la misma cosa: algo
-// que la está esperando para poder seguir.
 type PendingItem =
   | { kind: "auth"; id: string; created_at: string; data: AuthRequest }
   | { kind: "vault"; id: string; created_at: string; data: VaultApproval }
+
+// ── SINTETIZADOR DE AUDIO (Web Audio API) ──────────────────────────────────
+function playChime(freqs: number[], type: OscillatorType = "sine", duration = 0.12) {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioCtx) return
+    const ctx = new AudioCtx()
+    let delay = 0
+    for (const f of freqs) {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = type
+      osc.frequency.setValueAtTime(f, ctx.currentTime + delay)
+      gain.gain.setValueAtTime(0.18, ctx.currentTime + delay)
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + duration)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(ctx.currentTime + delay)
+      osc.stop(ctx.currentTime + delay + duration)
+      delay += 0.08
+    }
+  } catch (e) {
+    // Audio context bloqueado por el navegador
+  }
+}
 
 export default function SupervisorPage() {
   const { user, loading: authLoading, login, logout } = useAuth()
   const toast = useToast()
   const { dark, toggle: toggleTheme } = useTheme()
 
-  // ── LOGIN PROPIO, SIN NAVEGAR A NINGÚN LADO ──────────────────────────────
-  // Selector de supervisora/admin en vez de tipear el email -- mismo criterio
-  // que el picker de cajeros de Electron: un nombre largo y con puntos es
-  // fácil de escribir mal en un celular, elegir de una lista no.
+  // ── SONIDO Y AVISOS SONOROS ──────────────────────────────────────────────
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("supervisor_sound_enabled")
+    return saved !== null ? saved === "true" : true
+  })
+
+  const toggleSound = () => {
+    const next = !soundEnabled
+    setSoundEnabled(next)
+    localStorage.setItem("supervisor_sound_enabled", String(next))
+    if (next) playChime([523, 659, 784])
+  }
+
+  const triggerAlertSound = useCallback(() => {
+    if (!soundEnabled) return
+    playChime([880, 1174], "triangle", 0.16)
+    if (navigator.vibrate) navigator.vibrate([150, 80, 150])
+  }, [soundEnabled])
+
+  const triggerSuccessSound = useCallback(() => {
+    if (!soundEnabled) return
+    playChime([523, 659, 784, 1046], "sine", 0.1)
+    if (navigator.vibrate) navigator.vibrate([60])
+  }, [soundEnabled])
+
+  // ── LOGIN CON SELECTOR DE SUPERVISORA ────────────────────────────────────
   const [staffList, setStaffList] = useState<PosStaffMember[]>([])
   const [staffLoading, setStaffLoading] = useState(true)
   const [staffError, setStaffError] = useState("")
@@ -142,7 +190,7 @@ export default function SupervisorPage() {
     setStaffLoading(true)
     api.auth.posSupervisors()
       .then((res) => { if (!cancelled) setStaffList(res.staff || []) })
-      .catch(() => { if (!cancelled) setStaffError("No se pudo cargar la lista. Verifique la conexión.") })
+      .catch(() => { if (!cancelled) setStaffError("No se pudo cargar la lista de supervisores.") })
       .finally(() => { if (!cancelled) setStaffLoading(false) })
     return () => { cancelled = true }
   }, [user])
@@ -154,6 +202,7 @@ export default function SupervisorPage() {
     setLoggingIn(true)
     try {
       await login(selectedStaff.email, loginPassword)
+      triggerSuccessSound()
     } catch (err: any) {
       setLoginError(err?.message || "Contraseña incorrecta")
     } finally {
@@ -193,7 +242,19 @@ export default function SupervisorPage() {
   const [submittingReject, setSubmittingReject] = useState(false)
   const [lastSync, setLastSync] = useState<Date | null>(null)
 
-  // ── Marca presencia real de supervisor apenas entra a esta pantalla ──
+  // Modal para solicitar Drop Cash directo desde la supervisora
+  const [requestingDropSession, setRequestingDropSession] = useState<SessionSummary | null>(null)
+  const [dropAmountPyg, setDropAmountPyg] = useState("")
+  const [dropAmountUsd, setDropAmountUsd] = useState("")
+  const [dropAmountBrl, setDropAmountBrl] = useState("")
+  const [dropObs, setDropObs] = useState("")
+  const [submittingDrop, setSubmittingDrop] = useState(false)
+
+  // Referencias para alertar solo en nuevos pedidos entrantes
+  const prevPendingCountRef = useRef(0)
+  const prevDropAlertsRef = useRef(0)
+
+  // Marca turno de supervisor
   useEffect(() => {
     if (!isAuthorized) return
     let cancelled = false
@@ -203,39 +264,123 @@ export default function SupervisorPage() {
     return () => { cancelled = true }
   }, [isAuthorized])
 
-  // ── Colas de pendientes -- lo más urgente de la pantalla, se sondea cada
-  // 5s porque un cajero puede estar esperando en el mostrador con un cliente
-  // delante. Junta autorizaciones de caja y depósitos de bóveda: para la
-  // supervisora ambas son "algo que me está esperando". ──
+  // ── POLLING DE ALTA PRIORIDAD (CADA 4s) ──────────────────────────────────
   const fetchPending = useCallback(async () => {
     try {
       const [reqs, vApprovals] = await Promise.all([
         api.supervisorRequests.list({ estado: "pendiente" }),
         api.vault.depositApprovals.list("pendiente"),
       ])
-      setAuthRequests(reqs || [])
-      setVaultApprovals(vApprovals || [])
+      const newReqs = reqs || []
+      const newVault = vApprovals || []
+      const currentTotal = newReqs.length + newVault.length
+
+      // Si entraron nuevos pedidos pendientes, sonar alerta
+      if (currentTotal > prevPendingCountRef.current && prevPendingCountRef.current !== 0) {
+        triggerAlertSound()
+      }
+      prevPendingCountRef.current = currentTotal
+
+      setAuthRequests(newReqs)
+      setVaultApprovals(newVault)
       setSyncError(null)
     } catch (e: any) {
-      // Si el celular no puede sincronizar tiene que ser obvio, no una
-      // lista vacía mintiendo tranquilidad.
-      setSyncError(e?.message || "No se pudo conectar con el servidor")
+      setSyncError(e?.message || "Sin conexión con el servidor")
     }
-  }, [])
+  }, [triggerAlertSound])
 
   useEffect(() => {
     if (!isAuthorized) return
     fetchPending()
-    const interval = setInterval(fetchPending, 5000)
+    const interval = setInterval(fetchPending, 4000)
     return () => clearInterval(interval)
   }, [isAuthorized, fetchPending])
 
+  // ── POLLING GENERAL DE CAJAS & RETIROS (FILTRADO ESTRICTO: HOY Y AYER) ───
+  const fetchData = useCallback(async () => {
+    try {
+      // FILTRO ESTRICTO: Solo cajas de HOY o del DÍA ANTERIOR
+      const limiteAyer = new Date()
+      limiteAyer.setDate(limiteAyer.getDate() - 1)
+      limiteAyer.setHours(0, 0, 0, 0)
+
+      const [sess, ho, ret] = await Promise.all([
+        api.caja.sessionsSummary({ estado: "abierta", fecha_desde: limiteAyer.toISOString() }),
+        api.caja.handoffs.list({ estado: "pendiente" }),
+        api.caja.cashDropRequests.list("pendiente"),
+      ])
+
+      // Filtrado estricto en frontend para blindar que nunca aparezcan cajas del mes pasado
+      const validSessions = (sess || []).filter((s) => {
+        const apertura = new Date(s.fecha_apertura).getTime()
+        return apertura >= limiteAyer.getTime()
+      })
+
+      // Alertar si aumentó el número de cajas con alerta de Drop Cash
+      const dropAlertsCount = validSessions.filter((s) => s.cash_drop_alert).length
+      if (dropAlertsCount > prevDropAlertsRef.current && prevDropAlertsRef.current !== 0) {
+        triggerAlertSound()
+      }
+      prevDropAlertsRef.current = dropAlertsCount
+
+      setSessions(validSessions)
+      setHandoffs(ho || [])
+      setRetiros(ret || [])
+      setLastSync(new Date())
+      setSyncError(null)
+    } catch (e: any) {
+      setSyncError(e?.message || "No se pudo conectar con el servidor")
+    } finally {
+      setLoading(false)
+    }
+  }, [triggerAlertSound])
+
+  useEffect(() => {
+    if (!isAuthorized) return
+    fetchData()
+    const interval = setInterval(fetchData, 8000)
+    return () => clearInterval(interval)
+  }, [isAuthorized, fetchData])
+
+  // ── DATOS SECUNDARIOS (BÓVEDA Y EQUIPO) ──────────────────────────────────
+  const fetchVaultAndTeam = useCallback(async () => {
+    try {
+      const [vd, perf] = await Promise.all([api.vault.dashboard(), api.caja.cajeros.performance()])
+      setVaultDashboard(vd as any)
+      setCajeroPerf((perf as any) || [])
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    if (!isAuthorized) return
+    fetchVaultAndTeam()
+    const interval = setInterval(fetchVaultAndTeam, 20000)
+    return () => clearInterval(interval)
+  }, [isAuthorized, fetchVaultAndTeam])
+
+  // ── ACTIVIDAD RECIENTE ──────────────────────────────────────────────────
+  const fetchRecentResolved = useCallback(async () => {
+    try {
+      const all = await api.supervisorRequests.list({ limit: 30 })
+      setRecentResolved((all || []).filter((r: AuthRequest) => r.estado !== "pendiente").slice(0, 6))
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    if (!isAuthorized) return
+    fetchRecentResolved()
+    const interval = setInterval(fetchRecentResolved, 20000)
+    return () => clearInterval(interval)
+  }, [isAuthorized, fetchRecentResolved])
+
+  // ── ACCIONES DE AUTORIZACIÓN ─────────────────────────────────────────────
   const resolveAuthRequest = async (id: string, aprobado: boolean) => {
     if (!user) return
     setResolvingId(id)
     try {
       await api.supervisorRequests.resolve(id, { aprobado, resuelto_por: user.id, resuelto_por_nombre: user.nombre })
-      toast.success(aprobado ? "Autorizado" : "Rechazado", aprobado ? "La caja ya puede continuar." : "Se avisó al cajero.")
+      toast.success(aprobado ? "Autorizado" : "Rechazado", aprobado ? "La caja ya puede continuar." : "Se notificó a la cajera.")
+      if (aprobado) triggerSuccessSound()
       fetchPending()
     } catch (e: any) {
       toast.error("No se pudo resolver", e?.message || "Intente de nuevo.")
@@ -248,7 +393,8 @@ export default function SupervisorPage() {
     setResolvingId(v.id)
     try {
       await api.vault.depositApprovals.approve(v.id)
-      toast.success("Depósito aprobado", "Se sumó su aprobación al depósito.")
+      toast.success("Depósito aprobado", "Se registró su firma en el depósito a bóveda.")
+      triggerSuccessSound()
       fetchPending()
     } catch (e: any) {
       toast.error("No se pudo aprobar", e?.message || "Intente de nuevo.")
@@ -276,71 +422,6 @@ export default function SupervisorPage() {
       setSubmittingReject(false)
     }
   }
-
-  const fetchData = useCallback(async () => {
-    try {
-      // Solo cajas abiertas HOY -- una caja que quedo abierta de un dia
-      // anterior es un problema de arqueo/turno colgado, otra cosa distinta
-      // que ya no le corresponde resolver a la supervisora desde aca.
-      const hoyMedianoche = new Date()
-      hoyMedianoche.setHours(0, 0, 0, 0)
-      const [sess, ho, ret] = await Promise.all([
-        api.caja.sessionsSummary({ estado: "abierta", fecha_desde: hoyMedianoche.toISOString() }),
-        api.caja.handoffs.list({ estado: "pendiente" }),
-        api.caja.cashDropRequests.list("pendiente"),
-      ])
-      setSessions(sess || [])
-      setHandoffs(ho || [])
-      setRetiros(ret || [])
-      setLastSync(new Date())
-      setSyncError(null)
-    } catch (e: any) {
-      setSyncError(e?.message || "No se pudo conectar con el servidor")
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!isAuthorized) return
-    fetchData()
-    const interval = setInterval(fetchData, 15000)
-    return () => clearInterval(interval)
-  }, [isAuthorized, fetchData])
-
-  // ── Datos secundarios del hub -- bóveda y equipo -- se refrescan más
-  // lento (30s) porque no son urgentes, son de panorama. Un fallo acá no
-  // debe tapar el aviso de sincronización de las colas de pendientes. ──
-  const fetchVaultAndTeam = useCallback(async () => {
-    try {
-      const [vd, perf] = await Promise.all([api.vault.dashboard(), api.caja.cajeros.performance()])
-      setVaultDashboard(vd as any)
-      setCajeroPerf((perf as any) || [])
-    } catch { /* datos de panorama, no bloquean el resto del hub */ }
-  }, [])
-
-  useEffect(() => {
-    if (!isAuthorized) return
-    fetchVaultAndTeam()
-    const interval = setInterval(fetchVaultAndTeam, 30000)
-    return () => clearInterval(interval)
-  }, [isAuthorized, fetchVaultAndTeam])
-
-  // ── Actividad reciente -- últimos pedidos ya resueltos, para dar
-  // contexto de auditoría sin tener que salir de la PWA. ──
-  const fetchRecentResolved = useCallback(async () => {
-    try {
-      const all = await api.supervisorRequests.list({ limit: 30 })
-      setRecentResolved((all || []).filter((r: AuthRequest) => r.estado !== "pendiente").slice(0, 6))
-    } catch { /* no crítico */ }
-  }, [])
-
-  useEffect(() => {
-    if (!isAuthorized) return
-    fetchRecentResolved()
-    const interval = setInterval(fetchRecentResolved, 30000)
-    return () => clearInterval(interval)
-  }, [isAuthorized, fetchRecentResolved])
 
   const handleLogout = async () => {
     try { await api.auth.endPosShift() } catch {}
@@ -389,6 +470,7 @@ export default function SupervisorPage() {
         })
         toast.success("Retiro Confirmado", "El efectivo ya está registrado en bóveda.")
       }
+      triggerSuccessSound()
       setConfirmingItem(null)
       fetchData()
       fetchVaultAndTeam()
@@ -414,162 +496,238 @@ export default function SupervisorPage() {
     }
   }
 
+  // Ejecutar sangría (Drop Cash) iniciada por supervisora
+  const handleExecuteDropCash = async () => {
+    if (!requestingDropSession) return
+    const pyg = parseInt(dropAmountPyg.replace(/\D/g, ""), 10) || 0
+    const usd = parseFloat(dropAmountUsd.replace(/,/g, ".")) || 0
+    const brl = parseFloat(dropAmountBrl.replace(/,/g, ".")) || 0
+
+    if (pyg <= 0 && usd <= 0 && brl <= 0) {
+      toast.warning("Monto requerido", "Ingrese al menos un importe para retirar.")
+      return
+    }
+
+    setSubmittingDrop(true)
+    try {
+      await api.caja.cashDrop(requestingDropSession.id, {
+        monto: pyg,
+        monto_usd: usd,
+        monto_brl: brl,
+        observaciones: dropObs.trim() || "Sangría solicitada por supervisora",
+      })
+      toast.success("Sangría Registrada", `Se procesó el Drop Cash de ${requestingDropSession.cajero_nombre || "Caja"}.`)
+      triggerSuccessSound()
+      setRequestingDropSession(null)
+      setDropAmountPyg("")
+      setDropAmountUsd("")
+      setDropAmountBrl("")
+      setDropObs("")
+      fetchData()
+      fetchVaultAndTeam()
+    } catch (e: any) {
+      toast.error("No se pudo procesar la sangría", e?.message || "Intente de nuevo.")
+    } finally {
+      setSubmittingDrop(false)
+    }
+  }
+
   // ── ESTADO: CARGANDO SESIÓN ──────────────────────────────────────────────
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <Loader2 className="w-6 h-6 text-brand-orange animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
+        <Loader2 className="w-7 h-7 text-amber-500 animate-spin" />
       </div>
     )
   }
 
-  // ── ESTADO: SIN SESIÓN -- LOGIN PROPIO, NUNCA NAVEGA A OTRO LADO ─────────
+  // ── ESTADO: SIN SESIÓN (LOGIN TÁCTIL PREMIUM) ───────────────────────────
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col items-center p-6 relative">
-        <button
-          onClick={toggleTheme}
-          className="absolute top-5 right-5 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 cursor-pointer"
-        >
-          {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-        </button>
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-between p-6 relative select-none">
+        {/* Glow ambient background */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-72 h-72 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="w-full max-w-sm flex flex-col items-center mt-10 mb-2">
-          <div className="w-16 h-16 rounded-2xl bg-brand-orange flex items-center justify-center text-[#1C1710] shadow-lg shadow-orange-500/30 mb-5">
-            <ShieldCheck className="w-8 h-8" />
+        <div className="w-full max-w-sm flex items-center justify-between z-10 pt-2">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-black shadow-md shadow-amber-500/30">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-black tracking-widest uppercase text-amber-400" style={displayFont}>
+              EXTRA SUPERMERCADO
+            </span>
           </div>
-          <h1 className="font-black text-xl mb-1" style={displayFont}>Panel de Supervisora</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mb-7 text-center max-w-xs">Cajas, bóveda, equipo y pedidos de autorización — todo desde acá.</p>
+          <button
+            onClick={toggleTheme}
+            className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white cursor-pointer"
+          >
+            {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
         </div>
 
-        {!selectedStaff ? (
-          <div className="w-full max-w-sm">
-            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">¿Quién sos?</p>
-            {staffLoading && (
-              <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-brand-orange" /></div>
-            )}
-            {!staffLoading && staffError && (
-              <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/30 rounded-xl px-3 py-2.5 text-xs text-rose-600 dark:text-rose-300 font-bold">{staffError}</div>
-            )}
-            {!staffLoading && !staffError && staffList.length === 0 && (
-              <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-10">
-                No hay supervisores ni administradores cargados todavía.
-              </div>
-            )}
-            {!staffLoading && staffList.length > 0 && (
-              <div className="grid grid-cols-2 gap-3">
-                {staffList.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => { setSelectedStaff(s); setLoginPassword(""); setLoginError("") }}
-                    className="flex flex-col items-center gap-2 p-4 rounded-2xl border-2 border-slate-200 dark:border-slate-800 hover:border-brand-orange bg-white dark:bg-slate-900 transition-colors cursor-pointer"
-                  >
-                    <div className="w-14 h-14 rounded-full bg-brand-orange/10 flex items-center justify-center overflow-hidden">
-                      {s.foto_url ? (
-                        <img src={s.foto_url} alt={s.nombre} className="w-full h-full object-cover" />
-                      ) : (
-                        <UserIcon className="w-7 h-7 text-brand-orange" />
-                      )}
-                    </div>
-                    <span className="text-sm font-bold text-center leading-tight">{s.nombre}</span>
-                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase bg-primary-100 dark:bg-primary/20 text-primary dark:text-primary-300">{s.rol}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+        <div className="w-full max-w-sm flex flex-col items-center my-auto z-10">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-slate-950 shadow-xl shadow-amber-500/20 mb-4 ring-4 ring-amber-500/20">
+            <ShieldCheck className="w-9 h-9" />
           </div>
-        ) : (
-          <div className="w-full max-w-sm">
-            <button
-              onClick={() => { setSelectedStaff(null); setLoginPassword(""); setLoginError("") }}
-              className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400 mb-4 cursor-pointer"
-            >
-              <ArrowLeft className="w-4 h-4" /> Cambiar
-            </button>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 rounded-full bg-brand-orange/10 flex items-center justify-center overflow-hidden shrink-0">
-                {selectedStaff.foto_url ? (
-                  <img src={selectedStaff.foto_url} alt={selectedStaff.nombre} className="w-full h-full object-cover" />
-                ) : (
-                  <UserIcon className="w-6 h-6 text-brand-orange" />
-                )}
-              </div>
-              <div className="min-w-0">
-                <div className="font-black text-base truncate" style={displayFont}>{selectedStaff.nombre}</div>
-                <span className="text-xs text-slate-500 dark:text-slate-400 capitalize">{selectedStaff.rol}</span>
-              </div>
-            </div>
+          <h1 className="font-black text-2xl mb-1 text-center text-white" style={displayFont}>
+            PWA Supervisores
+          </h1>
+          <p className="text-xs text-slate-400 mb-6 text-center">
+            Radar de cajas, monitoreo multimoneda, drop cash y autorizaciones en piso.
+          </p>
 
-            <form onSubmit={handleLoginSubmit} className="space-y-3">
-              {loginError && (
-                <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/30 rounded-xl px-3 py-2.5 text-xs text-rose-600 dark:text-rose-300 font-bold">{loginError}</div>
+          {!selectedStaff ? (
+            <div className="w-full space-y-3">
+              <div className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">
+                Seleccione su Usuario:
+              </div>
+              {staffLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
+                </div>
               )}
-              <div>
-                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Contraseña</label>
+              {!staffLoading && staffError && (
+                <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3 text-xs text-rose-300 font-bold text-center">
+                  {staffError}
+                </div>
+              )}
+              {!staffLoading && staffList.length > 0 && (
+                <div className="grid grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                  {staffList.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => { setSelectedStaff(s); setLoginPassword(""); setLoginError("") }}
+                      className="flex flex-col items-center gap-2 p-3.5 rounded-2xl border border-slate-800 bg-slate-900/80 hover:border-amber-500 hover:bg-amber-500/10 transition-all cursor-pointer group active:scale-95"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden group-hover:border-amber-400">
+                        {s.foto_url ? (
+                          <img src={s.foto_url} alt={s.nombre} className="w-full h-full object-cover" />
+                        ) : (
+                          <UserIcon className="w-6 h-6 text-amber-400" />
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-center leading-tight truncate w-full">
+                        {s.nombre}
+                      </span>
+                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase bg-amber-500/20 text-amber-300">
+                        {s.rol}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="w-full space-y-4 animate-fade-in">
+              <button
+                onClick={() => { setSelectedStaff(null); setLoginPassword(""); setLoginError("") }}
+                className="flex items-center gap-1.5 text-xs text-amber-400 font-bold hover:underline cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" /> Cambiar de usuario
+              </button>
+
+              <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-800">
+                <div className="w-11 h-11 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center overflow-hidden shrink-0">
+                  {selectedStaff.foto_url ? (
+                    <img src={selectedStaff.foto_url} alt={selectedStaff.nombre} className="w-full h-full object-cover" />
+                  ) : (
+                    <UserIcon className="w-6 h-6 text-amber-400" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-black text-sm truncate" style={displayFont}>{selectedStaff.nombre}</div>
+                  <span className="text-[11px] text-slate-400 uppercase tracking-wider font-mono">{selectedStaff.rol}</span>
+                </div>
+              </div>
+
+              <form onSubmit={handleLoginSubmit} className="space-y-3">
                 <div className="relative">
                   <input
                     type={showPassword ? "text" : "password"}
                     autoFocus
+                    placeholder="PIN o Contraseña"
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 pr-11 text-sm outline-none focus:border-brand-orange text-slate-900 dark:text-white"
+                    className="w-full bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-2xl px-4 py-3.5 text-center text-lg font-black tracking-widest outline-none text-white transition placeholder:text-slate-600 placeholder:text-sm placeholder:tracking-normal"
+                    style={monoFont}
                   />
-                  <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-              </div>
-              <button
-                type="submit"
-                disabled={loggingIn}
-                className="w-full py-3.5 rounded-xl bg-brand-orange hover:brightness-95 text-[#1C1710] font-black text-sm flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer mt-2 shadow-lg shadow-orange-500/30 transition-all"
-              >
-                {loggingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                Entrar
-              </button>
-            </form>
-          </div>
-        )}
-      </div>
-    )
-  }
 
-  // ── ESTADO: LOGUEADA PERO SIN NIVEL DE SUPERVISOR ────────────────────────
-  if (!isAuthorized) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-6 text-center">
-        <div>
-          <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-rose-100 dark:bg-rose-500/15 flex items-center justify-center">
-            <ShieldCheck className="w-7 h-7 text-rose-500 dark:text-rose-400" />
-          </div>
-          <h1 className="text-slate-900 dark:text-white font-black text-lg mb-1">Acceso restringido</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm max-w-xs mx-auto">
-            Esta pantalla es solo para supervisores y administradores. Su cuenta ({user.nombre}) no tiene ese nivel.
-          </p>
-          <button onClick={handleLogout} className="mt-5 px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold cursor-pointer">
-            Cerrar sesión
-          </button>
+                {loginError && (
+                  <div className="text-xs text-rose-400 font-bold text-center bg-rose-500/10 border border-rose-500/20 rounded-xl p-2.5">
+                    {loginError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loggingIn || !loginPassword}
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 disabled:opacity-50 cursor-pointer active:scale-[0.98] transition-all"
+                >
+                  {loggingIn ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  Ingresar a Turno
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+
+        <div className="text-center text-[10px] text-slate-600 z-10">
+          Supermercado Extra · Terminal Móvil de Supervisión
         </div>
       </div>
     )
   }
 
-  const cashDropAlerts = sessions.filter((s) => s.cash_drop_alert)
+  // ── ESTADO: USUARIO SIN ROL DE SUPERVISOR ────────────────────────────────
+  if (!isAuthorized) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mb-4 border border-rose-500/30">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h1 className="text-lg font-black mb-1" style={displayFont}>Acceso Restringido</h1>
+        <p className="text-xs text-slate-400 max-w-xs mb-6">
+          Esta PWA es exclusiva para el rol de Supervisor y Administrador. Su cuenta ({user.nombre}) no cuenta con esos permisos.
+        </p>
+        <button
+          onClick={handleLogout}
+          className="px-5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold text-slate-300 hover:text-white cursor-pointer"
+        >
+          Cerrar Sesión
+        </button>
+      </div>
+    )
+  }
+
+  const cashDropAlerts = sessions.filter((s) => s.cash_drop_alert || (s.efectivo_acumulado >= (s.cash_drop_threshold || 5000000)))
   const totalHandoffPyg = handoffs.reduce((sum, h) => sum + h.monto_pyg, 0)
 
+  // Totales acumulados en vivo en todo el piso
+  const totalPygPiso = sessions.reduce((acc, s) => acc + (s.efectivo_acumulado || 0), 0)
+  const totalUsdPiso = sessions.reduce((acc, s) => acc + (s.efectivo_usd_acumulado || 0), 0)
+  const totalBrlPiso = sessions.reduce((acc, s) => acc + (s.efectivo_brl_acumulado || 0), 0)
+
   const ORIGEN_LABEL: Record<string, string> = {
-    cash_drop: "Retiro de caja",
-    entrega_cajero: "Entrega de cajero",
+    cash_drop: "Sangría / Drop Cash",
+    entrega_cajero: "Entrega de Turno",
   }
 
   const tipoLabel: Record<string, string> = {
-    remove_item: "Anular ítem",
-    decrease_qty: "Reducir cantidad",
-    clear_cart: "Vaciar carrito",
-    process_return: "Devolución",
-    open_pos_config: "Config. de POS",
-    assign_terminal: "Asignar caja",
+    remove_item: "Anular Ítem",
+    decrease_qty: "Reducir Cantidad",
+    clear_cart: "Vaciar Carrito",
+    process_return: "Nota de Crédito / Devolución",
+    open_pos_config: "Configuración POS",
+    assign_terminal: "Asignar Terminal",
+    descuento_manual: "Descuento Especial",
   }
 
   const pendingItems: PendingItem[] = [
@@ -577,150 +735,333 @@ export default function SupervisorPage() {
     ...vaultApprovals.map((v) => ({ kind: "vault" as const, id: v.id, created_at: v.created_at, data: v })),
   ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
-  const totalPendientes = pendingItems.length
+  const totalPendientes = pendingItems.length + retiros.length
   const firstName = (user.nombre || "").split(" ")[0]
-  const hour = new Date().getHours()
-  const saludo = hour < 12 ? "Buen día" : hour < 19 ? "Buenas tardes" : "Buenas noches"
 
   const tabs: { key: Tab; label: string; icon: typeof Home; badge?: number }[] = [
-    { key: "inicio", label: "Inicio", icon: Home, badge: totalPendientes },
-    { key: "cajas", label: "Cajas", icon: Wallet },
+    { key: "inicio", label: "Autorizaciones", icon: ShieldAlert, badge: totalPendientes },
+    { key: "cajas", label: "Radar Cajas", icon: Wallet, badge: cashDropAlerts.length },
     { key: "boveda", label: "Bóveda", icon: Landmark },
-    { key: "equipo", label: "Equipo", icon: Users },
+    { key: "equipo", label: "Cajeras", icon: Users },
   ]
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white pb-24" style={{ fontFamily: "'Public Sans', system-ui, sans-serif" }}>
-      {/* ── HEADER ── */}
-      <div className="sticky top-0 z-20 bg-white/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 pt-[env(safe-area-inset-top)]">
-        <div className="flex items-center justify-between py-3.5">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white pb-24 transition-colors">
+      
+      {/* ── HEADER SUPERVISOR PREMIUM ── */}
+      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800/80 px-4 pt-[env(safe-area-inset-top)] shadow-xs">
+        <div className="flex items-center justify-between py-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-slate-950 font-black shrink-0 shadow-md shadow-amber-500/25">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className="font-black text-[15px] truncate" style={displayFont}>{saludo}, {firstName}</div>
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-                <span className={`w-1.5 h-1.5 rounded-full ${onDuty ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}`} />
-                {onDuty ? "En turno · supervisor" : "Registrando turno…"}
+              <div className="flex items-center gap-2">
+                <span className="font-black text-sm truncate" style={displayFont}>
+                  {firstName}
+                </span>
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  Supervisor
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Turno Activo · Piso</span>
               </div>
             </div>
           </div>
+
           <div className="flex items-center gap-1 shrink-0">
-            <button onClick={toggleTheme} title="Cambiar tema" className="p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer">
-              {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            <button
+              onClick={toggleSound}
+              title={soundEnabled ? "Silenciar alertas sonoras" : "Activar alertas sonoras"}
+              className={`p-2 rounded-xl border transition cursor-pointer ${
+                soundEnabled
+                  ? "bg-amber-500/10 text-amber-500 border-amber-500/30"
+                  : "bg-slate-100 dark:bg-slate-900 text-slate-400 border-slate-200 dark:border-slate-800"
+              }`}
+            >
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
-            <button onClick={handleLogout} title="Cerrar sesión" className="p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer">
-              <LogOut className="w-5 h-5" />
+            <button
+              onClick={toggleTheme}
+              title="Cambiar tema"
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 cursor-pointer"
+            >
+              {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={handleLogout}
+              title="Cerrar sesión"
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-rose-500 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
 
+        {/* Tira de alertas de conexión */}
         {syncError && (
-          <div className="mx-0 mb-2 rounded-xl bg-rose-50 dark:bg-rose-500/15 border border-rose-300 dark:border-rose-500/40 px-3 py-2 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-rose-500 dark:text-rose-300 shrink-0" />
-            <div className="text-[11px] font-bold text-rose-600 dark:text-rose-300">Sin conexión con el servidor — esta pantalla no se está actualizando. Cierre y vuelva a abrir la app.</div>
+          <div className="mb-2 rounded-xl bg-rose-500/15 border border-rose-500/30 px-3 py-2 flex items-center gap-2 text-[11px] font-bold text-rose-600 dark:text-rose-300">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+            <span>Sin conexión con el servidor. Reintentando en segundo plano...</span>
           </div>
         )}
 
-        {/* Tira de resumen */}
+        {/* Tira de Métricas Clave en Vivo */}
         <div className="grid grid-cols-4 gap-2 pb-3">
-          {[
-            { label: "Pendientes", value: totalPendientes, alert: totalPendientes > 0 },
-            { label: "Entregas", value: handoffs.length, alert: false },
-            { label: "Cajas", value: sessions.length, alert: false },
-            { label: "Retiros", value: cashDropAlerts.length, alert: cashDropAlerts.length > 0 },
-          ].map((s) => (
-            <div key={s.label} className={`rounded-xl px-2 py-2 text-center border ${s.alert ? "bg-rose-50 dark:bg-rose-500/15 border-rose-300 dark:border-rose-500/30" : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800"}`}>
-              <div className={`font-black text-lg ${s.alert ? "text-rose-600 dark:text-rose-300" : ""}`} style={monoFont}>{s.value}</div>
-              <div className="text-[9px] uppercase tracking-wide text-slate-500 dark:text-slate-400 font-bold">{s.label}</div>
+          <div className={`rounded-xl p-2 text-center border transition ${
+            totalPendientes > 0
+              ? "bg-rose-50 dark:bg-rose-500/15 border-rose-300 dark:border-rose-500/30 animate-pulse"
+              : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+          }`}>
+            <div className={`font-black text-base ${totalPendientes > 0 ? "text-rose-600 dark:text-rose-400" : ""}`} style={monoFont}>
+              {totalPendientes}
             </div>
-          ))}
+            <div className="text-[8.5px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider">
+              Pedidos
+            </div>
+          </div>
+
+          <div className="rounded-xl p-2 text-center border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+            <div className="font-black text-base text-slate-900 dark:text-white" style={monoFont}>
+              {sessions.length}
+            </div>
+            <div className="text-[8.5px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider">
+              Cajas Hoy
+            </div>
+          </div>
+
+          <div className={`rounded-xl p-2 text-center border transition ${
+            cashDropAlerts.length > 0
+              ? "bg-amber-50 dark:bg-amber-500/15 border-amber-300 dark:border-amber-500/30"
+              : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+          }`}>
+            <div className={`font-black text-base ${cashDropAlerts.length > 0 ? "text-amber-600 dark:text-amber-400" : ""}`} style={monoFont}>
+              {cashDropAlerts.length}
+            </div>
+            <div className="text-[8.5px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider">
+              Drop Cash
+            </div>
+          </div>
+
+          <div className="rounded-xl p-2 text-center border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+            <div className="font-black text-base text-emerald-600 dark:text-emerald-400" style={monoFont}>
+              {handoffs.length}
+            </div>
+            <div className="text-[8.5px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider">
+              Entregas
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="px-4 pt-4 space-y-5">
-        {/* ══════════════════════ TAB: INICIO ══════════════════════ */}
+      {/* ── CUERPO PRINCIPAL ── */}
+      <div className="p-4 space-y-4 max-w-2xl mx-auto">
+        
+        {/* ══════════════════════ TAB 1: AUTORIZACIONES (INICIO) ══════════════════════ */}
         {tab === "inicio" && (
-          <>
+          <div className="space-y-4">
+            
+            {/* Banner de alerta si hay cajas en tope de Drop Cash */}
+            {cashDropAlerts.length > 0 && (
+              <div className="rounded-2xl border-2 border-rose-500 bg-rose-50 dark:bg-rose-950/40 p-4 shadow-lg shadow-rose-500/10 flex items-start gap-3 animate-fade-in">
+                <div className="p-2 rounded-xl bg-rose-500 text-white shrink-0">
+                  <Flame className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-black text-xs text-rose-700 dark:text-rose-300 uppercase tracking-wider">
+                    ¡Sangría de Efectivo Urgente! ({cashDropAlerts.length} Cajas)
+                  </div>
+                  <div className="text-xs font-bold text-rose-900 dark:text-rose-100 mt-0.5">
+                    Superaron el tope de seguridad en mostrador:
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {cashDropAlerts.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => {
+                          setRequestingDropSession(s)
+                          setDropAmountPyg(String(Math.round((s.efectivo_acumulado || 0) * 0.7)))
+                          setDropAmountUsd(s.efectivo_usd_acumulado ? String(s.efectivo_usd_acumulado) : "")
+                          setDropAmountBrl(s.efectivo_brl_acumulado ? String(s.efectivo_brl_acumulado) : "")
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer transition shadow-xs"
+                      >
+                        <span>{s.cajero_nombre || "Caja"}</span>
+                        <span style={monoFont}>({formatPYG(s.efectivo_acumulado)})</span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Retiros solicitados por cajeras */}
+            {retiros.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-[11px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5" style={displayFont}>
+                    <Banknote className="w-3.5 h-3.5" /> Retiros Drop Cash Pendientes ({retiros.length})
+                  </h2>
+                </div>
+
+                <div className="space-y-2.5">
+                  {retiros.map((r) => (
+                    <div key={r.id} className="rounded-2xl border-2 border-amber-400 bg-amber-50/50 dark:bg-amber-950/20 p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3 mb-2.5">
+                        <div>
+                          <div className="font-black text-sm text-slate-900 dark:text-white">
+                            {r.solicitado_por_nombre || "Cajera"} · {r.register_nombre || "Caja"}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Solicitado {timeSince(r.created_at)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          {r.monto_pyg > 0 && <div className="font-black text-base text-amber-700 dark:text-amber-300" style={monoFont}>{formatPYG(r.monto_pyg)}</div>}
+                          {r.monto_usd > 0 && <div className="text-xs font-bold text-slate-600 dark:text-slate-400" style={monoFont}>{formatUSD(r.monto_usd)}</div>}
+                          {r.monto_brl > 0 && <div className="text-xs font-bold text-slate-600 dark:text-slate-400" style={monoFont}>{formatBRL(r.monto_brl)}</div>}
+                        </div>
+                      </div>
+
+                      {r.observaciones && (
+                        <div className="text-xs bg-white/80 dark:bg-slate-900/80 p-2 rounded-xl mb-3 text-slate-700 dark:text-slate-300 border border-amber-200 dark:border-amber-800">
+                          {r.observaciones}
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setRejectingRetiro(r)}
+                          className="flex-1 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-rose-600 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer hover:bg-rose-50"
+                        >
+                          <X className="w-3.5 h-3.5" /> Rechazar
+                        </button>
+                        <button
+                          onClick={() => openConfirmRetiro(r)}
+                          className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1 cursor-pointer shadow-md shadow-amber-500/20"
+                        >
+                          <Check className="w-3.5 h-3.5" /> Contar y Confirmar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Cola de Autorizaciones de Piso */}
             <div>
               <div className="flex items-center justify-between mb-2.5">
                 <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400" style={displayFont}>
-                  Pedidos de Autorización
+                  Pedidos de Autorización ({pendingItems.length})
                 </h2>
-                {totalPendientes > 0 && (
-                  <span className="text-[10px] font-black bg-rose-500 text-white px-2 py-0.5 rounded-full animate-pulse">{totalPendientes} en vivo</span>
+                {pendingItems.length > 0 && (
+                  <span className="text-[10px] font-black bg-rose-500 text-white px-2 py-0.5 rounded-full animate-pulse">
+                    En Vivo
+                  </span>
                 )}
               </div>
 
-              {totalPendientes === 0 ? (
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center">
-                  <Inbox className="w-8 h-8 mx-auto mb-2 text-slate-300 dark:text-slate-700" />
-                  <div className="text-slate-500 dark:text-slate-400 text-sm">Ninguna caja está esperando autorización ahora.</div>
+              {pendingItems.length === 0 ? (
+                <div className="rounded-3xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-900/80 p-8 text-center shadow-xs">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <div className="font-black text-sm text-slate-900 dark:text-white">
+                    Piso de Cajas Despejado
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Ninguna caja tiene clientes en espera de autorización.
+                  </div>
                 </div>
               ) : (
-                <div className="space-y-2.5">
+                <div className="space-y-3">
                   {pendingItems.map((item) =>
                     item.kind === "auth" ? (
-                      <div key={item.id} className="rounded-2xl border-2 border-brand-orange bg-white dark:bg-slate-900 p-3.5 shadow-lg shadow-orange-500/10">
+                      <div
+                        key={item.id}
+                        className="rounded-3xl border-2 border-amber-500 bg-white dark:bg-slate-900 p-4 shadow-xl shadow-amber-500/10 animate-fade-in"
+                      >
                         <div className="flex items-start gap-3 mb-3">
-                          <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0">
+                          <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 font-black shadow-md shadow-amber-500/20">
                             <ShieldAlert className="w-5 h-5" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="text-[10px] font-black uppercase tracking-wide text-brand-orangeInk dark:text-brand-orange">{tipoLabel[item.data.tipo] || item.data.tipo}</div>
-                            <div className="font-bold text-sm leading-snug">{item.data.descripcion}</div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                              {item.data.cajero_nombre || "Cajero"} · {item.data.caja_nombre || "Caja"} · {timeSince(item.data.created_at)}
+                            <div className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                              {tipoLabel[item.data.tipo] || item.data.tipo}
+                            </div>
+                            <div className="font-bold text-sm leading-snug text-slate-900 dark:text-white mt-0.5">
+                              {item.data.descripcion}
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1.5">
+                              <span className="font-bold text-slate-700 dark:text-slate-300">{item.data.cajero_nombre || "Cajera"}</span>
+                              <span>·</span>
+                              <span>{item.data.caja_nombre || "Caja"}</span>
+                              <span>·</span>
+                              <span className="text-amber-600 dark:text-amber-400 font-bold">{timeSince(item.data.created_at)}</span>
                             </div>
                           </div>
                         </div>
-                        <div className="flex gap-2">
+
+                        <div className="grid grid-cols-2 gap-2 pt-1">
                           <button
                             onClick={() => resolveAuthRequest(item.id, false)}
                             disabled={resolvingId === item.id}
-                            className="flex-1 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                            className="py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer disabled:opacity-50 transition"
                           >
-                            <X className="w-3.5 h-3.5" /> Rechazar
+                            <X className="w-4 h-4" /> Rechazar
                           </button>
                           <button
                             onClick={() => resolveAuthRequest(item.id, true)}
                             disabled={resolvingId === item.id}
-                            className="flex-1 py-2.5 rounded-xl bg-brand-orange text-[#1C1710] font-black text-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                            className="py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 cursor-pointer disabled:opacity-50 transition active:scale-[0.98]"
                           >
-                            {resolvingId === item.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Autorizar
+                            {resolvingId === item.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                            Autorizar
                           </button>
                         </div>
                       </div>
                     ) : (
-                      <div key={item.id} className="rounded-2xl border-2 border-primary bg-white dark:bg-slate-900 p-3.5 shadow-lg shadow-primary/10">
+                      <div
+                        key={item.id}
+                        className="rounded-3xl border-2 border-blue-500 bg-white dark:bg-slate-900 p-4 shadow-xl shadow-blue-500/10 animate-fade-in"
+                      >
                         <div className="flex items-start gap-3 mb-3">
-                          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white shrink-0">
+                          <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
                             <Landmark className="w-5 h-5" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="text-[10px] font-black uppercase tracking-wide text-primary dark:text-primary-300">Depósito a bóveda</div>
-                            <div className="font-bold text-sm leading-snug" style={monoFont}>{formatPYG(item.data.monto_total_pyg)}</div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                              {item.data.entry_ids.length} entrada{item.data.entry_ids.length !== 1 ? "s" : ""} · {timeSince(item.data.created_at)}
-                              {item.data.aprobado_gerente_id && " · Ya tiene aprobación de gerencia"}
+                            <div className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                              Depósito a Bóveda (Doble Firma)
+                            </div>
+                            <div className="font-black text-base text-slate-900 dark:text-white" style={monoFont}>
+                              {formatPYG(item.data.monto_total_pyg)}
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                              {item.data.entry_ids.length} entrega{item.data.entry_ids.length !== 1 ? "s" : ""} · {timeSince(item.data.created_at)}
+                              {item.data.aprobado_gerente_id && " · ✓ Aprobado por Gerencia"}
                             </div>
                           </div>
                         </div>
-                        <div className="flex gap-2">
+
+                        <div className="grid grid-cols-2 gap-2 pt-1">
                           <button
                             onClick={() => openRejectVault(item.data)}
                             disabled={resolvingId === item.id}
-                            className="flex-1 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                            className="py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                           >
-                            <X className="w-3.5 h-3.5" /> Rechazar
+                            <X className="w-4 h-4" /> Rechazar
                           </button>
                           <button
                             onClick={() => approveVaultDeposit(item.data)}
                             disabled={resolvingId === item.id}
-                            className="flex-1 py-2.5 rounded-xl bg-primary text-white font-black text-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                            className="py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50"
                           >
-                            {resolvingId === item.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Aprobar
+                            {resolvingId === item.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                            Aprobar Depósito
                           </button>
                         </div>
                       </div>
@@ -730,243 +1071,291 @@ export default function SupervisorPage() {
               )}
             </div>
 
-            {cashDropAlerts.length > 0 && (
-              <div className="rounded-2xl border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/10 p-3.5 flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-rose-500 dark:text-rose-400 shrink-0 mt-0.5" />
-                <div className="min-w-0">
-                  <div className="font-black text-sm text-rose-600 dark:text-rose-300">
-                    {cashDropAlerts.length} caja{cashDropAlerts.length > 1 ? "s" : ""} necesita{cashDropAlerts.length > 1 ? "n" : ""} retiro de efectivo
-                  </div>
-                  <div className="text-xs text-rose-600/80 dark:text-rose-300/80 mt-0.5">
-                    {cashDropAlerts.map((s) => s.cajero_nombre).filter(Boolean).join(", ")}
-                  </div>
-                </div>
-              </div>
-            )}
-
+            {/* Actividad Reciente Resuelta */}
             {recentResolved.length > 0 && (
               <div>
                 <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5" style={displayFont}>
                   Actividad Reciente
                 </h2>
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800">
+                <div className="rounded-3xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800/60 overflow-hidden shadow-xs">
                   {recentResolved.map((r) => (
-                    <div key={r.id} className="px-3.5 py-2.5 flex items-center gap-3">
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${r.estado === "aprobado" ? "bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-rose-100 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400"}`}>
+                    <div key={r.id} className="p-3 flex items-center gap-3">
+                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
+                        r.estado === "aprobado"
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                          : "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                      }`}>
                         {r.estado === "aprobado" ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs font-bold truncate">{tipoLabel[r.tipo] || r.tipo} · {r.cajero_nombre || "Cajero"}</div>
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400">{r.resuelto_por_nombre ? `Por ${r.resuelto_por_nombre} · ` : ""}{timeSince(r.created_at)}</div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                          {tipoLabel[r.tipo] || r.tipo} · {r.cajero_nombre || "Cajera"}
+                        </div>
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                          {r.resuelto_por_nombre ? `Por ${r.resuelto_por_nombre} · ` : ""}{timeSince(r.created_at)}
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
 
-        {/* ══════════════════════ TAB: CAJAS ══════════════════════ */}
+        {/* ══════════════════════ TAB 2: RADAR DE CAJAS & DROP CASH ══════════════════════ */}
         {tab === "cajas" && (
-          <>
+          <div className="space-y-4">
+            
+            {/* Resumen Total de Recaudación en Piso */}
+            <div className="rounded-3xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-5 text-white shadow-xl">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-300" style={displayFont}>
+                    Recaudación en Piso ({sessions.length} Cajas)
+                  </span>
+                </div>
+                <button
+                  onClick={fetchData}
+                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                >
+                  <RefreshCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="font-black text-2xl mb-3 text-amber-400" style={monoFont}>
+                {formatPYG(totalPygPiso)}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-800/80">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-400">🇧🇷 Reales:</span>
+                  <span className="font-black text-sm text-white" style={monoFont}>{formatBRL(totalBrlPiso)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-400">🇺🇸 Dólares:</span>
+                  <span className="font-black text-sm text-white" style={monoFont}>{formatUSD(totalUsdPiso)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Listado de Cajas del Día con Termómetro de Drop Cash */}
             <div>
               <div className="flex items-center justify-between mb-2.5">
                 <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400" style={displayFont}>
-                  Entregas Pendientes
+                  Cajas Activas (Hoy / Turno Actual)
                 </h2>
-                {handoffs.length > 0 && (
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400" style={monoFont}>{formatPYG(totalHandoffPyg)} en total</span>
-                )}
+                <span className="text-[10px] text-slate-400 font-bold">
+                  Tope estándar: ₲ 5.000.000
+                </span>
               </div>
 
               {loading ? (
-                <div className="flex items-center justify-center py-8 text-slate-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
-              ) : handoffs.length === 0 ? (
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 text-center text-slate-500 dark:text-slate-400 text-sm">
-                  Sin entregas pendientes de confirmar.
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                </div>
+              ) : sessions.length === 0 ? (
+                <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center text-slate-500 text-sm">
+                  No hay cajas abiertas en el turno de hoy.
                 </div>
               ) : (
+                <div className="space-y-3">
+                  {sessions.map((s) => {
+                    const threshold = s.cash_drop_threshold || 5000000
+                    const pct = Math.min(100, Math.round(((s.efectivo_acumulado || 0) / threshold) * 100))
+                    const isCritical = s.cash_drop_alert || pct >= 100
+                    const isWarning = !isCritical && (s.cash_drop_warning || pct >= 70)
+
+                    return (
+                      <div
+                        key={s.id}
+                        className={`rounded-3xl border-2 p-4 transition-all shadow-xs ${
+                          isCritical
+                            ? "border-rose-500 bg-rose-50/50 dark:bg-rose-950/20"
+                            : isWarning
+                            ? "border-amber-400 bg-amber-50/30 dark:bg-amber-950/10"
+                            : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+                        }`}
+                      >
+                        {/* Encabezado Caja */}
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <div>
+                            <div className="font-black text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                              <span>{s.cajero_nombre || "Cajera"}</span>
+                              <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">
+                                {s.register_id ? `Boca ${s.register_id.slice(-3)}` : "Caja"}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1">
+                              <Clock className="w-3 h-3" /> Abierta {timeSince(s.fecha_apertura)}
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              setRequestingDropSession(s)
+                              setDropAmountPyg(String(Math.round((s.efectivo_acumulado || 0) * 0.7)))
+                              setDropAmountUsd(s.efectivo_usd_acumulado ? String(s.efectivo_usd_acumulado) : "")
+                              setDropAmountBrl(s.efectivo_brl_acumulado ? String(s.efectivo_brl_acumulado) : "")
+                            }}
+                            className={`px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1 cursor-pointer transition shadow-xs ${
+                              isCritical
+                                ? "bg-rose-600 hover:bg-rose-500 text-white animate-pulse"
+                                : "bg-slate-900 dark:bg-white text-white dark:text-slate-950 hover:opacity-90"
+                            }`}
+                          >
+                            <Banknote className="w-3.5 h-3.5" />
+                            <span>Drop Cash</span>
+                          </button>
+                        </div>
+
+                        {/* Desglose Multimoneda */}
+                        <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-slate-100/60 dark:bg-slate-950/60 mb-3 border border-slate-200/50 dark:border-slate-800/50">
+                          <div>
+                            <div className="text-[9px] font-bold text-slate-400 uppercase">Efectivo ₲</div>
+                            <div className="font-black text-xs text-slate-900 dark:text-white" style={monoFont}>
+                              {formatPYG(s.efectivo_acumulado)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[9px] font-bold text-slate-400 uppercase">Reales R$</div>
+                            <div className="font-bold text-xs text-slate-900 dark:text-white" style={monoFont}>
+                              {formatBRL(s.efectivo_brl_acumulado)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[9px] font-bold text-slate-400 uppercase">Dólares US$</div>
+                            <div className="font-bold text-xs text-slate-900 dark:text-white" style={monoFont}>
+                              {formatUSD(s.efectivo_usd_acumulado)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Termómetro de Sangría */}
+                        <div>
+                          <div className="flex items-center justify-between text-[10px] font-bold mb-1">
+                            <span className={isCritical ? "text-rose-600 dark:text-rose-400" : isWarning ? "text-amber-600 dark:text-amber-400" : "text-slate-500"}>
+                              {isCritical ? "🚨 Límite alcanzado: Requiere sangría" : isWarning ? "⚠️ Acercándose al tope de seguridad" : "Nivel de efectivo seguro"}
+                            </span>
+                            <span style={monoFont} className="text-slate-700 dark:text-slate-300">
+                              {pct}% ({formatPYG(threshold)})
+                            </span>
+                          </div>
+
+                          <div className="w-full h-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                isCritical ? "bg-rose-500 animate-pulse" : isWarning ? "bg-amber-500" : "bg-emerald-500"
+                              }`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Entregas de Turno Pendientes */}
+            {handoffs.length > 0 && (
+              <div className="pt-2">
+                <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5" style={displayFont}>
+                  Entregas de Cierre Pendientes ({handoffs.length})
+                </h2>
                 <div className="space-y-2.5">
                   {handoffs.map((h) => (
                     <button
                       key={h.id}
                       onClick={() => openConfirmHandoff(h)}
-                      className="w-full text-left rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 flex items-center gap-3 active:scale-[0.99] transition-transform cursor-pointer"
+                      className="w-full text-left rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-center justify-between gap-3 cursor-pointer hover:border-amber-500 transition active:scale-[0.99]"
                     >
-                      <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0">
-                        <Wallet className="w-5 h-5 text-brand-orange" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-bold text-sm truncate">{h.entregado_por_nombre || "Cajero"}</div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{h.register_nombre || "Caja"} · {timeSince(h.created_at)}</div>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                          <Wallet className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                            {h.entregado_por_nombre || "Cajera"} · {h.register_nombre || "Caja"}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Cierre de turno · {timeSince(h.created_at)}
+                          </div>
+                        </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="font-black text-sm" style={monoFont}>{formatPYG(h.monto_pyg)}</div>
+                        <div className="font-black text-sm text-slate-900 dark:text-white" style={monoFont}>
+                          {formatPYG(h.monto_pyg)}
+                        </div>
+                        <span className="text-[10px] text-amber-500 font-bold">Verificar ➔</span>
                       </div>
-                      <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
                     </button>
                   ))}
                 </div>
-              )}
-            </div>
-
-            {/* ── RETIROS PENDIENTES -- cash drops de mitad de turno, ahora
-                requieren la misma confirmacion con recuento que la entrega
-                de cierre de turno. Antes entraban a boveda solos, sin que
-                la supervisora se enterara siquiera. ── */}
-            <div>
-              <div className="flex items-center justify-between mb-2.5">
-                <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400" style={displayFont}>
-                  Retiros Pendientes
-                </h2>
-                {retiros.length > 0 && (
-                  <span className="text-[10px] font-black bg-rose-500 text-white px-2 py-0.5 rounded-full">{retiros.length}</span>
-                )}
               </div>
+            )}
 
-              {retiros.length === 0 ? (
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 text-center text-slate-500 dark:text-slate-400 text-sm">
-                  Sin retiros pendientes de confirmar.
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {retiros.map((r) => (
-                    <div key={r.id} className="rounded-2xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/5 p-3.5">
-                      <div className="flex items-center gap-3 mb-2.5">
-                        <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-500/15 flex items-center justify-center shrink-0">
-                          <Banknote className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="font-bold text-sm truncate">{r.solicitado_por_nombre || "Cajero"}</div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{r.register_nombre || "Caja"} · {timeSince(r.created_at)}</div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          {r.monto_pyg > 0 && <div className="font-black text-sm" style={monoFont}>{formatPYG(r.monto_pyg)}</div>}
-                          {r.monto_usd > 0 && <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300" style={monoFont}>US$ {r.monto_usd.toFixed(2)}</div>}
-                          {r.monto_brl > 0 && <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300" style={monoFont}>R$ {r.monto_brl.toFixed(2)}</div>}
-                        </div>
-                      </div>
-                      {r.observaciones && <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-2.5">{r.observaciones}</div>}
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setRejectingRetiro(r)}
-                          className="flex-1 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" /> Rechazar
-                        </button>
-                        <button
-                          onClick={() => openConfirmRetiro(r)}
-                          className="flex-1 py-2 rounded-xl bg-brand-orange text-[#1C1710] font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <Check className="w-3.5 h-3.5" /> Confirmar
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2.5">
-                <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400" style={displayFont}>
-                  Cajas Activas
-                </h2>
-                <button onClick={fetchData} className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400 cursor-pointer">
-                  <RefreshCcw className="w-3 h-3" />
-                  {lastSync ? lastSync.toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : ""}
-                </button>
-              </div>
-
-              {loading ? (
-                <div className="flex items-center justify-center py-8 text-slate-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
-              ) : sessions.length === 0 ? (
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 text-center text-slate-500 dark:text-slate-400 text-sm">
-                  No hay cajas abiertas en este momento.
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {sessions.map((s) => (
-                    <div key={s.id} className={`rounded-2xl border p-3.5 ${s.cash_drop_alert ? "border-rose-300 dark:border-rose-500/50 bg-rose-50 dark:bg-rose-500/5" : s.cash_drop_warning ? "border-amber-300 dark:border-amber-500/50 bg-amber-50 dark:bg-amber-500/5" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"}`}>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="font-bold text-sm">{s.cajero_nombre || "Cajero"}</div>
-                        <div className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
-                          <Clock className="w-3 h-3" /> {timeSince(s.fecha_apertura)}
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Vendido en el turno</div>
-                          <div className="font-black text-lg" style={monoFont}>{formatPYG(s.monto_cobrado)}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Efectivo acumulado</div>
-                          <div className={`font-bold text-sm ${s.cash_drop_alert ? "text-rose-600 dark:text-rose-400" : s.cash_drop_warning ? "text-amber-600 dark:text-amber-400" : ""}`} style={monoFont}>
-                            {formatPYG(s.efectivo_acumulado)}
-                          </div>
-                          {s.cash_drop_threshold && (
-                            <div className="text-[9px] text-slate-400 dark:text-slate-500" style={monoFont}>de {formatPYG(s.cash_drop_threshold)}</div>
-                          )}
-                        </div>
-                      </div>
-                      {s.cash_drop_alert && (
-                        <div className="mt-2 pt-2 border-t border-rose-200 dark:border-rose-500/20 flex items-center gap-1.5 text-[11px] text-rose-600 dark:text-rose-400 font-bold">
-                          <AlertTriangle className="w-3.5 h-3.5" /> Supera el umbral de retiro
-                        </div>
-                      )}
-                      {!s.cash_drop_alert && s.cash_drop_warning && (
-                        <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-500/20 flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-bold">
-                          <AlertTriangle className="w-3.5 h-3.5" /> Se acerca al umbral de retiro
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
+          </div>
         )}
 
-        {/* ══════════════════════ TAB: BÓVEDA ══════════════════════ */}
+        {/* ══════════════════════ TAB 3: BÓVEDA & CAJA FUERTE ══════════════════════ */}
         {tab === "boveda" && (
-          <>
+          <div className="space-y-4">
             {!vaultDashboard ? (
-              <div className="flex items-center justify-center py-8 text-slate-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+              </div>
             ) : (
               <>
-                <div className="rounded-2xl bg-primary text-white p-4 shadow-lg shadow-primary/20">
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-primary-100 flex items-center gap-1.5">
-                    <Landmark className="w-3.5 h-3.5" /> Saldo en Bóveda
+                <div className="rounded-3xl bg-gradient-to-tr from-blue-700 to-indigo-600 text-white p-6 shadow-xl shadow-blue-500/20">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-blue-200 flex items-center gap-1.5">
+                    <Landmark className="w-4 h-4" /> Saldo Consolidado en Bóveda
                   </div>
-                  <div className="font-black text-3xl mt-1" style={monoFont}>{formatPYG(vaultDashboard.saldo_en_boveda_pyg)}</div>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-primary-100">
-                    <span>{vaultDashboard.entradas_en_boveda} entrada{vaultDashboard.entradas_en_boveda !== 1 ? "s" : ""}</span>
-                    {vaultDashboard.saldo_en_boveda_usd > 0 && <span style={monoFont}>US$ {vaultDashboard.saldo_en_boveda_usd.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>}
-                    {vaultDashboard.saldo_en_boveda_brl > 0 && <span style={monoFont}>R$ {vaultDashboard.saldo_en_boveda_brl.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>}
+                  <div className="font-black text-3xl mt-1 mb-3" style={monoFont}>
+                    {formatPYG(vaultDashboard.saldo_en_boveda_pyg)}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 pt-3 border-t border-blue-400/30 text-xs text-blue-100">
+                    <div>
+                      <span className="opacity-80">Reales: </span>
+                      <span className="font-bold" style={monoFont}>{formatBRL(vaultDashboard.saldo_en_boveda_brl)}</span>
+                    </div>
+                    <div>
+                      <span className="opacity-80">Dólares: </span>
+                      <span className="font-bold" style={monoFont}>{formatUSD(vaultDashboard.saldo_en_boveda_usd)}</span>
+                    </div>
                   </div>
                 </div>
 
                 <div>
                   <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5" style={displayFont}>
-                    Movimientos Recientes
+                    Movimientos Recientes en Bóveda
                   </h2>
                   {vaultDashboard.movimientos_recientes.length === 0 ? (
-                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 text-center text-slate-500 dark:text-slate-400 text-sm">
-                      Sin movimientos registrados todavía.
+                    <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center text-slate-500 text-sm">
+                      Sin movimientos de bóveda registrados hoy.
                     </div>
                   ) : (
-                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800">
+                    <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden shadow-xs">
                       {vaultDashboard.movimientos_recientes.map((m) => (
-                        <div key={m.id} className="px-3.5 py-2.5 flex items-center gap-3">
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${m.estado === "depositado" ? "bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"}`}>
-                            <ArrowDownToLine className="w-3.5 h-3.5" />
+                        <div key={m.id} className="p-3.5 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                              <ArrowDownToLine className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                                {ORIGEN_LABEL[m.origen] || m.origen}
+                              </div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                {m.estado === "depositado" ? "Depositado en banco" : "En resguardo de bóveda"} · {timeSince(m.created_at)}
+                              </div>
+                            </div>
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-bold truncate">{ORIGEN_LABEL[m.origen] || m.origen} · {m.estado === "depositado" ? "Depositado" : "En bóveda"}</div>
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400">{timeSince(m.created_at)}</div>
+                          <div className="font-black text-xs text-slate-900 dark:text-white shrink-0" style={monoFont}>
+                            {formatPYG(m.monto_pyg)}
                           </div>
-                          <div className="text-xs font-black shrink-0" style={monoFont}>{formatPYG(m.monto_pyg)}</div>
                         </div>
                       ))}
                     </div>
@@ -974,43 +1363,68 @@ export default function SupervisorPage() {
                 </div>
               </>
             )}
-          </>
+          </div>
         )}
 
-        {/* ══════════════════════ TAB: EQUIPO ══════════════════════ */}
+        {/* ══════════════════════ TAB 4: RENDIMIENTO DE CAJERAS ══════════════════════ */}
         {tab === "equipo" && (
-          <div>
-            <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5" style={displayFont}>
-              Desempeño de Cajeros
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Ranking por descuadre acumulado en cierres de caja — el más alto arriba.</p>
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1" style={displayFont}>
+                Desempeño y Arqueos del Equipo
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                Control de diferencias acumuladas en cierres de caja.
+              </p>
+            </div>
+
             {cajeroPerf.length === 0 ? (
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 text-center text-slate-500 dark:text-slate-400 text-sm">
-                Todavía no hay cierres de caja registrados.
+              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center text-slate-500 text-sm">
+                No hay cierres auditados todavía en este periodo.
               </div>
             ) : (
               <div className="space-y-2.5">
                 {cajeroPerf.map((c, idx) => (
-                  <div key={c.cajero_nombre} className={`rounded-2xl border p-3.5 ${c.pct_con_revision > 20 ? "border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/5" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"}`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-black text-slate-500 dark:text-slate-400 shrink-0" style={monoFont}>#{idx + 1}</div>
-                        <div className="font-bold text-sm truncate">{c.cajero_nombre}</div>
+                  <div
+                    key={c.cajero_nombre}
+                    className={`rounded-3xl border p-4 shadow-xs ${
+                      c.pct_con_revision > 20
+                        ? "border-rose-300 dark:border-rose-500/40 bg-rose-50/50 dark:bg-rose-950/20"
+                        : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-7 h-7 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-black text-slate-600 dark:text-slate-300 shrink-0" style={monoFont}>
+                          #{idx + 1}
+                        </div>
+                        <div className="font-black text-sm text-slate-900 dark:text-white truncate">
+                          {c.cajero_nombre}
+                        </div>
                       </div>
-                      {c.pct_con_revision > 20 && <TrendingDown className="w-4 h-4 text-rose-500 shrink-0" />}
+                      {c.pct_con_revision > 20 && (
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-600 dark:text-rose-400">
+                          Revisión Frecuente
+                        </span>
+                      )}
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-center">
+
+                    <div className="grid grid-cols-3 gap-2 text-center p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/60 dark:border-slate-800/60">
                       <div>
-                        <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Cierres</div>
-                        <div className="font-black text-sm" style={monoFont}>{c.total_cierres}</div>
+                        <div className="text-[9px] font-bold text-slate-400 uppercase">Cierres</div>
+                        <div className="font-black text-sm text-slate-900 dark:text-white" style={monoFont}>{c.total_cierres}</div>
                       </div>
                       <div>
-                        <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Diferencia</div>
-                        <div className={`font-black text-sm ${c.diferencia_acumulada > 0 ? "text-rose-600 dark:text-rose-400" : ""}`} style={monoFont}>{formatPYG(c.diferencia_acumulada)}</div>
+                        <div className="text-[9px] font-bold text-slate-400 uppercase">Diferencia</div>
+                        <div className={`font-black text-sm ${c.diferencia_acumulada > 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`} style={monoFont}>
+                          {formatPYG(c.diferencia_acumulada)}
+                        </div>
                       </div>
                       <div>
-                        <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Con revisión</div>
-                        <div className="font-black text-sm" style={monoFont}>{c.pct_con_revision}%</div>
+                        <div className="text-[9px] font-bold text-slate-400 uppercase">% Descuadre</div>
+                        <div className="font-black text-sm text-slate-900 dark:text-white" style={monoFont}>
+                          {c.pct_con_revision}%
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1019,11 +1433,12 @@ export default function SupervisorPage() {
             )}
           </div>
         )}
+
       </div>
 
-      {/* ── NAV INFERIOR ── */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-4">
+      {/* ── BARRA INFERIOR DE NAVEGACIÓN TÁCTIL ── */}
+      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800/80 pb-[env(safe-area-inset-bottom)] shadow-lg">
+        <div className="grid grid-cols-4 max-w-lg mx-auto">
           {tabs.map((t) => {
             const Icon = t.icon
             const active = tab === t.key
@@ -1031,74 +1446,180 @@ export default function SupervisorPage() {
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
-                className={`flex flex-col items-center gap-0.5 py-2.5 relative cursor-pointer ${active ? "text-brand-orange" : "text-slate-400 dark:text-slate-500"}`}
+                className={`flex flex-col items-center gap-1 py-2.5 relative cursor-pointer transition ${
+                  active ? "text-amber-500 font-bold" : "text-slate-400 dark:text-slate-500 hover:text-slate-600"
+                }`}
               >
                 <div className="relative">
                   <Icon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
-                  {!!t.badge && (
-                    <span className="absolute -top-1.5 -right-2 text-[9px] font-black bg-rose-500 text-white w-4 h-4 rounded-full flex items-center justify-center">{t.badge}</span>
+                  {!!t.badge && t.badge > 0 && (
+                    <span className="absolute -top-1.5 -right-2 text-[9px] font-black bg-rose-500 text-white w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                      {t.badge}
+                    </span>
                   )}
                 </div>
-                <span className="text-[10px] font-bold">{t.label}</span>
+                <span className="text-[10px] tracking-tight">{t.label}</span>
               </button>
             )
           })}
         </div>
       </div>
 
-      {/* ── MODAL DE CONFIRMACIÓN DE ENTREGA ── */}
+      {/* ── MODAL DE SANGRÍA DIRECTA (DROP CASH POR SUPERVISORA) ── */}
+      {requestingDropSession && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] animate-fade-in">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
+                  <Banknote className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                    Ejecutar Drop Cash (Sangría)
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {requestingDropSession.cajero_nombre || "Caja"}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setRequestingDropSession(null)} className="text-slate-400 p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              Retire el exceso de efectivo del mostrador para traspasarlo directamente a la bóveda de seguridad.
+            </p>
+
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">
+                  Monto a Retirar en Guaraníes (₲):
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={dropAmountPyg}
+                  onChange={(e) => setDropAmountPyg(e.target.value.replace(/\D/g, ""))}
+                  placeholder="0"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-lg font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                  style={monoFont}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">
+                    Reales (R$):
+                  </label>
+                  <input
+                    type="text"
+                    value={dropAmountBrl}
+                    onChange={(e) => setDropAmountBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    style={monoFont}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">
+                    Dólares (US$):
+                  </label>
+                  <input
+                    type="text"
+                    value={dropAmountUsd}
+                    onChange={(e) => setDropAmountUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    style={monoFont}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">
+                  Observaciones (Opcional):
+                </label>
+                <input
+                  type="text"
+                  value={dropObs}
+                  onChange={(e) => setDropObs(e.target.value)}
+                  placeholder="Ej: Retiro por límite de seguridad superado"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={handleExecuteDropCash}
+              disabled={submittingDrop}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 cursor-pointer disabled:opacity-50"
+            >
+              {submittingDrop ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+              Confirmar Retiro a Bóveda
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DE CONFIRMACIÓN / RECUENTO ── */}
       {confirmingItem && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-          <div className="w-full sm:max-w-sm bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
-            <div className="flex items-center justify-between mb-4">
-              <div className="font-black text-base" style={displayFont}>{confirmingItem.kind === "handoff" ? "Confirmar Recepción" : "Confirmar Retiro"}</div>
-              <button onClick={() => setConfirmingItem(null)} className="text-slate-400 cursor-pointer"><X className="w-5 h-5" /></button>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] animate-fade-in">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-black text-sm" style={displayFont}>
+                {confirmingItem.kind === "handoff" ? "Confirmar Recepción de Cierre" : "Confirmar Retiro Drop Cash"}
+              </div>
+              <button onClick={() => setConfirmingItem(null)} className="text-slate-400 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-              Cuente el efectivo usted misma antes de confirmar — estos montos son su propio recuento, no lo que declaró el cajero.
+              Cuente físicamente el efectivo antes de confirmar. Este recuento ingresará a la bóveda.
             </p>
-            <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Monto contado (₲)</label>
-            <div className="relative mb-3">
-              <Banknote className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                autoFocus
-                value={confirmAmount}
-                onFocus={(e) => e.target.select()}
-                onClick={(e) => e.currentTarget.select()}
-                onChange={(e) => setConfirmAmount(e.target.value.replace(/\D/g, ""))}
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-3 py-3 text-lg font-black outline-none focus:border-brand-orange text-slate-900 dark:text-white"
-                style={monoFont}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2 mb-4">
+
+            <div className="space-y-3 mb-4">
               <div>
-                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">US$</label>
+                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">Monto Contado en Guaraníes (₲):</label>
                 <input
                   type="text"
-                  inputMode="decimal"
-                  value={confirmAmountUsd}
-                  onChange={(e) => setConfirmAmountUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-brand-orange text-slate-900 dark:text-white"
+                  autoFocus
+                  value={confirmAmount}
+                  onChange={(e) => setConfirmAmount(e.target.value.replace(/\D/g, ""))}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-4 py-3 text-lg font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
                   style={monoFont}
                 />
               </div>
-              <div>
-                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">R$</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={confirmAmountBrl}
-                  onChange={(e) => setConfirmAmountBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-brand-orange text-slate-900 dark:text-white"
-                  style={monoFont}
-                />
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">R$:</label>
+                  <input
+                    type="text"
+                    value={confirmAmountBrl}
+                    onChange={(e) => setConfirmAmountBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    style={monoFont}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">US$:</label>
+                  <input
+                    type="text"
+                    value={confirmAmountUsd}
+                    onChange={(e) => setConfirmAmountUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                    style={monoFont}
+                  />
+                </div>
               </div>
             </div>
+
             <button
               onClick={submitConfirm}
               disabled={submittingConfirm}
-              className="w-full py-3.5 rounded-xl bg-brand-orange hover:brightness-95 text-[#1C1710] font-black text-sm flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer shadow-lg shadow-orange-500/30"
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 cursor-pointer disabled:opacity-50"
             >
               {submittingConfirm ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               Confirmar y Registrar en Bóveda
@@ -1107,62 +1628,60 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* ── MODAL DE RECHAZO DE RETIRO ── */}
+      {/* ── MODAL RECHAZAR RETIRO ── */}
       {rejectingRetiro && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-          <div className="w-full sm:max-w-sm bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
-            <div className="flex items-center justify-between mb-4">
-              <div className="font-black text-base" style={displayFont}>Rechazar Retiro</div>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] animate-fade-in">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>Rechazar Retiro</div>
               <button onClick={() => setRejectingRetiro(null)} className="text-slate-400 cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-              {rejectingRetiro.solicitado_por_nombre || "Cajero"} · {formatPYG(rejectingRetiro.monto_pyg)}
+              {rejectingRetiro.solicitado_por_nombre || "Cajera"} · {formatPYG(rejectingRetiro.monto_pyg)}
             </p>
-            <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Motivo (opcional)</label>
             <textarea
               autoFocus
               value={rejectRetiroMotivo}
               onChange={(e) => setRejectRetiroMotivo(e.target.value)}
-              placeholder="Ej: monto no coincide con lo declarado"
+              placeholder="Indique el motivo del rechazo..."
               rows={3}
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-brand-orange text-slate-900 dark:text-white mb-4 resize-none"
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-xs outline-none focus:border-amber-500 mb-3 text-slate-900 dark:text-white resize-none"
             />
             <button
               onClick={submitRejectRetiro}
               disabled={submittingRejectRetiro}
-              className="w-full py-3.5 rounded-xl bg-rose-600 hover:brightness-95 text-white font-black text-sm flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+              className="w-full py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               {submittingRejectRetiro ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
-              Rechazar Retiro
+              Rechazar Solicitud
             </button>
           </div>
         </div>
       )}
 
-      {/* ── MODAL DE RECHAZO DE DEPÓSITO A BÓVEDA ── */}
+      {/* ── MODAL RECHAZAR DEPÓSITO BÓVEDA ── */}
       {rejectingVault && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-          <div className="w-full sm:max-w-sm bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]">
-            <div className="flex items-center justify-between mb-4">
-              <div className="font-black text-base" style={displayFont}>Rechazar Depósito</div>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] animate-fade-in">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>Rechazar Depósito</div>
               <button onClick={() => setRejectingVault(null)} className="text-slate-400 cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-              {formatPYG(rejectingVault.monto_total_pyg)} · {rejectingVault.entry_ids.length} entrada{rejectingVault.entry_ids.length !== 1 ? "s" : ""}
+              {formatPYG(rejectingVault.monto_total_pyg)}
             </p>
-            <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 block mb-1">Motivo (opcional)</label>
             <textarea
               autoFocus
               value={rejectMotivo}
               onChange={(e) => setRejectMotivo(e.target.value)}
-              placeholder="Ej: falta verificar un movimiento"
+              placeholder="Indique el motivo del rechazo..."
               rows={3}
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-brand-orange text-slate-900 dark:text-white mb-4 resize-none"
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-xs outline-none focus:border-amber-500 mb-3 text-slate-900 dark:text-white resize-none"
             />
             <button
               onClick={submitRejectVault}
               disabled={submittingReject}
-              className="w-full py-3.5 rounded-xl bg-rose-600 hover:brightness-95 text-white font-black text-sm flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+              className="w-full py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               {submittingReject ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
               Rechazar Depósito
@@ -1170,6 +1689,7 @@ export default function SupervisorPage() {
           </div>
         </div>
       )}
+
     </div>
   )
 }
