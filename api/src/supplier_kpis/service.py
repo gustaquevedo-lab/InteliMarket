@@ -248,7 +248,33 @@ async def get_supplier_kpis_dashboard(db: AsyncSession, company_id: uuid.UUID, m
         branch_filter_sql = "AND sra.branch_id = :target_branch_id"
         params["target_branch_id"] = branch_id
 
+    await db.execute(text("SET LOCAL enable_nestloop = off;"))
+
     query_str = f"""
+        WITH sales_by_branch AS (
+            SELECT 
+                sp.ruc,
+                COALESCE(s.branch_id, '13bab831-185b-56d7-8c10-74ec2feb9dfb'::uuid) AS branch_id,
+                SUM(si.total - si.iva_monto) AS ventas_sin_iva,
+                COUNT(DISTINCT s.id) AS tx_count,
+                COUNT(DISTINCT si.product_id) AS sku_count
+            FROM sales s
+            JOIN sale_items si ON s.id = si.sale_id
+            JOIN products p ON p.id = si.product_id
+            JOIN suppliers sp ON sp.id = p.supplier_id
+            WHERE s.company_id = :company_id
+              AND s.fecha >= :start_date AND s.fecha < :end_date
+            GROUP BY sp.ruc, COALESCE(s.branch_id, '13bab831-185b-56d7-8c10-74ec2feb9dfb'::uuid)
+        ),
+        sales_total AS (
+            SELECT 
+                ruc,
+                SUM(ventas_sin_iva) AS ventas_sin_iva,
+                SUM(tx_count) AS tx_count,
+                MAX(sku_count) AS sku_count
+            FROM sales_by_branch
+            GROUP BY ruc
+        )
         SELECT 
             sra.id,
             sra.supplier_id,
@@ -266,27 +292,29 @@ async def get_supplier_kpis_dashboard(db: AsyncSession, company_id: uuid.UUID, m
             sra.tramos_escala,
             sra.observaciones,
             sra.estado,
-            COALESCE(sales_data.ventas_sin_iva, 0) AS ventas_actual_gs,
-            COALESCE(sales_data.tx_count, 0) AS transacciones_count,
-            COALESCE(sales_data.sku_count, 0) AS skus_vendidos_count
+            COALESCE(
+                CASE 
+                    WHEN sra.branch_id IS NOT NULL THEN sb.ventas_sin_iva 
+                    ELSE st.ventas_sin_iva 
+                END, 0
+            ) AS ventas_actual_gs,
+            COALESCE(
+                CASE 
+                    WHEN sra.branch_id IS NOT NULL THEN sb.tx_count 
+                    ELSE st.tx_count 
+                END, 0
+            ) AS transacciones_count,
+            COALESCE(
+                CASE 
+                    WHEN sra.branch_id IS NOT NULL THEN sb.sku_count 
+                    ELSE st.sku_count 
+                END, 0
+            ) AS skus_vendidos_count
         FROM supplier_rebate_agreements sra
         JOIN suppliers s ON s.id = sra.supplier_id
         LEFT JOIN branches b ON b.id = sra.branch_id
-        LEFT JOIN (
-            SELECT 
-                sp.ruc,
-                s.branch_id,
-                SUM(si.total - si.iva_monto) AS ventas_sin_iva,
-                COUNT(DISTINCT s.id) AS tx_count,
-                COUNT(DISTINCT si.product_id) AS sku_count
-            FROM sale_items si
-            JOIN sales s ON s.id = si.sale_id
-            JOIN products p ON p.id = si.product_id
-            JOIN suppliers sp ON sp.id = p.supplier_id
-            WHERE s.company_id = :company_id
-              AND s.fecha >= :start_date AND s.fecha < :end_date
-            GROUP BY sp.ruc, s.branch_id
-        ) sales_data ON (s.ruc = sales_data.ruc AND (sra.branch_id IS NULL OR sra.branch_id = sales_data.branch_id))
+        LEFT JOIN sales_by_branch sb ON (s.ruc = sb.ruc AND sra.branch_id = sb.branch_id)
+        LEFT JOIN sales_total st ON (s.ruc = st.ruc)
         WHERE sra.company_id = :company_id
           AND sra.periodo = :periodo
           AND sra.estado = 'activo'
