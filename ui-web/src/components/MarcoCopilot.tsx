@@ -16,6 +16,7 @@ export default function MarcoCopilot() {
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [model, setModel] = useState("qwen2.5:7b") // default fast model for instant copilot answers
+  const [voice, setVoice] = useState(() => localStorage.getItem("marco_voice") || "es-AR-TomasNeural")
   const [loading, setLoading] = useState(false)
   const [recording, setRecording] = useState(false)
   const [history, setHistory] = useState<any[]>([])
@@ -30,6 +31,11 @@ export default function MarcoCopilot() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [history, loading])
+
+  const handleVoiceChange = (v: string) => {
+    setVoice(v)
+    localStorage.setItem("marco_voice", v)
+  }
 
   const playBase64Audio = (base64Audio: string) => {
     if (!base64Audio) return
@@ -66,6 +72,7 @@ export default function MarcoCopilot() {
       const res = await api.asistenteVirtual.brainChat(COMPANY_ID, {
         query: textQuery,
         user_name: userName,
+        voice_preference: voice,
         model_preference: model,
         generate_voice: true
       })
@@ -137,6 +144,7 @@ export default function MarcoCopilot() {
       const formData = new FormData()
       formData.append("audio", blob, "voice.webm")
       formData.append("user_name", userName)
+      formData.append("voice_preference", voice)
       formData.append("model_preference", model)
 
       const res = await api.asistenteVirtual.brainVoice(formData)
@@ -246,39 +254,59 @@ export default function MarcoCopilot() {
 
       {/* Slide-out Copilot Modal / Drawer */}
       {isOpen && (
-        <div className="fixed bottom-6 right-6 z-50 w-[95vw] sm:w-[460px] h-[640px] max-h-[90vh] bg-white dark:bg-gray-800 rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden animate-fade-in-up">
+        <div className="fixed bottom-6 right-6 z-50 w-[95vw] sm:w-[480px] h-[660px] max-h-[90vh] bg-white dark:bg-gray-800 rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden animate-fade-in-up">
           {/* Header */}
-          <div className="p-4 bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-950 text-white flex items-center justify-between border-b border-indigo-800/40">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-500/30 border border-indigo-400/40 flex items-center justify-center text-xl shadow-inner">
-                🧠
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-sm text-white">Marco</h3>
-                  <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/30 font-medium">
-                    ● En línea (Minisforum)
-                  </span>
+          <div className="p-3.5 bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-950 text-white flex flex-col gap-2 border-b border-indigo-800/40">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-indigo-500/30 border border-indigo-400/40 flex items-center justify-center text-lg shadow-inner">
+                  🧠
                 </div>
-                <p className="text-[11px] text-indigo-200/80">Tu mano derecha en Casa Gonzalito</p>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="font-bold text-sm text-white">Marco</h3>
+                    <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/30 font-medium">
+                      ● Minisforum Local
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-indigo-200/80">Asesor de Casa Gonzalito</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                {/* Model toggle */}
+                <button
+                  onClick={() => setModel(model === "qwen2.5:7b" ? "qwen2.5:14b" : "qwen2.5:7b")}
+                  className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] text-indigo-200 font-medium transition"
+                  title="Cambiar modelo LLM"
+                >
+                  {model === "qwen2.5:7b" ? "⚡ 7B" : "🧠 14B"}
+                </button>
+                <button
+                  onClick={() => setIsOpen(false)}
+                  className="p-1.5 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              {/* Model toggle */}
-              <button
-                onClick={() => setModel(model === "qwen2.5:7b" ? "qwen2.5:14b" : "qwen2.5:7b")}
-                className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] text-indigo-200 font-medium transition"
-                title="Cambiar modelo LLM"
+            {/* Voice & Accent Selector Toolbar */}
+            <div className="flex items-center justify-between pt-1 border-t border-white/10 text-[11px]">
+              <span className="text-indigo-200/70 flex items-center gap-1">
+                <Volume2 className="w-3.5 h-3.5 text-indigo-300" /> Acento de voz:
+              </span>
+              <select
+                value={voice}
+                onChange={(e) => handleVoiceChange(e.target.value)}
+                className="bg-black/40 hover:bg-black/60 text-white text-[11px] font-medium rounded-lg px-2 py-1 border border-white/10 outline-none cursor-pointer"
               >
-                {model === "qwen2.5:7b" ? "⚡ 7B Rápido" : "🧠 14B Profundo"}
-              </button>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
+                <option value="es-AR-TomasNeural">🇦🇷 Tomás (Rioplatense / Natural)</option>
+                <option value="es-UY-MateoNeural">🇺🇾 Mateo (Rioplatense / Ejecutivo)</option>
+                <option value="es-PY-MarioNeural">🇵🇾 Mario (Paraguayo)</option>
+                <option value="es-MX-JorgeNeural">🇲🇽 Jorge (Neutro Latino)</option>
+                <option value="es-CL-LorenzoNeural">🇨🇱 Lorenzo (Andino Claro)</option>
+              </select>
             </div>
           </div>
 
@@ -287,15 +315,15 @@ export default function MarcoCopilot() {
             {history.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-4">
                 <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-2xl mb-3 shadow-sm">
-                  🇵🇾
+                  🏢
                 </div>
-                <h4 className="text-sm font-bold text-gray-900 dark:text-white">¡Qué tal kp! Soy Marco.</h4>
+                <h4 className="text-sm font-bold text-gray-900 dark:text-white">¡Hola {userName}! Soy Marco.</h4>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Conozco todo lo que pasa en ventas, depósito, cobranzas y reparto. Preguntame lo que necesites o habláme por el micrófono.
+                  Tu asesor y mano derecha en ventas, depósito, cobranzas y logística. Podés consultarme por voz o texto.
                 </p>
 
                 <div className="mt-4 w-full text-left space-y-1.5">
-                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Sugerencias para esta pantalla:</p>
+                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Consultas sugeridas para esta pantalla:</p>
                   {getContextSuggestions().map((sug, i) => (
                     <button
                       key={i}

@@ -66,6 +66,7 @@ function BrainTab() {
   const userName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
   const [query, setQuery] = useState("")
   const [model, setModel] = useState("qwen2.5:14b")
+  const [voice, setVoice] = useState(() => localStorage.getItem("marco_voice") || "es-AR-TomasNeural")
   const [loading, setLoading] = useState(false)
   const [recording, setRecording] = useState(false)
   const [status, setStatus] = useState<any>(null)
@@ -90,6 +91,11 @@ function BrainTab() {
     api.asistenteVirtual.brainStatus(COMPANY_ID)
       .then(setStatus)
       .catch((err) => console.error("Error loading brain status", err))
+  }
+
+  const handleVoiceChange = (v: string) => {
+    setVoice(v)
+    localStorage.setItem("marco_voice", v)
   }
 
   const playBase64Audio = (base64Audio: string) => {
@@ -128,6 +134,7 @@ function BrainTab() {
       const res = await api.asistenteVirtual.brainChat(COMPANY_ID, {
         query: textQuery,
         user_name: userName,
+        voice_preference: voice,
         model_preference: model,
         generate_voice: true
       })
@@ -202,6 +209,7 @@ function BrainTab() {
       const formData = new FormData()
       formData.append("audio", audioBlob, "voice_input.webm")
       formData.append("user_name", userName)
+      formData.append("voice_preference", voice)
       formData.append("model_preference", model)
 
       const res = await api.asistenteVirtual.brainVoice(formData)
@@ -278,28 +286,47 @@ function BrainTab() {
             </div>
           </div>
 
-          {/* Model Switcher */}
-          <div className="flex items-center gap-2 bg-black/40 p-1.5 rounded-xl border border-white/10">
-            <button
-              onClick={() => setModel("qwen2.5:14b")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                model === "qwen2.5:14b"
-                  ? "bg-indigo-600 text-white shadow"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              🧠 Qwen 2.5 (14B) — Razonamiento SQL
-            </button>
-            <button
-              onClick={() => setModel("qwen2.5:7b")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                model === "qwen2.5:7b"
-                  ? "bg-indigo-600 text-white shadow"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              ⚡ Qwen 2.5 (7B) — Voz Ultra Rápida
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Voice / Accent Selector */}
+            <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 text-xs">
+              <Volume2 className="w-4 h-4 text-indigo-300" />
+              <span className="text-indigo-200 font-medium hidden sm:inline">Voz:</span>
+              <select
+                value={voice}
+                onChange={(e) => handleVoiceChange(e.target.value)}
+                className="bg-transparent text-white text-xs font-semibold outline-none cursor-pointer"
+              >
+                <option value="es-AR-TomasNeural" className="bg-gray-900 text-white">🇦🇷 Tomás (Rioplatense / Natural)</option>
+                <option value="es-UY-MateoNeural" className="bg-gray-900 text-white">🇺🇾 Mateo (Rioplatense / Ejecutivo)</option>
+                <option value="es-PY-MarioNeural" className="bg-gray-900 text-white">🇵🇾 Mario (Paraguayo)</option>
+                <option value="es-MX-JorgeNeural" className="bg-gray-900 text-white">🇲🇽 Jorge (Neutro Latino)</option>
+                <option value="es-CL-LorenzoNeural" className="bg-gray-900 text-white">🇨🇱 Lorenzo (Andino Claro)</option>
+              </select>
+            </div>
+
+            {/* Model Switcher */}
+            <div className="flex items-center gap-2 bg-black/40 p-1 rounded-xl border border-white/10">
+              <button
+                onClick={() => setModel("qwen2.5:14b")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  model === "qwen2.5:14b"
+                    ? "bg-indigo-600 text-white shadow"
+                    : "text-gray-400 hover:text-white"
+                }`}
+              >
+                🧠 Qwen 2.5 (14B)
+              </button>
+              <button
+                onClick={() => setModel("qwen2.5:7b")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  model === "qwen2.5:7b"
+                    ? "bg-indigo-600 text-white shadow"
+                    : "text-gray-400 hover:text-white"
+                }`}
+              >
+                ⚡ Qwen 2.5 (7B)
+              </button>
+            </div>
           </div>
         </div>
       </div>
