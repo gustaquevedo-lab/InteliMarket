@@ -6396,67 +6396,84 @@ export default function POSPage() {
                   </button>
                 </div>
 
-                {/* Abre tu Corazón - Redondeo Solidario F8 */}
-                <div className={`p-2.5 rounded-xl border transition-all ${
-                  donacionActiva
-                    ? "bg-gradient-to-br from-rose-50/90 to-amber-50/80 dark:from-rose-950/50 dark:to-amber-950/40 border-rose-400 dark:border-rose-600"
-                    : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
-                }`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Heart className={`w-3.5 h-3.5 shrink-0 ${donacionActiva ? "fill-rose-500 text-rose-500" : "text-slate-400"}`} />
-                      <div className="min-w-0">
-                        <span className="text-[11px] font-black text-slate-800 dark:text-slate-200 truncate block leading-tight">
-                          Abre tu corazón <span className="text-[9px] font-bold text-rose-500">(F8)</span>
-                        </span>
-                        <p className="text-[9px] text-slate-400 truncate">
-                          {campanaActivaDonacion?.ong_nombre || "Centro Amor y Esperanza"}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleDonacion(!donacionActiva)}
-                      className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                        donacionActiva ? "bg-rose-600" : "bg-slate-300 dark:bg-slate-700"
-                      }`}
-                    >
-                      <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition ${
-                        donacionActiva ? "translate-x-3" : "translate-x-0"
-                      }`} />
-                    </button>
-                  </div>
+                {/* Abre tu Corazón - Redondeo Solidario F8 (Solo si está activo en Configuración) */}
+                {(() => {
+                  let isDonacionOn = true
+                  try {
+                    const savedTpl = localStorage.getItem("pos_receipt_template_config")
+                    if (savedTpl) {
+                      const parsed = JSON.parse(savedTpl)
+                      if (parsed.donacion_activa === false) isDonacionOn = false
+                    } else if ((companyData?.config as any)?.receipt_template?.donacion_activa === false) {
+                      isDonacionOn = false
+                    }
+                  } catch (e) {}
 
-                  {/* Chips de montos rápidos */}
-                  <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1 flex-wrap">
-                    {[
-                      { label: `Sugerido (${formatPYG(montoSugeridoDonacion)})`, val: montoSugeridoDonacion },
-                      { label: "+500", val: 500 },
-                      { label: "+1.000", val: 1000 },
-                      { label: "+2.000", val: 2000 },
-                      { label: "+5.000", val: 5000 },
-                    ].map((btn, idx) => {
-                      const isSelected = donacionActiva && (
-                        montoDonacionManual === btn.val ||
-                        (montoDonacionManual === null && btn.val === montoSugeridoDonacion)
-                      )
-                      return (
+                  if (!isDonacionOn) return null
+
+                  return (
+                    <div className={`p-2.5 rounded-xl border transition-all ${
+                      donacionActiva
+                        ? "bg-gradient-to-br from-rose-50/90 to-amber-50/80 dark:from-rose-950/50 dark:to-amber-950/40 border-rose-400 dark:border-rose-600"
+                        : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                    }`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Heart className={`w-3.5 h-3.5 shrink-0 ${donacionActiva ? "fill-rose-500 text-rose-500" : "text-slate-400"}`} />
+                          <div className="min-w-0">
+                            <span className="text-[11px] font-black text-slate-800 dark:text-slate-200 truncate block leading-tight">
+                              Abre tu corazón <span className="text-[9px] font-bold text-rose-500">(F8)</span>
+                            </span>
+                            <p className="text-[9px] text-slate-400 truncate">
+                              {campanaActivaDonacion?.ong_nombre || "Centro Amor y Esperanza"}
+                            </p>
+                          </div>
+                        </div>
                         <button
-                          key={idx}
                           type="button"
-                          onClick={() => handleToggleDonacion(true, btn.val)}
-                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
-                            isSelected
-                              ? "bg-rose-600 text-white"
-                              : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                          onClick={() => handleToggleDonacion(!donacionActiva)}
+                          className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                            donacionActiva ? "bg-rose-600" : "bg-slate-300 dark:bg-slate-700"
                           }`}
                         >
-                          {btn.label}
+                          <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition ${
+                            donacionActiva ? "translate-x-3" : "translate-x-0"
+                          }`} />
                         </button>
-                      )
-                    })}
-                  </div>
-                </div>
+                      </div>
+
+                      {/* Chips de montos rápidos */}
+                      <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1 flex-wrap">
+                        {[
+                          { label: `Sugerido (${formatPYG(montoSugeridoDonacion)})`, val: montoSugeridoDonacion },
+                          { label: "+500", val: 500 },
+                          { label: "+1.000", val: 1000 },
+                          { label: "+2.000", val: 2000 },
+                          { label: "+5.000", val: 5000 },
+                        ].map((btn, idx) => {
+                          const isSelected = donacionActiva && (
+                            montoDonacionManual === btn.val ||
+                            (montoDonacionManual === null && btn.val === montoSugeridoDonacion)
+                          )
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => handleToggleDonacion(true, btn.val)}
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
+                                isSelected
+                                  ? "bg-rose-600 text-white"
+                                  : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                              }`}
+                            >
+                              {btn.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
 
               {/* ── COLUMNA DERECHA: SELECCIÓN DE MÉTODO Y ENTRADA DE PAGO (7 COLS) ── */}
@@ -6492,6 +6509,17 @@ export default function POSPage() {
                         if (saved) pMethods = JSON.parse(saved)
                       } catch (e) {}
 
+                      let isExtraClubOn = true
+                      try {
+                        const savedTpl = localStorage.getItem("pos_receipt_template_config")
+                        if (savedTpl) {
+                          const parsed = JSON.parse(savedTpl)
+                          if (parsed.habilitar_extra_club === false) isExtraClubOn = false
+                        } else if ((companyData?.config as any)?.receipt_template?.habilitar_extra_club === false) {
+                          isExtraClubOn = false
+                        }
+                      } catch (e) {}
+
                       const isEnabled = (key: string) => {
                         if (!pMethods || pMethods.length === 0) return true
                         const found = pMethods.find((p: any) => p.codigo.toUpperCase().includes(key) || key.includes(p.codigo.toUpperCase()))
@@ -6504,7 +6532,7 @@ export default function POSPage() {
                         { id: "dinelco", key: "3", label: "Dinelco", icon: CreditCard, show: isEnabled("DINELCO") },
                         { id: "qr", key: "4", label: "QR / PIX", icon: QrCode, show: isEnabled("QR") || isEnabled("PIX") },
                         { id: "plugpay_credito", key: "5", label: "Crédito BRL", icon: CreditCard, show: true },
-                        { id: "extra_club", key: "6", label: "Extra Club", icon: Star, show: isEnabled("EXTRA_CLUB") },
+                        { id: "extra_club", key: "6", label: "Extra Club", icon: Star, show: isExtraClubOn && isEnabled("EXTRA_CLUB") },
                       ]
 
                       return allTabs.filter(t => t.show).map((m) => {
