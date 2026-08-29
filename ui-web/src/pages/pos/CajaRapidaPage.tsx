@@ -3243,12 +3243,11 @@ export default function POSPage() {
     const query = customerSearch.trim().toLowerCase()
     if (!query) return list
 
-    return list.filter(c => 
-      c.nombre?.toLowerCase().includes(query) || 
-      c.ruc?.toLowerCase().includes(query) ||
-      c.ci?.includes(query) ||
-      (c.razon_social && c.razon_social.toLowerCase().includes(query))
-    )
+    const tokens = query.split(/\s+/).filter(Boolean)
+    return list.filter(c => {
+      const text = `${c.nombre || ''} ${c.razon_social || ''} ${c.ruc || ''} ${c.ci || ''} ${(c as any).telefono || ''} ${(c as any).extra_club_numero || ''}`.toLowerCase()
+      return tokens.every(token => text.includes(token))
+    })
   }, [customerSearch, customerSearchResults, customers])
 
   // El índice 0 siempre es "Consumidor Final"; 1..N son los resultados de

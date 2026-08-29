@@ -1644,290 +1644,341 @@ export default function SettingsPage() {
             )}
           </div>
 
-          {/* PANEL DERECHO: VISTA PREVIA EN VIVO REALISTA (LIVE SIMULATOR 80MM) (5 COLS) */}
+          {/* PANEL DERECHO: VISTA PREVIA EN VIVO REALISTA (SIMULADOR FOTORREALISTA 80MM TÉRMICO) (5 COLS) */}
           <div className="lg:col-span-5 space-y-3 sticky top-4">
             
             {/* Barra de control del simulador */}
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800 text-white border border-slate-700 shadow-md">
+            <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-900 text-white border border-slate-700/80 shadow-xl">
               <div className="flex items-center gap-2">
-                <Eye className="w-4 h-4 text-emerald-400" />
-                <span className="text-xs font-black uppercase tracking-wider">Simulador Térmico ({receiptConfig.ancho_papel})</span>
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-black uppercase tracking-wider">Papel Térmico 80mm (ESC/POS)</span>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
+                <a
+                  href="/cupones"
+                  title="Ir al Diseñador de Cupones de Sorteos"
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer shadow-sm"
+                >
+                  <Gift className="w-3 h-3" />
+                  <span>Diseñador Cupones ➔</span>
+                </a>
                 <button
                   type="button"
                   onClick={() => setPreviewCustomerType(previewCustomerType === "socio" ? "consumidor_final" : "socio")}
                   className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition cursor-pointer ${
-                    previewCustomerType === "socio" ? "bg-amber-500 text-slate-950" : "bg-slate-700 text-slate-300"
+                    previewCustomerType === "socio" ? "bg-amber-500 text-slate-950 font-bold" : "bg-slate-800 text-slate-300 border border-slate-700"
                   }`}
                 >
-                  {previewCustomerType === "socio" ? "⭐ Con Extra Club" : "👤 Consumidor Final"}
+                  {previewCustomerType === "socio" ? "⭐ Extra Club" : "👤 Sin Club"}
                 </button>
               </div>
             </div>
 
-            {/* Ticket Térmico Renderizado 100% Realista */}
-            <div className="bg-white rounded-xl shadow-2xl p-4 text-black border-2 border-slate-300 overflow-hidden font-mono max-h-[78vh] overflow-y-auto select-none">
-              
-              <div 
-                id="receipt-preview-content"
-                style={{
-                  fontFamily: receiptConfig.fuente_ticket,
-                  fontSize: `${receiptConfig.tamano_fuente_px}px`,
-                  lineHeight: receiptConfig.interlineado || 1.22,
-                  width: "100%",
-                  maxWidth: `${(receiptConfig.ancho_imprimible_mm || 68) * 3.8}px`,
-                  paddingLeft: `${(receiptConfig.margen_izq_mm || 0) * 3.8}px`,
-                  paddingRight: `${(receiptConfig.margen_der_mm || 0) * 3.8}px`,
-                  color: "#000000",
-                  margin: "0 auto",
-                  boxSizing: "border-box"
-                }}
-              >
-                {/* 1. CABECERA */}
-                <div style={{ textAlign: "center", marginBottom: "6px" }}>
-                  {receiptConfig.mostrar_logo && (
-                    <div style={{ margin: "0 auto 6px auto", width: `${receiptConfig.logo_ancho_px}px`, maxWidth: "100%" }}>
-                      {(company.logo_url || receiptConfig.logo_url) ? (
-                        <img
-                          src={company.logo_url || receiptConfig.logo_url}
-                          alt={receiptConfig.nombre_fantasia}
-                          style={{ maxWidth: "100%", height: "auto", display: "block", margin: "0 auto" }}
-                        />
-                      ) : (
-                        <div style={{ border: "2px solid #000", padding: "4px 8px", fontWeight: "900", fontSize: "14px", letterSpacing: "1px" }}>
-                          ★ LOGO EMPRESA ★
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <div style={{ fontSize: "15px", fontWeight: "900", letterSpacing: "0.5px" }}>
-                    {receiptConfig.nombre_fantasia}
-                  </div>
-                  <div style={{ fontSize: "11px", fontWeight: "bold" }}>
-                    {receiptConfig.razon_social}
-                  </div>
-                  <div style={{ fontSize: "10px" }}>
-                    RUC: {receiptConfig.ruc} · Tel: {receiptConfig.telefono}
-                  </div>
-                  <div style={{ fontSize: "10px" }}>
-                    {receiptConfig.direccion}
-                  </div>
-                  <div style={{ fontSize: "10px" }}>
-                    {receiptConfig.ciudad}
-                  </div>
-                  {receiptConfig.slogan && (
-                    <div style={{ fontSize: "9.5px", fontStyle: "italic", marginTop: "2px" }}>
-                      "{receiptConfig.slogan}"
-                    </div>
-                  )}
-                  <div style={{ fontSize: "10px", marginTop: "3px" }}>
-                    Timbrado Nº: <strong>{receiptConfig.timbrado}</strong>
-                  </div>
-                  <div style={{ fontSize: "10px" }}>
-                    Válido hasta: {receiptConfig.timbrado_vencimiento}
-                  </div>
-                </div>
+            {/* Contenedor Fotorrealista de Rollo Térmico 80mm */}
+            <div className="bg-slate-950/60 p-4 sm:p-6 rounded-3xl border border-slate-800 flex justify-center shadow-inner overflow-hidden">
+              <div className="relative w-[310px] max-w-[310px] select-none filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.45)]">
+                
+                {/* Borde dentado superior (Tear-off Zig-zag) */}
+                <div 
+                  className="h-3 w-full bg-[#FAFAF7]" 
+                  style={{
+                    clipPath: "polygon(0% 100%, 2% 0%, 4% 100%, 6% 0%, 8% 100%, 10% 0%, 12% 100%, 14% 0%, 16% 100%, 18% 0%, 20% 100%, 22% 0%, 24% 100%, 26% 0%, 28% 100%, 30% 0%, 32% 100%, 34% 0%, 36% 100%, 38% 0%, 40% 100%, 42% 0%, 44% 100%, 46% 0%, 48% 100%, 50% 0%, 52% 100%, 54% 0%, 56% 100%, 58% 0%, 60% 100%, 62% 0%, 64% 100%, 66% 0%, 68% 100%, 70% 0%, 72% 100%, 74% 0%, 76% 100%, 78% 0%, 80% 100%, 82% 0%, 84% 100%, 86% 0%, 88% 100%, 90% 0%, 92% 100%, 94% 0%, 96% 100%, 98% 0%, 100% 100%)"
+                  }}
+                />
 
-                {/* 2. DATOS DE FACTURA & CLIENTE */}
-                <div style={{ borderTop: "1px dashed #000", borderBottom: "1px dashed #000", padding: "4px 0", margin: "4px 0", fontSize: "10.5px" }}>
-                  <div><strong>FACTURA ELECTRÓNICA:</strong> 001-012-0048291</div>
-                  <div><strong>FECHA / HORA:</strong> {new Date().toLocaleString("es-PY")}</div>
-                  <div><strong>CONDICIÓN:</strong> CONTADO</div>
-                  {receiptConfig.mostrar_cajero && (
-                    <div><strong>CAJERO:</strong> Juan Silveira ({receiptConfig.punto_expedicion})</div>
-                  )}
-                  {receiptConfig.mostrar_cliente && (
-                    <div>
-                      <strong>CLIENTE:</strong> {previewCustomerType === "socio" ? "Gustavo Quevedo (Socio Extra Club)" : "Consumidor Final"}
-                    </div>
-                  )}
-                  {receiptConfig.mostrar_ruc_cliente && (
-                    <div>
-                      <strong>RUC / CI:</strong> {previewCustomerType === "socio" ? "4444440-1" : "44444401-7"}
-                    </div>
-                  )}
-                </div>
-
-                {/* 3. ÍTEMS FACTURADOS */}
-                <table style={{ width: "100%", borderCollapse: "collapse", margin: "6px 0", fontSize: "10.5px" }}>
-                  <tbody>
-                    {/* Item 1 */}
-                    <tr>
-                      <td colSpan={2} style={{ fontWeight: "bold", paddingTop: "2px" }}>
-                        COCA COLA PET 250ML (6)
-                        {receiptConfig.mostrar_sku && <span style={{ fontSize: "9px", fontWeight: "normal" }}> [SKU: 118971]</span>}
-                      </td>
-                    </tr>
-                    <tr style={{ borderBottom: "1px dotted #888" }}>
-                      <td style={{ paddingBottom: "3px" }}>2 UN x Gs. 3.500</td>
-                      <td style={{ textAlign: "right", fontWeight: "bold", paddingBottom: "3px" }}>Gs. 7.000</td>
-                    </tr>
-
-                    {/* Item 2 Pesable */}
-                    <tr>
-                      <td colSpan={2} style={{ fontWeight: "bold", paddingTop: "4px" }}>
-                        TOMATE SALSA KG {receiptConfig.mostrar_balanza_origen && <span style={{ fontSize: "9px", background: "#eee", padding: "1px 3px" }}>⚖️ Balanza</span>}
-                        {receiptConfig.mostrar_sku && <span style={{ fontSize: "9px", fontWeight: "normal" }}> [SKU: 120178]</span>}
-                      </td>
-                    </tr>
-                    <tr style={{ borderBottom: "1px dotted #888" }}>
-                      <td style={{ paddingBottom: "3px" }}>0.850 KG x Gs. 11.700</td>
-                      <td style={{ textAlign: "right", fontWeight: "bold", paddingBottom: "3px" }}>Gs. 9.945</td>
-                    </tr>
-
-                    {/* Item 3 */}
-                    <tr>
-                      <td colSpan={2} style={{ fontWeight: "bold", paddingTop: "4px" }}>
-                        QUESO MUZZARELA KG {receiptConfig.mostrar_balanza_origen && <span style={{ fontSize: "9px", background: "#eee", padding: "1px 3px" }}>⚖️ Balanza</span>}
-                      </td>
-                    </tr>
-                    <tr style={{ borderBottom: "1px dotted #888" }}>
-                      <td style={{ paddingBottom: "3px" }}>0.450 KG x Gs. 55.777</td>
-                      <td style={{ textAlign: "right", fontWeight: "bold", paddingBottom: "3px" }}>Gs. 25.100</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* 4. TOTALES & MULTIMONEDA */}
-                <div style={{ borderTop: "1px dashed #000", paddingTop: "4px", marginTop: "4px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px", fontWeight: "900" }}>
-                    <span>TOTAL A PAGAR:</span>
-                    <span>Gs. 42.045</span>
-                  </div>
-
-                  {receiptConfig.mostrar_multimoneda && (
-                    <div style={{ fontSize: "10px", marginTop: "2px", color: "#222" }}>
-                      {receiptConfig.mostrar_equivalente_brl && (
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span>Equivalente en Reales:</span>
-                          <span>R$ 29.60</span>
-                        </div>
-                      )}
-                      {receiptConfig.mostrar_equivalente_usd && (
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span>Equivalente en Dólares:</span>
-                          <span>US$ 5.56</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* 5. DESGLOSE DE PAGOS */}
-                {receiptConfig.mostrar_desglose_pagos && (
-                  <div style={{ borderTop: "1px dotted #000", marginTop: "4px", paddingTop: "3px", fontSize: "10px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Forma de Pago:</span>
-                      <span style={{ fontWeight: "bold" }}>EFECTIVO MULTIMONEDA</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Monto Recibido:</span>
-                      <span>Gs. 50.000</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "11px", marginTop: "1px" }}>
-                      <span>VUELTO ENTREGADO:</span>
-                      <span>Gs. 7.955 {receiptConfig.mostrar_vuelto_extranjero ? "(R$ 5.60)" : ""}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* 6. LIQUIDACIÓN IVA */}
-                {receiptConfig.mostrar_liquidacion_iva && (
-                  <div style={{ borderTop: "1px dashed #000", marginTop: "5px", paddingTop: "4px", fontSize: "9.5px" }}>
-                    <div style={{ fontWeight: "bold" }}>LIQUIDACIÓN DEL IVA (Ley Nº 6380/19):</div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Gravadas 10%: Gs. 38.223</span>
-                      <span>IVA 10%: Gs. 3.822</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Gravadas 5%: Gs. 0</span>
-                      <span>IVA 5%: Gs. 0</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold" }}>
-                      <span>TOTAL IVA LIQUIDADO:</span>
-                      <span>Gs. 3.822</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* 7. FIDELIZACIÓN EXTRA CLUB */}
-                {receiptConfig.habilitar_extra_club && (
-                  <div style={{ border: "1px dashed #000", padding: "4px", margin: "6px 0", textAlign: "center", fontSize: "10px" }}>
-                    {previewCustomerType === "socio" ? (
-                      <>
-                        <div style={{ fontWeight: "900", fontSize: "10.5px" }}>★ CLUB FIDELIDAD EXTRA ★</div>
-                        <div style={{ marginTop: "2px" }}>{receiptConfig.mensaje_socio_club}</div>
-                      </>
-                    ) : (
-                      <>
-                        <div style={{ fontWeight: "900", fontSize: "10.5px" }}>★ ÚNETE AL EXTRA CLUB ★</div>
-                        <div style={{ marginTop: "2px", fontSize: "9px" }}>{receiptConfig.mensaje_invitacion_club}</div>
-                        {receiptConfig.mostrar_qr_club && (
-                          <div style={{ margin: "4px auto 0 auto", width: "70px", height: "70px", border: "1px solid #000", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "8px", fontWeight: "bold" }}>
-                            [QR REGISTRO]
+                {/* Cuerpo del Ticket Térmico */}
+                <div 
+                  id="receipt-preview-content"
+                  className="bg-[#FAFAF7] text-black px-4 py-3 font-mono border-x border-slate-300/40"
+                  style={{
+                    fontSize: "11px",
+                    lineHeight: "1.25",
+                    fontFamily: '"SF Mono", "Courier New", Courier, Monaco, Consolas, monospace',
+                    letterSpacing: "-0.2px",
+                  }}
+                >
+                  {/* 1. CABECERA FISCAL */}
+                  <div className="text-center space-y-0.5 mb-2">
+                    {receiptConfig.mostrar_logo && (
+                      <div className="mx-auto mb-2 flex justify-center">
+                        {(company.logo_url || receiptConfig.logo_url) ? (
+                          <img
+                            src={company.logo_url || receiptConfig.logo_url}
+                            alt="Extra Supermercado"
+                            className="max-h-12 w-auto object-contain filter grayscale contrast-150"
+                          />
+                        ) : (
+                          <div className="border-2 border-black px-3 py-1 font-black text-xs tracking-widest">
+                            ★ EXTRA SUPERMERCADO ★
                           </div>
                         )}
-                      </>
+                      </div>
+                    )}
+                    <div className="font-black text-xs uppercase tracking-wide">
+                      {receiptConfig.nombre_fantasia || "EXTRA SUPERMERCADO"}
+                    </div>
+                    <div className="font-bold text-[10px]">
+                      {receiptConfig.razon_social || "EXTRA SUPERMERCADO S.A."}
+                    </div>
+                    <div className="text-[10px]">
+                      RUC: {receiptConfig.ruc || "80092451-2"} · Tel: {receiptConfig.telefono || "+595992052200"}
+                    </div>
+                    <div className="text-[9.5px]">
+                      {receiptConfig.direccion || "Alejo García c/ Carlos Antonio López"}
+                    </div>
+                    <div className="text-[9.5px]">
+                      {receiptConfig.ciudad || "Pedro Juan Caballero · Paraguay"}
+                    </div>
+                    {receiptConfig.slogan && (
+                      <div className="text-[9px] italic pt-0.5">
+                        "{receiptConfig.slogan}"
+                      </div>
+                    )}
+                    <div className="text-[9.5px] pt-1 font-bold">
+                      Timbrado Nº: {receiptConfig.timbrado || "18545636"}
+                    </div>
+                    <div className="text-[9px] text-slate-700">
+                      Válido hasta: {receiptConfig.timbrado_vencimiento || "31/12/2026"}
+                    </div>
+                  </div>
+
+                  {/* 2. DATOS DE LA TRANSACCIÓN */}
+                  <div className="border-t border-b border-black border-dashed py-1.5 my-1.5 text-[10px] space-y-0.5">
+                    <div className="flex justify-between font-bold">
+                      <span>FACTURA ELECTRÓNICA:</span>
+                      <span>001-012-0004829</span>
+                    </div>
+                    <div className="flex justify-between text-[9.5px]">
+                      <span>Fecha / Hora:</span>
+                      <span>{new Date().toLocaleDateString("es-PY")} {new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>
+                    <div className="flex justify-between text-[9.5px]">
+                      <span>Condición:</span>
+                      <span>{previewCustomerType === "socio" ? "CRÉDITO EXTRA CLUB" : "CONTADO"}</span>
+                    </div>
+                    {receiptConfig.mostrar_cajero && (
+                      <div className="flex justify-between text-[9.5px]">
+                        <span>Cajero / Terminal:</span>
+                        <span>Tomasa (Boca 012)</span>
+                      </div>
+                    )}
+                    {receiptConfig.mostrar_cliente && (
+                      <div className="flex justify-between text-[9.5px] font-bold">
+                        <span>Cliente:</span>
+                        <span className="truncate max-w-[170px]">
+                          {previewCustomerType === "socio" ? "PEDRO RAMIREZ GONZALEZ" : "CONSUMIDOR FINAL"}
+                        </span>
+                      </div>
+                    )}
+                    {receiptConfig.mostrar_ruc_cliente && (
+                      <div className="flex justify-between text-[9.5px]">
+                        <span>RUC / C.I.:</span>
+                        <span>{previewCustomerType === "socio" ? "3657834" : "44444401-7"}</span>
+                      </div>
                     )}
                   </div>
-                )}
 
-                {/* 8. MARKETING & CUPONERA */}
-                {receiptConfig.habilitar_mensaje_marketing && receiptConfig.mensaje_marketing && (
-                  <div style={{ textAlign: "center", margin: "5px 0", fontSize: "9.5px", fontWeight: "bold" }}>
-                    {receiptConfig.mensaje_marketing}
-                  </div>
-                )}
-
-                {receiptConfig.habilitar_cupon_descuento && (
-                  <div style={{ border: "1px dashed #333", padding: "4px", margin: "6px 0", textAlign: "center" }}>
-                    <div style={{ fontSize: "9px", textTransform: "uppercase" }}>✂ CUPÓN DE RECOMPRA ✂</div>
-                    <div style={{ fontSize: "13px", fontWeight: "900", letterSpacing: "1px", margin: "2px 0" }}>
-                      {receiptConfig.cupon_codigo}
+                  {/* 3. DETALLE DE PRODUCTOS */}
+                  <div className="py-1">
+                    <div className="flex justify-between text-[9px] font-bold border-b border-black border-dashed pb-0.5 mb-1">
+                      <span>DESCRIPCIÓN</span>
+                      <span>TOTAL</span>
                     </div>
-                    <div style={{ fontSize: "9.5px", fontWeight: "bold" }}>{receiptConfig.cupon_descripcion}</div>
-                    <div style={{ fontSize: "8.5px", color: "#444" }}>Válido por {receiptConfig.cupon_validez_dias} días en todas nuestras sucursales</div>
-                  </div>
-                )}
 
-                {/* 8.5. CAMPAÑA SOLIDARIA ABRE TU CORAZÓN */}
-                {receiptConfig.donacion_activa && (
-                  <div style={{ borderTop: "1px dashed #000", marginTop: "6px", paddingTop: "4px", textAlign: "center", fontSize: "10px" }}>
-                    <div style={{ fontWeight: "900", letterSpacing: "0.5px" }}>{receiptConfig.donacion_titulo || "* ABRE TU CORAZON *"}</div>
-                    <div style={{ margin: "2px 0", fontSize: "9.5px" }}>{receiptConfig.donacion_mensaje || "Gracias por colaborar con el Centro Amor y Esperanza."}</div>
-                    <div style={{ fontSize: "8.5px" }}>Conoce más en:</div>
-                    <div style={{ fontWeight: "bold", fontSize: "9px" }}>{receiptConfig.donacion_web || "www.centroamoresperanza.org"}</div>
-                  </div>
-                )}
-
-                {/* 9. PIE FISCAL SIFEN & DESPEDIDA */}
-                <div style={{ textAlign: "center", marginTop: "8px", fontSize: "9.5px" }}>
-                  {receiptConfig.mostrar_qr_sifen && (
-                    <>
-                      <div style={{ margin: "2px auto 4px auto", width: "80px", height: "80px", border: "1px solid #000", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "8px", fontWeight: "bold" }}>
-                        [QR SIFEN DNIT]
+                    <div className="space-y-1 text-[10px]">
+                      {/* Item 1 */}
+                      <div>
+                        <div className="font-bold truncate">
+                          COCA COLA PET 250ML (6)
+                          {receiptConfig.mostrar_sku && <span className="font-normal text-[8.5px]"> [118971]</span>}
+                        </div>
+                        <div className="flex justify-between text-[9.5px] pl-2 text-slate-800">
+                          <span>2 UN x Gs. 3.500</span>
+                          <span className="font-bold">Gs. 7.000</span>
+                        </div>
                       </div>
-                      <div>Consulte su comprobante electrónico en:</div>
-                      <div style={{ fontWeight: "bold" }}>{receiptConfig.sifen_consulta_url}</div>
-                    </>
-                  )}
-                  <div style={{ marginTop: "4px", fontWeight: "bold", fontSize: "10.5px" }}>
-                    {receiptConfig.mensaje_despedida}
+
+                      {/* Item 2 Balanza */}
+                      <div>
+                        <div className="font-bold truncate">
+                          TOMATE SALSA KG {receiptConfig.mostrar_balanza_origen && <span className="text-[8.5px] font-normal">[Balanza]</span>}
+                          {receiptConfig.mostrar_sku && <span className="font-normal text-[8.5px]"> [120178]</span>}
+                        </div>
+                        <div className="flex justify-between text-[9.5px] pl-2 text-slate-800">
+                          <span>0.850 KG x Gs. 11.700</span>
+                          <span className="font-bold">Gs. 9.945</span>
+                        </div>
+                      </div>
+
+                      {/* Item 3 Balanza */}
+                      <div>
+                        <div className="font-bold truncate">
+                          PAN FRANCES KG {receiptConfig.mostrar_balanza_origen && <span className="text-[8.5px] font-normal">[Balanza]</span>}
+                        </div>
+                        <div className="flex justify-between text-[9.5px] pl-2 text-slate-800">
+                          <span>0.510 KG x Gs. 10.000</span>
+                          <span className="font-bold">Gs. 5.100</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
+
+                  {/* 4. TOTALES & MULTIMONEDA */}
+                  <div className="border-t-2 border-black pt-1.5 mt-1">
+                    <div className="flex justify-between items-baseline font-black text-sm">
+                      <span>TOTAL A PAGAR:</span>
+                      <span className="text-base">Gs. 22.045</span>
+                    </div>
+
+                    {receiptConfig.mostrar_multimoneda && (
+                      <div className="pt-1 text-[9.5px] space-y-0.5 text-slate-800">
+                        {receiptConfig.mostrar_equivalente_brl && (
+                          <div className="flex justify-between">
+                            <span>Equivalente en Reales:</span>
+                            <span className="font-bold">R$ 15.50</span>
+                          </div>
+                        )}
+                        {receiptConfig.mostrar_equivalente_usd && (
+                          <div className="flex justify-between">
+                            <span>Equivalente en Dólares:</span>
+                            <span className="font-bold">US$ 2.95</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 5. DESGLOSE DE MEDIOS DE PAGO */}
+                  {receiptConfig.mostrar_desglose_pagos && (
+                    <div className="border-t border-black border-dashed pt-1 mt-1 text-[9.5px] space-y-0.5">
+                      <div className="font-bold">Medios de Pago:</div>
+                      <div className="flex justify-between pl-1">
+                        <span>EFECTIVO PYG:</span>
+                        <span>Gs. 25.000</span>
+                      </div>
+                      {receiptConfig.donacion_activa && (
+                        <div className="flex justify-between pl-1 font-bold">
+                          <span>DONACIÓN SOLIDARIA:</span>
+                          <span>Gs. 250</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between pl-1 font-black text-[10px] pt-0.5 border-t border-dotted border-black">
+                        <span>VUELTO ENTREGADO:</span>
+                        <span>Gs. 2.705 {receiptConfig.mostrar_vuelto_extranjero ? "(R$ 1.90)" : ""}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 6. LIQUIDACIÓN IVA (DNIT / SIFEN) */}
+                  {receiptConfig.mostrar_liquidacion_iva && (
+                    <div className="border-t border-black border-dashed pt-1 mt-1 text-[8.5px] space-y-0.5">
+                      <div className="font-bold text-[9px]">LIQUIDACIÓN DEL IVA (Ley Nº 6380/19):</div>
+                      <div className="flex justify-between">
+                        <span>Gravadas 10%: Gs. 20.041</span>
+                        <span>IVA 10%: Gs. 2.004</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Gravadas 5%: Gs. 0</span>
+                        <span>IVA 5%: Gs. 0</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Exentas: Gs. 0</span>
+                        <span className="font-bold">TOTAL IVA: Gs. 2.004</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 7. PROGRAMA DE FIDELIZACIÓN EXTRA CLUB */}
+                  {receiptConfig.habilitar_extra_club && (
+                    <div className="border border-black border-dashed p-1.5 my-1.5 text-center text-[9px] space-y-0.5">
+                      {previewCustomerType === "socio" ? (
+                        <>
+                          <div className="font-black text-[10px]">★ SOCIO EXTRA CLUB ★</div>
+                          <div>Socio Nº: 3657834 · Puntos Ganados: +22</div>
+                          <div className="font-bold">Saldo Total Acumulado: 2.872 Puntos</div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="font-black text-[10px]">★ ÚNETE AL EXTRA CLUB ★</div>
+                          <div className="text-[8.5px] leading-tight">
+                            {receiptConfig.mensaje_invitacion_club || "Acumula puntos en cada compra para canjear por premios y descuentos directos."}
+                          </div>
+                          {receiptConfig.mostrar_qr_club && (
+                            <div className="mx-auto my-1 w-12 h-12 border border-black flex items-center justify-center text-[7px] font-bold bg-white">
+                              [QR CLUB]
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 8. CAMPAÑA SOLIDARIA ABRE TU CORAZÓN */}
+                  {receiptConfig.donacion_activa && (
+                    <div className="border-t border-black border-dashed pt-1 mt-1 text-center text-[9px]">
+                      <div className="font-black">{receiptConfig.donacion_titulo || "* ABRE TU CORAZÓN *"}</div>
+                      <div className="text-[8.5px] leading-tight">
+                        {receiptConfig.donacion_mensaje || "Gracias por colaborar con el Centro Amor y Esperanza."}
+                      </div>
+                      <div className="text-[8px] font-bold">{receiptConfig.donacion_web || "www.centroamoresperanza.org"}</div>
+                    </div>
+                  )}
+
+                  {/* 9. MARKETING / CUPONERA */}
+                  {receiptConfig.habilitar_mensaje_marketing && receiptConfig.mensaje_marketing && (
+                    <div className="text-center font-bold text-[9px] pt-1">
+                      {receiptConfig.mensaje_marketing}
+                    </div>
+                  )}
+
+                  {receiptConfig.habilitar_cupon_descuento && (
+                    <div className="border-2 border-black border-dashed p-1.5 my-1 text-center">
+                      <div className="text-[8px] uppercase tracking-widest">✂ CUPÓN DE RECOMPRA ✂</div>
+                      <div className="font-black text-xs tracking-wider my-0.5">
+                        {receiptConfig.cupon_codigo || "EXTRA-VERANO-10"}
+                      </div>
+                      <div className="text-[8.5px] font-bold">{receiptConfig.cupon_descripcion || "10% OFF en tu próxima compra"}</div>
+                      <div className="text-[7.5px] text-slate-600">Válido por {receiptConfig.cupon_validez_dias || 7} días</div>
+                    </div>
+                  )}
+
+                  {/* 10. QR FISCAL SIFEN & PIE */}
+                  <div className="text-center pt-1.5 space-y-1">
+                    {receiptConfig.mostrar_qr_sifen && (
+                      <div className="flex flex-col items-center">
+                        <div className="w-16 h-16 border-2 border-black p-0.5 flex items-center justify-center bg-white">
+                          <svg viewBox="0 0 24 24" className="w-full h-full text-black fill-current">
+                            <path d="M2 2h8v8H2V2zm2 2v4h4V4H4zm10-2h8v8h-8V2zm2 2v4h4V4h-4zM2 14h8v8H2v-8zm2 2v4h4v-4H4zm14-2h4v2h-4v-2zm-4 0h2v4h-2v-4zm2 4h2v4h-2v-4zm2 2h4v2h-4v-2zm0-4h2v2h-2v-2z" />
+                          </svg>
+                        </div>
+                        <div className="text-[7px] text-slate-800 mt-0.5 break-all leading-none font-mono">
+                          CDC: 01800924512001012000004829120260829123456789
+                        </div>
+                        <div className="text-[7.5px] text-slate-700 font-bold">
+                          Consulte en: https://ekuatia.set.gov.py/consultas
+                        </div>
+                      </div>
+                    )}
+                    <div className="font-bold text-[10px] pt-1">
+                      {receiptConfig.mensaje_despedida || "¡Gracias por su preferencia!"}
+                    </div>
+                  </div>
+
+                  {/* Saltos de Corte de Papel */}
+                  {receiptConfig.mostrar_linea_corte_visual && (
+                    <div className="text-center border-t border-slate-400 border-dashed text-[8px] text-slate-500 pt-1 mt-2">
+                      - - - - - - - - - - - - - ✂ CORTE DE TICKET ✂ - - - - - - - - - - - - -
+                    </div>
+                  )}
                 </div>
 
-                {/* 10. SALTOS DE CORTE */}
-                {Array.from({ length: receiptConfig.lineas_salto_corte }).map((_, i) => (
-                  <br key={i} />
-                ))}
-
-                {receiptConfig.mostrar_linea_corte_visual && (
-                  <div style={{ textAlign: "center", borderTop: "1px dashed #666", fontSize: "9px", color: "#666", paddingTop: "3px" }}>
-                    ✂ CORTE DE TICKET ✂
-                  </div>
-                )}
-                <br />
+                {/* Borde dentado inferior (Tear-off Zig-zag) */}
+                <div 
+                  className="h-3 w-full bg-[#FAFAF7]" 
+                  style={{
+                    clipPath: "polygon(0% 0%, 2% 100%, 4% 0%, 6% 100%, 8% 0%, 10% 100%, 12% 0%, 14% 100%, 16% 0%, 18% 100%, 20% 0%, 22% 100%, 24% 0%, 26% 100%, 28% 0%, 30% 100%, 32% 0%, 34% 100%, 36% 0%, 38% 100%, 40% 0%, 42% 100%, 44% 0%, 46% 100%, 48% 0%, 50% 100%, 52% 0%, 54% 100%, 56% 0%, 58% 100%, 60% 0%, 62% 100%, 64% 0%, 66% 100%, 68% 0%, 70% 100%, 72% 0%, 74% 100%, 76% 0%, 78% 100%, 80% 0%, 82% 100%, 84% 0%, 86% 100%, 88% 0%, 90% 100%, 92% 0%, 94% 100%, 96% 0%, 98% 100%, 100% 0%)"
+                  }}
+                />
               </div>
             </div>
           </div>
