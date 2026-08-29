@@ -82,7 +82,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
     class Config:
-        env_file = ".env"
+        env_file = [".env", "/home/intellihouse/intelimarket/.env", "../.env"]
+        extra = "ignore"
 
 
 @lru_cache()
