@@ -65,7 +65,7 @@ function BrainTab() {
   const { user } = useAuth()
   const userName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
   const [query, setQuery] = useState("")
-  const [model, setModel] = useState("qwen2.5:14b")
+  const [model, setModel] = useState("qwen2.5:7b")
   const [voice, setVoice] = useState(() => localStorage.getItem("marco_voice") || "es-AR-TomasNeural")
   const [loading, setLoading] = useState(false)
   const [recording, setRecording] = useState(false)
