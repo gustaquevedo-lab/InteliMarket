@@ -2765,6 +2765,8 @@ export const api = {
   posTerminals: {
     list: () => client.get<any[]>(`/v1/pos-terminals`, { company_id: COMPANY_ID }),
     getByHostname: (hostname: string) => client.get<any>(`/v1/pos-terminals/by-hostname/${encodeURIComponent(hostname)}`, { company_id: COMPANY_ID }),
+    getByIp: (ip: string) => client.get<any>(`/v1/pos-terminals/by-ip/${encodeURIComponent(ip)}`, { company_id: COMPANY_ID }),
+    detect: (params?: { hostname?: string; ip?: string }) => client.get<any>(`/v1/pos-terminals/detect`, { company_id: COMPANY_ID, ...params }),
     create: (data: any) => client.post<any>("/v1/pos-terminals", { company_id: COMPANY_ID, ...data }),
     update: (id: string, data: any) => client.put<any>(`/v1/pos-terminals/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/pos-terminals/${id}`),

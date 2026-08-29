@@ -222,16 +222,29 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  // ── CAJAS Y PUNTOS DE EMISIÓN (asignación fija por máquina) ────────────────
-  // Cada caja física (identificada por el hostname real de Windows, ej.
-  // CAJA8) queda fija a un punto de emisión y nombre de caja -- esto lo
-  // administra el back-office acá, no el cajero en el mostrador.
-  const [posTerminals, setPosTerminals] = useState<{ id: string; hostname: string; punto_emision: string; caja_nombre: string; activo: boolean }[]>([])
+  // ── CAJAS Y PUNTOS DE EMISIÓN (asignación fija por máquina e IP) ──────────
+  const [posTerminals, setPosTerminals] = useState<{
+    id: string
+    hostname: string
+    ip_address?: string
+    punto_emision: string
+    caja_nombre: string
+    activo: boolean
+    factura_actual?: number
+    factura_final?: number
+    nc_actual?: number
+    nc_final?: number
+    tiene_factura?: boolean
+    tiene_nc?: boolean
+  }[]>([])
   const [loadingPosTerminals, setLoadingPosTerminals] = useState(false)
   const [newTerminalHostname, setNewTerminalHostname] = useState("")
-  const [newTerminalPunto, setNewTerminalPunto] = useState("012")
+  const [newTerminalIp, setNewTerminalIp] = useState("")
+  const [newTerminalPunto, setNewTerminalPunto] = useState("011")
   const [newTerminalCajaNombre, setNewTerminalCajaNombre] = useState("")
   const [savingNewTerminal, setSavingNewTerminal] = useState(false)
+  const [editingIpId, setEditingIpId] = useState<string | null>(null)
+  const [editingIpVal, setEditingIpVal] = useState("")
 
   const fetchPosTerminals = useCallback(async () => {
     setLoadingPosTerminals(true)
@@ -250,25 +263,38 @@ export default function SettingsPage() {
   }, [tab, fetchPosTerminals])
 
   const handleCreatePosTerminal = async () => {
-    if (!newTerminalHostname.trim()) {
-      toast.warning("Falta el hostname", "Ingrese el nombre real de la máquina de Windows (ej. CAJA8).")
+    if (!newTerminalHostname.trim() && !newTerminalIp.trim()) {
+      toast.warning("Falta Identificador", "Ingrese el Hostname de Windows (ej. CAJA1) o la IP de la máquina (ej. 192.168.0.11).")
       return
     }
     setSavingNewTerminal(true)
     try {
       await api.posTerminals.create({
-        hostname: newTerminalHostname.trim().toUpperCase(),
+        hostname: newTerminalHostname.trim().toUpperCase() || `CAJA-${newTerminalPunto}`,
+        ip_address: newTerminalIp.trim() || undefined,
         punto_emision: newTerminalPunto,
         caja_nombre: newTerminalCajaNombre.trim() || `Caja ${newTerminalPunto}`,
       })
-      toast.success("Caja Asignada", `${newTerminalHostname.trim().toUpperCase()} queda fija al punto ${newTerminalPunto}.`)
+      toast.success("Caja Asignada", `Caja vinculada al punto de emisión ${newTerminalPunto}.`)
       setNewTerminalHostname("")
+      setNewTerminalIp("")
       setNewTerminalCajaNombre("")
       fetchPosTerminals()
     } catch (e: any) {
       toast.error("No se pudo asignar la caja", e?.message || "Intente nuevamente.")
     } finally {
       setSavingNewTerminal(false)
+    }
+  }
+
+  const handleSaveTerminalIp = async (id: string) => {
+    try {
+      await api.posTerminals.update(id, { ip_address: editingIpVal.trim() || null })
+      toast.success("IP Actualizada", "La dirección IP de la máquina quedó guardada.")
+      setEditingIpId(null)
+      fetchPosTerminals()
+    } catch (e: any) {
+      toast.error("Error al actualizar IP", e?.message || "Intente nuevamente.")
     }
   }
 
@@ -2614,15 +2640,25 @@ export default function SettingsPage() {
 
           {/* Alta de nueva asignación */}
           <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-3">
-            <h3 className="text-sm font-black text-gray-900 dark:text-white">Asignar Nueva Caja</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <h3 className="text-sm font-black text-gray-900 dark:text-white">Asignar Nueva Caja / Máquina</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <div>
-                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Hostname de la Máquina (Windows):</label>
+                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Hostname (Windows):</label>
                 <input
                   type="text"
                   value={newTerminalHostname}
                   onChange={(e) => setNewTerminalHostname(e.target.value)}
-                  placeholder="CAJA9"
+                  placeholder="CAJA1"
+                  className="w-full bg-gray-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-sm text-gray-900 dark:text-white outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Dirección IP (LAN):</label>
+                <input
+                  type="text"
+                  value={newTerminalIp}
+                  onChange={(e) => setNewTerminalIp(e.target.value.trim())}
+                  placeholder="192.168.0.11"
                   className="w-full bg-gray-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-sm text-gray-900 dark:text-white outline-none focus:border-blue-500"
                 />
               </div>
@@ -2632,12 +2668,12 @@ export default function SettingsPage() {
                   type="text"
                   value={newTerminalPunto}
                   onChange={(e) => setNewTerminalPunto(e.target.value.replace(/\D/g, "").slice(0, 3))}
-                  placeholder="012"
+                  placeholder="011"
                   className="w-full bg-gray-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-sm text-gray-900 dark:text-white outline-none focus:border-blue-500"
                 />
               </div>
               <div>
-                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Nombre de la Caja (opcional):</label>
+                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Nombre de la Caja:</label>
                 <input
                   type="text"
                   value={newTerminalCajaNombre}
@@ -2653,14 +2689,19 @@ export default function SettingsPage() {
               className="flex items-center gap-1.5 px-4 py-2 text-xs font-black text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded-xl shadow-md transition cursor-pointer"
             >
               {savingNewTerminal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Lock className="w-3.5 h-3.5" />}
-              Asignar Caja
+              Asignar Caja & Punto Fiscal
             </button>
           </div>
 
-          {/* Listado de asignaciones existentes */}
+          {/* Listado de asignaciones existentes con Correlativos y Validación Fiscal */}
           <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-gray-900 dark:text-white">Cajas Asignadas</h3>
+              <div>
+                <h3 className="text-sm font-black text-gray-900 dark:text-white">Cajas & Puntos de Emisión Enlazados</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Enlace permanente de máquinas por Hostname o IP fija con sus puntos de Factura y Nota de Crédito.
+                </p>
+              </div>
               <button onClick={fetchPosTerminals} disabled={loadingPosTerminals} className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1 cursor-pointer">
                 <RefreshCcw className={`w-3.5 h-3.5 ${loadingPosTerminals ? "animate-spin" : ""}`} /> Refrescar
               </button>
@@ -2669,45 +2710,147 @@ export default function SettingsPage() {
               <table className="w-full text-xs text-left">
                 <thead className="bg-gray-50 dark:bg-slate-900/50 text-gray-500 dark:text-gray-400 uppercase text-[10px] font-bold border-b border-gray-100 dark:border-slate-700">
                   <tr>
-                    <th className="p-3">Hostname</th>
                     <th className="p-3">Caja</th>
-                    <th className="p-3 text-center">Punto de Emisión</th>
+                    <th className="p-3">Hostname</th>
+                    <th className="p-3">Dirección IP (LAN)</th>
+                    <th className="p-3 text-center">Punto Fiscal</th>
+                    <th className="p-3 text-center">Facturas (Actual / Final)</th>
+                    <th className="p-3 text-center">Notas de Crédito</th>
+                    <th className="p-3 text-center">Blindaje Fiscal</th>
                     <th className="p-3 text-center">Estado</th>
                     <th className="p-3 text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-slate-700/60">
                   {!loadingPosTerminals && posTerminals.length === 0 && (
-                    <tr><td colSpan={5} className="p-6 text-center text-gray-400 text-xs">Ninguna caja asignada todavía.</td></tr>
+                    <tr><td colSpan={9} className="p-6 text-center text-gray-400 text-xs">Ninguna caja asignada todavía.</td></tr>
                   )}
-                  {posTerminals.map((t) => (
-                    <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-slate-750/50">
-                      <td className="p-3 font-mono font-bold text-gray-900 dark:text-white">{t.hostname}</td>
-                      <td className="p-3 text-gray-700 dark:text-gray-300">{t.caja_nombre}</td>
-                      <td className="p-3 text-center font-mono font-bold text-blue-600 dark:text-blue-400">{t.punto_emision}</td>
-                      <td className="p-3 text-center">
-                        <button
-                          onClick={() => handleTogglePosTerminal(t.id, t.activo)}
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer ${
-                            t.activo
-                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                              : "bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-gray-400"
-                          }`}
-                        >
-                          {t.activo ? "Activa" : "Inactiva"}
-                        </button>
-                      </td>
-                      <td className="p-3 text-center">
-                        <button
-                          onClick={() => handleDeletePosTerminal(t.id, t.hostname)}
-                          title="Eliminar asignación"
-                          className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition cursor-pointer"
-                        >
-                          <Trash className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {posTerminals.map((t) => {
+                    const isFiscalOk = t.tiene_factura && t.tiene_nc
+                    const isEditingIp = editingIpId === t.id
+
+                    return (
+                      <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-slate-750/50">
+                        <td className="p-3 font-bold text-gray-900 dark:text-white">{t.caja_nombre}</td>
+                        <td className="p-3 font-mono font-bold text-blue-600 dark:text-blue-400">{t.hostname}</td>
+                        
+                        {/* Celda de IP con edición rápida */}
+                        <td className="p-3 font-mono text-xs">
+                          {isEditingIp ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                value={editingIpVal}
+                                onChange={(e) => setEditingIpVal(e.target.value)}
+                                placeholder="192.168.0.X"
+                                className="w-28 bg-white dark:bg-slate-900 border border-blue-500 rounded px-1.5 py-0.5 text-xs font-mono text-gray-900 dark:text-white"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => handleSaveTerminalIp(t.id)}
+                                className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-[10px]"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                onClick={() => setEditingIpId(null)}
+                                className="px-1.5 py-0.5 rounded bg-gray-300 dark:bg-slate-700 text-gray-700 dark:text-gray-300 text-[10px]"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={() => {
+                                setEditingIpId(t.id)
+                                setEditingIpVal(t.ip_address || "")
+                              }}
+                              className="group flex items-center gap-1.5 cursor-pointer hover:text-blue-600"
+                              title="Hacer clic para editar IP"
+                            >
+                              <span className={t.ip_address ? "text-gray-800 dark:text-gray-200 font-bold" : "text-gray-400 italic"}>
+                                {t.ip_address || "Sin IP (Asignar)"}
+                              </span>
+                              <span className="opacity-0 group-hover:opacity-100 text-[10px] text-blue-500">✏️</span>
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="p-3 text-center font-mono font-black text-amber-600 dark:text-amber-400">
+                          001-{t.punto_emision}
+                        </td>
+
+                        {/* Correlativo Factura */}
+                        <td className="p-3 text-center font-mono">
+                          {t.tiene_factura ? (
+                            <div>
+                              <span className="font-bold text-gray-900 dark:text-white">
+                                {`001-${t.punto_emision}-${String(t.factura_actual || 0).padStart(7, "0")}`}
+                              </span>
+                              <div className="text-[10px] text-gray-400">
+                                Hasta: {t.factura_final?.toLocaleString()}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-rose-500 font-bold text-[10px]">⚠️ Sin Factura</span>
+                          )}
+                        </td>
+
+                        {/* Correlativo Nota de Crédito */}
+                        <td className="p-3 text-center font-mono">
+                          {t.tiene_nc ? (
+                            <div>
+                              <span className="font-bold text-gray-900 dark:text-white">
+                                {`001-${t.punto_emision}-${String(t.nc_actual || 0).padStart(7, "0")}`}
+                              </span>
+                              <div className="text-[10px] text-gray-400">
+                                Hasta: {t.nc_final?.toLocaleString()}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-rose-500 font-bold text-[10px]">⚠️ Sin NC</span>
+                          )}
+                        </td>
+
+                        {/* Blindaje Fiscal */}
+                        <td className="p-3 text-center">
+                          {isFiscalOk ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+                              ✓ Factura + NC
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300">
+                              Incompleto
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Estado */}
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => handleTogglePosTerminal(t.id, t.activo)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer ${
+                              t.activo
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                : "bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-gray-400"
+                            }`}
+                          >
+                            {t.activo ? "Activa" : "Inactiva"}
+                          </button>
+                        </td>
+
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => handleDeletePosTerminal(t.id, t.hostname)}
+                            title="Eliminar asignación"
+                            className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition cursor-pointer"
+                          >
+                            <Trash className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

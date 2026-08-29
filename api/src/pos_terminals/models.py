@@ -16,6 +16,7 @@ class PosTerminalAssignment(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False)
     hostname = Column(String(120), nullable=False, unique=True)
+    ip_address = Column(String(45), nullable=True, index=True)
     punto_emision = Column(String(10), nullable=False)
     caja_nombre = Column(String(60), nullable=False)
     activo = Column(Boolean, default=True, server_default="true")
