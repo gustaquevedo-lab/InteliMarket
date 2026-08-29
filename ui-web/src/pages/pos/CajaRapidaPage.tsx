@@ -2217,8 +2217,8 @@ export default function POSPage() {
         t += ESCPOS_ALIGN_CENTER
         t += ESCPOS_BOLD_ON + escposStripAccents(camp.ticket_pie_urna || "¡Deposita este cupon en la urna de la sucursal!") + ESCPOS_BOLD_OFF + '\n'
         t += "Valido para los sorteos de la campana\n"
-        t += '\n\n'
-        t += GS + 'V' + '\x01' // Corte parcial ajustado sin desperdicio de papel
+        t += '\n'.repeat(Math.max(4, tpl.lineas_salto_corte || 4))
+        t += GS + 'V' + '\x01' // Corte parcial
 
         const escposB64 = escposToBase64(t)
         try {
@@ -4443,9 +4443,8 @@ export default function POSPage() {
         t += ESCPOS_ALIGN_CENTER
         if (showQrSifen) t += `Consulte en: ${sifenUrl}\n`
         t += ESCPOS_BOLD_ON + escposStripAccents(msgDespedida) + ESCPOS_BOLD_OFF + '\n'
-        const feedLines = Math.max(2, Math.min(3, Number(tpl.lineas_salto_corte) || 2))
-        t += '\n'.repeat(feedLines)
-        // Corte automatico ajustado (GS V 1 = corte parcial) sin margen superior en el proximo ticket
+        t += '\n'.repeat(Math.max(8, feedLinesCount))
+        // Corte automatico (GS V 1 = corte parcial).
         if (tpl.corte_automatico !== false) t += GS + 'V' + '\x01'
 
         // Guardar el ticket ESC/POS tal cual se imprimió
