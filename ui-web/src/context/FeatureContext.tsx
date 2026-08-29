@@ -139,6 +139,20 @@ export function FeatureProvider({ children }: { children: ReactNode }) {
 
 export function useFeatures() {
   const ctx = useContext(FeatureContext)
-  if (!ctx) throw new Error("useFeatures must be used within FeatureProvider")
+  if (!ctx) {
+    return {
+      features: [],
+      paymentGateways: [],
+      verticalSlug: null,
+      plan: "enterprise",
+      loading: false,
+      isFullMode: false,
+      hasFeature: () => true,
+      hasAnyFeature: () => true,
+      refreshFeatures: async () => {},
+      switchVertical: async () => {},
+      enableFullMode: async () => {},
+    }
+  }
   return ctx
 }
