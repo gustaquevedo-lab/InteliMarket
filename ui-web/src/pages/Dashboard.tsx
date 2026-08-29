@@ -221,36 +221,18 @@ export default function Dashboard() {
         api.reports.marginSummary({ fecha_desde: TODAY, fecha_hasta: TODAY }),
       ])
       if (sales.status === "fulfilled") {
-        if (sales.value && sales.value.total_ventas > 0) {
-          setSalesSummary(sales.value)
-        } else {
-          try {
-            const fallbackSales = await api.reports.salesSummary({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY })
-            setSalesSummary(fallbackSales)
-          } catch {
-            setSalesSummary(sales.value)
-          }
-        }
+        setSalesSummary(sales.value)
       }
       // Margen real: (ingresos - costo) / ingresos, calculado en el backend
       // desde el costo_unitario de cada sale_item — antes era un numero
       // inventado (ticket promedio * 25%) mostrado como si fuera guaranies.
       if (margin.status === "fulfilled") {
-        if (margin.value.monto > 0) {
-          setMarginAvg(margin.value.margen_pct)
-        } else {
-          try {
-            const fallbackMargin = await api.reports.marginSummary({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY })
-            setMarginAvg(fallbackMargin.monto > 0 ? fallbackMargin.margen_pct : 15.2)
-          } catch {
-            setMarginAvg(null)
-          }
-        }
+        setMarginAvg(margin.value.monto > 0 ? margin.value.margen_pct : null)
       }
       if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
       if (fin.status === "fulfilled") setFinancial(fin.value)
-      if (creditAccs.status === "fulfilled" && Array.isArray(creditAccs.value)) {
-        setCreditUsed(creditAccs.value.reduce((s: number, a: CreditAccount) => s + (Number(a.saldo_utilizado) || 0), 0))
+      if (creditAccs.status === "fulfilled") {
+        setCreditUsed(creditAccs.value.reduce((s: number, a: CreditAccount) => s + (a.saldo_utilizado || 0), 0))
       }
     } catch { /* fallback handled below */ }
     setKpisLoaded(true)
