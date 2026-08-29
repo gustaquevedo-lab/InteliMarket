@@ -7,7 +7,8 @@ import {
   Truck, ShoppingCart, ShieldCheck, BadgeDollarSign, Blocks, LineChart, Fingerprint, Settings,
   LogOut, Menu, X, Moon, Sun, Monitor, Search, Store, ChevronDown, Building, Scan, QrCode, BookOpen, PiggyBank,
   PieChart, DollarSign, TrendingUp, Bot, Clock, Award, Globe, Repeat, Wrench,
-  Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag
+  Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag,
+  Ticket
 } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
@@ -106,6 +107,7 @@ const navGroups: NavGroup[] = [
     title: "CRM & Marketing",
     items: [
       { icon: Users, label: "Fidelidad ExtraClub", path: "/crm" },
+      { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones" },
       { icon: PieChart, label: "Customer 360", path: "/customer360" },
       { icon: MessageCircle, label: "IntelliZapp (WhatsApp)", path: "/intellizapp" },
       { icon: Tag, label: "Promociones & Campañas", path: "/promociones" },

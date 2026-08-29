@@ -56,6 +56,7 @@ const ServiciosPage = lazy(() => import("./pages/servicios/ServiciosPage"))
 const InteliContPage = lazy(() => import("./pages/intelicont/InteliContPage"))
 const IntegrationsPage = lazy(() => import("./pages/integrations/IntegrationsPage"))
 const PromotionsPage = lazy(() => import("./pages/promotions/PromotionsPage"))
+const CapturaCuponesPage = lazy(() => import("./pages/cupones/CapturaCuponesPage"))
 const IntelliZappPage = lazy(() => import("./pages/intellizapp/IntelliZappPage"))
 const ExpensesPage = lazy(() => import("./pages/expenses/ExpensesPage"))
 const FinancialPage = lazy(() => import("./pages/financial/FinancialPage"))
@@ -233,6 +234,8 @@ function AppRoutes() {
           ["integrations", <IntegrationsPage />],
           ["sueldok", <SueldokPage />],
           ["promociones", <PromotionsPage />],
+          ["cupones", <CapturaCuponesPage />],
+          ["marketing/cupones", <CapturaCuponesPage />],
           ["crm", <CrmPage />],
           ["intellizapp", <IntelliZappPage />],
           ["whatsapp", <IntelliZappPage />],
