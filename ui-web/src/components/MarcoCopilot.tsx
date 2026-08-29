@@ -358,12 +358,15 @@ export default function MarcoCopilot() {
               <select
                 value={voice}
                 onChange={e => handleVoiceChange(e.target.value)}
-                className="bg-white/10 hover:bg-white/20 text-white text-[11px] font-medium rounded-xl px-2 py-1 outline-none border border-white/20 cursor-pointer transition"
+                className="bg-white/10 hover:bg-white/20 text-white text-[11px] font-medium rounded-xl px-2.5 py-1 outline-none border border-white/20 cursor-pointer transition"
                 title="Voz de Marco"
               >
-                <option value="es-AR-TomasNeural" className="text-gray-900">🇦🇷 Tomás (Neural)</option>
-                <option value="es-PY-MarioNeural" className="text-gray-900">🇵🇾 Mario (Paraguay)</option>
-                <option value="es-PY-TaniaNeural" className="text-gray-900">🇵🇾 Tania (Paraguay)</option>
+                <option value="es-UY-MateoNeural" className="text-gray-900">🇺🇾 Mateo (Rioplatense - Más fluido y natural)</option>
+                <option value="es-MX-JorgeNeural" className="text-gray-900">🇲🇽 Jorge (Latinoamérica - Ejecutivo natural)</option>
+                <option value="es-AR-TomasNeural" className="text-gray-900">🇦🇷 Tomás (Argentina - Formal)</option>
+                <option value="es-ES-AlvaroNeural" className="text-gray-900">🇪🇸 Álvaro (Conversacional)</option>
+                <option value="es-PY-TaniaNeural" className="text-gray-900">🇵🇾 Tania (Paraguay - Femenina)</option>
+                <option value="es-AR-ElenaNeural" className="text-gray-900">🇦🇷 Elena (Argentina - Femenina suave)</option>
               </select>
               <button onClick={() => setIsOpen(false)} className="p-1.5 hover:bg-white/20 rounded-xl transition text-white/80 hover:text-white">
                 <X className="w-4 h-4" />

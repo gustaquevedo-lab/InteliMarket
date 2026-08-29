@@ -401,11 +401,12 @@ function BrainTab() {
                 onChange={(e) => handleVoiceChange(e.target.value)}
                 className="bg-transparent text-white text-xs font-semibold outline-none cursor-pointer"
               >
-                <option value="es-AR-TomasNeural" className="bg-gray-900 text-white">🇦🇷 Tomás (Rioplatense / Natural)</option>
-                <option value="es-UY-MateoNeural" className="bg-gray-900 text-white">🇺🇾 Mateo (Rioplatense / Ejecutivo)</option>
-                <option value="es-PY-MarioNeural" className="bg-gray-900 text-white">🇵🇾 Mario (Paraguayo)</option>
-                <option value="es-MX-JorgeNeural" className="bg-gray-900 text-white">🇲🇽 Jorge (Neutro Latino)</option>
-                <option value="es-CL-LorenzoNeural" className="bg-gray-900 text-white">🇨🇱 Lorenzo (Andino Claro)</option>
+                <option value="es-UY-MateoNeural" className="bg-gray-900 text-white">🇺🇾 Mateo (Rioplatense - Más fluido y natural)</option>
+                <option value="es-MX-JorgeNeural" className="bg-gray-900 text-white">🇲🇽 Jorge (Latinoamérica - Locutor ejecutivo)</option>
+                <option value="es-AR-TomasNeural" className="bg-gray-900 text-white">🇦🇷 Tomás (Argentina - Formal)</option>
+                <option value="es-ES-AlvaroNeural" className="bg-gray-900 text-white">🇪🇸 Álvaro (Conversacional)</option>
+                <option value="es-PY-TaniaNeural" className="bg-gray-900 text-white">🇵🇾 Tania (Paraguay - Femenina)</option>
+                <option value="es-AR-ElenaNeural" className="bg-gray-900 text-white">🇦🇷 Elena (Argentina - Femenina suave)</option>
               </select>
             </div>
 

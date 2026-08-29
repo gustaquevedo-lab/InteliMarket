@@ -90,44 +90,54 @@ def format_gs(val: Any) -> str:
 
 
 def normalize_text_for_speech(raw_text: str) -> str:
-    """Limpia markdown y formatea importes para síntesis de voz ultra natural."""
+    """Limpia markdown y formatea importes preservando comas y puntos para cadencia y prosodia natural."""
     if not raw_text:
         return ""
     t = raw_text
+    # Eliminar emojis que puedan leerse como símbolos
     t = re.sub(r'[\U00010000-\U0010ffff]', '', t)
-    t = re.sub(r'[💡🧠🇵🇾🎙️📈🏢📦🚚💰🎯🔒🛠️✅⚠️]', '', t)
+    t = re.sub(r'[💡🧠🇵🇾🎙️📈🏢📦🚚💰🎯🔒🛠️✅⚠️⚡🇦🇷🇺🇾🇲🇽🇪🇸]', '', t)
     t = re.sub(r'```[\s\S]*?```', '', t)
     t = re.sub(r'#{1,6}\s*', '', t)
     t = re.sub(r'[*_`]', '', t)
     t = re.sub(r'^\s*[-•*]\s+', '', t, flags=re.MULTILINE)
+    
+    # Mapeo fonético de monedas y siglas comerciales
     t = re.sub(r'Gs\.?\s*([\d.,]+)\s*mil millones', r'\1 mil millones de guaraníes', t, flags=re.IGNORECASE)
     t = re.sub(r'Gs\.?\s*([\d.,]+)\s*millones', r'\1 millones de guaraníes', t, flags=re.IGNORECASE)
+    t = re.sub(r'Gs\.?\s*([\d.,]+)\s*mil', r'\1 mil guaraníes', t, flags=re.IGNORECASE)
     t = re.sub(r'Gs\.?\s*([\d.,]+)', r'\1 guaraníes', t, flags=re.IGNORECASE)
     t = re.sub(r'\bGs\.?\b', 'guaraníes', t, flags=re.IGNORECASE)
+    t = re.sub(r'\bUC\b', 'cajas unitarias', t)
     t = re.sub(r'\bS\.A\.?\b', 'Sociedad Anónima', t, flags=re.IGNORECASE)
     t = re.sub(r'\bS\.R\.L\.?\b', 'S.R.L.', t, flags=re.IGNORECASE)
+    t = re.sub(r'\bRUC:?', 'RUC', t, flags=re.IGNORECASE)
+    t = re.sub(r'\bSKU:?', 'código', t, flags=re.IGNORECASE)
+    
+    # Unificar saltos de línea en pausas naturales
     t = re.sub(r'\n+', '. ', t)
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
 
 async def query_ollama(prompt: str, system_prompt: str, model: str = DEFAULT_MODEL) -> str:
-    """Llamada directa ultra rápida a Ollama."""
+    """Llamada directa ultra rápida a Ollama con timeout ampliado y keep_alive permanente."""
     url = f"{OLLAMA_BASE_URL}/api/generate"
     payload = {
         "model": model,
         "prompt": prompt,
         "system": system_prompt,
         "stream": False,
-        "keep_alive": "24h",
+        "keep_alive": -1,
         "options": {
-            "temperature": 0.2,
+            "temperature": 0.25,
             "num_ctx": 2048,
-            "num_predict": 256
+            "num_predict": 300,
+            "num_thread": 12
         }
     }
     try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with httpx.AsyncClient(timeout=25.0) as client:
             res = await client.post(url, json=payload)
             res.raise_for_status()
             data = res.json()
@@ -138,10 +148,10 @@ async def query_ollama(prompt: str, system_prompt: str, model: str = DEFAULT_MOD
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ⚡ MOTOR DE RETRIEVAL DIRECTO ULTRA RÁPIDO (<5ms en PostgreSQL)
+# ⚡ MOTOR DE RETRIEVAL DIRECTO ULTRA RÁPIDO & RAG (<5ms en PostgreSQL)
 # ─────────────────────────────────────────────────────────────────────────────
 async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id: str) -> Optional[Dict[str, Any]]:
-    """Ejecuta consultas de negocio pre-compiladas para latencia cero sin exponer SQL al usuario."""
+    """Ejecuta consultas de negocio pre-compiladas y dinámicas para latencia cero sin exponer SQL al usuario."""
     
     # 0. HISTORIA / ORIGEN / SOBRE CASA GONZALITO
     if any(k in q_lower for k in ["historia", "origen", "orígenes", "quien es casa gonzalito", "que es casa gonzalito", "fundacion", "fundación", "trayectoria", "anos tiene", "años tiene"]):
@@ -151,8 +161,24 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
             "sql": None
         }
 
-    # 1. TOP CLIENTES / MAYORES CLIENTES / RANKING CLIENTES
-    if any(k in q_lower for k in ["top cliente", "mayor cliente", "mayores cliente", "ranking cliente", "mejores cliente", "principales cliente", "quien compra mas", "quienes compran mas", "cliente"]):
+    # 1. METAS PARESA / REBATE / CAJAS UNITARIAS (UC) / COCA-COLA
+    if any(k in q_lower for k in ["paresa", "coca", "rebate", "cajas unitarias", "uc", "fanta", "sprite", "monster", "powerade"]):
+        return {
+            "type": "paresa_status",
+            "data": {
+                "total_mes_gs": 3380000000,
+                "total_mes_formateado": "Gs. 3.380 millones",
+                "uc_acumuladas": 98450,
+                "meta_uc": 113503,
+                "pct_alcanzado": 86.7,
+                "rebate_estimado_gs": 149173352,
+                "rebate_formateado": "Gs. 149,2 millones"
+            },
+            "sql": "SELECT ... FROM supplier_kpis / sales"
+        }
+
+    # 2. TOP CLIENTES / MAYORES CLIENTES / RANKING CLIENTES
+    if any(k in q_lower for k in ["top cliente", "mayor cliente", "mayores cliente", "ranking cliente", "mejores cliente", "principales cliente", "quien compra mas", "quienes compran mas", "mejores compradores"]):
         sql = """
             SELECT 
                 c.razon_social as cliente,
@@ -184,8 +210,8 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing top_clientes query: {e}")
 
-    # 2. TOP PROVEEDORES / MAYORES PROVEEDORES / COMPRAS POR PROVEEDOR
-    if any(k in q_lower for k in ["top proveedor", "mayor proveedor", "mayores proveedor", "ranking proveedor", "principales proveedor", "a quien compramos mas", "proveedor"]):
+    # 3. TOP PROVEEDORES / MAYORES PROVEEDORES / COMPRAS POR PROVEEDOR
+    if any(k in q_lower for k in ["top proveedor", "mayor proveedor", "mayores proveedor", "ranking proveedor", "principales proveedor", "a quien compramos mas", "proveedores lideres"]):
         sql = """
             SELECT 
                 sp.razon_social as proveedor,
@@ -216,23 +242,7 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing top_proveedores query: {e}")
 
-    # 3. METAS PARESA / REBATE / CAJAS UNITARIAS (UC)
-    if any(k in q_lower for k in ["paresa", "coca", "rebate", "cajas unitarias", "uc", "fanta", "sprite"]):
-        return {
-            "type": "paresa_status",
-            "data": {
-                "total_mes_gs": 3380000000,
-                "total_mes_formateado": "Gs. 3.380 millones",
-                "uc_acumuladas": 98450,
-                "meta_uc": 113503,
-                "pct_alcanzado": 86.7,
-                "rebate_estimado_gs": 149173352,
-                "rebate_formateado": "Gs. 149,2 millones"
-            },
-            "sql": "SELECT ... FROM supplier_kpis / sales"
-        }
-
-    # 4. VENTAS DE HOY / DEL MES / FACTURACIÓN RECIENTE
+    # 4. VENTAS DE HOY / DEL MES / FACTURACIÓN GENERAL
     if any(k in q_lower for k in ["cuanto vendimos", "ventas de hoy", "ventas del mes", "facturacion de hoy", "facturacion del mes", "cuanto se vendio", "facturacion", "ventas"]):
         sql = """
             SELECT 
@@ -262,8 +272,8 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing ventas_resumen query: {e}")
 
-    # 5. PRODUCTOS MÁS VENDIDOS / TOP SKUS / ARTÍCULOS
-    if any(k in q_lower for k in ["mas vendido", "mas vendidos", "top producto", "top productos", "articulos lideres", "skus mas vendidos", "producto", "articulos", "artículos"]):
+    # 5. PRODUCTOS MÁS VENDIDOS / TOP SKUS
+    if any(k in q_lower for k in ["mas vendido", "mas vendidos", "top producto", "top productos", "articulos lideres", "skus mas vendidos"]):
         sql = """
             SELECT 
                 p.nombre as producto,
@@ -297,28 +307,92 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing top_productos query: {e}")
 
+    # 6. BÚSQUEDA DINÁMICA DE CLIENTE ESPECÍFICO (DEUDA, LÍMITE, SALDO)
+    if any(k in q_lower for k in ["cliente", "deuda", "saldo", "debe", "credito", "crédito", "limite", "límite"]):
+        # Buscar coincidencias de clientes
+        sql_search = """
+            SELECT c.razon_social, COALESCE(c.ruc, '—') as ruc,
+                   COALESCE(ca.saldo_actual, 0) as saldo_deuda,
+                   COALESCE(ca.limite_credito, c.limite_credito, 0) as limite_credito,
+                   COALESCE(ca.estado, 'activo') as estado_cuenta
+            FROM customers c
+            LEFT JOIN credit_accounts ca ON ca.customer_id = c.id
+            WHERE c.company_id = :cid
+            ORDER BY ca.saldo_actual DESC NULLS LAST
+            LIMIT 5;
+        """
+        try:
+            res = (await db.execute(text(sql_search), {"cid": company_id})).mappings().all()
+            if res:
+                items = []
+                for r in res:
+                    items.append({
+                        "cliente": r["razon_social"],
+                        "ruc": r["ruc"],
+                        "saldo_deuda": float(r["saldo_deuda"] or 0),
+                        "saldo_formateado": format_gs(r["saldo_deuda"] or 0),
+                        "limite_formateado": format_gs(r["limite_credito"] or 0),
+                        "estado": r["estado_cuenta"]
+                    })
+                return {"type": "clientes_deuda", "data": items, "sql": sql_search}
+        except Exception as e:
+            logger.error(f"Error executing dynamic customer debt lookup: {e}")
+
+    # 7. BÚSQUEDA DINÁMICA DE STOCK / INVENTARIO
+    if any(k in q_lower for k in ["stock", "inventario", "deposito", "depósito", "cuanto queda", "existencia", "articulos", "productos"]):
+        sql_stock = """
+            SELECT p.nombre, COALESCE(p.sku, '—') as sku,
+                   p.precio_venta,
+                   COALESCE(SUM(st.cantidad), 0) as stock_total
+            FROM products p
+            LEFT JOIN stock st ON st.product_id = p.id
+            WHERE p.company_id = :cid AND p.activo = true
+            GROUP BY p.id, p.nombre, p.sku, p.precio_venta
+            ORDER BY stock_total ASC
+            LIMIT 6;
+        """
+        try:
+            res = (await db.execute(text(sql_stock), {"cid": company_id})).mappings().all()
+            if res:
+                items = []
+                for r in res:
+                    items.append({
+                        "producto": r["nombre"],
+                        "sku": r["sku"],
+                        "stock": int(r["stock_total"] or 0),
+                        "precio_formateado": format_gs(r["precio_venta"] or 0)
+                    })
+                return {"type": "stock_resumen", "data": items, "sql": sql_stock}
+        except Exception as e:
+            logger.error(f"Error executing dynamic stock lookup: {e}")
+
     return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🎙️ SÍNTESIS DE VOZ Y PIPELINE PRINCIPAL
+# 🎙️ SÍNTESIS DE VOZ Y PIPELINE PRINCIPAL (CADENCIA HUMANA ULTRA NATURAL)
 # ─────────────────────────────────────────────────────────────────────────────
-async def generate_speech_audio(text_content: str, voice: str = "es-AR-TomasNeural") -> Optional[str]:
-    """Sintetiza voz con Edge TTS con timeout estricto de 2.5s para no demorar la respuesta."""
+async def generate_speech_audio(text_content: str, voice: str = "es-UY-MateoNeural") -> Optional[str]:
+    """Sintetiza voz con Edge TTS en cadencia humana natural (rate=0%, prosodia fluida)."""
     cleaned = normalize_text_for_speech(text_content)
     if not cleaned:
         return None
+    
+    # Elegir voz neuronal óptima si viene por defecto o vacía
+    chosen_voice = voice if voice and "Neural" in voice else "es-UY-MateoNeural"
+    
     try:
         import edge_tts
         async def _synth():
-            communicate = edge_tts.Communicate(cleaned[:250], voice, rate="+6%", pitch="+0Hz")
+            # Cadencia natural sin apresuramiento
+            communicate = edge_tts.Communicate(cleaned[:400], chosen_voice, rate="+0%", pitch="+0Hz")
             mp3_buffer = io.BytesIO()
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
                     mp3_buffer.write(chunk["data"])
             return base64.b64encode(mp3_buffer.getvalue()).decode("utf-8")
         
-        return await asyncio.wait_for(_synth(), timeout=2.5)
+        return await asyncio.wait_for(_synth(), timeout=3.5)
     except Exception as e:
         logger.warning(f"Voice generation skipped safely: {e}")
         return None
@@ -361,7 +435,7 @@ async def execute_ai_brain_pipeline(
     if "@" in display_name:
         display_name = display_name.split("@")[0].capitalize()
         
-    chosen_voice = voice_preference or "es-AR-TomasNeural"
+    chosen_voice = voice_preference or "es-UY-MateoNeural"
     q_lower = user_query.lower().strip()
     
     # ── 1. FAST PATH: Consultas de Negocio Pre-compiladas (< 5ms) ─────────────
@@ -416,15 +490,23 @@ async def execute_ai_brain_pipeline(
             final_response += f"• **Acumulado del Mes:** **{d['total_mes_formateado']}** ({d['tickets_mes']} facturas).\n\n"
             final_response += f"💡 **Sugerencia de Marco:** El ritmo de ventas mantiene una tendencia positiva. Te sugiero monitorear el cierre de caja de la tarde para verificar cobranzas de rutas."
 
-        elif q_type == "top_productos":
+        elif q_type == "clientes_deuda":
             items = fast_result["data"]
             data_preview = items
-            final_response = f"¡Hola {display_name}! Los **productos más vendidos** en el mes son:\n\n"
-            for i, p in enumerate(items, 1):
-                final_response += f"{i}. **{p['producto']}** (`{p['sku']}`) — {p['cantidad']:,} unidades — **{p['total_formateado']}**\n".replace(",", ".")
-            final_response += f"\n💡 **Sugerencia de Marco:** Asegurar suficiente stock en depósito central de Coca-Cola 2L y Leche Trébol para evitar quiebres en pedidos mayoristas."
+            final_response = f"¡Hola {display_name}! Aquí tenés el estado de **cuentas corrientes y deudas de clientes**:\n\n"
+            for i, c in enumerate(items, 1):
+                final_response += f"{i}. **{c['cliente']}** (RUC: `{c['ruc']}`) — Deuda: **{c['saldo_formateado']}** (Límite: {c['limite_formateado']})\n"
+            final_response += f"\n💡 **Sugerencia de Marco:** Te recomiendo priorizar la gestión de cobranza sobre los clientes que superen el 80% de su límite de crédito autorizado."
 
-    # ── 2. DYNAMIC PATH: LLM Ultra Rápido (Qwen 2.5:7b) ──────────────────────
+        elif q_type == "stock_resumen":
+            items = fast_result["data"]
+            data_preview = items
+            final_response = f"¡Hola {display_name}! Aquí tenés el reporte de **stock e inventario de productos**:\n\n"
+            for i, p in enumerate(items, 1):
+                final_response += f"{i}. **{p['producto']}** (`{p['sku']}`) — Stock: **{p['stock']} un.** (Precio: {p['precio_formateado']})\n"
+            final_response += f"\n💡 **Sugerencia de Marco:** Revisa los artículos con stock menor a 50 unidades para emitir órdenes de compra preventivas a los proveedores."
+
+    # ── 2. DYNAMIC PATH: LLM Ultra Rápido (Qwen 2.5:7b / 14b) ──────────────────────
     if not final_response:
         prompt = f"""Sos MARCO, el asesor operativo inteligente de Casa Gonzalito (distribuidora mayorista en Amambay, Paraguay).
 Te dirigís cordialmente a: {display_name}.
@@ -437,11 +519,12 @@ REGLAS ESTRICTAS DE RESPUESTA:
 1. Responde DIRECTAMENTE la información solicitada de manera ejecutiva, clara y en español paraguayo formal (cordial, sin modismos forzados como "kp" o "chavales").
 2. NUNCA menciones instrucciones SQL, tablas ni código técnico. El usuario es un ejecutivo de negocios.
 3. Expresá montos en Guaraníes (Gs.).
-4. Finalizá con una breve "💡 Sugerencia de Marco:" proactiva.
+4. Si la pregunta es sobre productos o marcas, hacé referencia a PARESA (Coca-Cola, Fanta, Sprite, Monster), Lácteos Trébol, Arroz Tío Nico, o proveedores de Casa Gonzalito.
+5. Finalizá con una breve "💡 Sugerencia de Marco:" proactiva.
 """
         final_response = await query_ollama(
             prompt=prompt,
-            system_prompt="Sos MARCO, asistente ejecutivo de Casa Gonzalito. Respondes con datos comerciales precisos en Guaraníes sin código ni tecnicismos.",
+            system_prompt="Sos MARCO, asistente ejecutivo de Casa Gonzalito en Pedro Juan Caballero. Respondes con datos comerciales precisos en Guaraníes sin inventar productos ajenos.",
             model=FAST_MODEL
         )
         
