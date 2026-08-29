@@ -4300,15 +4300,13 @@ export default function POSPage() {
       // ── EVALUACIÓN MULTI-CAMPAÑA DE SORTEOS Y CUPONES ──────────────────
       try {
         const itemsEvaluacion = cart.map(item => ({
-          producto_id: item.product.id,
-          sku: item.product.sku,
-          nombre: item.product.nombre,
+          producto_id: item.product_id,
+          sku: item.sku,
+          nombre: item.nombre,
           cantidad: item.quantity,
-          precio_unitario: item.unitPrice,
-          total: item.total,
-          marca: item.product.marca,
-          categoria: item.product.categoria,
-          codigo_barra: item.product.codigo_barra
+          precio_unitario: item.precio,
+          total: item.precio * item.quantity,
+          codigo_barra: item.codigo_barra
         }))
 
         const evalRes = await api.cupones.evaluarCarrito({
