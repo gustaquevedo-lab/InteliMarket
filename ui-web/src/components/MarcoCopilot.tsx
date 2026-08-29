@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { useLocation } from "react-router-dom"
 import {
   Sparkles, Mic, MicOff, Send, X, Volume2, Database, Clock,
-  Bot, User, ChevronDown, ChevronUp, Loader2, MessageSquare, Play, HelpCircle
+  Bot, User, ChevronDown, ChevronUp, Loader2, MessageSquare, Play, Pause, Check
 } from "lucide-react"
 import { api } from "../api/index"
 
@@ -15,16 +15,24 @@ export default function MarcoCopilot() {
   const userName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState("")
-  const [model, setModel] = useState("qwen2.5:7b") // default fast model for instant copilot answers
+  const [model, setModel] = useState("qwen2.5:7b")
   const [voice, setVoice] = useState(() => localStorage.getItem("marco_voice") || "es-AR-TomasNeural")
   const [loading, setLoading] = useState(false)
   const [recording, setRecording] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [audioLevels, setAudioLevels] = useState<number[]>([12, 16, 8, 20, 14, 26, 18, 22, 15, 28, 12, 18, 10, 24, 16, 12])
   const [history, setHistory] = useState<any[]>([])
   const [openSqlIdx, setOpenSqlIdx] = useState<number | null>(null)
-  
+  const [playingAudioId, setPlayingAudioId] = useState<number | null>(null)
+
   const location = useLocation()
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  const timerIntervalRef = useRef<any>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const animFrameRef = useRef<number | null>(null)
+  const isCancelledRef = useRef<boolean>(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
 
@@ -32,25 +40,61 @@ export default function MarcoCopilot() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [history, loading])
 
+  useEffect(() => {
+    return () => {
+      cleanupRecording()
+    }
+  }, [])
+
+  const cleanupRecording = () => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current)
+      timerIntervalRef.current = null
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current)
+      animFrameRef.current = null
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      try { audioContextRef.current.close() } catch (e) {}
+      audioContextRef.current = null
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(t => t.stop())
+      mediaStreamRef.current = null
+    }
+  }
+
   const handleVoiceChange = (v: string) => {
     setVoice(v)
     localStorage.setItem("marco_voice", v)
   }
 
-  const playBase64Audio = (base64Audio: string) => {
-    if (!base64Audio) return
+  const playAudioUrl = (url: string, id: number) => {
+    if (!url) return
     try {
-      const audioUrl = `data:audio/mp3;base64,${base64Audio}`
       if (audioPlayerRef.current) {
-        audioPlayerRef.current.src = audioUrl
+        audioPlayerRef.current.src = url
         audioPlayerRef.current.play()
+        setPlayingAudioId(id)
+        audioPlayerRef.current.onended = () => setPlayingAudioId(null)
+        audioPlayerRef.current.onpause = () => setPlayingAudioId(null)
       } else {
-        const audio = new Audio(audioUrl)
+        const audio = new Audio(url)
+        setPlayingAudioId(id)
+        audio.onended = () => setPlayingAudioId(null)
         audio.play()
       }
     } catch (e) {
       console.error("Error playing audio", e)
+      setPlayingAudioId(null)
     }
+  }
+
+  const playBase64Audio = (base64Audio: string, id?: number) => {
+    if (!base64Audio) return
+    const audioUrl = `data:audio/mp3;base64,${base64Audio}`
+    playAudioUrl(audioUrl, id || Date.now())
   }
 
   const handleSend = async (textToSend?: string) => {
@@ -77,8 +121,9 @@ export default function MarcoCopilot() {
         generate_voice: true
       })
 
+      const botMsgId = Date.now()
       setHistory(prev => [...prev, {
-        id: Date.now(),
+        id: botMsgId,
         user_query: textQuery,
         response: res.response,
         sql_executed: res.sql_executed,
@@ -92,7 +137,7 @@ export default function MarcoCopilot() {
       }])
 
       if (res.audio_base64) {
-        playBase64Audio(res.audio_base64)
+        playBase64Audio(res.audio_base64, botMsgId)
       }
     } catch (err: any) {
       setHistory(prev => [...prev, {
@@ -110,7 +155,47 @@ export default function MarcoCopilot() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
       audioChunksRef.current = []
+      isCancelledRef.current = false
+      setRecordingSeconds(0)
+
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingSeconds(s => s + 1)
+      }, 1000)
+
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+        const ctx = new AudioCtx()
+        audioContextRef.current = ctx
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 64
+        analyser.smoothingTimeConstant = 0.5
+        const source = ctx.createMediaStreamSource(stream)
+        source.connect(analyser)
+
+        const bufferLength = analyser.frequencyBinCount
+        const dataArray = new Uint8Array(bufferLength)
+
+        const updateBars = () => {
+          if (!analyser) return
+          analyser.getByteFrequencyData(dataArray)
+          const bars: number[] = []
+          const barCount = 16
+          const step = Math.max(1, Math.floor(bufferLength / barCount))
+          for (let i = 0; i < barCount; i++) {
+            const val = dataArray[i * step] || 0
+            const h = Math.max(6, Math.min(38, Math.round((val / 255) * 38)))
+            bars.push(h)
+          }
+          setAudioLevels(bars)
+          animFrameRef.current = requestAnimationFrame(updateBars)
+        }
+        updateBars()
+      } catch (audioErr) {
+        console.warn("Web Audio Visualizer setup fallback:", audioErr)
+      }
+
       const mediaRecorder = new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
 
@@ -119,12 +204,19 @@ export default function MarcoCopilot() {
       }
 
       mediaRecorder.onstop = async () => {
+        cleanupRecording()
+        if (isCancelledRef.current) {
+          setRecording(false)
+          return
+        }
+
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" })
-        stream.getTracks().forEach(t => t.stop())
-        await handleSendVoice(audioBlob)
+        const localAudioUrl = URL.createObjectURL(audioBlob)
+        setRecording(false)
+        await handleSendVoice(audioBlob, localAudioUrl)
       }
 
-      mediaRecorder.start()
+      mediaRecorder.start(100)
       setRecording(true)
     } catch (e) {
       alert("Por favor habilitá el permiso de micrófono en tu navegador.")
@@ -133,13 +225,23 @@ export default function MarcoCopilot() {
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && recording) {
+      isCancelledRef.current = false
       mediaRecorderRef.current.stop()
-      setRecording(false)
     }
   }
 
-  const handleSendVoice = async (blob: Blob) => {
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && recording) {
+      isCancelledRef.current = true
+      mediaRecorderRef.current.stop()
+      setRecording(false)
+      cleanupRecording()
+    }
+  }
+
+  const handleSendVoice = async (blob: Blob, localAudioUrl: string) => {
     setLoading(true)
+    const userMsgId = Date.now() - 1
     try {
       const formData = new FormData()
       formData.append("audio", blob, "voice.webm")
@@ -148,18 +250,20 @@ export default function MarcoCopilot() {
       formData.append("model_preference", model)
 
       const res = await api.asistenteVirtual.brainVoice(formData)
+      const botMsgId = Date.now()
 
       setHistory(prev => [
         ...prev,
         {
-          id: Date.now() - 1,
+          id: userMsgId,
           user_query: res.transcript || "(Mensaje de voz)",
+          userAudioUrl: localAudioUrl,
           isUser: true,
           isVoice: true,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         },
         {
-          id: Date.now(),
+          id: botMsgId,
           user_query: res.transcript,
           response: res.response,
           sql_executed: res.sql_executed,
@@ -174,7 +278,7 @@ export default function MarcoCopilot() {
       ])
 
       if (res.audio_base64) {
-        playBase64Audio(res.audio_base64)
+        playBase64Audio(res.audio_base64, botMsgId)
       }
     } catch (err: any) {
       setHistory(prev => [...prev, {
@@ -189,49 +293,33 @@ export default function MarcoCopilot() {
     }
   }
 
-  // Context-aware suggestions depending on which page the user is viewing
+  const formatTimer = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+
   const getContextSuggestions = () => {
     const p = location.pathname
     if (p.includes("clientes") || p.includes("accounts-receivable") || p.includes("deudas")) {
-      return [
-        "¿Quiénes son los clientes con mayor deuda vencida?",
-        "¿Cuáles son los últimos pagos registrados?",
-        "¿Qué clientes superaron su límite de crédito?"
-      ]
+      return ["¿Quiénes son los clientes con mayor deuda vencida?", "¿Cuáles son los últimos pagos registrados?", "¿Qué clientes superaron su límite de crédito?"]
     }
     if (p.includes("products") || p.includes("inventory") || p.includes("deposito")) {
-      return [
-        "¿Qué productos tienen bajo stock en el depósito central?",
-        "¿Cuáles son los 5 productos con mayor valor total en stock?",
-        "¿Qué artículos no tuvieron movimientos en los últimos 30 días?"
-      ]
+      return ["¿Qué productos tienen bajo stock en el depósito central?", "¿Cuáles son los 5 productos con mayor valor total en stock?", "¿Qué artículos no tuvieron movimientos en los últimos 30 días?"]
     }
     if (p.includes("sales") || p.includes("distribuidora") || p.includes("pos")) {
-      return [
-        "¿Cuánto facturamos hoy y cuántas boletas se emitieron?",
-        "¿Quién es el vendedor que más vendió este mes?",
-        "¿Cuáles son los 3 productos más vendidos de la semana?"
-      ]
+      return ["¿Cuánto facturamos hoy y cuántas boletas se emitieron?", "¿Quién es el vendedor que más vendió este mes?", "¿Cuáles son los 3 productos más vendidos de la semana?"]
     }
     if (p.includes("logistics") || p.includes("intelientregas") || p.includes("rutas")) {
-      return [
-        "¿Qué camiones tienen resumen de carga activo hoy?",
-        "¿Cuáles son las rutas con más entregas pendientes?",
-        "¿Quiénes son los choferes en reparto ahora mismo?"
-      ]
+      return ["¿Qué camiones tienen resumen de carga activo hoy?", "¿Cuáles son las rutas con más entregas pendientes?", "¿Quiénes son los choferes en reparto ahora mismo?"]
     }
-    return [
-      "¿Cómo vienen las ventas y cobranzas de este mes?",
-      "¿Qué alertas operativas o de stock tenemos para hoy?",
-      "Mostrame los 5 clientes top de Casa Gonzalito"
-    ]
+    return ["¿Cómo vienen las ventas y cobranzas de este mes?", "¿Qué alertas operativas o de stock tenemos para hoy?", "Mostrame los 5 clientes top de Casa Gonzalito"]
   }
 
   return (
     <>
       <audio ref={audioPlayerRef} className="hidden" />
 
-      {/* Floating Trigger Button */}
       {!isOpen && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3">
           <button
@@ -239,9 +327,7 @@ export default function MarcoCopilot() {
             className="group relative flex items-center gap-2.5 px-4 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-full shadow-xl hover:shadow-indigo-500/25 transition-all duration-300 transform hover:scale-105 border border-white/20"
           >
             <div className="relative">
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-sm">
-                🧠
-              </div>
+              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-sm">🧠</div>
               <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-indigo-700 animate-pulse"></span>
             </div>
             <div className="text-left hidden sm:block">
@@ -252,210 +338,134 @@ export default function MarcoCopilot() {
         </div>
       )}
 
-      {/* Slide-out Copilot Modal / Drawer */}
       {isOpen && (
-        <div className="fixed bottom-6 right-6 z-50 w-[95vw] sm:w-[480px] h-[660px] max-h-[90vh] bg-white dark:bg-gray-800 rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden animate-fade-in-up">
-          {/* Header */}
-          <div className="p-3.5 bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-950 text-white flex flex-col gap-2 border-b border-indigo-800/40">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-2xl bg-indigo-500/30 border border-indigo-400/40 flex items-center justify-center text-lg shadow-inner">
-                  🧠
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <h3 className="font-bold text-sm text-white">Marco</h3>
-                    <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/30 font-medium">
-                      ● Minisforum Local
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-indigo-200/80">Asesor de Casa Gonzalito</p>
-                </div>
+        <div className="fixed bottom-6 right-6 z-50 w-[95vw] sm:w-[460px] h-[640px] max-h-[85vh] bg-white dark:bg-gray-850 rounded-3xl shadow-2xl border border-gray-200/80 dark:border-gray-700/80 flex flex-col overflow-hidden backdrop-blur-xl animate-in fade-in slide-in-from-bottom-5 duration-300">
+          <div className="p-4 bg-gradient-to-r from-indigo-600 via-indigo-700 to-violet-700 text-white flex items-center justify-between shadow-md">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-10 h-10 rounded-2xl bg-white/15 backdrop-blur-md flex items-center justify-center text-lg border border-white/20 shadow-inner">🧠</div>
+                <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 border-2 border-indigo-700 rounded-full"></span>
               </div>
-
-              <div className="flex items-center gap-1.5">
-                {/* Model toggle */}
-                <button
-                  onClick={() => setModel(model === "qwen2.5:7b" ? "qwen2.5:14b" : "qwen2.5:7b")}
-                  className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] text-indigo-200 font-medium transition"
-                  title="Cambiar modelo LLM"
-                >
-                  {model === "qwen2.5:7b" ? "⚡ 7B" : "🧠 14B"}
-                </button>
-                <button
-                  onClick={() => setIsOpen(false)}
-                  className="p-1.5 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm leading-tight">Marco</h3>
+                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-medium tracking-wide">Casa Gonzalito</span>
+                </div>
+                <p className="text-[11px] text-indigo-100/90 font-medium">Asesor Operativo Inteligente</p>
               </div>
             </div>
-
-            {/* Voice & Accent Selector Toolbar */}
-            <div className="flex items-center justify-between pt-1 border-t border-white/10 text-[11px]">
-              <span className="text-indigo-200/70 flex items-center gap-1">
-                <Volume2 className="w-3.5 h-3.5 text-indigo-300" /> Acento de voz:
-              </span>
+            <div className="flex items-center gap-1.5">
               <select
                 value={voice}
-                onChange={(e) => handleVoiceChange(e.target.value)}
-                className="bg-black/40 hover:bg-black/60 text-white text-[11px] font-medium rounded-lg px-2 py-1 border border-white/10 outline-none cursor-pointer"
+                onChange={e => handleVoiceChange(e.target.value)}
+                className="bg-white/10 hover:bg-white/20 text-white text-[11px] font-medium rounded-xl px-2 py-1 outline-none border border-white/20 cursor-pointer transition"
+                title="Voz de Marco"
               >
-                <option value="es-AR-TomasNeural">🇦🇷 Tomás (Rioplatense / Natural)</option>
-                <option value="es-UY-MateoNeural">🇺🇾 Mateo (Rioplatense / Ejecutivo)</option>
-                <option value="es-PY-MarioNeural">🇵🇾 Mario (Paraguayo)</option>
-                <option value="es-MX-JorgeNeural">🇲🇽 Jorge (Neutro Latino)</option>
-                <option value="es-CL-LorenzoNeural">🇨🇱 Lorenzo (Andino Claro)</option>
+                <option value="es-AR-TomasNeural" className="text-gray-900">🇦🇷 Tomás (Neural)</option>
+                <option value="es-PY-MarioNeural" className="text-gray-900">🇵🇾 Mario (Paraguay)</option>
+                <option value="es-PY-TaniaNeural" className="text-gray-900">🇵🇾 Tania (Paraguay)</option>
               </select>
+              <button onClick={() => setIsOpen(false)} className="p-1.5 hover:bg-white/20 rounded-xl transition text-white/80 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
-          {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/70 dark:bg-gray-900/40">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50 dark:bg-gray-900/50">
             {history.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-4">
-                <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-2xl mb-3 shadow-sm">
-                  🏢
+              <div className="h-full flex flex-col justify-center items-center text-center p-4">
+                <div className="w-16 h-16 rounded-3xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-4 shadow-sm border border-indigo-100 dark:border-indigo-900/50">
+                  <Sparkles className="w-8 h-8" />
                 </div>
-                <h4 className="text-sm font-bold text-gray-900 dark:text-white">¡Hola {userName}! Soy Marco.</h4>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Tu asesor y mano derecha en ventas, depósito, cobranzas y logística. Podés consultarme por voz o texto.
-                </p>
-
-                <div className="mt-4 w-full text-left space-y-1.5">
-                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Consultas sugeridas para esta pantalla:</p>
-                  {getContextSuggestions().map((sug, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleSend(sug)}
-                      className="w-full text-xs text-left p-2.5 rounded-xl bg-white dark:bg-gray-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 transition flex items-center justify-between"
-                    >
-                      <span>{sug}</span>
-                      <span className="text-indigo-500">→</span>
+                <h4 className="font-bold text-gray-900 dark:text-white text-base mb-1">¡Hola, {userName}! Soy Marco</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 max-w-xs mb-6">Tu copiloto ejecutivo conectado en tiempo real a la base de datos de Casa Gonzalito.</p>
+                <div className="w-full space-y-2 text-left">
+                  <p className="text-[10px] font-black tracking-wider text-gray-400 uppercase px-1">Sugerencias para esta pantalla:</p>
+                  {getContextSuggestions().map((s, idx) => (
+                    <button key={idx} onClick={() => handleSend(s)} className="w-full text-left p-2.5 bg-white dark:bg-gray-800 hover:bg-indigo-50/60 dark:hover:bg-gray-700/60 rounded-xl border border-gray-200/70 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 transition shadow-sm flex items-center justify-between group">
+                      <span>{s}</span>
+                      <ChevronDown className="w-3.5 h-3.5 text-gray-400 group-hover:text-indigo-600 -rotate-90 transition" />
                     </button>
                   ))}
                 </div>
               </div>
             ) : (
               history.map((msg, idx) => (
-                <div key={idx} className={`flex gap-2.5 ${msg.isUser ? "justify-end" : "justify-start"}`}>
+                <div key={msg.id || idx} className={`flex gap-2.5 ${msg.isUser ? "justify-end" : "justify-start"}`}>
                   {!msg.isUser && (
-                    <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex-shrink-0 flex items-center justify-center text-xs font-bold">
-                      M
-                    </div>
+                    <div className="w-7 h-7 rounded-xl bg-indigo-600 text-white flex-shrink-0 flex items-center justify-center text-xs font-bold shadow-sm">🧠</div>
                   )}
-
-                  <div className={`max-w-[85%] rounded-2xl p-3.5 text-xs shadow-sm ${
-                    msg.isUser
-                      ? "bg-indigo-600 text-white ml-6"
-                      : msg.isError
-                      ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 mr-6"
-                      : "bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-900 dark:text-gray-100 mr-6"
-                  }`}>
-                    {msg.isUser ? (
-                      <div className="flex items-center gap-1.5">
-                        {msg.isVoice && <Mic className="w-3 h-3 text-indigo-200" />}
-                        <p>{msg.user_query}</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2.5">
-                        <p className="whitespace-pre-wrap leading-relaxed">{msg.response}</p>
-
-                        <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-700">
-                          {msg.audio_base64 && (
-                            <button
-                              onClick={() => playBase64Audio(msg.audio_base64)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 font-semibold text-[11px] hover:bg-indigo-100"
-                            >
-                              <Volume2 className="w-3 h-3" /> Escuchar
-                            </button>
-                          )}
-                          {msg.sql_executed && (
-                            <button
-                              onClick={() => setOpenSqlIdx(openSqlIdx === idx ? null : idx)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium text-[11px]"
-                            >
-                              <Database className="w-3 h-3 text-amber-500" /> SQL ({msg.data_count || 0})
-                            </button>
-                          )}
-                          {msg.execution_time_seconds && (
-                            <span className="text-[10px] text-gray-400 ml-auto">
-                              {msg.execution_time_seconds}s
-                            </span>
-                          )}
+                  <div className={`max-w-[85%] space-y-2`}>
+                    <div className={`p-3.5 rounded-2xl text-xs leading-relaxed shadow-sm ${msg.isUser ? "bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-tr-none font-medium" : msg.isError ? "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200 rounded-tl-none" : "bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200/80 dark:border-gray-700/80 rounded-tl-none"}`}>
+                      {msg.isUser && msg.userAudioUrl && (
+                        <div className="flex items-center gap-2 mb-2 p-2 bg-white/15 rounded-xl border border-white/20 backdrop-blur-sm">
+                          <button onClick={() => playAudioUrl(msg.userAudioUrl, msg.id)} className="w-7 h-7 rounded-full bg-white text-indigo-600 flex items-center justify-center shadow hover:scale-105 transition" title="Reproducir audio grabado">
+                            {playingAudioId === msg.id ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
+                          </button>
+                          <div className="flex items-center gap-0.5 flex-1"><span className="text-[10px] text-white/90 font-bold">🎙️ Tu mensaje de voz</span></div>
                         </div>
-
-                        {openSqlIdx === idx && msg.sql_executed && (
-                          <div className="bg-slate-900 text-emerald-400 p-2.5 rounded-lg font-mono text-[10px] overflow-x-auto border border-slate-800">
-                            <code>{msg.sql_executed}</code>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      )}
+                      <div className="whitespace-pre-wrap">{msg.response || msg.user_query}</div>
+                      {!msg.isUser && msg.audio_base64 && (
+                        <div className="mt-3 pt-2.5 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between gap-3">
+                          <button onClick={() => playBase64Audio(msg.audio_base64, msg.id)} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm ${playingAudioId === msg.id ? "bg-emerald-600 text-white animate-pulse" : "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100"}`}>
+                            {playingAudioId === msg.id ? <><Pause className="w-3.5 h-3.5" /><span>Reproduciendo...</span></> : <><Volume2 className="w-3.5 h-3.5" /><span>Escuchar voz</span></>}
+                          </button>
+                          {msg.execution_time_seconds && <span className="text-[10px] text-gray-400 font-mono">⚡ {msg.execution_time_seconds}s</span>}
+                        </div>
+                      )}
+                    </div>
                   </div>
-
                   {msg.isUser && (
-                    <div className="w-7 h-7 rounded-lg bg-slate-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 flex-shrink-0 flex items-center justify-center">
+                    <div className="w-7 h-7 rounded-xl bg-slate-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 flex-shrink-0 flex items-center justify-center">
                       <User className="w-4 h-4" />
                     </div>
                   )}
                 </div>
               ))
             )}
-
             {loading && (
               <div className="flex gap-2 items-center">
-                <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs animate-pulse">
-                  M
-                </div>
-                <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-3 text-xs flex items-center gap-2 text-gray-500">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-                  <span>Marco está revisando la base de datos...</span>
+                <div className="w-7 h-7 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs animate-pulse">🧠</div>
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-3 text-xs flex items-center gap-2.5 text-gray-600 dark:text-gray-300 shadow-sm">
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                  <span>Marco está analizando los datos en tiempo real...</span>
                 </div>
               </div>
             )}
             <div ref={chatEndRef} />
           </div>
 
-          {/* Footer Controls */}
-          <div className="p-3 bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={recording ? stopRecording : startRecording}
-                disabled={loading && !recording}
-                className={`p-3 rounded-2xl flex items-center justify-center transition shadow-sm ${
-                  recording
-                    ? "bg-red-600 text-white animate-bounce shadow-red-500/50"
-                    : "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100"
-                }`}
-                title={recording ? "Detener" : "Hablar con Marco"}
-              >
-                {recording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </button>
-
-              <input
-                type="text"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault()
-                    handleSend()
-                  }
-                }}
-                placeholder={recording ? "🎙️ Hablando a Marco..." : "Preguntale a Marco..."}
-                disabled={loading || recording}
-                className="flex-1 px-3.5 py-2.5 bg-slate-100 dark:bg-gray-900 border-none rounded-xl text-xs text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 outline-none"
-              />
-
-              <button
-                onClick={() => handleSend()}
-                disabled={!query.trim() || loading}
-                className="p-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-2xl transition shadow-sm"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </div>
+          <div className="p-3 bg-white dark:bg-gray-850 border-t border-gray-200/80 dark:border-gray-700/80">
+            {recording ? (
+              <div className="flex items-center justify-between gap-3 p-2.5 bg-gradient-to-r from-red-50 via-rose-50 to-pink-50 dark:from-red-950/30 dark:via-rose-950/20 dark:to-slate-850 border-2 border-red-500/40 rounded-2xl animate-in fade-in duration-200">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
+                  </span>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-red-600 dark:text-red-400 block leading-none">Grabando</span>
+                    <span className="text-xs font-mono font-bold text-gray-800 dark:text-gray-200">{formatTimer(recordingSeconds)}</span>
+                  </div>
+                </div>
+                <div className="flex-1 flex items-center justify-center gap-1 h-9 px-2 overflow-hidden">
+                  {audioLevels.map((h, i) => (
+                    <div key={i} className="w-1.5 rounded-full bg-gradient-to-t from-red-600 via-rose-500 to-amber-400 transition-all duration-75" style={{ height: `${h}px` }} />
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={cancelRecording} className="p-2.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-xl transition shadow-sm" title="Cancelar grabación"><X className="w-4 h-4" /></button>
+                  <button onClick={stopRecording} className="flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow-md shadow-emerald-600/30 active:scale-95" title="Finalizar y Enviar a Marco"><Check className="w-4 h-4" /><span className="hidden sm:inline">Enviar</span></button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button onClick={startRecording} disabled={loading} className="p-3 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 rounded-2xl flex items-center justify-center transition shadow-sm border border-indigo-200/50 dark:border-indigo-800/50 hover:scale-105 active:scale-95" title="Hablar por micrófono con Marco"><Mic className="w-4 h-4" /></button>
+                <input type="text" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder="Escribí o hablá con Marco..." disabled={loading} className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-gray-900 border border-gray-200/60 dark:border-gray-700/60 rounded-2xl text-xs text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 outline-none transition" />
+                <button onClick={() => handleSend()} disabled={!query.trim() || loading} className="p-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-2xl transition shadow-md shadow-indigo-600/20 active:scale-95" title="Enviar consulta"><Send className="w-4 h-4" /></button>
+              </div>
+            )}
           </div>
         </div>
       )}
