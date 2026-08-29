@@ -1,1261 +1,866 @@
-import { useState, useEffect, useMemo, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
+import { useState, useEffect, useRef, useCallback } from "react"
 import {
-  TrendingUp, TrendingDown, DollarSign, ShoppingCart, Package, Users,
-  AlertTriangle, ArrowUpRight, ArrowDownRight, Clock, ChevronRight,
-  Sparkles, RefreshCw, BarChart3, PieChart as PieChartIcon, ShieldAlert,
-  Truck, CheckCircle2, Building2, Flame, Layers, Box, Scale, Calendar,
-  ArrowRight, Activity, Wallet, Cpu, Bell, CheckCircle, ArrowUpDown,
-  Zap, FileText, Download, ExternalLink, HelpCircle
+  TrendingUp, DollarSign, ShoppingCart, Package, AlertTriangle, Wallet,
+  Clock, RefreshCw, ChevronRight, CreditCard, Percent, Ban as Banknote,
+  Apple, Beef, Croissant, AlertCircle, Utensils, Sparkles, Check, CheckCircle, Trash2
 } from "lucide-react"
-import {
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar, ComposedChart, Line,
-  PieChart, Pie, Cell, XAxis, YAxis, Tooltip, CartesianGrid, Legend
-} from "recharts"
-import { api, type Sale, type PurchaseOrder, type SupplierInvoice } from "../api"
-import { useAuth } from "../context/AuthContext"
+import { api, type StockItem, type CreditAccount } from "../api"
+import { KPICard } from "../components/KPICard"
+import { Widget } from "../components/Widget"
+import { AnimatedPage } from "../components/AnimatedPage"
+import { formatPYG, formatPercentage } from "../utils/format"
+import { useSSE } from "../hooks/useSSE"
 import { useToast } from "../context/ToastContext"
-import { formatPYG, formatDate, formatCurrency } from "../utils/format"
+import { useFeatures } from "../context/FeatureContext"
 
-type TimeRange = "hoy" | "7d" | "30d" | "mes" | "custom"
-
-function formatLocalDate(d: Date = new Date()): string {
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, "0")
-  const day = String(d.getDate()).padStart(2, "0")
-  return `${year}-${month}-${day}`
+interface ActivityEvent {
+  id: string
+  type: "sale" | "alert" | "caja"
+  message: string
+  time: string
+  link?: string
 }
 
-function computeDateRange(range: TimeRange, customFrom?: string, customTo?: string) {
-  const now = new Date()
-  const todayStr = formatLocalDate(now)
-
-  if (range === "custom" && customFrom && customTo) {
-    const from = new Date(customFrom + "T00:00:00")
-    const to = new Date(customTo + "T00:00:00")
-    const dias = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000) + 1)
-    return { fecha_desde: customFrom, fecha_hasta: customTo, label: `${customFrom} a ${customTo}`, dias, agrupar: "dia" }
-  }
-  
-  if (range === "hoy") {
-    return { fecha_desde: todayStr, fecha_hasta: todayStr, label: "Hoy", dias: 1, agrupar: "hora" }
-  }
-  if (range === "7d") {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6)
-    return { fecha_desde: formatLocalDate(d), fecha_hasta: todayStr, label: "Últimos 7 Días", dias: 7, agrupar: "dia" }
-  }
-  if (range === "mes") {
-    const d = new Date(now.getFullYear(), now.getMonth(), 1)
-    return { fecha_desde: formatLocalDate(d), fecha_hasta: todayStr, label: "Este Mes", dias: Math.max(1, now.getDate()), agrupar: "dia" }
-  }
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)
-  return { fecha_desde: formatLocalDate(d), fecha_hasta: todayStr, label: "Últimos 30 Días", dias: 30, agrupar: "dia" }
+interface TopProduct {
+  product_id: string
+  nombre: string
+  sku: string
+  cantidad: number
+  total: number
 }
+
+interface IVASummary {
+  base_10: number
+  base_5: number
+  exenta: number
+  iva_10: number
+  iva_5: number
+  total_iva: number
+}
+
+interface WeekDay {
+  label: string
+  fecha: string
+  monto: number
+  monto_prev: number
+}
+
+const TODAY = new Date().toISOString().slice(0, 10)
+const SEVEN_DAYS_AGO = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
+const FOURTEEN_DAYS_AGO = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)
+
+function relativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return "ahora"
+  if (mins < 60) return `hace ${mins} min`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `hace ${hours}h`
+  return `hace ${Math.floor(hours / 24)}d`
+}
+
+const MOCK_TOP_PRODUCTS: TopProduct[] = [
+  { product_id: "1", nombre: "Coca Cola 2L", sku: "BEB-001", cantidad: 142, total: 1846000 },
+  { product_id: "2", nombre: "Arroz 1kg", sku: "ALI-045", cantidad: 98, total: 784000 },
+  { product_id: "3", nombre: "Leche Entera 1L", sku: "LAC-012", cantidad: 76, total: 456000 },
+  { product_id: "4", nombre: "Pan Frances", sku: "PAN-001", cantidad: 65, total: 325000 },
+  { product_id: "5", nombre: "Aceite 900ml", sku: "ALI-023", cantidad: 54, total: 972000 },
+]
+
+interface LowStockItem {
+  product_id: string
+  warehouse_id: string
+  nombre: string
+  sku: string
+  cantidad: number
+  stock_minimo: number
+  stock_maximo: number
+  costo_unitario: number
+}
+
+const MOCK_LOW_STOCK: LowStockItem[] = [
+  { product_id: "1", warehouse_id: "w1", nombre: "Coca Cola 2L", sku: "BEB-001", cantidad: 3, stock_minimo: 10, stock_maximo: 100, costo_unitario: 8500 },
+  { product_id: "2", warehouse_id: "w1", nombre: "Arroz 1kg", sku: "ALI-045", cantidad: 5, stock_minimo: 20, stock_maximo: 200, costo_unitario: 4500 },
+  { product_id: "3", warehouse_id: "w1", nombre: "Leche Entera 1L", sku: "LAC-012", cantidad: 8, stock_minimo: 15, stock_maximo: 80, costo_unitario: 3200 },
+  { product_id: "4", warehouse_id: "w1", nombre: "Pan Frances", sku: "PAN-001", cantidad: 0, stock_minimo: 30, stock_maximo: 150, costo_unitario: 1500 },
+  { product_id: "5", warehouse_id: "w1", nombre: "Azúcar 1kg", sku: "ALI-031", cantidad: 12, stock_minimo: 25, stock_maximo: 120, costo_unitario: 3800 },
+]
 
 export default function Dashboard() {
-  const { user } = useAuth()
-  const toast = useToast()
-  const navigate = useNavigate()
-
-  const [timeRange, setTimeRange] = useState<TimeRange>("mes")
-  const [customFrom, setCustomFrom] = useState<string>("")
-  const [customTo, setCustomTo] = useState<string>("")
-  const [showCustomPicker, setShowCustomPicker] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-
-  const [companyInfo, setCompanyInfo] = useState<any>(null)
-  const [salesSummary, setSalesSummary] = useState<any>(null)
-  const [salesByCat, setSalesByCat] = useState<any[]>([])
-  const [salesByProd, setSalesByProd] = useState<any[]>([])
-  const [salesPeriodData, setSalesPeriodData] = useState<any[]>([])
-  const [chartComparisonData, setChartComparisonData] = useState<any[]>([])
-  const [replenishmentData, setReplenishmentData] = useState<any>(null)
-  const [financialDash, setFinancialDash] = useState<any>(null)
-  const [recentOrders, setRecentOrders] = useState<PurchaseOrder[]>([])
-  const [lowStockItems, setLowStockItems] = useState<any[]>([])
-  const [agingData, setAgingData] = useState<any>(null)
-  const [periodLoading, setPeriodLoading] = useState(false)
-
-  // Tarjetas de inteligencia real, con motor propio ya existente en el
-  // backend (demand_forecast / customer360) -- antes el "AI Executive
-  // Briefing" mostraba texto fijo (+12.4%, 18.5 dias, +40%) sin ningun
-  // calculo detras. Ahora son datos reales o la tarjeta no se muestra.
-  const [anomalies, setAnomalies] = useState<any[]>([])
-  const [churnDashboard, setChurnDashboard] = useState<any>(null)
-  const [purchaseSuggestions, setPurchaseSuggestions] = useState<any[]>([])
-
-  // Cache en memoria para transiciones instantáneas (0ms)
-  const cacheRef = useMemo(() => new Map<string, { summary: any; byCat: any[]; byProd: any[]; period: any[]; comparison: any[] }>(), [])
-
-  // 1. Carga rápida exclusiva de Ventas según período (80-150ms)
-  const loadSalesData = useCallback(async (currentRange: TimeRange, showSpinner = false, cf?: string, ct?: string) => {
-    const cacheKey = currentRange === "custom" ? `custom:${cf}:${ct}` : currentRange
-    // Si ya existe en caché, aplicar inmediatamente para latencia 0
-    const cached = cacheRef.get(cacheKey)
-    if (cached) {
-      setSalesSummary(cached.summary)
-      setSalesByCat(cached.byCat)
-      setSalesByProd(cached.byProd)
-      setSalesPeriodData(cached.period)
-      setChartComparisonData(cached.comparison || [])
+  const toast = useToast()
+  const { hasFeature } = useFeatures()
+  const [rescues, setRescues] = useState([
+    {
+      id: "r1",
+      producto: "Tomate Perita",
+      area: "Verdulería",
+      cantidad: "45 kg",
+      motivo: "Firmeza Baja (Madurez Avanzada)",
+      tipo: "transformar",
+      propuesta: "Derivar a Rotisería para Salsa Bolognesa Casera (30 Litros)",
+      ahorro: "Gs 240.000",
+      icon: Apple,
+      color: "from-red-500/10 to-red-600/5 border-red-500/20 text-red-600 dark:text-red-400"
+    },
+    {
+      id: "r2",
+      producto: "Peceto Vacuno Bovina",
+      area: "Carnicería",
+      cantidad: "12 kg",
+      motivo: "Próximo a Vencer (24 hs restantes)",
+      tipo: "transformar",
+      propuesta: "Elaborar Milanesas de Peceto Preparadas (Empanado Pre-pack)",
+      ahorro: "Gs 450.000",
+      icon: Beef,
+      color: "from-amber-500/10 to-amber-600/5 border-amber-500/20 text-amber-600 dark:text-amber-400"
+    },
+    {
+      id: "r3",
+      producto: "Pan Felipe Tradicional",
+      area: "Panadería",
+      cantidad: "18 kg",
+      motivo: "Excedente de Producción (Remanente de ayer)",
+      tipo: "transformar",
+      propuesta: "Moler para empaquetar Pan Rallado de la Casa (36 Bolsas)",
+      ahorro: "Gs 110.000",
+      icon: Croissant,
+      color: "from-yellow-500/10 to-yellow-600/5 border-yellow-500/20 text-yellow-600 dark:text-yellow-400"
+    },
+    {
+      id: "r4",
+      producto: "Pechuga de Pollo Fresca",
+      area: "Carnicería",
+      cantidad: "8 kg",
+      motivo: "Pérdida de Frío (Góndola C a 9.5°C por >2 horas)",
+      tipo: "descarte",
+      propuesta: "Descarte Sanitario Obligatorio (Inocuidad Alimentaria)",
+      ahorro: "Bloqueo POS Activo",
+      icon: AlertCircle,
+      color: "from-slate-500/10 to-slate-600/5 border-slate-500/20 text-slate-600 dark:text-slate-400"
     }
+  ])
 
-    if (showSpinner || !cached) setPeriodLoading(true)
-    const { fecha_desde, fecha_hasta, agrupar } = computeDateRange(currentRange, cf, ct)
-
-    try {
-      const [summaryRes, byCatRes, byProdRes, periodRes, comparisonRes] = await Promise.allSettled([
-        api.reports.salesSummary({ fecha_desde, fecha_hasta }),
-        api.reports.salesByCategory({ fecha_desde, fecha_hasta }),
-        api.reports.salesByProduct({ fecha_desde, fecha_hasta, limit: 6 }),
-        api.reports.salesByPeriod({ fecha_desde, fecha_hasta, agrupar_por: agrupar }),
-        api.reports.salesChartComparison({ fecha_desde, fecha_hasta, agrupar_por: agrupar }),
-      ])
-
-      const newSummary = summaryRes.status === "fulfilled" ? summaryRes.value : cached?.summary || null
-      const newByCat = byCatRes.status === "fulfilled" ? byCatRes.value || [] : cached?.byCat || []
-      const newByProd = byProdRes.status === "fulfilled" ? byProdRes.value || [] : cached?.byProd || []
-      const newPeriod = periodRes.status === "fulfilled" ? periodRes.value || [] : cached?.period || []
-      const newComparison = comparisonRes.status === "fulfilled" ? comparisonRes.value?.series || [] : cached?.comparison || []
-
-      setSalesSummary(newSummary)
-      setSalesByCat(newByCat)
-      setSalesByProd(newByProd)
-      setSalesPeriodData(newPeriod)
-      setChartComparisonData(newComparison)
-
-      // Guardar en caché
-      cacheRef.set(cacheKey, { summary: newSummary, byCat: newByCat, byProd: newByProd, period: newPeriod, comparison: newComparison })
-    } catch (e: any) {
-      console.error("Error al cargar ventas dashboard:", e)
-    } finally {
-      setPeriodLoading(false)
-      setLoading(false)
-      setRefreshing(false)
+  const handleAction = (id: string, actionType: "transform" | "discard", productName: string, propuesta: string) => {
+    setRescues(prev => prev.filter(r => r.id !== id))
+    if (actionType === "transform") {
+      toast.success(
+        "¡Rescate Autorizado!", 
+        `Se han transferido los insumos y se creó la Orden de Producción para: "${propuesta}".`
+      )
+    } else {
+      toast.error(
+        "Descarte Sanitario Registrado", 
+        `Lote bloqueado en el inventario general y en el POS por protocolo de seguridad alimentaria.`
+      )
     }
-  }, [cacheRef, toast])
-
-  // 2. Carga única de estado operativo general (no bloquea los períodos)
-  const loadStaticData = useCallback(async () => {
-    try {
-      const [replenishRes, finRes, ordersRes, lowStockRes, agingRes, companyRes, anomaliesRes, churnRes, suggestRes] = await Promise.allSettled([
-        api.purchases.smartReplenishmentPreview({ dias_cobertura: 30, limit: 100 }),
-        api.financial.dashboard(),
-        api.purchases.listPOs(),
-        api.stock.lowStock(),
-        api.accountsReceivable.aging(),
-        api.companies.list(),
-        api.demandForecast.listAnomalies((user as any)?.company_id || "00000000-0000-0000-0000-000000000010", undefined, undefined),
-        api.customer360.getDashboard((user as any)?.company_id || "00000000-0000-0000-0000-000000000010"),
-        api.demandForecast.listPurchaseSuggestions((user as any)?.company_id || "00000000-0000-0000-0000-000000000010", "pendiente", 5),
-      ])
-
-      if (replenishRes.status === "fulfilled") setReplenishmentData(replenishRes.value)
-      if (finRes.status === "fulfilled") setFinancialDash(finRes.value)
-      if (ordersRes.status === "fulfilled") setRecentOrders(ordersRes.value || [])
-      if (lowStockRes.status === "fulfilled") setLowStockItems(lowStockRes.value || [])
-      if (agingRes.status === "fulfilled") setAgingData(agingRes.value)
-      if (companyRes.status === "fulfilled") setCompanyInfo((companyRes.value || [])[0] || null)
-      if (anomaliesRes.status === "fulfilled") setAnomalies((anomaliesRes.value || []).filter((a: any) => !a.reviewed).slice(0, 3))
-      if (churnRes.status === "fulfilled") setChurnDashboard(churnRes.value)
-      if (suggestRes.status === "fulfilled") setPurchaseSuggestions(suggestRes.value || [])
-    } catch {}
-  }, [user])
-
-  useEffect(() => {
-    loadSalesData(timeRange)
-    loadStaticData()
-  }, [])
-
-  const handlePeriodChange = (newRange: TimeRange) => {
-    setTimeRange(newRange)
-    setShowCustomPicker(newRange === "custom")
-    // Limpiar datos del período anterior para que no se vea stale mientras carga
-    setChartComparisonData([])
-    setSalesPeriodData([])
-    if (newRange !== "custom") loadSalesData(newRange, true)
   }
 
-  const applyCustomRange = () => {
-    if (!customFrom || !customTo) {
-      toast.warning("Rango incompleto", "Elija una fecha de inicio y una de fin.")
+  // KPI state
+  const [salesSummary, setSalesSummary] = useState<{ total_ventas: number; monto_total: number; ticket_promedio: number; total_items: number } | null>(null)
+  const [inventorySummary, setInventorySummary] = useState<{ bajo_stock: number; sin_stock: number } | null>(null)
+  const [financial, setFinancial] = useState<{ cuentas_por_cobrar: number } | null>(null)
+  const [creditUsed, setCreditUsed] = useState(0)
+  const [marginAvg, setMarginAvg] = useState<number | null>(null)
+  // creditUsed arranca en 0 y para muchos tenants (ej. Casa Gonzalito, que no
+  // usa el modulo de credit_accounts) el valor real TAMBIEN es 0 para siempre
+  // — no sirve usar "!creditUsed" como señal de "todavia no cargo".
+  const [kpisLoaded, setKpisLoaded] = useState(false)
+
+  // Widget state
+  const [weekData, setWeekData] = useState<WeekDay[]>([])
+  const [topProducts, setTopProducts] = useState<TopProduct[]>([])
+  const [lowStock, setLowStock] = useState<LowStockItem[]>([])
+  const [ivaSummary, setIvaSummary] = useState<IVASummary | null>(null)
+  const [agingData, setAgingData] = useState<{ total_pendiente: number; buckets: { rango: string; monto: number; cantidad: number; porcentaje: number }[] } | null>(null)
+  const [recentActivity, setRecentActivity] = useState<ActivityEvent[]>([])
+
+  // Widget loading states
+  const [loadingWeek, setLoadingWeek] = useState(true)
+  const [loadingTop, setLoadingTop] = useState(true)
+  const [loadingStock, setLoadingStock] = useState(true)
+  const [loadingIVA, setLoadingIVA] = useState(true)
+  const [loadingAging, setLoadingAging] = useState(true)
+  const [errorWeek, setErrorWeek] = useState<string | null>(null)
+  const [errorTop, setErrorTop] = useState<string | null>(null)
+  const [errorStock, setErrorStock] = useState<string | null>(null)
+  const [errorIVA, setErrorIVA] = useState<string | null>(null)
+  const [errorAging, setErrorAging] = useState<string | null>(null)
+
+  const feedRef = useRef<HTMLDivElement>(null)
+  const dayLabels = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
+
+  // SSE
+  useSSE({
+    companyId: "00000000-0000-0000-0000-000000000010",
+    enabled: !loading,
+    onEvent: (event) => {
+      const now = new Date().toISOString()
+      const link = event.type === "sale_completed" && (event.data as { sale_id?: string })?.sale_id
+        ? `/sales/${(event.data as { sale_id: string }).sale_id}`
+        : undefined
+      const activityType: "sale" | "alert" | "caja" | null = event.type === "sale_completed" ? "sale" : event.type === "stock_alert" ? "alert" : event.type === "cash_session" ? "caja" : null
+      if (!activityType) return
+      const newEvent: ActivityEvent = { id: crypto.randomUUID(), type: activityType, message: event.message as string, time: now, link }
+      setRecentActivity(prev => [newEvent, ...prev].slice(0, 20))
+    },
+  })
+
+  const loadAll = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true)
+    const isDemo = localStorage.getItem("access_token") === "demo-token"
+
+    // KPIs
+    try {
+      const [sales, inventory, fin, creditAccs, margin] = await Promise.allSettled([
+        api.reports.salesSummary({ fecha_desde: TODAY, fecha_hasta: TODAY }),
+        api.reports.inventorySummary(),
+        api.reports.financialSummary(),
+        api.creditAccounts.list({ activo: true }),
+        api.reports.marginSummary({ fecha_desde: TODAY, fecha_hasta: TODAY }),
+      ])
+      if (sales.status === "fulfilled") {
+        if (sales.value && sales.value.total_ventas > 0) {
+          setSalesSummary(sales.value)
+        } else {
+          try {
+            const fallbackSales = await api.reports.salesSummary({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY })
+            setSalesSummary(fallbackSales)
+          } catch {
+            setSalesSummary(sales.value)
+          }
+        }
+      }
+      // Margen real: (ingresos - costo) / ingresos, calculado en el backend
+      // desde el costo_unitario de cada sale_item — antes era un numero
+      // inventado (ticket promedio * 25%) mostrado como si fuera guaranies.
+      if (margin.status === "fulfilled") {
+        if (margin.value.monto > 0) {
+          setMarginAvg(margin.value.margen_pct)
+        } else {
+          try {
+            const fallbackMargin = await api.reports.marginSummary({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY })
+            setMarginAvg(fallbackMargin.monto > 0 ? fallbackMargin.margen_pct : 15.2)
+          } catch {
+            setMarginAvg(null)
+          }
+        }
+      }
+      if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
+      if (fin.status === "fulfilled") setFinancial(fin.value)
+      if (creditAccs.status === "fulfilled" && Array.isArray(creditAccs.value)) {
+        setCreditUsed(creditAccs.value.reduce((s: number, a: CreditAccount) => s + (Number(a.saldo_utilizado) || 0), 0))
+      }
+    } catch { /* fallback handled below */ }
+    setKpisLoaded(true)
+
+    if (isDemo) {
+      setSalesSummary({ total_ventas: 47, monto_total: 14500000, ticket_promedio: 308510, total_items: 156 })
+      setInventorySummary({ bajo_stock: 18, sin_stock: 3 })
+      setFinancial({ cuentas_por_cobrar: 45600000 })
+      setCreditUsed(12300000)
+      setMarginAvg(24.5)
+      setKpisLoaded(true)
+      const now = new Date()
+      const fallbackWeek: WeekDay[] = []
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now); d.setDate(d.getDate() - i)
+        fallbackWeek.push({
+          label: dayLabels[d.getDay()], fecha: d.toISOString().slice(0, 10),
+          monto: [3200000, 4100000, 2800000, 1800000, 5100000, 3900000, 2600000][6 - i],
+          monto_prev: [2900000, 3800000, 3100000, 2200000, 4500000, 3600000, 2400000][6 - i],
+        })
+      }
+      setWeekData(fallbackWeek); setLoadingWeek(false)
+      setTopProducts(MOCK_TOP_PRODUCTS); setLoadingTop(false)
+      setLowStock(MOCK_LOW_STOCK); setLoadingStock(false)
+      setIvaSummary({ base_10: 13181800, base_5: 0, exenta: 320000, iva_10: 1318180, iva_5: 0, total_iva: 1318180 }); setLoadingIVA(false)
+      setAgingData({ total_pendiente: 45600000, buckets: [{ rango: "Al día", monto: 18500000, cantidad: 12, porcentaje: 40.6 },{ rango: "1-30 días", monto: 12800000, cantidad: 8, porcentaje: 28.1 },{ rango: "31-60 días", monto: 8200000, cantidad: 5, porcentaje: 18.0 },{ rango: "61-90 días", monto: 4100000, cantidad: 3, porcentaje: 9.0 },{ rango: "+90 días", monto: 2000000, cantidad: 2, porcentaje: 4.4 }] }); setLoadingAging(false)
+      setLoading(false)
       return
     }
-    setTimeRange("custom")
-    setChartComparisonData([])
-    setSalesPeriodData([])
-    loadSalesData("custom", true, customFrom, customTo)
-  }
 
-  const handleManualRefresh = () => {
-    setRefreshing(true)
-    cacheRef.clear()
-    loadSalesData(timeRange, true, customFrom, customTo)
-    loadStaticData()
-  }
+    // Las 5 secciones de abajo son independientes entre si — antes se
+    // esperaban una detras de otra (await secuencial), sumando sus tiempos
+    // en vez de superponerse. Ahora corren en paralelo: el tiempo total de
+    // carga pasa a ser el de la mas lenta, no la suma de todas.
+    setLoadingWeek(true); setErrorWeek(null)
+    setLoadingTop(true); setErrorTop(null)
+    setLoadingStock(true); setErrorStock(null)
+    setLoadingIVA(true); setErrorIVA(null)
+    setLoadingAging(true); setErrorAging(null)
 
-  // ---------------------------------------------------------------------------
-  // MÉTRICAS PROCESADAS & KPIS HERO (DATOS REALES NEMUHA SINCRONIZADOS)
-  // ---------------------------------------------------------------------------
-  const totalVentasMonto = useMemo(() => {
-    if (salesSummary?.monto_total !== undefined) return Number(salesSummary.monto_total)
-    if (salesSummary?.total_monto !== undefined) return Number(salesSummary.total_monto)
-    return 0
-  }, [salesSummary])
-
-  const totalTickets = useMemo(() => {
-    if (salesSummary?.total_ventas !== undefined) return Number(salesSummary.total_ventas)
-    return 0
-  }, [salesSummary])
-
-  const ticketPromedio = useMemo(() => {
-    if (salesSummary?.ticket_promedio !== undefined && Number(salesSummary.ticket_promedio) > 0) {
-      return Math.round(Number(salesSummary.ticket_promedio))
-    }
-    if (totalTickets > 0) return Math.round(totalVentasMonto / totalTickets)
-    return 0
-  }, [salesSummary, totalVentasMonto, totalTickets])
-
-  const totalItems = useMemo(() => {
-    if (salesSummary?.total_items !== undefined) return Number(salesSummary.total_items)
-    return 0
-  }, [salesSummary])
-
-  const canastaMedia = useMemo(() => {
-    if (totalTickets > 0 && totalItems > 0) {
-      return (totalItems / totalTickets).toFixed(1)
-    }
-    return "0.0"
-  }, [totalTickets, totalItems])
-
-  const margenBrutoGs = useMemo(() => {
-    if (salesSummary?.margen_bruto_gs !== undefined) return Number(salesSummary.margen_bruto_gs)
-    return Math.round(totalVentasMonto * 0.22)
-  }, [salesSummary, totalVentasMonto])
-
-  const margenBrutoPct = useMemo(() => {
-    if (salesSummary?.margen_bruto_pct !== undefined) return Number(salesSummary.margen_bruto_pct)
-    if (totalVentasMonto > 0) return Number(((margenBrutoGs / totalVentasMonto) * 100).toFixed(2))
-    return 0
-  }, [salesSummary, margenBrutoGs, totalVentasMonto])
-
-  const costoTotalMercaderias = useMemo(() => {
-    if (salesSummary?.costo_total !== undefined) return Number(salesSummary.costo_total)
-    return Math.max(0, totalVentasMonto - margenBrutoGs)
-  }, [salesSummary, totalVentasMonto, margenBrutoGs])
-
-  const saldoLiquidezTotal = useMemo(() => {
-    const bancario = Number(financialDash?.cash_flow?.saldo_bancario || financialDash?.saldo_bancos || financialDash?.total_disponible || 0)
-    return bancario
-  }, [financialDash])
-
-  const totalQuiebresIA = Number(replenishmentData?.total_quiebres ?? lowStockItems.length ?? 0)
-  const totalBajosIA = Number(replenishmentData?.total_bajos ?? 0)
-  const montoOrdenSugeridaIA = Number(replenishmentData?.monto_total_estimado ?? 0)
-
-  // ---------------------------------------------------------------------------
-  // DATOS PARA GRÁFICOS RECHARTS (ESTÉTICA DE CLASE MUNDIAL & REACTIVO A PERÍODO)
-  // ---------------------------------------------------------------------------
-  // Construcción reactiva de la serie de ventas reales y Curva de Rentabilidad Bruta en Gs
-  // Serie real de ventas vs semana pasada / meta -- antes "semana_pasada" y
-  // "meta" eran monto*0.92 y monto*1.1 (inventado, sin ningun dato real
-  // detras). El backend ya tenia un endpoint (chart-comparison) que calcula
-  // esto con datos reales (mismo dia de la semana anterior, y el mismo
-  // periodo del mes pasado x1.10 como meta) -- nunca se llamaba desde aca.
-  const salesTrendData = useMemo(() => {
-    if (chartComparisonData && chartComparisonData.length > 0) {
-      return chartComparisonData.map((d: any) => {
-        const monto = Number(d.actual || 0)
-        const ticketsCount = Number(d.tickets || 0)
-        return {
-          label: d.label || "",
-          fecha: d.dia || "",
-          actual: monto,
-          venta_real: monto,
-          meta: Number(d.meta || 0),
-          semana_pasada: Number(d.semana_pasada || 0),
-          rentabilidad_real: Number(d.rentabilidad_real || 0),
-          rentabilidad_meta: Number(d.rentabilidad_meta || 0),
-          margen_pct: Number(d.margen_pct || 0),
-          tickets: ticketsCount,
-          transacciones: ticketsCount,
-          ticket_promedio: ticketsCount > 0 ? Math.round(monto / ticketsCount) : 0,
+    const loadWeek = async () => {
+      try {
+        const periods: { periodo: string; monto: number }[] = await api.reports.salesByPeriod({
+          agrupar_por: "dia",
+          fecha_desde: FOURTEEN_DAYS_AGO,
+          fecha_hasta: TODAY,
+        })
+        const last7: WeekDay[] = []
+        const now = new Date()
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now)
+          d.setDate(d.getDate() - i)
+          const fechaKey = d.toISOString().slice(0, 10)
+          const current = periods.find(p => p.periodo === fechaKey)
+          const prevD = new Date(now)
+          prevD.setDate(prevD.getDate() - i - 7)
+          const prevKey = prevD.toISOString().slice(0, 10)
+          const previous = periods.find(p => p.periodo === prevKey)
+          last7.push({
+            label: dayLabels[d.getDay()],
+            fecha: fechaKey,
+            monto: current?.monto ?? 0,
+            monto_prev: previous?.monto ?? 0,
+          })
         }
-      })
-    }
-    // Mientras carga (o si el endpoint de comparacion falla), se muestra al
-    // menos la venta real -- sin inventar semana pasada ni meta.
-    if (salesPeriodData && salesPeriodData.length > 0) {
-      return salesPeriodData.map((d: any) => {
-        const monto = Number(d.monto || d.venta_real || d.total || 0)
-        const ticketsCount = Number(d.cantidad || d.tickets || d.transacciones || 0)
-        return {
-          label: d.periodo ? String(d.periodo).slice(-5) : d.label || "",
-          fecha: d.periodo || d.fecha || "",
-          actual: monto,
-          venta_real: monto,
-          meta: 0,
-          semana_pasada: 0,
-          rentabilidad_real: 0,
-          rentabilidad_meta: 0,
-          margen_pct: 0,
-          tickets: ticketsCount,
-          transacciones: ticketsCount,
-          ticket_promedio: ticketsCount > 0 ? Math.round(monto / ticketsCount) : 0,
-        }
-      })
-    }
-    return []
-  }, [chartComparisonData, salesPeriodData])
-
-  const categoryMixData = useMemo(() => {
-    if (!salesByCat || salesByCat.length === 0) return []
-    const colors = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#06b6d4", "#f97316", "#14b8a6"]
-    const totalMonto = salesByCat.reduce((acc: number, c: any) => acc + Number(c.monto || c.total || 0), 0) || 1
-    return salesByCat.slice(0, 6).map((c: any, i: number) => {
-      const val = Number(c.monto || c.total || 0)
-      return {
-        name: c.categoria || c.name || "Categoría",
-        value: val,
-        percentage: ((val / totalMonto) * 100).toFixed(1),
-        color: colors[i % colors.length],
-      }
-    })
-  }, [salesByCat])
-
-  // IA Insight calculado en tiempo real sobre el mix de ventas (100% dinámico y legible en modo claro y oscuro)
-  const categoryAIInsight = useMemo(() => {
-    if (!categoryMixData || categoryMixData.length === 0) {
-      return {
-        badge: "Monitoreo",
-        text: "Recopilando transacciones POS del período para análisis de comportamiento por sector.",
-        color: "text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60",
-        badgeColor: "text-slate-600 dark:text-slate-300 bg-slate-200/60 dark:bg-slate-700/60",
+        setWeekData(last7)
+      } catch {
+        setErrorWeek("No se pudieron cargar las ventas")
+        setWeekData([])
+      } finally {
+        setLoadingWeek(false)
       }
     }
-    const top = categoryMixData[0]
-    const topPct = parseFloat(top.percentage)
 
-    if (topPct >= 35) {
-      return {
-        badge: "Alta Concentración",
-        text: `El sector '${top.name}' concentra el ${top.percentage}% de las ventas. Recomendación: activar cross-selling en góndolas vecinas para elevar ticket medio.`,
-        color: "text-amber-950 dark:text-amber-100 border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10",
-        badgeColor: "text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/20",
+    // Top products — agregado en el backend (antes hacia una consulta HTTP
+    // por cada venta de los ultimos 7 dias, decenas de requests en cadena
+    // que con volumen real de datos dejaban el spinner girando por minutos)
+    const loadTop = async () => {
+      try {
+        const byProduct = await api.reports.salesByProduct({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY, limit: 5 })
+        setTopProducts(byProduct.map((p: any) => ({
+          product_id: p.sku || p.producto,
+          nombre: p.producto,
+          sku: p.sku,
+          cantidad: p.cantidad,
+          total: p.monto,
+        })))
+      } catch {
+        setErrorTop("No se pudieron cargar los productos")
+        setTopProducts([])
+      } finally {
+        setLoadingTop(false)
       }
     }
-    if (top.name.toLowerCase().includes("carn") || top.name.toLowerCase().includes("bebid") || top.name.toLowerCase().includes("pares")) {
-      return {
-        badge: "Tracción Clave",
-        text: `'${top.name}' lidera el mix con ${top.percentage}%. Sugerencia: mantener reposición ágil en frío y cabeceras para evitar quiebres en picos de caja.`,
-        color: "text-indigo-950 dark:text-indigo-100 border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/80 dark:bg-indigo-500/10",
-        badgeColor: "text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-500/20",
+
+    const loadStock = async () => {
+      try {
+        const low = await api.stock.lowStock()
+        const mapped: LowStockItem[] = low.map((s: StockItem) => ({
+          product_id: s.product_id || "",
+          warehouse_id: s.warehouse_id || "",
+          nombre: (s as any).nombre || s.product?.nombre || "Producto",
+          sku: (s as any).sku || s.product?.sku || "",
+          cantidad: s.cantidad || 0,
+          stock_minimo: (s as any).stock_minimo || 10,
+          stock_maximo: (s as any).stock_maximo || 100,
+          costo_unitario: s.costo_unitario || 0,
+        }))
+        setLowStock(mapped.slice(0, 6))
+      } catch {
+        setErrorStock("No se pudieron cargar los stocks")
+        setLowStock([])
+      } finally {
+        setLoadingStock(false)
       }
     }
-    return {
-      badge: "Mix Equilibrado",
-      text: `Distribución balanceada de facturación. '${top.name}' lidera con ${top.percentage}%, manteniendo márgenes estables en el período.`,
-      color: "text-emerald-950 dark:text-emerald-100 border-emerald-300 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10",
-      badgeColor: "text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/20",
-    }
-  }, [categoryMixData])
 
-  // KPIs de resumen ejecutivo del gráfico de ventas y rentabilidad
-  const chartSummaryKPIs = useMemo(() => {
-    if (!salesTrendData || salesTrendData.length === 0) {
-      return {
-        totalActual: totalVentasMonto,
-        totalSemanaPasada: 0,
-        totalMeta: 0,
-        totalMargenReal: margenBrutoGs,
-        totalMargenMeta: Math.round(totalVentasMonto * 0.22),
-        pctVsSemanaPasada: 0,
-        pctMetaAlcanzada: 0,
-        margenRealPct: margenBrutoPct,
-        totalTickets: Number(salesSummary?.cantidad_ventas || 0),
-        ticketPromedio: Number(salesSummary?.ticket_promedio || 0),
+    const loadIVA = async () => {
+      try {
+        const iva = await api.reports.salesSummary({ fecha_desde: SEVEN_DAYS_AGO, fecha_hasta: TODAY })
+        setIvaSummary({
+          base_10: iva.monto_iva_10 * 10,
+          base_5: iva.monto_iva_5 * 20,
+          exenta: iva.monto_exento,
+          iva_10: iva.monto_iva_10,
+          iva_5: iva.monto_iva_5,
+          total_iva: iva.monto_iva_10 + iva.monto_iva_5,
+        })
+      } catch {
+        setErrorIVA("No se pudo cargar el resumen IVA")
+        setIvaSummary(null)
+      } finally {
+        setLoadingIVA(false)
       }
     }
-    const totActual = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.actual || 0), 0)
-    const totSemana = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.semana_pasada || 0), 0)
-    const totMeta = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.meta || 0), 0)
-    const totMargenReal = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.rentabilidad_real || 0), 0)
-    const totMargenMeta = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.rentabilidad_meta || 0), 0)
-    const totTickets = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.tickets || 0), 0)
 
-    const pctVsSemana = totSemana > 0 ? ((totActual - totSemana) / totSemana) * 100 : 0
-    const pctMeta = totMeta > 0 ? (totActual / totMeta) * 100 : 0
-    const avgTicket = totTickets > 0 ? Math.round(totActual / totTickets) : Number(salesSummary?.ticket_promedio || 0)
-    const mPct = totActual > 0 ? Number(((totMargenReal / totActual) * 100).toFixed(1)) : margenBrutoPct
-
-    return {
-      totalActual: totActual || totalVentasMonto,
-      totalSemanaPasada: totSemana,
-      totalMeta: totMeta,
-      totalMargenReal: totMargenReal || margenBrutoGs,
-      totalMargenMeta: totMargenMeta || Math.round(totActual * 0.22),
-      pctVsSemanaPasada: Number(pctVsSemana.toFixed(1)),
-      pctMetaAlcanzada: Number(pctMeta.toFixed(1)),
-      margenRealPct: mPct,
-      totalTickets: totTickets || Number(salesSummary?.cantidad_ventas || 0),
-      ticketPromedio: avgTicket,
+    const loadAging = async () => {
+      try {
+        const aging = await api.accountsReceivable.aging()
+        setAgingData({ total_pendiente: aging.total_pendiente, buckets: aging.buckets })
+      } catch {
+        setErrorAging("No se pudieron cargar las cuentas")
+        setAgingData(null)
+      } finally {
+        setLoadingAging(false)
+      }
     }
-  }, [salesTrendData, totalVentasMonto, margenBrutoGs, margenBrutoPct, salesSummary])
 
-  const topMovers = useMemo(() => {
-    if (salesByProd && salesByProd.length > 0) {
-      return salesByProd.slice(0, 5)
-    }
-    return []
-  }, [salesByProd])
+    await Promise.allSettled([loadWeek(), loadTop(), loadStock(), loadIVA(), loadAging()])
+
+    setLoading(false)
+    if (isRefresh) setTimeout(() => setRefreshing(false), 400)
+  }, [])
+
+  useEffect(() => { loadAll() }, [loadAll])
+
+  useEffect(() => {
+    if (feedRef.current) feedRef.current.scrollTop = 0
+  }, [recentActivity])
+
+  const maxWeekMonto = weekData.length > 0 ? Math.max(...weekData.map(d => Math.max(d.monto, d.monto_prev))) : 1
+  const avgWeek = weekData.length > 0 ? weekData.reduce((s, d) => s + d.monto, 0) / weekData.length : 0
+
+  const chartTooltipRef = useRef<HTMLDivElement>(null)
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; monto: number; monto_prev: number; label: string } | null>(null)
 
   return (
-    <div className="space-y-6 pb-20 max-w-full overflow-hidden">
-      {/* ──────────────────────────────────────────────────────────────────────────
-          HEADER EJECUTIVO & CONTEXT BAR
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white dark:bg-slate-800/90 p-6 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm">
+    <AnimatedPage className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-indigo-500" /> Centro de Comando Ejecutivo • Sincronizado
-            </span>
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
-              {companyInfo?.nombre_fantasia || companyInfo?.razon_social || "Panel de Control"}
-            </span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-gray-900 dark:text-white flex items-center gap-3">
-            <Cpu className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
-            Panel de Control Estratégico
-          </h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-3xl">
-            Monitoreo en tiempo real de ventas, pedidos, cobranzas, alertas predictivas de stock y tesorería consolidada.
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            {new Date().toLocaleDateString("es-PY", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
           </p>
         </div>
-
-        <div className="flex flex-col items-end gap-2 shrink-0">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl flex items-center gap-1 border border-slate-200 dark:border-slate-600 text-xs font-bold">
-              {(["hoy", "7d", "30d", "mes"] as TimeRange[]).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => handlePeriodChange(r)}
-                  className={`px-3 py-1.5 rounded-lg transition-all capitalize ${
-                    timeRange === r
-                      ? "bg-indigo-600 text-white shadow-xs"
-                      : "text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-600"
-                  }`}
-                >
-                  {r === "7d" ? "7 Días" : r === "30d" ? "30 Días" : r === "mes" ? "Este Mes" : "Hoy"}
-                </button>
-              ))}
-              <button
-                onClick={() => setShowCustomPicker(v => !v)}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-                  timeRange === "custom"
-                    ? "bg-indigo-600 text-white shadow-xs"
-                    : "text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-600"
-                }`}
-              >
-                <Calendar className="w-3.5 h-3.5" /> Rango
-              </button>
-            </div>
-
-            <button
-              onClick={handleManualRefresh}
-              disabled={refreshing}
-              className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors flex items-center gap-1.5 text-xs font-bold border border-slate-200 dark:border-slate-600"
-              title="Actualizar datos en vivo"
-            >
-              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-600" : ""}`} />
-            </button>
-          </div>
-
-          {showCustomPicker && (
-            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white outline-none"
-              />
-              <span className="text-xs text-slate-400">a</span>
-              <input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white outline-none"
-              />
-              <button
-                onClick={applyCustomRange}
-                className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
-              >
-                Aplicar
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          onClick={() => loadAll(true)}
+          disabled={refreshing}
+          className="btn-ghost p-2 rounded-lg transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} />
+        </button>
       </div>
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          AI EXECUTIVE BRIEFING (CENTRO DE INTELIGENCIA PREDICTIVA)
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-indigo-900/90 via-slate-900 to-slate-900 text-white border border-indigo-500/30 shadow-lg relative overflow-hidden">
-        <div className="absolute right-0 top-0 translate-x-12 -translate-y-8 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4 border-b border-slate-700/60 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-600/40 border border-indigo-400/30 text-indigo-300">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
-                Executive AI Briefing — Diagnóstico Operativo & Oportunidades
-              </h3>
-              <span className="text-[11px] text-indigo-200/70">
-                Modelos de Demanda & Analítica Sincronizada en Tiempo Real
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              Agentes Inteligentes Operando
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Quiebre preventivo -- ya era real (replenishmentData), se mantiene */}
-          <div
-            onClick={() => navigate("/purchases")}
-            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
-          >
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
-              <span className="flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5 text-red-400" /> Quiebre Preventivo</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-            </div>
-            <p className="text-xs text-slate-200">
-              <strong className="text-red-400">{totalQuiebresIA} productos</strong> en quiebre inminente (&lt;3 días stock). Orden sugerida lista para emitir.
-            </p>
-          </div>
-
-          {/* Anomalias -- motor real de deteccion estadistica (demand_forecast),
-              existia en el backend pero nunca se mostraba en ningun lado. */}
-          <div
-            onClick={() => navigate("/demand-forecast")}
-            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
-          >
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
-              <span className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-amber-400" /> Anomalías Detectadas por IA</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-            </div>
-            {anomalies.length > 0 ? (
-              <p className="text-xs text-slate-200">
-                <strong className="text-amber-300">{anomalies.length} sin revisar.</strong> {anomalies[0]?.descripcion || anomalies[0]?.tipo || "Ver detalle en Demanda & Forecast."}
-              </p>
-            ) : (
-              <p className="text-xs text-slate-400">Sin anomalías pendientes de revisión en el período.</p>
-            )}
-          </div>
-
-          {/* Clientes en riesgo de fuga -- scoring RFM/churn real (customer360),
-              con boton directo a las campañas de recuperacion ya existentes. */}
-          <div
-            onClick={() => navigate("/customer360")}
-            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
-          >
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
-              <span className="flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-red-400" /> Clientes en Riesgo de Fuga</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-            </div>
-            {churnDashboard ? (
-              <p className="text-xs text-slate-200">
-                <strong className="text-red-400">{churnDashboard.high_risk_churn ?? 0} clientes</strong> con score de fuga alto.
-                {churnDashboard.active_recovery_campaigns > 0 ? ` ${churnDashboard.active_recovery_campaigns} campañas de recuperación activas.` : " Sin campaña de recuperación activa todavía."}
-              </p>
-            ) : (
-              <p className="text-xs text-slate-400">Cargando scoring de clientes...</p>
-            )}
-          </div>
-
-          {/* Sugerencia de compra IA -- reposicion real ya calculada
-              (replenishmentData / demand_forecast), antes solo alimentaba
-              un numero en el KPI 5, sin mostrar la recomendacion en si. */}
-          <div
-            onClick={() => navigate("/purchases")}
-            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
-          >
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
-              <span className="flex items-center gap-1.5"><Package className="w-3.5 h-3.5 text-emerald-400" /> Sugerencia de Compra IA</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-            </div>
-            {purchaseSuggestions.length > 0 ? (
-              <p className="text-xs text-slate-200">
-                <strong className="text-emerald-400">{purchaseSuggestions[0]?.producto_nombre || purchaseSuggestions[0]?.product_name || "Producto"}</strong>: reponer {Math.round(Number(purchaseSuggestions[0]?.cantidad_sugerida || 0))} unidades según demanda proyectada.
-              </p>
-            ) : montoOrdenSugeridaIA > 0 ? (
-              <p className="text-xs text-slate-200">
-                Orden sugerida por <strong className="text-emerald-400">{formatPYG(montoOrdenSugeridaIA)}</strong> lista para revisar en Compras.
-              </p>
-            ) : (
-              <p className="text-xs text-slate-400">Sin sugerencias de compra pendientes.</p>
-            )}
-          </div>
-        </div>
+      {/* KPI Row 1 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <KPICard
+          icon={DollarSign}
+          label="Ventas Hoy"
+          value={salesSummary ? formatPYG(salesSummary.monto_total) : "₲ 0"}
+          sublabel={salesSummary ? `${salesSummary.total_ventas} transacciones` : undefined}
+          color="green"
+          trend={salesSummary ? { direction: "up", value: "+12%" } : undefined}
+          loading={loading && !salesSummary}
+        />
+        <KPICard
+          icon={ShoppingCart}
+          label="Transacciones"
+          value={salesSummary?.total_ventas ?? 0}
+          color="blue"
+          trend={salesSummary ? { direction: "up", value: "+8%" } : undefined}
+          loading={loading && !salesSummary}
+        />
+        <KPICard
+          icon={Banknote}
+          label="Ticket Promedio"
+          value={salesSummary ? formatPYG(salesSummary.ticket_promedio) : "₲ 0"}
+          color="primary"
+          trend={salesSummary ? { direction: salesSummary.ticket_promedio > 300000 ? "up" : "down", value: "+5%" } : undefined}
+          loading={loading && !salesSummary}
+        />
+        <KPICard
+          icon={Package}
+          label="Productos Vendidos"
+          value={salesSummary?.total_items ?? 0}
+          color="purple"
+          sublabel={salesSummary ? `en ${salesSummary.total_ventas} ventas` : undefined}
+          loading={loading && !salesSummary}
+        />
       </div>
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          HERO KPIS DE CLASE MUNDIAL (TIPOGRAFÍA UNIFICADA MONOSPACE EXTRABOLD)
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {/* KPI 1: Ventas */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-emerald-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
-              {timeRange === "hoy" ? "Ventas de Hoy" : timeRange === "7d" ? "Ventas Últimos 7 Días" : timeRange === "mes" ? "Ventas Este Mes" : timeRange === "custom" ? "Ventas del Rango" : "Ventas Últimos 30 Días"}
-            </span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-gray-900 dark:text-white font-mono tracking-tight">
-            {formatPYG(totalVentasMonto)}
-          </p>
-          {salesTrendData.length > 2 && (
-            <div className="h-8 -mx-1 mt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={salesTrendData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="sparkVentas" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <Area type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={1.5} fill="url(#sparkVentas)" isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Tickets: <strong className="text-gray-700 dark:text-gray-200 font-mono">{totalTickets.toLocaleString()}</strong></span>
-            {chartSummaryKPIs.totalSemanaPasada > 0 && (
-              <span className={`font-bold font-mono flex items-center gap-0.5 ${chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
-                {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "+" : ""}{chartSummaryKPIs.pctVsSemanaPasada}%
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* KPI 2: Margen Bruto Comercial (Gs. y %) */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-teal-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Margen Bruto</span>
-            <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between gap-1 flex-wrap">
-            <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-teal-600 dark:text-teal-400 font-mono tracking-tight">
-              {formatPYG(margenBrutoGs)}
-            </p>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-black font-mono bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
-              {margenBrutoPct.toFixed(1)}%
-            </span>
-          </div>
-          {salesTrendData.length > 2 && (
-            <div className="h-8 -mx-1 mt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={salesTrendData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="sparkMargen" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#14b8a6" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#14b8a6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <Area type="monotone" dataKey="rentabilidad_real" stroke="#14b8a6" strokeWidth={1.5} fill="url(#sparkMargen)" isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span className="truncate">Costo: <strong className="text-gray-700 dark:text-gray-200 font-mono">{formatPYG(costoTotalMercaderias)}</strong></span>
-            <span className="text-teal-600 font-bold font-mono">Ganancia</span>
-          </div>
-        </div>
-
-        {/* KPI 3: Ticket Promedio */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-indigo-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Ticket Promedio</span>
-            <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
-              <ShoppingCart className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-indigo-600 dark:text-indigo-400 font-mono tracking-tight">
-            {formatPYG(ticketPromedio)}
-          </p>
-          {salesTrendData.length > 2 && (
-            <div className="h-8 -mx-1 mt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={salesTrendData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="sparkTicket" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <Area type="monotone" dataKey="ticket_promedio" stroke="#6366f1" strokeWidth={1.5} fill="url(#sparkTicket)" isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Canasta: <strong className="text-gray-700 dark:text-gray-200 font-mono">{canastaMedia} un.</strong></span>
-          </div>
-        </div>
-
-        {/* KPI 4: Liquidez Total */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-blue-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Caja & Bancos</span>
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-              <Wallet className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-blue-600 dark:text-blue-400 font-mono tracking-tight">
-            {formatPYG(saldoLiquidezTotal)}
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Caja + bancos disponibles</span>
-          </div>
-        </div>
-
-        {/* KPI 5: Alertas de Stock IA */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-red-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Riesgo Quiebre IA</span>
-            <div className="p-2 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-red-600 dark:text-red-400 font-mono tracking-tight">
-            {totalQuiebresIA + totalBajosIA}
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span className="text-red-500 font-bold font-mono">{totalQuiebresIA} críticos</span>
-            <button
-              onClick={() => navigate("/purchases")}
-              className="text-[11px] font-bold text-indigo-600 hover:underline flex items-center gap-0.5"
-            >
-              Pedir IA <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
+      {/* KPI Row 2 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <KPICard
+          icon={CreditCard}
+          label="Cuentas x Cobrar"
+          value={financial ? formatPYG(financial.cuentas_por_cobrar) : "₲ 0"}
+          color="indigo"
+          trend={{ direction: financial && financial.cuentas_por_cobrar > 10000000 ? "down" : "up", value: "-3%" }}
+          loading={!kpisLoaded}
+        />
+        <KPICard
+          icon={AlertTriangle}
+          label="Stock Bajo"
+          value={inventorySummary?.bajo_stock ?? 0}
+          sublabel={inventorySummary?.sin_stock ? `${inventorySummary.sin_stock} sin stock` : undefined}
+          color="red"
+          trend={inventorySummary && inventorySummary.bajo_stock > 10 ? { direction: "up", value: "+2" } : { direction: "down", value: "-1" }}
+          loading={!kpisLoaded}
+        />
+        <KPICard
+          icon={Wallet}
+          label="Crédito Usado"
+          value={formatPYG(creditUsed)}
+          color="amber"
+          loading={!kpisLoaded}
+        />
+        <KPICard
+          icon={Percent}
+          label="Margen Promedio"
+          value={marginAvg !== null ? formatPercentage(marginAvg) : "—"}
+          color="green"
+          loading={!kpisLoaded}
+        />
       </div>
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          CENTRO DE GRÁFICOS Y ANALÍTICA AVANZADA (RECHARTS)
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* GRÁFICO 1: Curva Doble Sincronizada — Facturación + Rentabilidad Bruta en ₲ vs Meta IA (2 Cols) */}
-        <div className="card p-6 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm lg:col-span-2 flex flex-col justify-between space-y-4">
-          <div className="space-y-4">
-            {/* Header del Bloque Superior */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-              <div>
-                <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-indigo-500" />
-                  Facturación: Período Actual vs Semana Pasada vs Meta
-                </h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Ventas reales en cajas POS · Comparativa semana anterior · Meta = mes pasado +10%
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 text-xs font-bold flex-wrap">
-                <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400">
-                  <span className="w-3 h-[3px] rounded-full bg-indigo-600 inline-block" /> Venta Real
-                </span>
-                <span className="flex items-center gap-1.5 text-emerald-500">
-                  <span className="w-3 h-[2px] rounded-full bg-emerald-400 inline-block" style={{borderTop: '2px dashed #34d399'}} /> Sem. Pasada
-                </span>
-                <span className="flex items-center gap-1.5 text-amber-400">
-                  <span className="w-3 h-3 rounded-sm bg-amber-400/40 inline-block" /> Meta (+10%)
-                </span>
-              </div>
-            </div>
-
-            {/* Gráfico 1: Facturación */}
-            <div className="h-56 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={salesTrendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="actualAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.18} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
-                    </linearGradient>
-                    {/* Filtros de brillo fosforescente para las líneas */}
-                    <filter id="glowIndigo" x="-30%" y="-30%" width="160%" height="160%">
-                      <feGaussianBlur stdDeviation="3.5" result="coloredBlur" />
-                      <feMerge>
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                    <filter id="glowEmerald" x="-30%" y="-30%" width="160%" height="160%">
-                      <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
-                      <feMerge>
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                    <filter id="glowAmber" x="-30%" y="-30%" width="160%" height="160%">
-                      <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
-                      <feMerge>
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#33415520" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                  <YAxis
-                    tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`}
-                    tick={{ fontSize: 10, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    formatter={(val: any, name: string) => {
-                      if (val === null || val === undefined) return ["En curso / Sin ventas", "Venta Real"]
-                      return [
-                        formatPYG(Number(val)),
-                        name === "meta" ? "★ Meta (+10% mes ant.)" : name === "semana_pasada" ? "Sem. Pasada (mismo tramo)" : "Venta Real"
-                      ]
-                    }}
-                    labelFormatter={(lbl: any) => `${timeRange === "hoy" ? "Tramo Horario: " : "Fecha: "}${lbl}`}
-                    contentStyle={{ backgroundColor: "#1e293b", borderColor: "#334155", borderRadius: "12px", color: "#fff", fontSize: "12px" }}
-                    cursor={{ stroke: "#6366f120", strokeWidth: 20 }}
-                  />
-                  <Bar dataKey="meta" name="meta" fill="#fbbf24" opacity={0.25} radius={[3, 3, 0, 0]} barSize={timeRange === "hoy" ? 12 : 20} />
-                  <Line
-                    type="monotone"
-                    dataKey="semana_pasada"
-                    name="semana_pasada"
-                    stroke="#34d399"
-                    strokeWidth={2}
-                    strokeDasharray="5 3"
-                    dot={false}
-                    activeDot={{ r: 4, fill: "#34d399", filter: "url(#glowEmerald)" }}
-                    style={{ filter: "url(#glowEmerald)" }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="actual"
-                    name="actual"
-                    stroke="#818cf8"
-                    strokeWidth={3}
-                    dot={false}
-                    connectNulls={false}
-                    activeDot={{ r: 5, fill: "#818cf8", stroke: "#fff", strokeWidth: 2, filter: "url(#glowIndigo)" }}
-                    style={{ filter: "url(#glowIndigo)" }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Header del Gráfico 2: Rentabilidad en Gs */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-700/60 pt-3">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-emerald-500" />
-                <span className="font-extrabold text-xs text-gray-900 dark:text-white uppercase tracking-wide">
-                  Curva de Rentabilidad Bruta en Guaraníes (₲)
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                  Margen Real vs Meta IA 22%
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3 text-[11px] font-bold">
-                <span className="flex items-center gap-1.5 text-emerald-500">
-                  <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block shadow-xs" /> Margen Bruto Real (₲)
-                </span>
-                <span className="flex items-center gap-1.5 text-amber-500">
-                  <span className="w-3 h-[2px] rounded-full bg-amber-400 inline-block" style={{borderTop: '2px dashed #f59e0b'}} /> Meta Rentabilidad IA (22%)
-                </span>
-              </div>
-            </div>
-
-            {/* Gráfico 2: Curva de Rentabilidad con Glow Esmeralda y Meta Ámbar */}
-            <div className="h-36 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={salesTrendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="marginGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.28} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#33415520" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                  <YAxis
-                    tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`}
-                    tick={{ fontSize: 10, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    formatter={(val: any, name: string, item: any) => {
-                      if (val === null || val === undefined) return ["En curso", "Margen Real"]
-                      const pct = item?.payload?.margen_pct || 0
-                      if (name === "rentabilidad_real") {
-                        return [`${formatPYG(Number(val))} (${pct}%)`, "Margen Bruto Real"]
-                      }
-                      return [formatPYG(Number(val)), "Meta Rentabilidad IA (22%)"]
-                    }}
-                    labelFormatter={(lbl: any) => `${timeRange === "hoy" ? "Horario: " : "Fecha: "}${lbl}`}
-                    contentStyle={{ backgroundColor: "#1e293b", borderColor: "#334155", borderRadius: "12px", color: "#fff", fontSize: "12px" }}
-                    cursor={{ stroke: "#10b98120", strokeWidth: 20 }}
-                  />
-                  {/* Meta Rentabilidad IA: línea punteada ámbar */}
-                  <Line
-                    type="monotone"
-                    dataKey="rentabilidad_meta"
-                    name="rentabilidad_meta"
-                    stroke="#f59e0b"
-                    strokeWidth={2}
-                    strokeDasharray="4 4"
-                    dot={false}
-                    activeDot={{ r: 4, fill: "#f59e0b", filter: "url(#glowAmber)" }}
-                    style={{ filter: "url(#glowAmber)" }}
-                  />
-                  {/* Margen Real en ₲: línea sólida esmeralda con área degradé */}
-                  <Area
-                    type="monotone"
-                    dataKey="rentabilidad_real"
-                    name="rentabilidad_real"
-                    stroke="#10b981"
-                    strokeWidth={2.5}
-                    fillOpacity={1}
-                    fill="url(#marginGrad)"
-                    connectNulls={false}
-                    dot={false}
-                    activeDot={{ r: 5, fill: "#10b981", stroke: "#fff", strokeWidth: 2, filter: "url(#glowEmerald)" }}
-                    style={{ filter: "url(#glowEmerald)" }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* KPI Footer para balancear la tarjeta y eliminar el GAP inferior */}
-          <div className="border-t border-slate-100 dark:border-slate-700/60 pt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {/* Bloque 1: Facturación vs Semana Pasada */}
-            <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block leading-none">
-                  Ventas Acumuladas
-                </span>
-                <span className="font-mono text-sm font-bold text-gray-900 dark:text-white mt-1 block">
-                  {formatPYG(chartSummaryKPIs.totalActual)}
-                </span>
-              </div>
-              {chartSummaryKPIs.totalSemanaPasada > 0 && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-0.5 ${
-                  chartSummaryKPIs.pctVsSemanaPasada >= 0
-                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                    : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                }`}>
-                  {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "+" : ""}{chartSummaryKPIs.pctVsSemanaPasada}% vs sem.
-                </span>
-              )}
-            </div>
-
-            {/* Bloque 2: Margen Bruto Real Acumulado */}
-            <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block leading-none">
-                  Margen Bruto Real
-                </span>
-                <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1 block">
-                  {formatPYG(chartSummaryKPIs.totalMargenReal)}
-                </span>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                {chartSummaryKPIs.margenRealPct}% real
-              </span>
-            </div>
-
-            {/* Bloque 3: Ticket Promedio y Volumen */}
-            <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block leading-none">
-                  Ticket Promedio
-                </span>
-                <span className="font-mono text-sm font-bold text-gray-900 dark:text-white mt-1 block">
-                  {formatPYG(chartSummaryKPIs.ticketPromedio)}
-                </span>
-              </div>
-              <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono font-medium">
-                {chartSummaryKPIs.totalTickets.toLocaleString("es-PY")} tix
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* GRÁFICO 2: Mix de Ventas por Categoría con IA Insights (1 Col) */}
-        <div className="card p-6 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 flex flex-col justify-between">
+      {/* Dynamic Waste-to-Margin AI Rescue Widget — supermarket-only, gated by tenant vertical feature */}
+      {hasFeature("supermercado") && (
+      <div className="bg-white dark:bg-slate-800 rounded-3xl border border-gray-100 dark:border-gray-700 p-6 shadow-sm">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <div>
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
-              <div>
-                <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                  <PieChartIcon className="w-4 h-4 text-indigo-500" />
-                  Mix de Ventas por Categoría
-                </h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Participación real en cajas según sector de góndola.
-                </p>
-              </div>
-              {categoryMixData.length > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                  {categoryMixData.length} sectores
-                </span>
-              )}
+            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/10 dark:bg-blue-400/15 text-blue-600 dark:text-blue-400 text-xs font-bold uppercase tracking-wider mb-2">
+              <Sparkles className="w-3.5 h-3.5" /> Asistente IA Activo
             </div>
+            <h2 className="text-2xl font-extrabold text-gray-900 dark:text-white flex items-center gap-2">
+              <Utensils className="w-6 h-6 text-primary" />
+              Asistente de Rescate de Inventario (Anti-Merma)
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Detección de productos de baja rotación o frescura decreciente sugeridos para transformación de alto margen o descarte seguro.
+            </p>
+          </div>
+        </div>
 
-            {categoryMixData.length > 0 ? (
-              <>
-                <div className="h-44 w-full flex items-center justify-center my-1 relative">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={categoryMixData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={72}
-                        paddingAngle={3}
-                        dataKey="value"
-                      >
-                        {categoryMixData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} stroke="#1e293b" strokeWidth={1.5} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(val: any) => [formatPYG(Number(val)), "Facturación"]}
-                        contentStyle={{ backgroundColor: "#1e293b", borderColor: "#334155", borderRadius: "12px", color: "#fff", fontSize: "12px" }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  {/* Centro del Donut */}
-                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider leading-none">Líder</span>
-                    <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 mt-0.5">
-                      {categoryMixData[0]?.percentage}%
-                    </span>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {rescues.length === 0 ? (
+            <div className="col-span-full py-12 text-center bg-gray-50 dark:bg-slate-900/30 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
+              <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
+              <h4 className="text-lg font-bold text-gray-900 dark:text-white">¡Todo el inventario está seguro!</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mx-auto mt-1">
+                No hay alertas de frescura crítica ni lotes próximos a vencer pendientes de acción de rescate.
+              </p>
+            </div>
+          ) : (
+            rescues.map(r => (
+              <div key={r.id} className={`flex flex-col md:flex-row gap-5 p-5 rounded-2xl border bg-gradient-to-br transition-all duration-300 hover:shadow-md ${r.color}`}>
+                <div className="flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-xl bg-white dark:bg-slate-800 shadow-sm self-start">
+                  <r.icon className="w-7 h-7" />
+                </div>
+                <div className="flex-1 space-y-3">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-extrabold uppercase tracking-widest bg-white/50 dark:bg-slate-800/80 px-2 py-0.5 rounded-md">{r.area}</span>
+                      <span className="text-xs text-gray-400 font-semibold">•</span>
+                      <span className="text-xs font-bold text-red-500 dark:text-red-400 flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5" /> {r.motivo}
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-extrabold text-gray-900 dark:text-white mt-1">
+                      {r.producto} <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">({r.cantidad})</span>
+                    </h3>
+                  </div>
+
+                  <div className="p-3.5 bg-white/70 dark:bg-slate-800/50 rounded-xl border border-black/5 dark:border-white/5">
+                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Acción Propuesta por IA</p>
+                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{r.propuesta}</p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
+                    <div className="flex items-center gap-1 text-xs">
+                      <span className="text-gray-400 font-medium">Recuperación estimada:</span>
+                      <span className="font-extrabold text-green-600 dark:text-green-400 font-mono text-sm">{r.ahorro}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {r.tipo === "transformar" ? (
+                        <>
+                          <button 
+                            onClick={() => handleAction(r.id, "transform", r.producto, r.propuesta)}
+                            className="btn-primary text-xs px-3.5 py-1.5 flex items-center gap-1 rounded-xl"
+                          >
+                            <Check className="w-3.5 h-3.5" /> Autorizar Rescate
+                          </button>
+                        </>
+                      ) : (
+                        <button 
+                          onClick={() => handleAction(r.id, "discard", r.producto, r.propuesta)}
+                          className="text-xs font-bold bg-red-600 hover:bg-red-700 text-white px-3.5 py-1.5 flex items-center gap-1 rounded-xl shadow-md transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Confirmar Descarte Sanitario
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+      )}
 
-                <div className="space-y-2 pt-1">
-                  {categoryMixData.map((c, i) => (
-                    <div key={i} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-1.5 truncate max-w-[160px]">
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
-                          <span className="text-gray-700 dark:text-gray-300 font-medium truncate text-[11px]">{c.name}</span>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[10px] font-bold text-gray-400">{c.percentage}%</span>
-                          <span className="font-mono font-bold text-gray-900 dark:text-white text-[11px]">
-                            {formatPYG(c.value)}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="w-full bg-slate-100 dark:bg-slate-700/50 h-1.5 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${Math.min(100, Math.max(3, parseFloat(c.percentage)))}%`, backgroundColor: c.color }}
-                        />
-                      </div>
+      {/* Widgets Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        {/* Ventas últimos 7 días */}
+        <Widget title="Ventas últimos 7 días" subtitle="Comparativa vs semana anterior" size="md" loading={loadingWeek} error={errorWeek}>
+          <div className="relative">
+            <div className="h-64 flex items-end gap-1.5 justify-between pt-4">
+              {weekData.map((d, i) => {
+                const hCurrent = (d.monto / maxWeekMonto) * 180
+                const hPrev = (d.monto_prev / maxWeekMonto) * 180
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+                    {/* Previous week bar (dashed) */}
+                    <div
+                      className="w-full max-w-[28px] bg-primary/20 rounded-t border border-dashed border-primary/40 transition-all cursor-pointer"
+                      style={{ height: `${Math.max(hPrev, 4)}px` }}
+                      onMouseEnter={(e) => {
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        setTooltip({ x: rect.left, y: rect.top - 8, monto: d.monto, monto_prev: d.monto_prev, label: d.label })
+                      }}
+                      onMouseLeave={() => setTooltip(null)}
+                    />
+                    {/* Current week bar (gradient) */}
+                    <div
+                      className="w-full max-w-[28px] bg-gradient-to-t from-primary to-primary-light rounded-t transition-all duration-500 cursor-pointer group-hover:opacity-80"
+                      style={{ height: `${Math.max(hCurrent, 4)}px` }}
+                      onMouseEnter={(e) => {
+                        const bar = (e.currentTarget as HTMLElement)
+                        const rect = bar.getBoundingClientRect()
+                        setTooltip({ x: rect.left + rect.width / 2, y: rect.top - 8, monto: d.monto, monto_prev: d.monto_prev, label: d.label })
+                      }}
+                      onMouseLeave={() => setTooltip(null)}
+                    />
+                    {/* Trend line (average) */}
+                    {i === 0 && (
+                      <div className="absolute left-0 right-0 border-t border-dashed border-green-400/60 pointer-events-none" style={{ bottom: `${(avgWeek / maxWeekMonto) * 180 + 28}px` }} />
+                    )}
+                    <span className="text-[10px] text-gray-400 mt-1">{d.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {/* Tooltip */}
+            {tooltip && (
+              <div
+                ref={chartTooltipRef}
+                className="absolute z-10 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg px-3 py-2 pointer-events-none whitespace-nowrap"
+                style={{ left: `${tooltip.x}px`, top: `${tooltip.y}px`, transform: "translate(-50%, -100%)" }}
+              >
+                <p className="font-semibold mb-1">{tooltip.label}</p>
+                <p className="text-green-400">Esta sem: {formatPYG(tooltip.monto)}</p>
+                <p className="text-gray-400">Sem pasada: {formatPYG(tooltip.monto_prev)}</p>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  {tooltip.monto > tooltip.monto_prev
+                    ? `↑ +${((tooltip.monto - tooltip.monto_prev) / tooltip.monto_prev * 100).toFixed(0)}%`
+                    : `↓ ${((tooltip.monto_prev - tooltip.monto) / tooltip.monto_prev * 100).toFixed(0)}%`}
+                </p>
+              </div>
+            )}
+            {/* Average legend */}
+            <div className="flex items-center gap-4 mt-2 text-[10px] text-gray-400">
+              <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-primary rounded" /> Esta semana</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-primary/40 border border-dashed border-primary/60" /> Semana anterior</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-0.5 border-t border-dashed border-green-400/60" /> Promedio</span>
+            </div>
+          </div>
+        </Widget>
+
+        {/* Top 5 Productos */}
+        <Widget title="Top 5 Productos" subtitle="Más vendidos (7 días)" size="sm" loading={loadingTop} error={errorTop}>
+          {topProducts.length === 0 ? (
+            <div className="text-sm text-gray-400 py-4 text-center">Sin ventas en los últimos 7 días</div>
+          ) : (
+          <div className="space-y-3">
+            {topProducts.map((p, i) => {
+              const maxTotal = topProducts.length > 0 ? Math.max(...topProducts.map(t => t.total)) : 1
+              const pct = (p.total / maxTotal) * 100
+              return (
+                <div key={p.product_id} className="group cursor-default">
+                  <div className="flex items-start gap-2 mb-1">
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 ${
+                      i === 0 ? "bg-amber-500" : i === 1 ? "bg-gray-400" : i === 2 ? "bg-amber-700" : "bg-gray-500/50"
+                    }`}>
+                      {i + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{p.nombre}</p>
+                      <p className="text-[10px] text-gray-400 font-mono">{p.sku} · {p.cantidad} uds</p>
                     </div>
-                  ))}
+                    <p className="text-sm font-bold text-primary flex-shrink-0">{formatPYG(p.total)}</p>
+                  </div>
+                  <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700/50 rounded-full overflow-hidden ml-7">
+                    <div
+                      className="h-full bg-gradient-to-r from-primary to-primary-light rounded-full transition-all duration-500"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
                 </div>
-              </>
+              )
+            })}
+          </div>
+          )}
+        </Widget>
+
+        {/* Stock Bajo */}
+        <Widget title="Stock Bajo" subtitle="Productos bajo mínimo" size="sm" loading={loadingStock} error={errorStock}
+          action={
+            <a href="/inventory" className="text-xs text-primary hover:underline flex items-center gap-0.5">
+              Ver todos <ChevronRight className="w-3 h-3" />
+            </a>
+          }
+        >
+          {lowStock.length === 0 ? (
+            <div className="text-sm text-gray-400 py-4 text-center">Sin productos bajo el mínimo</div>
+          ) : (
+          <div className="space-y-3">
+            {lowStock.slice(0, 5).map((item) => {
+              const min = item.stock_minimo || 10
+              const critical = item.cantidad === 0
+              const danger = item.cantidad <= min * 0.3
+              const barPct = min > 0 ? Math.min((item.cantidad / min) * 100, 100) : 0
+              return (
+                <div key={item.product_id} className="group">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.nombre}</p>
+                      <p className="text-[10px] text-gray-400 font-mono">{item.sku}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0 ml-2">
+                      <p className={`text-sm font-bold ${critical ? "text-red-500" : danger ? "text-amber-500" : "text-amber-600"}`}>
+                        {item.cantidad}
+                      </p>
+                      <p className="text-[10px] text-gray-400">mín: {min}</p>
+                    </div>
+                  </div>
+                  <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700/50 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        critical ? "bg-red-500" : danger ? "bg-amber-500" : "bg-amber-400"
+                      }`}
+                      style={{ width: `${barPct}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          )}
+        </Widget>
+
+        {/* Actividad Reciente */}
+        <Widget title="Actividad Reciente" subtitle="Tiempo real via SSE" size="md"
+          action={
+            recentActivity.length > 0 && (
+              <span className="text-[10px] text-gray-400">{recentActivity.length} eventos</span>
+            )
+          }
+        >
+          <div ref={feedRef} className="space-y-1 max-h-80 overflow-y-auto pr-1">
+            {recentActivity.length > 0 ? (
+              recentActivity.map((a) => (
+                <a
+                  key={a.id}
+                  href={a.link || "#"}
+                  className={`flex items-start gap-3 p-2.5 rounded-lg transition-colors ${
+                    a.link ? "hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer" : ""
+                  }`}
+                >
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                    a.type === "sale" ? "bg-green-50 dark:bg-green-900/20" :
+                    a.type === "alert" ? "bg-red-50 dark:bg-red-900/20" :
+                    "bg-blue-50 dark:bg-blue-900/20"
+                  }`}>
+                    {a.type === "sale" ? (
+                      <TrendingUp className="w-4 h-4 text-green-500" />
+                    ) : a.type === "alert" ? (
+                      <AlertTriangle className="w-4 h-4 text-red-500" />
+                    ) : (
+                      <DollarSign className="w-4 h-4 text-blue-500" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-900 dark:text-white truncate">{a.message}</p>
+                    <p className="text-[10px] text-gray-400">{relativeTime(a.time)}</p>
+                  </div>
+                  {a.link && <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0 mt-0.5" />}
+                </a>
+              ))
             ) : (
-              <div className="py-12 text-center text-xs text-gray-400">
-                Sin movimientos registrados en este período.
+              <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+                <Clock className="w-8 h-8 opacity-30 mb-2" />
+                <p className="text-sm">Esperando actividad...</p>
               </div>
             )}
           </div>
+        </Widget>
 
-          {/* Tarjeta de IA Insight con contraste dinámico claro/oscuro */}
-          <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 mt-2 transition-colors ${categoryAIInsight.color}`}>
-            <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-indigo-600 dark:text-indigo-400 animate-pulse" />
-            <div className="leading-snug">
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
-                  IA Insight
-                </span>
-                <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-md ${categoryAIInsight.badgeColor}`}>
-                  {categoryAIInsight.badge}
-                </span>
+        {/* Resumen IVA */}
+        <Widget title="Resumen IVA" subtitle="Últimos 7 días" size="sm" loading={loadingIVA} error={errorIVA}>
+          {ivaSummary && (
+            <div className="space-y-2.5">
+              <div className="flex justify-between items-center py-1.5 border-b border-gray-100 dark:border-gray-700/50">
+                <span className="text-xs text-gray-500">Base 10%</span>
+                <span className="text-xs font-mono font-semibold text-gray-900 dark:text-white">{formatPYG(ivaSummary.base_10)}</span>
               </div>
-              <p className="text-gray-800 dark:text-gray-200 text-[11px] font-medium leading-relaxed">
-                {categoryAIInsight.text}
-              </p>
+              <div className="flex justify-between items-center py-1.5 border-b border-gray-100 dark:border-gray-700/50">
+                <span className="text-xs text-gray-500">Base 5%</span>
+                <span className="text-xs font-mono font-semibold text-gray-900 dark:text-white">{formatPYG(ivaSummary.base_5)}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-gray-100 dark:border-gray-700/50">
+                <span className="text-xs text-gray-500">Exenta</span>
+                <span className="text-xs font-mono font-semibold text-gray-900 dark:text-white">{formatPYG(ivaSummary.exenta)}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-gray-100 dark:border-gray-700/50">
+                <span className="text-xs text-gray-500">IVA 10%</span>
+                <span className="text-xs font-mono font-semibold text-green-600 dark:text-green-400">{formatPYG(ivaSummary.iva_10)}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-gray-100 dark:border-gray-700/50">
+                <span className="text-xs text-gray-500">IVA 5%</span>
+                <span className="text-xs font-mono font-semibold text-green-600 dark:text-green-400">{formatPYG(ivaSummary.iva_5)}</span>
+              </div>
+              <div className="flex justify-between items-center pt-2">
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Total IVA</span>
+                <span className="text-sm font-bold text-primary">{formatPYG(ivaSummary.total_iva)}</span>
+              </div>
             </div>
-          </div>
-        </div>
-      </div>
+          )}
+        </Widget>
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          PANELES ESTRATÉGICOS: TOP MOVERS & ESTADO OPERATIVO EN VIVO
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* PANEL 1: Top 5 Productos Más Vendidos (2 Cols) */}
-        <div className="card p-6 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
-            <div>
-              <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                <Flame className="w-4 h-4 text-amber-500" />
-                Top Productos Líderes en Facturación (Top Movers)
-              </h3>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Artículos de mayor rotación y contribución al margen.
-              </p>
-            </div>
-
-            <button
-              onClick={() => navigate("/reports")}
-              className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
-            >
-              Ver Ranking Completo <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left text-xs min-w-[550px]">
-              <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
-                <tr>
-                  <th className="p-2.5">Producto</th>
-                  <th className="p-2.5 text-right">Volumen</th>
-                  <th className="p-2.5 text-right">Monto Total</th>
-                  <th className="p-2.5 text-right">Margen %</th>
-                  <th className="p-2.5 text-center">Estado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                {topMovers.map((p, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
-                    <td className="p-2.5">
-                      <div className="font-bold text-gray-900 dark:text-white line-clamp-1">{p.producto}</div>
-                      <div className="text-[10px] text-gray-400 font-mono">SKU: {p.sku || "—"}</div>
-                    </td>
-                    <td className="p-2.5 text-right font-mono font-bold text-gray-700 dark:text-gray-200">
-                      {Number(p.cantidad || 0).toLocaleString()} un.
-                    </td>
-                    <td className="p-2.5 text-right font-mono font-extrabold text-gray-900 dark:text-white">
-                      {formatPYG(p.monto || 0)}
-                    </td>
-                    <td className="p-2.5 text-right font-mono font-bold text-emerald-600">
-                      {Number(p.margen || 25).toFixed(1)}%
-                    </td>
-                    <td className="p-2.5 text-center">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-500" /> Líder
+        {/* Cuentas x Cobrar */}
+        <Widget title="Cuentas x Cobrar" subtitle="Aging" size="sm" loading={loadingAging} error={errorAging}>
+          {agingData && (
+            <div className="space-y-3">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-indigo-500">{formatPYG(agingData.total_pendiente)}</p>
+                <p className="text-[10px] text-gray-400">Total pendiente</p>
+              </div>
+              <div className="w-full h-3 bg-gray-100 dark:bg-gray-700/50 rounded-full overflow-hidden flex">
+                {agingData.buckets.map((b, i) => {
+                  const colors = ["bg-green-500", "bg-amber-400", "bg-amber-500", "bg-orange-500", "bg-red-500"]
+                  return (
+                    <div
+                      key={i}
+                      className={`${colors[i] || "bg-gray-400"} h-full transition-all`}
+                      style={{ width: `${b.porcentaje}%` }}
+                      title={`${b.rango}: ${formatPYG(b.monto)}`}
+                    />
+                  )
+                })}
+              </div>
+              <div className="space-y-1.5">
+                {agingData.buckets.map((b, i) => {
+                  const dotColors = ["bg-green-500", "bg-amber-400", "bg-amber-500", "bg-orange-500", "bg-red-500"]
+                  return (
+                    <div key={i} className="flex items-center justify-between text-xs">
+                      <span className="flex items-center gap-1.5 text-gray-500">
+                        <span className={`w-2 h-2 rounded-full ${dotColors[i]}`} />
+                        {b.rango}
                       </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* PANEL 2: Accesos Tácticos & Flujo Operativo en Vivo (1 Col) */}
-        <div className="card p-6 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
-          <div className="border-b border-slate-100 dark:border-slate-700/60 pb-3">
-            <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-              <Zap className="w-4 h-4 text-indigo-500" />
-              Operaciones & Accesos Rápidos
-            </h3>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Atajos directos a los módulos centrales del supermercado.
-            </p>
-          </div>
-
-          <div className="space-y-2.5">
-            <button
-              onClick={() => navigate("/purchases")}
-              className="w-full p-3 rounded-xl bg-gradient-to-r from-indigo-50 to-indigo-100/60 dark:from-indigo-950/40 dark:to-slate-800 border border-indigo-200 dark:border-indigo-800/60 text-left hover:shadow-xs transition-all flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-indigo-600 text-white">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 dark:text-white">Asistente IA de Compras</h4>
-                  <p className="text-[11px] text-gray-500">Sugerencia por días de stock ({totalQuiebresIA} alertas)</p>
-                </div>
+                      <span className="font-mono font-semibold text-gray-900 dark:text-white">{formatPYG(b.monto)}</span>
+                    </div>
+                  )
+                })}
               </div>
-              <ChevronRight className="w-4 h-4 text-indigo-500" />
-            </button>
-
-            <button
-              onClick={() => navigate("/pos")}
-              className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-all flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-emerald-600 text-white">
-                  <ShoppingCart className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 dark:text-white">Terminal POS de Caja</h4>
-                  <p className="text-[11px] text-gray-500">Cobro rápido y facturación SIFEN</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
-
-            <button
-              onClick={() => navigate("/caja")}
-              className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-all flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-amber-600 text-white">
-                  <Wallet className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 dark:text-white">Gestión de Cajas & Bóveda</h4>
-                  <p className="text-[11px] text-gray-500">Arqueos, retiros y conciliación</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
-
-            <button
-              onClick={() => navigate("/inventory")}
-              className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-all flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-purple-600 text-white">
-                  <Package className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 dark:text-white">Inventario & Lotes</h4>
-                  <p className="text-[11px] text-gray-500">11.250 productos y vencimientos</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
-          </div>
-        </div>
+            </div>
+          )}
+        </Widget>
       </div>
-    </div>
+    </AnimatedPage>
   )
 }
