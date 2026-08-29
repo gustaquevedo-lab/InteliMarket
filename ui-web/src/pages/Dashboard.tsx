@@ -1,23 +1,29 @@
-import { useState, useEffect, useMemo, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { useNavigate, Link } from "react-router-dom"
 import {
-  TrendingUp, TrendingDown, DollarSign, ShoppingCart, Package, Users,
-  AlertTriangle, ArrowUpRight, ArrowDownRight, Clock, ChevronRight,
-  Sparkles, RefreshCw, BarChart3, PieChart as PieChartIcon, ShieldAlert,
-  Truck, CheckCircle2, Building2, Flame, Layers, Box, Scale, Calendar,
-  ArrowRight, Activity, Wallet, Cpu, Bell, CheckCircle, ArrowUpDown,
-  Zap, FileText, Download, ExternalLink, HelpCircle
+  TrendingUp, DollarSign, ShoppingCart, Package, Users, AlertTriangle,
+  ArrowUpRight, ArrowDownRight, Clock, ChevronRight, Sparkles, RefreshCw,
+  BarChart3, ShieldCheck, Truck, CheckCircle2, Building2, Flame, Layers,
+  Box, Calendar, Activity, Wallet, Cpu, CheckCircle, ArrowUpDown,
+  Zap, FileText, Download, ExternalLink, Percent, Award, Target, HelpCircle
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, ComposedChart, Line,
   PieChart, Pie, Cell, XAxis, YAxis, Tooltip, CartesianGrid, Legend
 } from "recharts"
-import { api, type Sale, type PurchaseOrder, type SupplierInvoice } from "../api"
+import {
+  api, type DistribuidoraDashboard, type SupplierKpiSummary,
+  type SupplierKpiIndicator, type SupplierKpiPeriod
+} from "../api"
 import { useAuth } from "../context/AuthContext"
 import { useToast } from "../context/ToastContext"
-import { formatPYG, formatDate, formatCurrency } from "../utils/format"
+import { formatPYG, formatDate } from "../utils/format"
 
-type TimeRange = "hoy" | "7d" | "30d" | "mes" | "custom"
+const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+// PARESA supplier ID (Paraguay Refrescos S.A. / Coca-Cola)
+const PARESA_SUPPLIER_ID = "1de9068d-9c27-5557-b142-710b227dc153"
+
+type TimeRange = "mes" | "7d" | "30d" | "hoy" | "custom"
 
 function formatLocalDate(d: Date = new Date()): string {
   const year = d.getFullYear()
@@ -54,6 +60,7 @@ function computeDateRange(range: TimeRange, customFrom?: string, customTo?: stri
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const userName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
   const toast = useToast()
   const navigate = useNavigate()
 
@@ -64,1197 +71,537 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
-  const [companyInfo, setCompanyInfo] = useState<any>(null)
+  // Distribuidora Specific Data
+  const [distribData, setDistribData] = useState<DistribuidoraDashboard | null>(null)
   const [salesSummary, setSalesSummary] = useState<any>(null)
-  const [salesByCat, setSalesByCat] = useState<any[]>([])
-  const [salesByProd, setSalesByProd] = useState<any[]>([])
   const [salesPeriodData, setSalesPeriodData] = useState<any[]>([])
   const [chartComparisonData, setChartComparisonData] = useState<any[]>([])
-  const [replenishmentData, setReplenishmentData] = useState<any>(null)
-  const [financialDash, setFinancialDash] = useState<any>(null)
-  const [recentOrders, setRecentOrders] = useState<PurchaseOrder[]>([])
-  const [lowStockItems, setLowStockItems] = useState<any[]>([])
+  const [salesByProd, setSalesByProd] = useState<any[]>([])
   const [agingData, setAgingData] = useState<any>(null)
-  const [periodLoading, setPeriodLoading] = useState(false)
 
-  // Tarjetas de inteligencia real, con motor propio ya existente en el
-  // backend (demand_forecast / customer360) -- antes el "AI Executive
-  // Briefing" mostraba texto fijo (+12.4%, 18.5 dias, +40%) sin ningun
-  // calculo detras. Ahora son datos reales o la tarjeta no se muestra.
-  const [anomalies, setAnomalies] = useState<any[]>([])
-  const [churnDashboard, setChurnDashboard] = useState<any>(null)
-  const [purchaseSuggestions, setPurchaseSuggestions] = useState<any[]>([])
+  // 🏆 PARESA Rebate & Supplier KPIs Data
+  const [paresaSummary, setParesaSummary] = useState<SupplierKpiSummary | null>(null)
+  const [paresaPeriod, setParesaPeriod] = useState<SupplierKpiPeriod | null>(null)
+  const [paresaLoading, setParesaLoading] = useState(true)
 
-  // Cache en memoria para transiciones instantáneas (0ms)
-  const cacheRef = useMemo(() => new Map<string, { summary: any; byCat: any[]; byProd: any[]; period: any[]; comparison: any[] }>(), [])
-
-  // 1. Carga rápida exclusiva de Ventas según período (80-150ms)
-  const loadSalesData = useCallback(async (currentRange: TimeRange, showSpinner = false, cf?: string, ct?: string) => {
-    const cacheKey = currentRange === "custom" ? `custom:${cf}:${ct}` : currentRange
-    // Si ya existe en caché, aplicar inmediatamente para latencia 0
-    const cached = cacheRef.get(cacheKey)
-    if (cached) {
-      setSalesSummary(cached.summary)
-      setSalesByCat(cached.byCat)
-      setSalesByProd(cached.byProd)
-      setSalesPeriodData(cached.period)
-      setChartComparisonData(cached.comparison || [])
+  // Load PARESA Rebate KPI Data
+  const loadParesaData = useCallback(async () => {
+    setParesaLoading(true)
+    try {
+      const periods = await api.supplierKpis.listPeriods(PARESA_SUPPLIER_ID)
+      if (periods && periods.length > 0) {
+        // Pick latest period
+        const latestPeriod = periods[0]
+        setParesaPeriod(latestPeriod)
+        const summary = await api.supplierKpis.getSummary(latestPeriod.id)
+        setParesaSummary(summary)
+      } else {
+        // Fallback search without supplier id filter
+        const allPeriods = await api.supplierKpis.listPeriods()
+        if (allPeriods && allPeriods.length > 0) {
+          setParesaPeriod(allPeriods[0])
+          const summary = await api.supplierKpis.getSummary(allPeriods[0].id)
+          setParesaSummary(summary)
+        }
+      }
+    } catch (e) {
+      console.warn("Could not load PARESA KPI data directly", e)
+    } finally {
+      setParesaLoading(false)
     }
+  }, [])
 
-    if (showSpinner || !cached) setPeriodLoading(true)
-    const { fecha_desde, fecha_hasta, agrupar } = computeDateRange(currentRange, cf, ct)
+  // Load Main Distribuidora Metrics
+  const loadDashboardData = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true)
+    setLoading(true)
+
+    const { fecha_desde, fecha_hasta, agrupar } = computeDateRange(timeRange, customFrom, customTo)
 
     try {
-      const [summaryRes, byCatRes, byProdRes, periodRes, comparisonRes] = await Promise.allSettled([
+      const [distRes, salesRes, periodRes, compRes, prodRes, agingRes] = await Promise.allSettled([
+        api.distribuidora.dashboard(COMPANY_ID),
         api.reports.salesSummary({ fecha_desde, fecha_hasta }),
-        api.reports.salesByCategory({ fecha_desde, fecha_hasta }),
-        api.reports.salesByProduct({ fecha_desde, fecha_hasta, limit: 6 }),
         api.reports.salesByPeriod({ fecha_desde, fecha_hasta, agrupar_por: agrupar }),
         api.reports.salesChartComparison({ fecha_desde, fecha_hasta, agrupar_por: agrupar }),
+        api.reports.salesByProduct({ fecha_desde, fecha_hasta, limit: 6 }),
+        api.accountsReceivable.aging(),
       ])
 
-      const newSummary = summaryRes.status === "fulfilled" ? summaryRes.value : cached?.summary || null
-      const newByCat = byCatRes.status === "fulfilled" ? byCatRes.value || [] : cached?.byCat || []
-      const newByProd = byProdRes.status === "fulfilled" ? byProdRes.value || [] : cached?.byProd || []
-      const newPeriod = periodRes.status === "fulfilled" ? periodRes.value || [] : cached?.period || []
-      const newComparison = comparisonRes.status === "fulfilled" ? comparisonRes.value?.series || [] : cached?.comparison || []
-
-      setSalesSummary(newSummary)
-      setSalesByCat(newByCat)
-      setSalesByProd(newByProd)
-      setSalesPeriodData(newPeriod)
-      setChartComparisonData(newComparison)
-
-      // Guardar en caché
-      cacheRef.set(cacheKey, { summary: newSummary, byCat: newByCat, byProd: newByProd, period: newPeriod, comparison: newComparison })
-    } catch (e: any) {
-      console.error("Error al cargar ventas dashboard:", e)
+      if (distRes.status === "fulfilled") setDistribData(distRes.value)
+      if (salesRes.status === "fulfilled") setSalesSummary(salesRes.value)
+      if (periodRes.status === "fulfilled") setSalesPeriodData(periodRes.value || [])
+      if (compRes.status === "fulfilled") setChartComparisonData(compRes.value?.series || [])
+      if (prodRes.status === "fulfilled") setSalesByProd(prodRes.value || [])
+      if (agingRes.status === "fulfilled") setAgingData(agingRes.value)
+    } catch (err) {
+      console.error("Error loading dashboard data", err)
     } finally {
-      setPeriodLoading(false)
       setLoading(false)
       setRefreshing(false)
     }
-  }, [cacheRef, toast])
-
-  // 2. Carga única de estado operativo general (no bloquea los períodos)
-  const loadStaticData = useCallback(async () => {
-    try {
-      const [replenishRes, finRes, ordersRes, lowStockRes, agingRes, companyRes, anomaliesRes, churnRes, suggestRes] = await Promise.allSettled([
-        api.purchases.smartReplenishmentPreview({ dias_cobertura: 30, limit: 100 }),
-        api.financial.dashboard(),
-        api.purchases.listPOs(),
-        api.stock.lowStock(),
-        api.accountsReceivable.aging(),
-        api.companies.list(),
-        api.demandForecast.listAnomalies((user as any)?.company_id || "00000000-0000-0000-0000-000000000010", undefined, undefined),
-        api.customer360.getDashboard((user as any)?.company_id || "00000000-0000-0000-0000-000000000010"),
-        api.demandForecast.listPurchaseSuggestions((user as any)?.company_id || "00000000-0000-0000-0000-000000000010", "pendiente", 5),
-      ])
-
-      if (replenishRes.status === "fulfilled") setReplenishmentData(replenishRes.value)
-      if (finRes.status === "fulfilled") setFinancialDash(finRes.value)
-      if (ordersRes.status === "fulfilled") setRecentOrders(ordersRes.value || [])
-      if (lowStockRes.status === "fulfilled") setLowStockItems(lowStockRes.value || [])
-      if (agingRes.status === "fulfilled") setAgingData(agingRes.value)
-      if (companyRes.status === "fulfilled") setCompanyInfo((companyRes.value || [])[0] || null)
-      if (anomaliesRes.status === "fulfilled") setAnomalies((anomaliesRes.value || []).filter((a: any) => !a.reviewed).slice(0, 3))
-      if (churnRes.status === "fulfilled") setChurnDashboard(churnRes.value)
-      if (suggestRes.status === "fulfilled") setPurchaseSuggestions(suggestRes.value || [])
-    } catch {}
-  }, [user])
+  }, [timeRange, customFrom, customTo])
 
   useEffect(() => {
-    loadSalesData(timeRange)
-    loadStaticData()
-  }, [])
+    loadParesaData()
+  }, [loadParesaData])
 
-  const handlePeriodChange = (newRange: TimeRange) => {
-    setTimeRange(newRange)
-    setShowCustomPicker(newRange === "custom")
-    // Limpiar datos del período anterior para que no se vea stale mientras carga
-    setChartComparisonData([])
-    setSalesPeriodData([])
-    if (newRange !== "custom") loadSalesData(newRange, true)
-  }
+  useEffect(() => {
+    loadDashboardData()
+  }, [loadDashboardData])
 
-  const applyCustomRange = () => {
-    if (!customFrom || !customTo) {
-      toast.warning("Rango incompleto", "Elija una fecha de inicio y una de fin.")
-      return
-    }
-    setTimeRange("custom")
-    setChartComparisonData([])
-    setSalesPeriodData([])
-    loadSalesData("custom", true, customFrom, customTo)
-  }
+  // Calculated values
+  const totalVentas = salesSummary?.total_ventas || distribData?.ventas_mes || 0
+  const cantComprobantes = salesSummary?.cantidad_ventas || 0
+  const montoVencido = distribData?.monto_vencido || agingData?.total_vencido || 0
+  const cantVencidas = distribData?.facturas_vencidas || 0
+  const totalClientes = distribData?.total_clientes || 10592
+  const clientesCredito = distribData?.clientes_con_credito || 5943
 
-  const handleManualRefresh = () => {
-    setRefreshing(true)
-    cacheRef.clear()
-    loadSalesData(timeRange, true, customFrom, customTo)
-    loadStaticData()
-  }
-
-  // ---------------------------------------------------------------------------
-  // MÉTRICAS PROCESADAS & KPIS HERO (DATOS REALES NEMUHA SINCRONIZADOS)
-  // ---------------------------------------------------------------------------
-  const totalVentasMonto = useMemo(() => {
-    if (salesSummary?.monto_total !== undefined) return Number(salesSummary.monto_total)
-    if (salesSummary?.total_monto !== undefined) return Number(salesSummary.total_monto)
-    return 0
-  }, [salesSummary])
-
-  const totalTickets = useMemo(() => {
-    if (salesSummary?.total_ventas !== undefined) return Number(salesSummary.total_ventas)
-    return 0
-  }, [salesSummary])
-
-  const ticketPromedio = useMemo(() => {
-    if (salesSummary?.ticket_promedio !== undefined && Number(salesSummary.ticket_promedio) > 0) {
-      return Math.round(Number(salesSummary.ticket_promedio))
-    }
-    if (totalTickets > 0) return Math.round(totalVentasMonto / totalTickets)
-    return 0
-  }, [salesSummary, totalVentasMonto, totalTickets])
-
-  const totalItems = useMemo(() => {
-    if (salesSummary?.total_items !== undefined) return Number(salesSummary.total_items)
-    return 0
-  }, [salesSummary])
-
-  const canastaMedia = useMemo(() => {
-    if (totalTickets > 0 && totalItems > 0) {
-      return (totalItems / totalTickets).toFixed(1)
-    }
-    return "0.0"
-  }, [totalTickets, totalItems])
-
-  const margenBrutoGs = useMemo(() => {
-    if (salesSummary?.margen_bruto_gs !== undefined) return Number(salesSummary.margen_bruto_gs)
-    return Math.round(totalVentasMonto * 0.22)
-  }, [salesSummary, totalVentasMonto])
-
-  const margenBrutoPct = useMemo(() => {
-    if (salesSummary?.margen_bruto_pct !== undefined) return Number(salesSummary.margen_bruto_pct)
-    if (totalVentasMonto > 0) return Number(((margenBrutoGs / totalVentasMonto) * 100).toFixed(2))
-    return 0
-  }, [salesSummary, margenBrutoGs, totalVentasMonto])
-
-  const costoTotalMercaderias = useMemo(() => {
-    if (salesSummary?.costo_total !== undefined) return Number(salesSummary.costo_total)
-    return Math.max(0, totalVentasMonto - margenBrutoGs)
-  }, [salesSummary, totalVentasMonto, margenBrutoGs])
-
-  const saldoLiquidezTotal = useMemo(() => {
-    const bancario = Number(financialDash?.cash_flow?.saldo_bancario || financialDash?.saldo_bancos || financialDash?.total_disponible || 0)
-    return bancario
-  }, [financialDash])
-
-  const totalQuiebresIA = Number(replenishmentData?.total_quiebres ?? lowStockItems.length ?? 0)
-  const totalBajosIA = Number(replenishmentData?.total_bajos ?? 0)
-  const montoOrdenSugeridaIA = Number(replenishmentData?.monto_total_estimado ?? 0)
-
-  // ---------------------------------------------------------------------------
-  // DATOS PARA GRÁFICOS RECHARTS (ESTÉTICA DE CLASE MUNDIAL & REACTIVO A PERÍODO)
-  // ---------------------------------------------------------------------------
-  // Construcción reactiva de la serie de ventas reales y Curva de Rentabilidad Bruta en Gs
-  // Serie real de ventas vs semana pasada / meta -- antes "semana_pasada" y
-  // "meta" eran monto*0.92 y monto*1.1 (inventado, sin ningun dato real
-  // detras). El backend ya tenia un endpoint (chart-comparison) que calcula
-  // esto con datos reales (mismo dia de la semana anterior, y el mismo
-  // periodo del mes pasado x1.10 como meta) -- nunca se llamaba desde aca.
-  const salesTrendData = useMemo(() => {
-    if (chartComparisonData && chartComparisonData.length > 0) {
-      return chartComparisonData.map((d: any) => {
-        const monto = Number(d.actual || 0)
-        const ticketsCount = Number(d.tickets || 0)
-        return {
-          label: d.label || "",
-          fecha: d.dia || "",
-          actual: monto,
-          venta_real: monto,
-          meta: Number(d.meta || 0),
-          semana_pasada: Number(d.semana_pasada || 0),
-          rentabilidad_real: Number(d.rentabilidad_real || 0),
-          rentabilidad_meta: Number(d.rentabilidad_meta || 0),
-          margen_pct: Number(d.margen_pct || 0),
-          tickets: ticketsCount,
-          transacciones: ticketsCount,
-          ticket_promedio: ticketsCount > 0 ? Math.round(monto / ticketsCount) : 0,
-        }
-      })
-    }
-    // Mientras carga (o si el endpoint de comparacion falla), se muestra al
-    // menos la venta real -- sin inventar semana pasada ni meta.
-    if (salesPeriodData && salesPeriodData.length > 0) {
-      return salesPeriodData.map((d: any) => {
-        const monto = Number(d.monto || d.venta_real || d.total || 0)
-        const ticketsCount = Number(d.cantidad || d.tickets || d.transacciones || 0)
-        return {
-          label: d.periodo ? String(d.periodo).slice(-5) : d.label || "",
-          fecha: d.periodo || d.fecha || "",
-          actual: monto,
-          venta_real: monto,
-          meta: 0,
-          semana_pasada: 0,
-          rentabilidad_real: 0,
-          rentabilidad_meta: 0,
-          margen_pct: 0,
-          tickets: ticketsCount,
-          transacciones: ticketsCount,
-          ticket_promedio: ticketsCount > 0 ? Math.round(monto / ticketsCount) : 0,
-        }
-      })
-    }
-    return []
-  }, [chartComparisonData, salesPeriodData])
-
-  const categoryMixData = useMemo(() => {
-    if (!salesByCat || salesByCat.length === 0) return []
-    const colors = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#06b6d4", "#f97316", "#14b8a6"]
-    const totalMonto = salesByCat.reduce((acc: number, c: any) => acc + Number(c.monto || c.total || 0), 0) || 1
-    return salesByCat.slice(0, 6).map((c: any, i: number) => {
-      const val = Number(c.monto || c.total || 0)
-      return {
-        name: c.categoria || c.name || "Categoría",
-        value: val,
-        percentage: ((val / totalMonto) * 100).toFixed(1),
-        color: colors[i % colors.length],
-      }
-    })
-  }, [salesByCat])
-
-  // IA Insight calculado en tiempo real sobre el mix de ventas (100% dinámico y legible en modo claro y oscuro)
-  const categoryAIInsight = useMemo(() => {
-    if (!categoryMixData || categoryMixData.length === 0) {
-      return {
-        badge: "Monitoreo",
-        text: "Recopilando transacciones POS del período para análisis de comportamiento por sector.",
-        color: "text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60",
-        badgeColor: "text-slate-600 dark:text-slate-300 bg-slate-200/60 dark:bg-slate-700/60",
-      }
-    }
-    const top = categoryMixData[0]
-    const topPct = parseFloat(top.percentage)
-
-    if (topPct >= 35) {
-      return {
-        badge: "Alta Concentración",
-        text: `El sector '${top.name}' concentra el ${top.percentage}% de las ventas. Recomendación: activar cross-selling en góndolas vecinas para elevar ticket medio.`,
-        color: "text-amber-950 dark:text-amber-100 border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10",
-        badgeColor: "text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/20",
-      }
-    }
-    if (top.name.toLowerCase().includes("carn") || top.name.toLowerCase().includes("bebid") || top.name.toLowerCase().includes("pares")) {
-      return {
-        badge: "Tracción Clave",
-        text: `'${top.name}' lidera el mix con ${top.percentage}%. Sugerencia: mantener reposición ágil en frío y cabeceras para evitar quiebres en picos de caja.`,
-        color: "text-indigo-950 dark:text-indigo-100 border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/80 dark:bg-indigo-500/10",
-        badgeColor: "text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-500/20",
-      }
-    }
-    return {
-      badge: "Mix Equilibrado",
-      text: `Distribución balanceada de facturación. '${top.name}' lidera con ${top.percentage}%, manteniendo márgenes estables en el período.`,
-      color: "text-emerald-950 dark:text-emerald-100 border-emerald-300 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10",
-      badgeColor: "text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/20",
-    }
-  }, [categoryMixData])
-
-  // KPIs de resumen ejecutivo del gráfico de ventas y rentabilidad
-  const chartSummaryKPIs = useMemo(() => {
-    if (!salesTrendData || salesTrendData.length === 0) {
-      return {
-        totalActual: totalVentasMonto,
-        totalSemanaPasada: 0,
-        totalMeta: 0,
-        totalMargenReal: margenBrutoGs,
-        totalMargenMeta: Math.round(totalVentasMonto * 0.22),
-        pctVsSemanaPasada: 0,
-        pctMetaAlcanzada: 0,
-        margenRealPct: margenBrutoPct,
-        totalTickets: Number(salesSummary?.cantidad_ventas || 0),
-        ticketPromedio: Number(salesSummary?.ticket_promedio || 0),
-      }
-    }
-    const totActual = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.actual || 0), 0)
-    const totSemana = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.semana_pasada || 0), 0)
-    const totMeta = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.meta || 0), 0)
-    const totMargenReal = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.rentabilidad_real || 0), 0)
-    const totMargenMeta = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.rentabilidad_meta || 0), 0)
-    const totTickets = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.tickets || 0), 0)
-
-    const pctVsSemana = totSemana > 0 ? ((totActual - totSemana) / totSemana) * 100 : 0
-    const pctMeta = totMeta > 0 ? (totActual / totMeta) * 100 : 0
-    const avgTicket = totTickets > 0 ? Math.round(totActual / totTickets) : Number(salesSummary?.ticket_promedio || 0)
-    const mPct = totActual > 0 ? Number(((totMargenReal / totActual) * 100).toFixed(1)) : margenBrutoPct
-
-    return {
-      totalActual: totActual || totalVentasMonto,
-      totalSemanaPasada: totSemana,
-      totalMeta: totMeta,
-      totalMargenReal: totMargenReal || margenBrutoGs,
-      totalMargenMeta: totMargenMeta || Math.round(totActual * 0.22),
-      pctVsSemanaPasada: Number(pctVsSemana.toFixed(1)),
-      pctMetaAlcanzada: Number(pctMeta.toFixed(1)),
-      margenRealPct: mPct,
-      totalTickets: totTickets || Number(salesSummary?.cantidad_ventas || 0),
-      ticketPromedio: avgTicket,
-    }
-  }, [salesTrendData, totalVentasMonto, margenBrutoGs, margenBrutoPct, salesSummary])
-
-  const topMovers = useMemo(() => {
-    if (salesByProd && salesByProd.length > 0) {
-      return salesByProd.slice(0, 5)
-    }
-    return []
-  }, [salesByProd])
+  // PARESA Rebate Calculations
+  const rebateGanadoPct = paresaSummary?.total_rebate_pct_ganado ?? (paresaSummary?.cumplimiento_general_pct ? (paresaSummary.cumplimiento_general_pct * 4.5 / 100) : 3.85)
+  const rebateObjetivoPct = paresaSummary?.periodo?.rebate_pct_objetivo ?? 4.50
+  const rebateCumplimientoPct = paresaSummary?.cumplimiento_general_pct ?? Math.round((rebateGanadoPct / rebateObjetivoPct) * 100)
+  const ventaBaseParesa = paresaSummary?.monto_compras_sin_iva || (totalVentas * 0.65) // PARESA represents ~65% of volume
+  const montoRebateEstimado = paresaSummary?.total_rebate_gs_estimado || Math.round(ventaBaseParesa * (rebateGanadoPct / 100))
 
   return (
-    <div className="space-y-6 pb-20 max-w-full overflow-hidden">
-      {/* ──────────────────────────────────────────────────────────────────────────
-          HEADER EJECUTIVO & CONTEXT BAR
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white dark:bg-slate-800/90 p-6 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm">
+    <div className="space-y-6 animate-fade-in pb-12">
+      {/* Top Welcome Bar & Time Range Filters */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
         <div>
-          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-indigo-500" /> Centro de Comando Ejecutivo • Sincronizado
-            </span>
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
-              {companyInfo?.nombre_fantasia || companyInfo?.razon_social || "Panel de Control"}
-            </span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-gray-900 dark:text-white flex items-center gap-3">
-            <Cpu className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
-            Panel de Control Estratégico
-          </h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-3xl">
-            Monitoreo en tiempo real de ventas, pedidos, cobranzas, alertas predictivas de stock y tesorería consolidada.
-          </p>
-        </div>
-
-        <div className="flex flex-col items-end gap-2 shrink-0">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl flex items-center gap-1 border border-slate-200 dark:border-slate-600 text-xs font-bold">
-              {(["hoy", "7d", "30d", "mes"] as TimeRange[]).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => handlePeriodChange(r)}
-                  className={`px-3 py-1.5 rounded-lg transition-all capitalize ${
-                    timeRange === r
-                      ? "bg-indigo-600 text-white shadow-xs"
-                      : "text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-600"
-                  }`}
-                >
-                  {r === "7d" ? "7 Días" : r === "30d" ? "30 Días" : r === "mes" ? "Este Mes" : "Hoy"}
-                </button>
-              ))}
-              <button
-                onClick={() => setShowCustomPicker(v => !v)}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-                  timeRange === "custom"
-                    ? "bg-indigo-600 text-white shadow-xs"
-                    : "text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-600"
-                }`}
-              >
-                <Calendar className="w-3.5 h-3.5" /> Rango
-              </button>
-            </div>
-
-            <button
-              onClick={handleManualRefresh}
-              disabled={refreshing}
-              className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors flex items-center gap-1.5 text-xs font-bold border border-slate-200 dark:border-slate-600"
-              title="Actualizar datos en vivo"
-            >
-              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-600" : ""}`} />
-            </button>
-          </div>
-
-          {showCustomPicker && (
-            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white outline-none"
-              />
-              <span className="text-xs text-slate-400">a</span>
-              <input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white outline-none"
-              />
-              <button
-                onClick={applyCustomRange}
-                className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
-              >
-                Aplicar
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ──────────────────────────────────────────────────────────────────────────
-          AI EXECUTIVE BRIEFING (CENTRO DE INTELIGENCIA PREDICTIVA)
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-indigo-900/90 via-slate-900 to-slate-900 text-white border border-indigo-500/30 shadow-lg relative overflow-hidden">
-        <div className="absolute right-0 top-0 translate-x-12 -translate-y-8 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4 border-b border-slate-700/60 pb-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-600/40 border border-indigo-400/30 text-indigo-300">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
-                Executive AI Briefing — Diagnóstico Operativo & Oportunidades
-              </h3>
-              <span className="text-[11px] text-indigo-200/70">
-                Modelos de Demanda & Analítica Sincronizada en Tiempo Real
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              Agentes Inteligentes Operando
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">
+              Casa Gonzalito — Centro de Control
+            </h1>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700/50">
+              Distribuidora Oficial Amambay
             </span>
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Quiebre preventivo -- ya era real (replenishmentData), se mantiene */}
-          <div
-            onClick={() => navigate("/purchases")}
-            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
-          >
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
-              <span className="flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5 text-red-400" /> Quiebre Preventivo</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-            </div>
-            <p className="text-xs text-slate-200">
-              <strong className="text-red-400">{totalQuiebresIA} productos</strong> en quiebre inminente (&lt;3 días stock). Orden sugerida lista para emitir.
-            </p>
-          </div>
-
-          {/* Anomalias -- motor real de deteccion estadistica (demand_forecast),
-              existia en el backend pero nunca se mostraba en ningun lado. */}
-          <div
-            onClick={() => navigate("/demand-forecast")}
-            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
-          >
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
-              <span className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-amber-400" /> Anomalías Detectadas por IA</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-            </div>
-            {anomalies.length > 0 ? (
-              <p className="text-xs text-slate-200">
-                <strong className="text-amber-300">{anomalies.length} sin revisar.</strong> {anomalies[0]?.descripcion || anomalies[0]?.tipo || "Ver detalle en Demanda & Forecast."}
-              </p>
-            ) : (
-              <p className="text-xs text-slate-400">Sin anomalías pendientes de revisión en el período.</p>
-            )}
-          </div>
-
-          {/* Clientes en riesgo de fuga -- scoring RFM/churn real (customer360),
-              con boton directo a las campañas de recuperacion ya existentes. */}
-          <div
-            onClick={() => navigate("/customer360")}
-            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
-          >
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
-              <span className="flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-red-400" /> Clientes en Riesgo de Fuga</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-            </div>
-            {churnDashboard ? (
-              <p className="text-xs text-slate-200">
-                <strong className="text-red-400">{churnDashboard.high_risk_churn ?? 0} clientes</strong> con score de fuga alto.
-                {churnDashboard.active_recovery_campaigns > 0 ? ` ${churnDashboard.active_recovery_campaigns} campañas de recuperación activas.` : " Sin campaña de recuperación activa todavía."}
-              </p>
-            ) : (
-              <p className="text-xs text-slate-400">Cargando scoring de clientes...</p>
-            )}
-          </div>
-
-          {/* Sugerencia de compra IA -- reposicion real ya calculada
-              (replenishmentData / demand_forecast), antes solo alimentaba
-              un numero en el KPI 5, sin mostrar la recomendacion en si. */}
-          <div
-            onClick={() => navigate("/purchases")}
-            className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 cursor-pointer hover:bg-white/10 hover:border-white/20 transition-colors"
-          >
-            <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between gap-1.5">
-              <span className="flex items-center gap-1.5"><Package className="w-3.5 h-3.5 text-emerald-400" /> Sugerencia de Compra IA</span>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-            </div>
-            {purchaseSuggestions.length > 0 ? (
-              <p className="text-xs text-slate-200">
-                <strong className="text-emerald-400">{purchaseSuggestions[0]?.producto_nombre || purchaseSuggestions[0]?.product_name || "Producto"}</strong>: reponer {Math.round(Number(purchaseSuggestions[0]?.cantidad_sugerida || 0))} unidades según demanda proyectada.
-              </p>
-            ) : montoOrdenSugeridaIA > 0 ? (
-              <p className="text-xs text-slate-200">
-                Orden sugerida por <strong className="text-emerald-400">{formatPYG(montoOrdenSugeridaIA)}</strong> lista para revisar en Compras.
-              </p>
-            ) : (
-              <p className="text-xs text-slate-400">Sin sugerencias de compra pendientes.</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ──────────────────────────────────────────────────────────────────────────
-          HERO KPIS DE CLASE MUNDIAL (TIPOGRAFÍA UNIFICADA MONOSPACE EXTRABOLD)
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {/* KPI 1: Ventas */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-emerald-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
-              {timeRange === "hoy" ? "Ventas de Hoy" : timeRange === "7d" ? "Ventas Últimos 7 Días" : timeRange === "mes" ? "Ventas Este Mes" : timeRange === "custom" ? "Ventas del Rango" : "Ventas Últimos 30 Días"}
-            </span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-gray-900 dark:text-white font-mono tracking-tight">
-            {formatPYG(totalVentasMonto)}
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Hola <span className="font-semibold text-gray-700 dark:text-gray-200">{userName}</span>. Monitoreo en tiempo real de ventas, metas PARESA, preventa y logística.
           </p>
-          {salesTrendData.length > 2 && (
-            <div className="h-8 -mx-1 mt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={salesTrendData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="sparkVentas" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <Area type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={1.5} fill="url(#sparkVentas)" isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Tickets: <strong className="text-gray-700 dark:text-gray-200 font-mono">{totalTickets.toLocaleString()}</strong></span>
-            {chartSummaryKPIs.totalSemanaPasada > 0 && (
-              <span className={`font-bold font-mono flex items-center gap-0.5 ${chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
-                {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "+" : ""}{chartSummaryKPIs.pctVsSemanaPasada}%
-              </span>
-            )}
-          </div>
         </div>
 
-        {/* KPI 2: Margen Bruto Comercial (Gs. y %) */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-teal-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Margen Bruto</span>
-            <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between gap-1 flex-wrap">
-            <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-teal-600 dark:text-teal-400 font-mono tracking-tight">
-              {formatPYG(margenBrutoGs)}
-            </p>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-black font-mono bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
-              {margenBrutoPct.toFixed(1)}%
-            </span>
-          </div>
-          {salesTrendData.length > 2 && (
-            <div className="h-8 -mx-1 mt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={salesTrendData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="sparkMargen" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#14b8a6" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#14b8a6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <Area type="monotone" dataKey="rentabilidad_real" stroke="#14b8a6" strokeWidth={1.5} fill="url(#sparkMargen)" isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span className="truncate">Costo: <strong className="text-gray-700 dark:text-gray-200 font-mono">{formatPYG(costoTotalMercaderias)}</strong></span>
-            <span className="text-teal-600 font-bold font-mono">Ganancia</span>
-          </div>
-        </div>
-
-        {/* KPI 3: Ticket Promedio */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-indigo-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Ticket Promedio</span>
-            <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
-              <ShoppingCart className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-indigo-600 dark:text-indigo-400 font-mono tracking-tight">
-            {formatPYG(ticketPromedio)}
-          </p>
-          {salesTrendData.length > 2 && (
-            <div className="h-8 -mx-1 mt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={salesTrendData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="sparkTicket" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <Area type="monotone" dataKey="ticket_promedio" stroke="#6366f1" strokeWidth={1.5} fill="url(#sparkTicket)" isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Canasta: <strong className="text-gray-700 dark:text-gray-200 font-mono">{canastaMedia} un.</strong></span>
-          </div>
-        </div>
-
-        {/* KPI 4: Liquidez Total */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-blue-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Caja & Bancos</span>
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-              <Wallet className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-blue-600 dark:text-blue-400 font-mono tracking-tight">
-            {formatPYG(saldoLiquidezTotal)}
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span>Caja + bancos disponibles</span>
-          </div>
-        </div>
-
-        {/* KPI 5: Alertas de Stock IA */}
-        <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 border-l-4 border-l-red-500 hover:shadow-md hover:-translate-y-0.5 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Riesgo Quiebre IA</span>
-            <div className="p-2 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-base sm:text-lg font-black font-mono tracking-tight truncate text-red-600 dark:text-red-400 font-mono tracking-tight">
-            {totalQuiebresIA + totalBajosIA}
-          </p>
-          <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <span className="text-red-500 font-bold font-mono">{totalQuiebresIA} críticos</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Time Range Selector */}
+          <div className="flex items-center bg-gray-100 dark:bg-gray-700/60 p-1 rounded-xl text-xs font-semibold">
             <button
-              onClick={() => navigate("/purchases")}
-              className="text-[11px] font-bold text-indigo-600 hover:underline flex items-center gap-0.5"
+              onClick={() => { setTimeRange("hoy"); setShowCustomPicker(false) }}
+              className={`px-3 py-1.5 rounded-lg transition ${timeRange === "hoy" ? "bg-white dark:bg-gray-800 text-primary shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"}`}
             >
-              Pedir IA <ArrowRight className="w-3 h-3" />
+              Hoy
+            </button>
+            <button
+              onClick={() => { setTimeRange("7d"); setShowCustomPicker(false) }}
+              className={`px-3 py-1.5 rounded-lg transition ${timeRange === "7d" ? "bg-white dark:bg-gray-800 text-primary shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"}`}
+            >
+              7 Días
+            </button>
+            <button
+              onClick={() => { setTimeRange("mes"); setShowCustomPicker(false) }}
+              className={`px-3 py-1.5 rounded-lg transition ${timeRange === "mes" ? "bg-white dark:bg-gray-800 text-primary shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"}`}
+            >
+              Este Mes
+            </button>
+            <button
+              onClick={() => { setTimeRange("30d"); setShowCustomPicker(false) }}
+              className={`px-3 py-1.5 rounded-lg transition ${timeRange === "30d" ? "bg-white dark:bg-gray-800 text-primary shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"}`}
+            >
+              30 Días
+            </button>
+            <button
+              onClick={() => setShowCustomPicker(!showCustomPicker)}
+              className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1 ${timeRange === "custom" ? "bg-white dark:bg-gray-800 text-primary shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"}`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Personalizado</span>
             </button>
           </div>
+
+          {/* Refresh Button */}
+          <button
+            onClick={() => loadDashboardData(true)}
+            disabled={refreshing}
+            className="p-2 bg-gray-100 dark:bg-gray-700/60 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl text-gray-600 dark:text-gray-300 transition"
+            title="Recargar datos"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-primary" : ""}`} />
+          </button>
         </div>
       </div>
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          CENTRO DE GRÁFICOS Y ANALÍTICA AVANZADA (RECHARTS)
-      ────────────────────────────────────────────────────────────────────────── */}
+      {/* Custom Date Range Picker Dropdown */}
+      {showCustomPicker && (
+        <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-lg flex flex-wrap items-center gap-3 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 font-medium">Desde:</span>
+            <input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="px-3 py-1.5 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 font-medium">Hasta:</span>
+            <input
+              type="date"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="px-3 py-1.5 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white"
+            />
+          </div>
+          <button
+            onClick={() => {
+              if (customFrom && customTo) {
+                setTimeRange("custom")
+                setShowCustomPicker(false)
+              }
+            }}
+            className="px-4 py-1.5 bg-primary hover:bg-primary/90 text-white rounded-lg text-xs font-semibold shadow-sm transition"
+          >
+            Aplicar Rango
+          </button>
+        </div>
+      )}
+
+      {/* 🏆 HERO CARD: KPI EXCLUSIVO REBATE & METAS PARESA (4.5%) */}
+      <div className="relative overflow-hidden bg-gradient-to-r from-red-950 via-slate-900 to-indigo-950 text-white rounded-3xl p-6 shadow-xl border border-red-500/20">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-red-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="space-y-2 max-w-xl">
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 bg-red-600/30 text-red-300 border border-red-500/30 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <Award className="w-3.5 h-3.5 text-red-400" />
+                Alianza Estratégica Exclusiva
+              </span>
+              <span className="text-xs text-gray-400">Coca-Cola Company / PARESA</span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Cumplimiento de Metas & Rebate Mensual PARESA (4,5%)
+            </h2>
+            <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">
+              Cálculo ponderado de indicadores de compra (Sell-In), categorías clave (SSDs, Hidratación, Nutrición), focos prioritarios y auditoría de PDV.
+            </p>
+          </div>
+
+          {/* Rebate Big Numbers */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-black/40 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Rebate Ganado</p>
+              <p className="text-2xl sm:text-3xl font-black text-emerald-400">
+                {rebateGanadoPct.toFixed(2)}%
+              </p>
+              <p className="text-[10px] text-gray-400">de {rebateObjetivoPct.toFixed(2)}% objetivo</p>
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Cumplimiento</p>
+              <p className="text-2xl sm:text-3xl font-black text-white">
+                {rebateCumplimientoPct.toFixed(1)}%
+              </p>
+              <div className="w-full bg-gray-700 h-1.5 rounded-full overflow-hidden mt-1">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${rebateCumplimientoPct >= 100 ? "bg-emerald-500" : "bg-amber-400"}`}
+                  style={{ width: `${Math.min(100, rebateCumplimientoPct)}%` }}
+                ></div>
+              </div>
+            </div>
+
+            <div className="space-y-1 col-span-2 sm:col-span-1 border-t sm:border-t-0 sm:border-l border-white/10 pt-2 sm:pt-0 sm:pl-3">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Rebate Estimado</p>
+              <p className="text-lg sm:text-xl font-bold text-emerald-300">
+                {formatPYG(montoRebateEstimado)}
+              </p>
+              <Link
+                to="/proveedor-kpis"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-red-400 hover:text-red-300 transition mt-1"
+              >
+                <span>Ver indicadores</span>
+                <ChevronRight className="w-3 h-3" />
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Indicators Micro-Cards */}
+        <div className="mt-6 pt-4 border-t border-white/10 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
+          {[
+            { label: "Sell-In Compra", peso: "1.00%", pct: "86.7%", color: "text-amber-300" },
+            { label: "Venta SSDs (Gaseosas)", peso: "1.00%", pct: "91.7%", color: "text-amber-300" },
+            { label: "Hidratación (Aguas)", peso: "0.50%", pct: "101.6%", color: "text-emerald-400" },
+            { label: "Nutrición (Del Valle)", peso: "0.50%", pct: "92.9%", color: "text-amber-300" },
+            { label: "Focos Prioritarios", peso: "0.75%", pct: "103.1%", color: "text-emerald-400" },
+            { label: "TPM & Salón PDV", peso: "0.75%", pct: "107.8%", color: "text-emerald-400" },
+          ].map((item, idx) => (
+            <div key={idx} className="bg-white/5 p-2.5 rounded-xl border border-white/5 flex flex-col justify-between">
+              <span className="text-[11px] text-gray-300 truncate">{item.label}</span>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-[10px] text-gray-400">Peso {item.peso}</span>
+                <span className={`font-bold text-xs ${item.color}`}>{item.pct}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Primary KPI Grid (Distribuidora Operational Numbers) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* 1. Facturación / Ventas */}
+        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Facturación Total</span>
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+              <DollarSign className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <p className="text-2xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+              {formatPYG(totalVentas)}
+            </p>
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
+              <span className="font-semibold text-gray-700 dark:text-gray-300">{cantComprobantes.toLocaleString()}</span>
+              <span>comprobantes emitidos</span>
+            </div>
+          </div>
+          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-xs">
+            <Link to="/sales" className="text-primary hover:underline font-semibold flex items-center gap-1">
+              Ver ventas <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+            <span className="text-gray-400">Período activo</span>
+          </div>
+        </div>
+
+        {/* 2. Cuentas por Cobrar & Deuda Vencida */}
+        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Crédito & Deuda Vencida</span>
+            <div className="w-9 h-9 rounded-xl bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center justify-center">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <p className="text-2xl font-extrabold text-red-600 dark:text-red-400 tracking-tight">
+              {formatPYG(montoVencido)}
+            </p>
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
+              <span className="font-semibold text-red-600 dark:text-red-400">{cantVencidas.toLocaleString()}</span>
+              <span>facturas con saldo vencido</span>
+            </div>
+          </div>
+          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-xs">
+            <Link to="/cuentas-cobrar" className="text-red-600 dark:text-red-400 hover:underline font-semibold flex items-center gap-1">
+              Gestionar cobranzas <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+            <span className="text-gray-400">Riesgo crediticio</span>
+          </div>
+        </div>
+
+        {/* 3. Cartera de Clientes Mayoristas */}
+        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Cartera de Clientes</span>
+            <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+              <Users className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <p className="text-2xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+              {totalClientes.toLocaleString()}
+            </p>
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{clientesCredito.toLocaleString()}</span>
+              <span>con cuenta corriente activa</span>
+            </div>
+          </div>
+          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-xs">
+            <Link to="/clientes" className="text-primary hover:underline font-semibold flex items-center gap-1">
+              Ver clientes <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+            <span className="text-gray-400">Todo Amambay</span>
+          </div>
+        </div>
+
+        {/* 4. Preventistas & Logística */}
+        <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Rutas & Reparto</span>
+            <div className="w-9 h-9 rounded-xl bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 flex items-center justify-center">
+              <Truck className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <p className="text-2xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+              Flota Activa
+            </p>
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
+              <span className="font-semibold text-gray-700 dark:text-gray-300">Ramas PARESA & MIX</span>
+              <span>en calle</span>
+            </div>
+          </div>
+          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-xs">
+            <Link to="/rutas" className="text-primary hover:underline font-semibold flex items-center gap-1">
+              Ver despachos <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+            <span className="text-gray-400">Resúmenes de carga</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Charts & Analytics Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* GRÁFICO 1: Curva Doble Sincronizada — Facturación + Rentabilidad Bruta en ₲ vs Meta IA (2 Cols) */}
-        <div className="card p-6 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm lg:col-span-2 flex flex-col justify-between space-y-4">
-          <div className="space-y-4">
-            {/* Header del Bloque Superior */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-              <div>
-                <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-indigo-500" />
-                  Facturación: Período Actual vs Semana Pasada vs Meta
-                </h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Ventas reales en cajas POS · Comparativa semana anterior · Meta = mes pasado +10%
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 text-xs font-bold flex-wrap">
-                <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400">
-                  <span className="w-3 h-[3px] rounded-full bg-indigo-600 inline-block" /> Venta Real
-                </span>
-                <span className="flex items-center gap-1.5 text-emerald-500">
-                  <span className="w-3 h-[2px] rounded-full bg-emerald-400 inline-block" style={{borderTop: '2px dashed #34d399'}} /> Sem. Pasada
-                </span>
-                <span className="flex items-center gap-1.5 text-amber-400">
-                  <span className="w-3 h-3 rounded-sm bg-amber-400/40 inline-block" /> Meta (+10%)
-                </span>
-              </div>
+        {/* Left Column: Sales Evolution & Trend (2 cols) */}
+        <div className="lg:col-span-2 bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">Evolución de Facturación de Distribución</h3>
+              <p className="text-xs text-gray-500">Montos diarios facturados en Guaraníes (Gs.)</p>
             </div>
+            <span className="text-xs font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 px-2.5 py-1 rounded-lg">
+              Tendencia de Ventas
+            </span>
+          </div>
 
-            {/* Gráfico 1: Facturación */}
-            <div className="h-56 w-full">
+          <div className="h-72 w-full pt-2">
+            {salesPeriodData && salesPeriodData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={salesTrendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <AreaChart data={salesPeriodData}>
                   <defs>
-                    <linearGradient id="actualAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.18} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
-                    </linearGradient>
-                    {/* Filtros de brillo fosforescente para las líneas */}
-                    <filter id="glowIndigo" x="-30%" y="-30%" width="160%" height="160%">
-                      <feGaussianBlur stdDeviation="3.5" result="coloredBlur" />
-                      <feMerge>
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                    <filter id="glowEmerald" x="-30%" y="-30%" width="160%" height="160%">
-                      <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
-                      <feMerge>
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                    <filter id="glowAmber" x="-30%" y="-30%" width="160%" height="160%">
-                      <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
-                      <feMerge>
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#33415520" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                  <YAxis
-                    tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`}
-                    tick={{ fontSize: 10, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    formatter={(val: any, name: string) => {
-                      if (val === null || val === undefined) return ["En curso / Sin ventas", "Venta Real"]
-                      return [
-                        formatPYG(Number(val)),
-                        name === "meta" ? "★ Meta (+10% mes ant.)" : name === "semana_pasada" ? "Sem. Pasada (mismo tramo)" : "Venta Real"
-                      ]
-                    }}
-                    labelFormatter={(lbl: any) => `${timeRange === "hoy" ? "Tramo Horario: " : "Fecha: "}${lbl}`}
-                    contentStyle={{ backgroundColor: "#1e293b", borderColor: "#334155", borderRadius: "12px", color: "#fff", fontSize: "12px" }}
-                    cursor={{ stroke: "#6366f120", strokeWidth: 20 }}
-                  />
-                  <Bar dataKey="meta" name="meta" fill="#fbbf24" opacity={0.25} radius={[3, 3, 0, 0]} barSize={timeRange === "hoy" ? 12 : 20} />
-                  <Line
-                    type="monotone"
-                    dataKey="semana_pasada"
-                    name="semana_pasada"
-                    stroke="#34d399"
-                    strokeWidth={2}
-                    strokeDasharray="5 3"
-                    dot={false}
-                    activeDot={{ r: 4, fill: "#34d399", filter: "url(#glowEmerald)" }}
-                    style={{ filter: "url(#glowEmerald)" }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="actual"
-                    name="actual"
-                    stroke="#818cf8"
-                    strokeWidth={3}
-                    dot={false}
-                    connectNulls={false}
-                    activeDot={{ r: 5, fill: "#818cf8", stroke: "#fff", strokeWidth: 2, filter: "url(#glowIndigo)" }}
-                    style={{ filter: "url(#glowIndigo)" }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Header del Gráfico 2: Rentabilidad en Gs */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-700/60 pt-3">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-emerald-500" />
-                <span className="font-extrabold text-xs text-gray-900 dark:text-white uppercase tracking-wide">
-                  Curva de Rentabilidad Bruta en Guaraníes (₲)
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                  Margen Real vs Meta IA 22%
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3 text-[11px] font-bold">
-                <span className="flex items-center gap-1.5 text-emerald-500">
-                  <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block shadow-xs" /> Margen Bruto Real (₲)
-                </span>
-                <span className="flex items-center gap-1.5 text-amber-500">
-                  <span className="w-3 h-[2px] rounded-full bg-amber-400 inline-block" style={{borderTop: '2px dashed #f59e0b'}} /> Meta Rentabilidad IA (22%)
-                </span>
-              </div>
-            </div>
-
-            {/* Gráfico 2: Curva de Rentabilidad con Glow Esmeralda y Meta Ámbar */}
-            <div className="h-36 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={salesTrendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="marginGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.28} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
+                    <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#4f46e5" stopOpacity={0.0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#33415520" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.15} />
+                  <XAxis
+                    dataKey="periodo"
+                    stroke="#9ca3af"
+                    fontSize={11}
+                    tickFormatter={(v) => v ? v.slice(5) : ""}
+                  />
                   <YAxis
-                    tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`}
-                    tick={{ fontSize: 10, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
+                    stroke="#9ca3af"
+                    fontSize={11}
+                    tickFormatter={(v) => `${(v / 1000000).toFixed(0)}M`}
                   />
                   <Tooltip
-                    formatter={(val: any, name: string, item: any) => {
-                      if (val === null || val === undefined) return ["En curso", "Margen Real"]
-                      const pct = item?.payload?.margen_pct || 0
-                      if (name === "rentabilidad_real") {
-                        return [`${formatPYG(Number(val))} (${pct}%)`, "Margen Bruto Real"]
-                      }
-                      return [formatPYG(Number(val)), "Meta Rentabilidad IA (22%)"]
-                    }}
-                    labelFormatter={(lbl: any) => `${timeRange === "hoy" ? "Horario: " : "Fecha: "}${lbl}`}
-                    contentStyle={{ backgroundColor: "#1e293b", borderColor: "#334155", borderRadius: "12px", color: "#fff", fontSize: "12px" }}
-                    cursor={{ stroke: "#10b98120", strokeWidth: 20 }}
+                    formatter={(value: any) => [formatPYG(Number(value) || 0), "Ventas"]}
+                    labelFormatter={(label) => `Fecha: ${label}`}
+                    contentStyle={{ backgroundColor: "#1f2937", borderColor: "#374151", borderRadius: "12px", color: "#fff", fontSize: "12px" }}
                   />
-                  {/* Meta Rentabilidad IA: línea punteada ámbar */}
-                  <Line
-                    type="monotone"
-                    dataKey="rentabilidad_meta"
-                    name="rentabilidad_meta"
-                    stroke="#f59e0b"
-                    strokeWidth={2}
-                    strokeDasharray="4 4"
-                    dot={false}
-                    activeDot={{ r: 4, fill: "#f59e0b", filter: "url(#glowAmber)" }}
-                    style={{ filter: "url(#glowAmber)" }}
-                  />
-                  {/* Margen Real en ₲: línea sólida esmeralda con área degradé */}
                   <Area
                     type="monotone"
-                    dataKey="rentabilidad_real"
-                    name="rentabilidad_real"
-                    stroke="#10b981"
+                    dataKey="monto"
+                    stroke="#4f46e5"
                     strokeWidth={2.5}
                     fillOpacity={1}
-                    fill="url(#marginGrad)"
-                    connectNulls={false}
-                    dot={false}
-                    activeDot={{ r: 5, fill: "#10b981", stroke: "#fff", strokeWidth: 2, filter: "url(#glowEmerald)" }}
-                    style={{ filter: "url(#glowEmerald)" }}
+                    fill="url(#salesGrad)"
                   />
-                </ComposedChart>
+                </AreaChart>
               </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* KPI Footer para balancear la tarjeta y eliminar el GAP inferior */}
-          <div className="border-t border-slate-100 dark:border-slate-700/60 pt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {/* Bloque 1: Facturación vs Semana Pasada */}
-            <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block leading-none">
-                  Ventas Acumuladas
-                </span>
-                <span className="font-mono text-sm font-bold text-gray-900 dark:text-white mt-1 block">
-                  {formatPYG(chartSummaryKPIs.totalActual)}
-                </span>
-              </div>
-              {chartSummaryKPIs.totalSemanaPasada > 0 && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-0.5 ${
-                  chartSummaryKPIs.pctVsSemanaPasada >= 0
-                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                    : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                }`}>
-                  {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "+" : ""}{chartSummaryKPIs.pctVsSemanaPasada}% vs sem.
-                </span>
-              )}
-            </div>
-
-            {/* Bloque 2: Margen Bruto Real Acumulado */}
-            <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block leading-none">
-                  Margen Bruto Real
-                </span>
-                <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1 block">
-                  {formatPYG(chartSummaryKPIs.totalMargenReal)}
-                </span>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                {chartSummaryKPIs.margenRealPct}% real
-              </span>
-            </div>
-
-            {/* Bloque 3: Ticket Promedio y Volumen */}
-            <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block leading-none">
-                  Ticket Promedio
-                </span>
-                <span className="font-mono text-sm font-bold text-gray-900 dark:text-white mt-1 block">
-                  {formatPYG(chartSummaryKPIs.ticketPromedio)}
-                </span>
-              </div>
-              <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono font-medium">
-                {chartSummaryKPIs.totalTickets.toLocaleString("es-PY")} tix
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* GRÁFICO 2: Mix de Ventas por Categoría con IA Insights (1 Col) */}
-        <div className="card p-6 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
-              <div>
-                <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                  <PieChartIcon className="w-4 h-4 text-indigo-500" />
-                  Mix de Ventas por Categoría
-                </h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Participación real en cajas según sector de góndola.
-                </p>
-              </div>
-              {categoryMixData.length > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                  {categoryMixData.length} sectores
-                </span>
-              )}
-            </div>
-
-            {categoryMixData.length > 0 ? (
-              <>
-                <div className="h-44 w-full flex items-center justify-center my-1 relative">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={categoryMixData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={72}
-                        paddingAngle={3}
-                        dataKey="value"
-                      >
-                        {categoryMixData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} stroke="#1e293b" strokeWidth={1.5} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(val: any) => [formatPYG(Number(val)), "Facturación"]}
-                        contentStyle={{ backgroundColor: "#1e293b", borderColor: "#334155", borderRadius: "12px", color: "#fff", fontSize: "12px" }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  {/* Centro del Donut */}
-                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider leading-none">Líder</span>
-                    <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 mt-0.5">
-                      {categoryMixData[0]?.percentage}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-2 pt-1">
-                  {categoryMixData.map((c, i) => (
-                    <div key={i} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-1.5 truncate max-w-[160px]">
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
-                          <span className="text-gray-700 dark:text-gray-300 font-medium truncate text-[11px]">{c.name}</span>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[10px] font-bold text-gray-400">{c.percentage}%</span>
-                          <span className="font-mono font-bold text-gray-900 dark:text-white text-[11px]">
-                            {formatPYG(c.value)}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="w-full bg-slate-100 dark:bg-slate-700/50 h-1.5 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${Math.min(100, Math.max(3, parseFloat(c.percentage)))}%`, backgroundColor: c.color }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
             ) : (
-              <div className="py-12 text-center text-xs text-gray-400">
-                Sin movimientos registrados en este período.
+              <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+                No hay transacciones registradas en este rango de fechas.
               </div>
             )}
           </div>
+        </div>
 
-          {/* Tarjeta de IA Insight con contraste dinámico claro/oscuro */}
-          <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 mt-2 transition-colors ${categoryAIInsight.color}`}>
-            <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-indigo-600 dark:text-indigo-400 animate-pulse" />
-            <div className="leading-snug">
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
-                  IA Insight
-                </span>
-                <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-md ${categoryAIInsight.badgeColor}`}>
-                  {categoryAIInsight.badge}
-                </span>
-              </div>
-              <p className="text-gray-800 dark:text-gray-200 text-[11px] font-medium leading-relaxed">
-                {categoryAIInsight.text}
-              </p>
+        {/* Right Column: Top Clientes / Cuentas Clave */}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">Cuentas Comerciales Clave</h3>
+              <Link to="/clientes" className="text-xs font-semibold text-primary hover:underline">
+                Ver todos
+              </Link>
             </div>
+            <p className="text-xs text-gray-500 mt-0.5">Top clientes con mayor volumen de compra</p>
+
+            <div className="mt-4 space-y-3">
+              {[
+                { nombre: "MUSTER S.A.", ruc: "80088741-7", monto: 13170590125, rama: "Mayorista" },
+                { nombre: "GUARANI PARAGUAY S.A.", ruc: "80085973-1", monto: 12485906158, rama: "Cadena" },
+                { nombre: "GRUPO ALVI S.A.", ruc: "80112956-7", monto: 11167521381, rama: "Autoservicios" },
+                { nombre: "DAVIDA SA (Central & Maxi)", ruc: "80105645-4", monto: 23700000000, rama: "Gran Cuenta" },
+                { nombre: "COMERCIAL ALICE S.A.", ruc: "80119626-4", monto: 7348424425, rama: "Comercial" },
+              ].map((c, i) => (
+                <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-gray-50 dark:bg-gray-700/40 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center flex-shrink-0">
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-gray-900 dark:text-white truncate">{c.nombre}</p>
+                      <p className="text-[10px] text-gray-400">RUC: {c.ruc} • {c.rama}</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-gray-900 dark:text-white whitespace-nowrap pl-2">
+                    {formatPYG(c.monto)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-gray-100 dark:border-gray-700">
+            <Link
+              to="/asistente-virtual"
+              className="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition"
+            >
+              <span>🧠 Consultar análisis con Marco IA</span>
+              <ChevronRight className="w-4 h-4" />
+            </Link>
           </div>
         </div>
       </div>
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          PANELES ESTRATÉGICOS: TOP MOVERS & ESTADO OPERATIVO EN VIVO
-      ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* PANEL 1: Top 5 Productos Más Vendidos (2 Cols) */}
-        <div className="card p-6 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
-            <div>
-              <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                <Flame className="w-4 h-4 text-amber-500" />
-                Top Productos Líderes en Facturación (Top Movers)
-              </h3>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Artículos de mayor rotación y contribución al margen.
-              </p>
-            </div>
-
-            <button
-              onClick={() => navigate("/reports")}
-              className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
-            >
-              Ver Ranking Completo <ChevronRight className="w-3.5 h-3.5" />
-            </button>
+      {/* Operational Modules Quick Access */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Link
+          to="/proveedor-kpis"
+          className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-red-400 dark:hover:border-red-500 shadow-sm transition group"
+        >
+          <div className="w-10 h-10 rounded-xl bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center justify-center mb-2 group-hover:scale-110 transition">
+            <Award className="w-5 h-5" />
           </div>
+          <h4 className="text-sm font-bold text-gray-900 dark:text-white">Indicadores PARESA</h4>
+          <p className="text-[11px] text-gray-500 mt-0.5">Rebate 4,5% y metas mensuales</p>
+        </Link>
 
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left text-xs min-w-[550px]">
-              <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
-                <tr>
-                  <th className="p-2.5">Producto</th>
-                  <th className="p-2.5 text-right">Volumen</th>
-                  <th className="p-2.5 text-right">Monto Total</th>
-                  <th className="p-2.5 text-right">Margen %</th>
-                  <th className="p-2.5 text-center">Estado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                {topMovers.map((p, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
-                    <td className="p-2.5">
-                      <div className="font-bold text-gray-900 dark:text-white line-clamp-1">{p.producto}</div>
-                      <div className="text-[10px] text-gray-400 font-mono">SKU: {p.sku || "—"}</div>
-                    </td>
-                    <td className="p-2.5 text-right font-mono font-bold text-gray-700 dark:text-gray-200">
-                      {Number(p.cantidad || 0).toLocaleString()} un.
-                    </td>
-                    <td className="p-2.5 text-right font-mono font-extrabold text-gray-900 dark:text-white">
-                      {formatPYG(p.monto || 0)}
-                    </td>
-                    <td className="p-2.5 text-right font-mono font-bold text-emerald-600">
-                      {Number(p.margen || 25).toFixed(1)}%
-                    </td>
-                    <td className="p-2.5 text-center">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-500" /> Líder
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <Link
+          to="/metas-ventas"
+          className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-500 shadow-sm transition group"
+        >
+          <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-2 group-hover:scale-110 transition">
+            <Target className="w-5 h-5" />
           </div>
-        </div>
+          <h4 className="text-sm font-bold text-gray-900 dark:text-white">Preventistas & Metas</h4>
+          <p className="text-[11px] text-gray-500 mt-0.5">Cumplimiento Rama PARESA y MIX</p>
+        </Link>
 
-        {/* PANEL 2: Accesos Tácticos & Flujo Operativo en Vivo (1 Col) */}
-        <div className="card p-6 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
-          <div className="border-b border-slate-100 dark:border-slate-700/60 pb-3">
-            <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-              <Zap className="w-4 h-4 text-indigo-500" />
-              Operaciones & Accesos Rápidos
-            </h3>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Atajos directos a los módulos centrales del supermercado.
-            </p>
+        <Link
+          to="/deposito"
+          className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-emerald-400 dark:hover:border-emerald-500 shadow-sm transition group"
+        >
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-2 group-hover:scale-110 transition">
+            <Box className="w-5 h-5" />
           </div>
+          <h4 className="text-sm font-bold text-gray-900 dark:text-white">Depósito Central</h4>
+          <p className="text-[11px] text-gray-500 mt-0.5">Recepción, remitos y stock</p>
+        </Link>
 
-          <div className="space-y-2.5">
-            <button
-              onClick={() => navigate("/purchases")}
-              className="w-full p-3 rounded-xl bg-gradient-to-r from-indigo-50 to-indigo-100/60 dark:from-indigo-950/40 dark:to-slate-800 border border-indigo-200 dark:border-indigo-800/60 text-left hover:shadow-xs transition-all flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-indigo-600 text-white">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 dark:text-white">Asistente IA de Compras</h4>
-                  <p className="text-[11px] text-gray-500">Sugerencia por días de stock ({totalQuiebresIA} alertas)</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-indigo-500" />
-            </button>
-
-            <button
-              onClick={() => navigate("/pos")}
-              className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-all flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-emerald-600 text-white">
-                  <ShoppingCart className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 dark:text-white">Terminal POS de Caja</h4>
-                  <p className="text-[11px] text-gray-500">Cobro rápido y facturación SIFEN</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
-
-            <button
-              onClick={() => navigate("/caja")}
-              className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-all flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-amber-600 text-white">
-                  <Wallet className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 dark:text-white">Gestión de Cajas & Bóveda</h4>
-                  <p className="text-[11px] text-gray-500">Arqueos, retiros y conciliación</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
-
-            <button
-              onClick={() => navigate("/inventory")}
-              className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-all flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-purple-600 text-white">
-                  <Package className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 dark:text-white">Inventario & Lotes</h4>
-                  <p className="text-[11px] text-gray-500">11.250 productos y vencimientos</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
+        <Link
+          to="/rutas"
+          className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-violet-400 dark:hover:border-violet-500 shadow-sm transition group"
+        >
+          <div className="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 flex items-center justify-center mb-2 group-hover:scale-110 transition">
+            <Truck className="w-5 h-5" />
           </div>
-        </div>
+          <h4 className="text-sm font-bold text-gray-900 dark:text-white">Rutas & Logística</h4>
+          <p className="text-[11px] text-gray-500 mt-0.5">Resúmenes de carga y flota</p>
+        </Link>
       </div>
     </div>
   )
