@@ -2,8 +2,9 @@ const API_BASE = import.meta.env.VITE_API_URL || "/api"
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("access_token")
+  const isFormData = options.body instanceof FormData
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(options.headers as Record<string, string>),
   }
   if (token) headers["Authorization"] = `Bearer ${token}`
@@ -22,9 +23,21 @@ export const client = {
     const url = params ? `${endpoint}?${new URLSearchParams(Object.entries(params).filter(([_, v]) => v !== undefined) as [string, string][])}` : endpoint
     return request<T>(url)
   },
-  post: <T>(endpoint: string, data?: unknown) => request<T>(endpoint, { method: "POST", body: JSON.stringify(data) }),
-  put: <T>(endpoint: string, data?: unknown) => request<T>(endpoint, { method: "PUT", body: JSON.stringify(data) }),
-  patch: <T>(endpoint: string, data?: unknown) => request<T>(endpoint, { method: "PATCH", body: JSON.stringify(data) }),
+  post: <T>(endpoint: string, data?: unknown) =>
+    request<T>(endpoint, {
+      method: "POST",
+      body: data instanceof FormData ? data : JSON.stringify(data),
+    }),
+  put: <T>(endpoint: string, data?: unknown) =>
+    request<T>(endpoint, {
+      method: "PUT",
+      body: data instanceof FormData ? data : JSON.stringify(data),
+    }),
+  patch: <T>(endpoint: string, data?: unknown) =>
+    request<T>(endpoint, {
+      method: "PATCH",
+      body: data instanceof FormData ? data : JSON.stringify(data),
+    }),
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: "DELETE" }),
 }
 
