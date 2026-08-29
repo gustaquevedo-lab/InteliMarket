@@ -6,9 +6,9 @@ import {
   MapPinned, Truck, ShoppingCart, Pill, Shirt, ShieldCheck, BadgeDollarSign, Blocks, LineChart, Fingerprint, Settings,
   LogOut, Menu, X, Moon, Sun, Monitor, Search, Plus, Store, ChevronDown, Building2, Shield, Crown, Target,
   ClipboardList, RotateCcw, Percent, Coins, HandCoins, Building, Scan, QrCode, BookOpen, PiggyBank, Beaker, PieChart, Factory, Smartphone,
-   ArrowLeftRight, Cpu, Map, Navigation, Fence, BarChart3, MapPin, DollarSign, TrendingUp, Route, Lightbulb, Thermometer, Bot, Clock, Award, Globe, Repeat, Wrench,
-   Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid
-  } from "lucide-react"
+  ArrowLeftRight, Cpu, Map, Navigation, Fence, BarChart3, MapPin, DollarSign, TrendingUp, Route, Lightbulb, Thermometer, Bot, Clock, Award, Globe, Repeat, Wrench,
+  Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Tag, Ticket
+} from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { useFeatures } from "../context/FeatureContext"
@@ -35,168 +35,120 @@ const navGroups: NavGroup[] = [
   {
     title: "Inicio",
     items: [
-      { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+      { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+      { icon: TrendingUp, label: "Gerente de Ventas IA", path: "/sales-agent" },
+      { icon: Bot, label: "Gerente Financiero IA", path: "/finance-agent" },
+      { icon: Sparkles, label: "Gerente de Marketing IA", path: "/marketing-agent" },
     ]
   },
   {
     title: "Ventas",
     items: [
-      { icon: MonitorSmartphone, label: "Punto de Venta", path: "/pos", feature: "pos" },
-      { icon: Receipt, label: "Facturación", path: "/sales" },
-      { icon: ClipboardList, label: "Pedidos", path: "/sales-orders" },
+      { icon: MonitorSmartphone, label: "Punto de Venta (POS)", path: "/pos" },
+      { icon: Receipt, label: "Facturación SIFEN", path: "/sales" },
+      { icon: ClipboardList, label: "Pedidos & Preventa", path: "/sales-orders" },
       { icon: FileSpreadsheet, label: "Cotizaciones", path: "/quotes" },
-      { icon: RotateCcw, label: "Devoluciones", path: "/returns" },
-      { icon: Users, label: "Clientes", path: "/customers" },
-      { icon: Globe, label: "Portal Clientes", path: "/portal", feature: "portal" },
-    ]
-  },
-  {
-    title: "Retail / Tienda",
-    items: [
-      { icon: ShoppingBag, label: "Retail Hub", path: "/retail", feature: "retail" },
-      { icon: Store, label: "Tienda Online", path: "/tienda" },
-    ]
-  },
-  {
-    title: "CRM & Marketing",
-    items: [
-      { icon: Target, label: "Fidelidad & CRM", path: "/crm", feature: "crm" },
-      { icon: MessageCircle, label: "WhatsApp", path: "/whatsapp", feature: "whatsapp" },
-      { icon: Megaphone, label: "IntelliZapp", path: "/intellizapp", feature: "intellizapp" },
-      { icon: Megaphone, label: "Campañas", path: "/promociones" },
-      { icon: Percent, label: "Descuentos", path: "/discounts" },
-      { icon: Coins, label: "Comisiones", path: "/commissions" },
-      { icon: DollarSign, label: "Precios Inteligente", path: "/smart-pricing", feature: "smart_pricing" },
-      { icon: BadgeDollarSign, label: "Listas de Precios", path: "/price-lists", feature: "price_lists" },
-      { icon: Megaphone, label: "Marketing Automat.", path: "/marketing", feature: "marketing_automation" },
-      { icon: Award, label: "Lealtad", path: "/loyalty", feature: "loyalty" },
-    ]
-  },
-  {
-    title: "IA & Analítica",
-    items: [
-      { icon: TrendingUp, label: "Forecast Demanda", path: "/demand-forecast", feature: "demand_forecast" },
-      { icon: Route, label: "Ruteo Inteligente", path: "/intelligent-routing", feature: "intelligent_routing" },
-      { icon: Shield, label: "Scoring Crédito", path: "/credit-scoring", feature: "credit_scoring" },
-      { icon: Lightbulb, label: "Oportunidades", path: "/oportunidades", feature: "comerciales" },
-      { icon: Thermometer, label: "Cadena de Frío", path: "/cold-chain", feature: "cold_chain" },
-      { icon: Bot, label: "Marco IA (Cerebro)", path: "/asistente-virtual", feature: "asistente_virtual" },
-      { icon: Users, label: "Clientes", path: "/clientes", feature: "clientes_fidelizacion" },
-      { icon: PieChart, label: "Customer 360", path: "/customer360", feature: "customer360" },
-      { icon: Clock, label: "Turnos", path: "/schedule", feature: "schedule" },
-      { icon: BarChart3, label: "Productividad", path: "/productividad", feature: "productividad" },
-      { icon: BookOpen, label: "Capacitación", path: "/capacitacion", feature: "capacitacion" },
-      { icon: DollarSign, label: "PyG Diario", path: "/pyg-diario", feature: "pyg_diario" },
-      { icon: AlertTriangle, label: "Shrinkage", path: "/shrinkage", feature: "shrinkage" },
-      { icon: TrendingUp, label: "Forecast Avanz.", path: "/forecast-avanzado", feature: "forecast_avanzado" },
-      { icon: BarChart3, label: "Benchmarking", path: "/benchmarking", feature: "benchmarking" },
-      { icon: ShoppingCart, label: "E-commerce", path: "/ecommerce-sm", feature: "ecommerce_sm" },
-      { icon: Globe, label: "Delivery Apps", path: "/delivery-integrations", feature: "delivery_integrations" },
-      { icon: Repeat, label: "Suscripciones", path: "/suscripciones", feature: "suscripciones" },
+      { icon: RotateCcw, label: "Devoluciones & NC", path: "/returns" },
+      { icon: Users, label: "Clientes Mayoristas", path: "/customers" },
+      { icon: BadgeDollarSign, label: "Listas de Precios", path: "/price-lists" },
+      { icon: DollarSign, label: "Comisiones", path: "/commissions" },
+      { icon: Globe, label: "Portal Clientes", path: "/portal" },
     ]
   },
   {
     title: "Inventario",
     items: [
-      { icon: Tags, label: "Catálogo", path: "/products" },
-      { icon: Copy, label: "Variantes", path: "/variants", feature: "variants" },
-      { icon: Package, label: "Kits", path: "/kits", feature: "kits" },
-      { icon: Warehouse, label: "Almacenes", path: "/inventory" },
-      { icon: ClipboardList, label: "Depósito", path: "/deposito" },
-      { icon: Scale, label: "Básculas", path: "/escalas", feature: "supermercado" },
-      { icon: ArrowLeftRight, label: "Transferencias", path: "/transferencias", feature: "advanced_inventory" },
-      { icon: ClipboardList, label: "Reabastecimiento", path: "/auto-replenish", feature: "advanced_inventory" },
-      { icon: MapPin, label: "Inventario Avanzado", path: "/advanced-inventory", feature: "advanced_inventory" },
+      { icon: Tags, label: "Catálogo de Productos", path: "/products" },
+      { icon: Copy, label: "Variantes & Empaques", path: "/variants" },
+      { icon: Package, label: "Kits & Combos", path: "/kits" },
+      { icon: Warehouse, label: "Depósitos & Stock", path: "/inventory" },
+      { icon: AlertTriangle, label: "Mermas (Shrinkage)", path: "/shrinkage" },
+      { icon: ArrowLeftRight, label: "Transferencias", path: "/transferencias" },
+      { icon: ClipboardList, label: "Reabastecimiento", path: "/auto-replenish" },
+    ]
+  },
+  {
+    title: "Distribución & Logística",
+    items: [
+      { icon: Factory, label: "Módulo Distribuidora", path: "/distribuidora" },
+      { icon: Navigation, label: "Rutas de Venta", path: "/rutas" },
+      { icon: MapPinned, label: "Rutas de Logística", path: "/logistics" },
+      { icon: Truck, label: "Flota & Entregas", path: "/intelientregas" },
+      { icon: Map, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real" },
+      { icon: BarChart3, label: "Rendimiento Preventa", path: "/rendimiento" },
+      { icon: Smartphone, label: "App Repartidor", path: "/driver-app" },
     ]
   },
   {
     title: "Abastecimiento",
     items: [
       { icon: ShoppingBag, label: "Gestión de Compras", path: "/purchases" },
-      { icon: Upload, label: "Importaciones CSV", path: "/imports", feature: "imports" },
-      { icon: Briefcase, label: "Contratos Prov.", path: "/contratos-proveedores" },
-      { icon: RotateCcw, label: "Devol. a Proveedores", path: "/devoluciones-proveedores" },
+      { icon: TrendingUp, label: "Forecast & Reposición", path: "/demand-forecast" },
+      { icon: Target, label: "Metas & Rebates PARESA", path: "/proveedor-kpis" },
+      { icon: Briefcase, label: "Contratos Proveedores", path: "/contratos-proveedores" },
       { icon: Award, label: "Bonificaciones Compra", path: "/bonificaciones-compra" },
-      { icon: Users, label: "Acuerdos Clientes", path: "/acuerdos-clientes" },
+      { icon: RotateCcw, label: "Devol. a Proveedores", path: "/devoluciones-proveedores" },
+      { icon: Upload, label: "Importaciones CSV", path: "/imports" },
       { icon: Globe, label: "Portal Proveedores", path: "/portal/proveedores/dashboard" },
     ]
   },
   {
     title: "Finanzas & Tesorería",
     items: [
-      { icon: Sparkles, label: "Gerente Financiero", path: "/finance-agent" },
-      { icon: ShieldAlert, label: "Deuda Total Consolidada", path: "/deudas-consolidadas" },
-      { icon: Landmark, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
-      { icon: Banknote, label: "Cheques & Pagarés", path: "/checks" },
-      { icon: Wallet, label: "Cajas, Arqueos & Rutas", path: "/caja" },
+      { icon: Banknote, label: "Arqueo de Caja", path: "/caja" },
       { icon: Landmark, label: "Bóveda Central", path: "/boveda" },
+      { icon: Landmark, label: "Cuentas Bancarias", path: "/bancos" },
+      { icon: CreditCard, label: "Gestión de Cheques", path: "/checks" },
+      { icon: DollarSign, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
+      { icon: ShieldAlert, label: "Deuda Consolidada", path: "/deudas-consolidadas" },
       { icon: CreditCard, label: "Líneas de Crédito", path: "/credit-accounts" },
       { icon: HandCoins, label: "Cuentas por Pagar", path: "/accounts-payable" },
       { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
+      { icon: DollarSign, label: "PyG Diario", path: "/pyg-diario" },
       { icon: Building, label: "Contabilidad Integrada", path: "/contabilidad" },
-      { icon: Percent, label: "Rebates de Proveedores", path: "/proveedor-kpis" },
+    ]
+  },
+  {
+    title: "CRM & Marketing",
+    items: [
+      { icon: Users, label: "Fidelidad & CRM", path: "/crm" },
+      { icon: PieChart, label: "Customer 360", path: "/customer360" },
+      { icon: MessageCircle, label: "WhatsApp", path: "/whatsapp" },
+      { icon: Megaphone, label: "IntelliZapp", path: "/intellizapp" },
+      { icon: Tag, label: "Promociones & Campañas", path: "/promociones" },
       { icon: Target, label: "Metas de Venta", path: "/sales-targets" },
     ]
   },
   {
-    title: "Logística & Reparto",
+    title: "Recursos Humanos",
     items: [
-      { icon: Factory, label: "Distribuidora", path: "/distribuidora", feature: "distribuidora" },
-      { icon: MapPinned, label: "Rutas de Distrib.", path: "/logistics", feature: "logistics" },
-      { icon: Truck, label: "Flota y Entregas", path: "/intelientregas", feature: "logistics" },
-      { icon: Smartphone, label: "App Repartidor", path: "/driver-app" },
-    ]
-  },
-  {
-    title: "Mapa & Rutas",
-    items: [
-      { icon: Map, label: "Mapa en Tiempo Real", path: "/mapa-tiempo-real", feature: "real_time_map" },
-      { icon: Users, label: "Vendedores", path: "/sellers", feature: "seller_tracking" },
-      { icon: Navigation, label: "Rutas de Venta", path: "/rutas", feature: "sales_routes" },
-      { icon: ClipboardList, label: "Visitas", path: "/visitas", feature: "seller_tracking" },
-      { icon: Fence, label: "Geocercas", path: "/geocercas", feature: "geofence_zones" },
-      { icon: BarChart3, label: "Rendimiento", path: "/rendimiento", feature: "seller_performance" },
-    ]
-  },
-  {
-    title: "Verticales (Especiales)",
-    items: [
-      { icon: ShoppingCart, label: "Supermercado", path: "/supermer", feature: "supermercado" },
-      { icon: Scan, label: "Self-Checkout", path: "/self-checkout", feature: "supermercado" },
-      { icon: QrCode, label: "Scan&Go", path: "/scanandgo", feature: "scanandgo" },
-      { icon: Cpu, label: "Edge Hardware", path: "/edge-agent", feature: "supermercado" },
-      { icon: Pill, label: "Farmacia", path: "/pharma", feature: "pharma" },
-      { icon: Beaker, label: "POS Farmacia", path: "/pharma-pos", feature: "pharma" },
-      { icon: Shirt, label: "Boutique", path: "/boutique", feature: "boutique_pedidos" },
-      { icon: Wrench, label: "Servicios", path: "/servicios", feature: "servicios" },
-      { icon: Smartphone, label: "App Clientes", path: "/client-app", feature: "client_app" },
+      { icon: PiggyBank, label: "Nómina (SueldOK)", path: "/sueldok" },
+      { icon: Clock, label: "Turnos & Horarios", path: "/schedule" },
+      { icon: BookOpen, label: "Capacitación", path: "/capacitacion" },
     ]
   },
   {
     title: "Integraciones",
     items: [
-      { icon: ShieldCheck, label: "Facturación SET", path: "/sifen", feature: "sifen" },
-      { icon: ShieldCheck, label: "SIFEN Avanzado", path: "/sifen-avanzado", feature: "sifen_avanzado" },
-      { icon: CreditCard, label: "Pagopar", path: "/pagopar", feature: "pagopar" },
-      { icon: QrCode, label: "Kuapay", path: "/kuapay", feature: "kuapay" },
-      { icon: Scan, label: "SPI QR", path: "/spi", feature: "spi" },
-      { icon: CreditCard, label: "Bancard", path: "/bancard", feature: "bancard" },
-      { icon: CreditCard, label: "Dinelco", path: "/dinelco", feature: "dinelco" },
-      { icon: Mail, label: "Email", path: "/email", feature: "email" },
+      { icon: ShieldCheck, label: "Facturación SIFEN", path: "/sifen" },
+      { icon: CreditCard, label: "Bancard & Dinelco", path: "/bancard" },
+      { icon: CreditCard, label: "Pagopar", path: "/pagopar" },
+      { icon: QrCode, label: "Kuapay", path: "/kuapay" },
+      { icon: Mail, label: "Email Transaccional", path: "/email" },
       { icon: BookOpen, label: "InteliCont", path: "/intelicont" },
-      { icon: PiggyBank, label: "SueldOK", path: "/sueldok" },
       { icon: Blocks, label: "Ecosistema Intelli", path: "/integrations" },
     ]
   },
   {
     title: "Inteligencia & Sistema",
     items: [
+      { icon: Bot, label: "Marco IA (Cerebro)", path: "/asistente-virtual" },
       { icon: LineChart, label: "Business Intelligence", path: "/reports" },
-      { icon: PieChart, label: "Rep. Gerenciales", path: "/gerencial" },
+      { icon: PieChart, label: "Reportes Gerenciales", path: "/gerencial" },
       { icon: Fingerprint, label: "Auditoría", path: "/audit" },
+      { icon: Building2, label: "Sucursales", path: "/branches" },
+      { icon: Shield, label: "Usuarios & Permisos (RBAC)", path: "/rbac" },
       { icon: Settings, label: "Configuración", path: "/settings" },
-      { icon: Building2, label: "Sucursales", path: "/branches", feature: "branches" },
-      { icon: Shield, label: "RBAC", path: "/rbac", feature: "rbac" },
       { icon: Crown, label: "Admin SaaS", path: "/admin", superadminOnly: true },
       { icon: LayoutGrid, label: "Verticales", path: "/admin/verticals", superadminOnly: true },
     ]
@@ -208,14 +160,14 @@ export default function Layout() {
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false)
   const { user, logout } = useAuth()
   const { theme, setTheme } = useTheme()
-  const { hasFeature, verticalSlug } = useFeatures()
+  const { hasFeature } = useFeatures()
   const navigate = useNavigate()
   const location = useLocation()
 
   const [expandedGroups, setExpandedGroups] = useState<string[]>([])
 
   useEffect(() => {
-    const activeGroup = navGroups.find(g => g.items.some(i => i.path === location.pathname))
+    const activeGroup = navGroups.find(g => g.items.some(i => i.path === location.pathname || (i.path !== "/" && i.path !== "/dashboard" && location.pathname.startsWith(i.path))))
     if (activeGroup && !expandedGroups.includes(activeGroup.title)) {
       setExpandedGroups(prev => [...prev, activeGroup.title])
     }
@@ -236,123 +188,83 @@ export default function Layout() {
   }
 
   return (
-    <div className="h-screen bg-body-light dark:bg-body-dark flex overflow-hidden">
+    <div className="h-screen bg-body-light dark:bg-body-dark flex overflow-hidden font-sans">
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
+      {/* ── Sidebar Estilo Granítico con Estilo Pill, Línea Vertical y Acentuación Teal ── */}
       <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 sidebar-gradient transform transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} flex flex-col`}>
-        <div className="p-6 border-b border-white/10">
+        
+        {/* Logo & Header con Pill de Vertical */}
+        <div className="p-5 border-b border-white/10">
           <div className="flex items-center justify-between">
-            <div className="flex flex-col">
+            <div className="flex flex-col text-left">
               <Logo />
-              {(() => {
-                // Badge real de vertical, de tenants.config (via FeatureContext) --
-                // no confundir con el 'demo_mode' de localStorage de mas abajo, que
-                // es solo un toggle de demo comercial en el navegador, no la
-                // configuracion real del cliente.
-                const VERTICAL_LABELS: Record<string, string> = {
-                  distribucion: "Distribución",
-                  retail: "Retail",
-                  supermercado: "Supermercado",
-                  farmacia: "Farmacia",
-                  boutique: "Boutique",
-                  servicios: "Servicios",
-                  full: "Full",
-                }
-                const demoOverride = localStorage.getItem('demo_mode') === 'supermercado' ? 'supermercado' : null
-                const slug = demoOverride || verticalSlug
-                if (!slug || !VERTICAL_LABELS[slug]) return null
-                return (
-                  <span className="mt-1 text-[10px] font-bold bg-green-500 text-white px-2 py-0.5 rounded-full w-max uppercase tracking-wider">
-                    {VERTICAL_LABELS[slug]}
-                  </span>
-                )
-              })()}
+              <span className="mt-1.5 text-[9px] font-black bg-teal-500 text-white px-2.5 py-0.5 rounded-full w-max uppercase tracking-widest shadow-sm">
+                Versión: Distribuidora
+              </span>
             </div>
-            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/70 hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
           </div>
         </div>
 
-        <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
+        {/* Menú de Navegación con Pills de Categoría y Guía Vertical */}
+        <nav className="flex-1 p-3 space-y-3 overflow-y-auto">
           {navGroups.map((group) => {
-            if (localStorage.getItem('demo_mode') === 'supermercado') {
-              const allowedGroups = ["Inicio", "Ventas", "Inventario", "Abastecimiento", "Finanzas & Tesorería", "Verticales (Especiales)", "Integraciones", "Inteligencia & Sistema", "CRM & Marketing"];
-              if (!allowedGroups.includes(group.title)) return null;
-            }
-
             const visibleItems = group.items.filter((item) => {
-              const isSupermerCRM = localStorage.getItem('demo_mode') === 'supermercado' && (item.label === "Fidelidad & CRM" || item.label === "WhatsApp");
-              if (item.feature && !hasFeature(item.feature) && !isSupermerCRM) return false;
-              if (item.superadminOnly && !user?.is_superadmin) return false;
-              if (localStorage.getItem('demo_mode') === 'supermercado') {
-                if (
-                  item.label === "SueldOK" ||
-                  item.label === "Supermercado" ||
-                  item.label === "Self-Checkout" ||
-                  item.label === "Edge Hardware" ||
-                  item.label === "Básculas" ||
-                  item.label === "Catálogo" ||
-                  item.label === "Almacenes" ||
-                  item.label === "Transferencias" ||
-                  item.label === "Reabastecimiento" ||
-                  item.label === "Punto de Venta" ||
-                  item.label === "Devoluciones" ||
-                  item.label === "Facturación" ||
-                  item.label === "Arqueo de Caja" ||
-                  item.label === "Bóveda Central" ||
-                  item.label === "Cuentas por Cobrar" ||
-                  item.label === "Cuentas por Pagar" ||
-                  item.label === "Líneas de Crédito" ||
-                  item.label === "Gastos Operativos" ||
-                  item.label === "Gestión Financiera" ||
-                  item.label === "Dashboard" ||
-                  item.label === "Facturación SET" ||
-                  item.label === "Pagopar" ||
-                  item.label === "Kuapay" ||
-                  item.label === "SPI QR" ||
-                  item.label === "InteliCont" ||
-                  item.label === "Ecosistema Intelli" ||
-                  item.label === "Auditoría" ||
-                  item.label === "Gestión de Compras" ||
-                  item.label === "Contratos Prov." ||
-                  item.label === "Fidelidad & CRM" ||
-                  item.label === "WhatsApp"
-                ) {
-                  return true;
-                }
-                return false;
-              }
-              return true;
-            });
-            if (visibleItems.length === 0) return null;
+              if (item.superadminOnly && !user?.is_superadmin) return false
+              return !item.feature || hasFeature(item.feature)
+            })
+            if (visibleItems.length === 0) return null
+
+            const isExpanded = group.title === "Inicio" || expandedGroups.includes(group.title)
 
             return (
-              <div key={group.title} className="space-y-1">
+              <div key={group.title} className="space-y-1 text-left">
+                {/* ── Estilo Pill en la Categoría ── */}
                 {group.title !== "Inicio" && (
-                  <button 
+                  <button
                     onClick={() => toggleGroup(group.title)}
-                    className="w-full flex items-center justify-between px-3 py-2 mt-2 text-xs font-semibold text-white/50 hover:text-white uppercase tracking-wide transition-colors"
+                    className={`w-full flex items-center justify-between px-3.5 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all text-left shadow-xs ${
+                      isExpanded 
+                        ? "bg-white/15 text-white border border-white/20" 
+                        : "bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-white/5"
+                    }`}
                   >
-                    <span>{group.title}</span>
-                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${expandedGroups.includes(group.title) ? "rotate-180 text-white" : ""}`} />
+                    <span className="text-left flex-1 truncate">{group.title}</span>
+                    <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-180 text-white" : "text-white/60"}`} />
                   </button>
                 )}
-                
-                <div className={`space-y-1 overflow-hidden transition-all duration-300 ${group.title === "Inicio" || expandedGroups.includes(group.title) ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0"}`}>
-                  {visibleItems.map((item) => {
-                    const active = location.pathname === item.path
-                    return (
-                      <button key={item.path} onClick={() => { navigate(item.path); setSidebarOpen(false) }}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-left leading-snug transition-all duration-200 ${active ? "bg-white/20 text-white shadow-lg" : "text-white/70 hover:text-white hover:bg-white/10"}`}>
-                        <item.icon className="w-5 h-5 flex-shrink-0" />{item.label}
-                      </button>
-                    )
-                  })}
+
+                {/* ── Submenús con Línea Vertical al Costado Izquierdo y Acento Teal ── */}
+                <div className={`overflow-hidden transition-all duration-300 ${isExpanded ? "max-h-[800px] opacity-100" : "max-h-0 opacity-0"}`}>
+                  <div className={`${group.title !== "Inicio" ? "ml-3 pl-2.5 border-l-2 border-white/20 space-y-1 py-1" : "space-y-1"}`}>
+                    {visibleItems.map((item) => {
+                      const active = location.pathname === item.path || (item.path === "/dashboard" && location.pathname === "/")
+                      return (
+                        <button
+                          key={item.path}
+                          onClick={() => { navigate(item.path); setSidebarOpen(false) }}
+                          className={`w-full flex items-center justify-start gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-left transition-all duration-200 ${
+                            active
+                              ? "bg-white/25 text-white font-bold shadow-lg border-l-4 border-teal-400 pl-2"
+                              : "text-white/75 hover:text-white hover:bg-white/10"
+                          }`}
+                        >
+                          <item.icon className={`w-4 h-4 flex-shrink-0 ${active ? "text-teal-300" : "text-white/70"}`} />
+                          <span className="text-left flex-1 truncate leading-tight">{item.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               </div>
-            );
+            )
           })}
         </nav>
 
+        {/* Footer: Selector de Tema & Logout */}
         <div className="p-3 border-t border-white/10 space-y-1 relative">
           <div className="relative">
             <button onClick={() => setThemeDropdownOpen(!themeDropdownOpen)} className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all">
@@ -382,6 +294,7 @@ export default function Layout() {
         </div>
       </aside>
 
+      {/* ── Main Layout Body ── */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="relative z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 px-4 lg:px-6 py-3 flex items-center gap-4 lg:gap-8 justify-between">
           <div className="flex items-center gap-4 lg:hidden">
@@ -397,7 +310,7 @@ export default function Layout() {
               <input
                 type="text"
                 className="w-full bg-gray-100 dark:bg-slate-800/50 border border-transparent focus:border-primary/50 focus:bg-white dark:focus:bg-slate-800 text-sm rounded-xl pl-10 pr-12 py-2.5 transition-all text-gray-900 dark:text-white placeholder-gray-500 outline-none"
-                placeholder="Buscar productos, clientes, facturas..."
+                placeholder="Buscar productos, clientes, facturas mayoristas..."
               />
               <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
                 <span className="text-[10px] font-semibold text-gray-400 border border-gray-200 dark:border-gray-700 px-1.5 py-0.5 rounded-md bg-white dark:bg-slate-800">Ctrl K</span>
@@ -407,23 +320,22 @@ export default function Layout() {
 
           {/* Right Tools */}
           <div className="flex items-center gap-2 sm:gap-4 ml-auto">
-            {/* Branch Selector */}
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">
-              <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center text-primary">
+            {/* Branch Badge */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+              <div className="w-6 h-6 rounded bg-teal-500/10 flex items-center justify-center text-teal-600 dark:text-teal-400">
                 <Store className="w-3.5 h-3.5" />
               </div>
               <div className="flex flex-col">
-                <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider leading-none">Sucursal</span>
-                <span className="text-xs font-medium text-gray-900 dark:text-white leading-tight mt-0.5">Centro (Súper)</span>
+                <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider leading-none">Distribuidora</span>
+                <span className="text-xs font-bold text-gray-900 dark:text-white leading-tight mt-0.5">Casa Gonzalito</span>
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-gray-400 ml-1" />
             </div>
 
             {/* Quick Actions & Notifications */}
             <div className="flex items-center gap-1 sm:gap-2">
-              <button className="hidden sm:flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-2 rounded-lg text-sm font-medium transition-colors">
+              <button onClick={() => navigate("/sales")} className="hidden sm:flex items-center gap-1.5 bg-teal-600/10 hover:bg-teal-600/20 text-teal-700 dark:text-teal-300 px-3 py-2 rounded-lg text-sm font-bold transition-colors">
                 <Plus className="w-4 h-4" />
-                <span>Nuevo</span>
+                <span>Nueva Venta</span>
               </button>
               
               <NotificationBell />
@@ -434,12 +346,12 @@ export default function Layout() {
 
             {/* User Profile */}
             <div className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-primary to-primary-light flex items-center justify-center text-white shadow-sm font-semibold text-sm">
-                {user?.nombre?.charAt(0).toUpperCase() || "U"}
+              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-teal-600 to-indigo-600 flex items-center justify-center text-white shadow-sm font-semibold text-sm">
+                {user?.nombre?.charAt(0).toUpperCase() || "A"}
               </div>
               <div className="hidden md:flex flex-col">
-                <span className="text-sm font-medium text-gray-900 dark:text-white leading-none">{user?.nombre || "Usuario"}</span>
-                <span className="text-[11px] text-gray-500 mt-0.5">Administrador</span>
+                <span className="text-sm font-bold text-gray-900 dark:text-white leading-none">{user?.nombre || "Admin Casa Gonzalito"}</span>
+                <span className="text-[11px] text-teal-600 dark:text-teal-400 font-medium mt-0.5">Distribución Mayorista</span>
               </div>
             </div>
           </div>
