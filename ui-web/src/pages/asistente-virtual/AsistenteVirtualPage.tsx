@@ -3,7 +3,7 @@ import {
   BarChart3, MessageCircle, Ticket, BrainCircuit, Send, Plus, Search, Loader2,
   Zap, CheckCircle, XCircle, Clock, RefreshCcw, Bot, User, ThumbsUp, ThumbsDown,
   Star, Phone, Mail, ArrowLeft, Settings, Activity, Mic, MicOff, Volume2, Database,
-  Sparkles, Terminal, Play, Cpu, HardDrive, ShieldCheck
+  Sparkles, Terminal, Play, Pause, X, Check, Cpu, HardDrive, ShieldCheck
 } from "lucide-react"
 import { api } from "../../api/index"
 import { useAuth } from "../../context/AuthContext"
@@ -61,12 +61,99 @@ function Spinner() { return <Loader2 className="w-4 h-4 animate-spin" /> }
 
 // ===== 🧠 CEREBRO IA & VOZ TAB =====
 
+function FormattedExecutiveMessage({ content, isUser }: { content: string; isUser?: boolean }) {
+  if (!content) return null
+  if (isUser) return <p className="text-sm leading-relaxed font-medium">{content}</p>
+
+  let mainText = content
+  let suggestionText = ""
+
+  const suggestionMatch = content.match(/(?:💡\s*(?:\*\*)?Sugerencia(?: de Marco)?(?:\*\*)?:?\s*)([\s\S]*)$/i)
+  if (suggestionMatch) {
+    mainText = content.substring(0, suggestionMatch.index).trim()
+    suggestionText = suggestionMatch[1].trim()
+  }
+
+  const lines = mainText.split("\n").filter(l => l.trim().length > 0)
+
+  const renderInlineFormatting = (str: string) => {
+    const parts = str.split(/(\*\*.*?\*\*)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        const text = part.slice(2, -2)
+        return <strong key={i} className="font-bold text-gray-900 dark:text-white">{text}</strong>
+      }
+      return part
+    })
+  }
+
+  return (
+    <div className="space-y-3 text-sm leading-relaxed">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim()
+        
+        // Bullet point with bold title: e.g. • **Volumen Acumulado:** 98.450 UC ...
+        if (trimmed.startsWith("•") || trimmed.startsWith("-") || trimmed.startsWith("*")) {
+          const bulletContent = trimmed.replace(/^[•\-*]\s*/, "")
+          return (
+            <div key={idx} className="flex items-start gap-2.5 p-2.5 bg-slate-50 dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/60 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-indigo-500 mt-1.5 flex-shrink-0"></span>
+              <div className="flex-1 text-gray-800 dark:text-gray-200">
+                {renderInlineFormatting(bulletContent)}
+              </div>
+            </div>
+          )
+        }
+
+        // Numbered list: e.g. 1. **Davida S.A.** ...
+        const numMatch = trimmed.match(/^(\d+)\.\s*(.*)/)
+        if (numMatch) {
+          const num = numMatch[1]
+          const rest = numMatch[2]
+          return (
+            <div key={idx} className="flex items-start gap-2.5 p-2.5 bg-slate-50 dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/60 shadow-2xs">
+              <span className="w-5 h-5 rounded-lg bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
+                {num}
+              </span>
+              <div className="flex-1 text-gray-800 dark:text-gray-200">
+                {renderInlineFormatting(rest)}
+              </div>
+            </div>
+          )
+        }
+
+        // Normal paragraph
+        return (
+          <p key={idx} className="text-gray-800 dark:text-gray-200">
+            {renderInlineFormatting(trimmed)}
+          </p>
+        )
+      })}
+
+      {/* Suggestion Callout Box */}
+      {suggestionText && (
+        <div className="mt-3 p-3.5 bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-violet-500/10 dark:from-amber-950/20 dark:via-indigo-950/30 dark:to-violet-950/20 rounded-2xl border border-amber-500/30 dark:border-indigo-500/30 text-gray-800 dark:text-gray-200 shadow-sm">
+          <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-bold text-xs mb-1">
+            <Sparkles className="w-4 h-4" />
+            <span>Sugerencia de Marco</span>
+          </div>
+          <p className="text-xs text-gray-700 dark:text-gray-300 pl-5">
+            {renderInlineFormatting(suggestionText)}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function BrainTab() {
   const { user } = useAuth()
-  const userName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
+  const rawName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
+  const userName = rawName.toLowerCase().includes("admin") || rawName.toLowerCase().includes("casa") ? "Gustavo" : rawName
+
   const [query, setQuery] = useState("")
   const [model, setModel] = useState("qwen2.5:7b")
-  const [voice, setVoice] = useState(() => localStorage.getItem("marco_voice") || "es-AR-TomasNeural")
+  const [voice, setVoice] = useState(() => localStorage.getItem("marco_voice") || "es-UY-MateoNeural")
   const [loading, setLoading] = useState(false)
   const [recording, setRecording] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
@@ -133,16 +220,29 @@ function BrainTab() {
     if (!url) return
     try {
       if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause()
+        audioPlayerRef.current.currentTime = 0
         audioPlayerRef.current.src = url
-        audioPlayerRef.current.play()
-        setPlayingAudioId(id)
+        audioPlayerRef.current.load()
+        const playPromise = audioPlayerRef.current.play()
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => setPlayingAudioId(id))
+            .catch((err) => {
+              console.warn("Autoplay block or error:", err)
+              const fallbackAudio = new Audio(url)
+              fallbackAudio.onended = () => setPlayingAudioId(null)
+              fallbackAudio.onpause = () => setPlayingAudioId(null)
+              fallbackAudio.play().then(() => setPlayingAudioId(id)).catch(() => setPlayingAudioId(null))
+            })
+        }
         audioPlayerRef.current.onended = () => setPlayingAudioId(null)
         audioPlayerRef.current.onpause = () => setPlayingAudioId(null)
       } else {
-        const audio = new Audio(url)
-        setPlayingAudioId(id)
-        audio.onended = () => setPlayingAudioId(null)
-        audio.play()
+        const fallbackAudio = new Audio(url)
+        fallbackAudio.onended = () => setPlayingAudioId(null)
+        fallbackAudio.onpause = () => setPlayingAudioId(null)
+        fallbackAudio.play().then(() => setPlayingAudioId(id)).catch(() => setPlayingAudioId(null))
       }
     } catch (e) {
       console.error("Error playing audio", e)
@@ -502,7 +602,7 @@ function BrainTab() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.response}</p>
+                      <FormattedExecutiveMessage content={msg.response} />
 
                       {/* Audio Controls & Metadata Badges */}
                       <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">

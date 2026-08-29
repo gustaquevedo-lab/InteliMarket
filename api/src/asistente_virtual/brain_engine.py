@@ -486,6 +486,8 @@ async def execute_ai_brain_pipeline(
     display_name = user_name.strip() if user_name and user_name.strip() else "Gustavo"
     if "@" in display_name:
         display_name = display_name.split("@")[0].capitalize()
+    if any(k in display_name.lower() for k in ["admin", "casa gonzalito", "casagonzalito", "usuario", "root"]):
+        display_name = "Gustavo"
         
     chosen_voice = voice_preference or "es-UY-MateoNeural"
     q_lower = user_query.lower().strip()

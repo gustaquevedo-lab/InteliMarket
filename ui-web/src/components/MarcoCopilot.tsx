@@ -10,13 +10,102 @@ import { useAuth } from "../context/AuthContext"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
+function FormattedExecutiveMessage({ content, isUser }: { content: string; isUser?: boolean }) {
+  if (!content) return null
+  if (isUser) return <p className="text-xs leading-relaxed font-medium">{content}</p>
+
+  // Split suggestion callout if present
+  let mainText = content
+  let suggestionText = ""
+
+  const suggestionMatch = content.match(/(?:💡\s*(?:\*\*)?Sugerencia(?: de Marco)?(?:\*\*)?:?\s*)([\s\S]*)$/i)
+  if (suggestionMatch) {
+    mainText = content.substring(0, suggestionMatch.index).trim()
+    suggestionText = suggestionMatch[1].trim()
+  }
+
+  // Parse lines of mainText
+  const lines = mainText.split("\n").filter(l => l.trim().length > 0)
+
+  const renderInlineFormatting = (str: string) => {
+    const parts = str.split(/(\*\*.*?\*\*)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        const text = part.slice(2, -2)
+        return <strong key={i} className="font-bold text-gray-900 dark:text-white">{text}</strong>
+      }
+      return part
+    })
+  }
+
+  return (
+    <div className="space-y-2.5 text-xs leading-relaxed">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim()
+        
+        // Bullet point with bold title: e.g. • **Volumen Acumulado:** 98.450 UC ...
+        if (trimmed.startsWith("•") || trimmed.startsWith("-") || trimmed.startsWith("*")) {
+          const bulletContent = trimmed.replace(/^[•\-*]\s*/, "")
+          return (
+            <div key={idx} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/60 shadow-2xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 flex-shrink-0"></span>
+              <div className="flex-1 text-gray-800 dark:text-gray-200">
+                {renderInlineFormatting(bulletContent)}
+              </div>
+            </div>
+          )
+        }
+
+        // Numbered list: e.g. 1. **Davida S.A.** ...
+        const numMatch = trimmed.match(/^(\d+)\.\s*(.*)/)
+        if (numMatch) {
+          const num = numMatch[1]
+          const rest = numMatch[2]
+          return (
+            <div key={idx} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/60 shadow-2xs">
+              <span className="w-4 h-4 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+                {num}
+              </span>
+              <div className="flex-1 text-gray-800 dark:text-gray-200">
+                {renderInlineFormatting(rest)}
+              </div>
+            </div>
+          )
+        }
+
+        // Normal paragraph
+        return (
+          <p key={idx} className="text-gray-800 dark:text-gray-200">
+            {renderInlineFormatting(trimmed)}
+          </p>
+        )
+      })}
+
+      {/* Suggestion Callout Box */}
+      {suggestionText && (
+        <div className="mt-2.5 p-3 bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-violet-500/10 dark:from-amber-950/20 dark:via-indigo-950/30 dark:to-violet-950/20 rounded-2xl border border-amber-500/30 dark:border-indigo-500/30 text-gray-800 dark:text-gray-200 shadow-sm">
+          <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-bold text-[11px] mb-1">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Sugerencia de Marco</span>
+          </div>
+          <p className="text-xs text-gray-700 dark:text-gray-300 pl-4">
+            {renderInlineFormatting(suggestionText)}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function MarcoCopilot() {
   const { user } = useAuth()
-  const userName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
+  const rawName = user?.nombre || user?.email?.split("@")[0] || "Gustavo"
+  const userName = rawName.toLowerCase().includes("admin") || rawName.toLowerCase().includes("casa") ? "Gustavo" : rawName
+
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [model, setModel] = useState("qwen2.5:7b")
-  const [voice, setVoice] = useState(() => localStorage.getItem("marco_voice") || "es-AR-TomasNeural")
+  const [voice, setVoice] = useState(() => localStorage.getItem("marco_voice") || "es-UY-MateoNeural")
   const [loading, setLoading] = useState(false)
   const [recording, setRecording] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
@@ -74,16 +163,29 @@ export default function MarcoCopilot() {
     if (!url) return
     try {
       if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause()
+        audioPlayerRef.current.currentTime = 0
         audioPlayerRef.current.src = url
-        audioPlayerRef.current.play()
-        setPlayingAudioId(id)
+        audioPlayerRef.current.load()
+        const playPromise = audioPlayerRef.current.play()
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => setPlayingAudioId(id))
+            .catch((err) => {
+              console.warn("Autoplay block or error:", err)
+              const fallbackAudio = new Audio(url)
+              fallbackAudio.onended = () => setPlayingAudioId(null)
+              fallbackAudio.onpause = () => setPlayingAudioId(null)
+              fallbackAudio.play().then(() => setPlayingAudioId(id)).catch(() => setPlayingAudioId(null))
+            })
+        }
         audioPlayerRef.current.onended = () => setPlayingAudioId(null)
         audioPlayerRef.current.onpause = () => setPlayingAudioId(null)
       } else {
-        const audio = new Audio(url)
-        setPlayingAudioId(id)
-        audio.onended = () => setPlayingAudioId(null)
-        audio.play()
+        const fallbackAudio = new Audio(url)
+        fallbackAudio.onended = () => setPlayingAudioId(null)
+        fallbackAudio.onpause = () => setPlayingAudioId(null)
+        fallbackAudio.play().then(() => setPlayingAudioId(id)).catch(() => setPlayingAudioId(null))
       }
     } catch (e) {
       console.error("Error playing audio", e)
@@ -408,7 +510,7 @@ export default function MarcoCopilot() {
                           <div className="flex items-center gap-0.5 flex-1"><span className="text-[10px] text-white/90 font-bold">🎙️ Tu mensaje de voz</span></div>
                         </div>
                       )}
-                      <div className="whitespace-pre-wrap">{msg.response || msg.user_query}</div>
+                      <FormattedExecutiveMessage content={msg.response || msg.user_query} isUser={msg.isUser} />
                       {!msg.isUser && msg.audio_base64 && (
                         <div className="mt-3 pt-2.5 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between gap-3">
                           <button onClick={() => playBase64Audio(msg.audio_base64, msg.id)} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm ${playingAudioId === msg.id ? "bg-emerald-600 text-white animate-pulse" : "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100"}`}>
