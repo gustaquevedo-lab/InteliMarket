@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
 
@@ -43,5 +43,33 @@ class FinanceAgentRunResponse(BaseModel):
 
 
 class DecisionRequest(BaseModel):
-    approved_by: UUID
+    approved_by: Optional[UUID] = None
+    approved_by_name: Optional[str] = "Gustavo"
     comments: Optional[str] = None
+
+
+class FinanceChatRequest(BaseModel):
+    query: str
+    user_name: Optional[str] = "Gustavo"
+
+
+class FinanceChatResponse(BaseModel):
+    query: str
+    response: str
+    diagnostico_key: Optional[str] = None
+    metricas_relacionadas: Optional[Dict[str, Any]] = None
+    propuesta_estrategica: Optional[str] = None
+    execution_time_seconds: float = 0.0
+
+
+class FinanceExecutiveSummaryResponse(BaseModel):
+    company_id: str
+    as_of: datetime
+    liquidez_bancos_gs: float
+    cuentas_por_cobrar_gs: float
+    cuentas_por_cobrar_vencidas_gs: float
+    cuentas_por_pagar_gs: float
+    flujo_neto_proyectado_30d_gs: float
+    cheques_en_cartera_gs: float
+    alertas_criticas: List[str]
+    recomendaciones_activas_count: int

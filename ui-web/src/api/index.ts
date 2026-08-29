@@ -745,9 +745,11 @@ export const api = {
   exchangeRates: () => client.get<ExchangeRate[]>("/v1/currency/rates"),
   financeAgent: {
     run: () => client.post<FinanceAgentRun>("/v1/finance-agent/run", { company_id: COMPANY_ID }),
+    summary: () => client.get<any>("/v1/finance-agent/summary", { company_id: COMPANY_ID }),
+    chat: (query: string, user_name?: string) => client.post<any>("/v1/finance-agent/chat", { query, user_name }, { params: { company_id: COMPANY_ID } }),
     recommendations: (status?: string) => client.get<FinanceRecommendation[]>("/v1/finance-agent/recommendations", { company_id: COMPANY_ID, status }),
-    approve: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/approve`, { approved_by, comments }),
-    reject: (id: string, approved_by: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/reject`, { approved_by, comments }),
+    approve: (id: string, approved_by?: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/approve`, { approved_by_name: approved_by || "Gustavo", comments }),
+    reject: (id: string, approved_by?: string, comments?: string) => client.post<FinanceRecommendation>(`/v1/finance-agent/recommendations/${id}/reject`, { approved_by_name: approved_by || "Gustavo", comments }),
   },
   commercialAgent: {
     run: () => client.post<any>("/v1/commercial-agent/run", { company_id: COMPANY_ID }),

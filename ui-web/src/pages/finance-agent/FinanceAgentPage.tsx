@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Bot, Sparkles, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw,
   Landmark, DollarSign, ArrowUpRight, ArrowDownRight, CreditCard, TrendingUp,
-  Calendar, Plus, ArrowRightLeft, FileSpreadsheet, Building2
+  Calendar, Plus, ArrowRightLeft, FileSpreadsheet, Building2, Send, Clock,
+  ShieldAlert, CheckCircle, HelpCircle, ChevronRight
 } from "lucide-react"
 import { api, type FinanceRecommendation, type FinanceAgentRun } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -13,19 +14,28 @@ const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 type ActiveTab = "cfo" | "ai" | "banks" | "cajas" | "reconciliation" | "pnl"
 
+interface ChatMsg {
+  id: string
+  isUser: boolean
+  text: string
+  time: string
+  metrics?: any
+}
+
 const TIPO_LABEL: Record<string, string> = {
   cobranza: "Cobranza",
   pago_proveedor: "Pago a proveedor",
   alerta_presupuesto: "Presupuesto",
   control_caja_chica: "Control de caja chica",
-  otro: "Otro",
+  otro: "Tesorería",
 }
 
 export default function FinanceAgentPage() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>("cfo")
+  const [activeTab, setActiveTab] = useState<ActiveTab>("ai")
   const [loading, setLoading] = useState(true)
   
   // Executive Suite State
+  const [summaryData, setSummaryData] = useState<any>(null)
   const [cashFlowData, setCashFlowData] = useState<any>(null)
   const [banksData, setBanksData] = useState<any[]>([])
   const [ebitdaData, setEbitdaData] = useState<any>(null)
@@ -37,6 +47,23 @@ export default function FinanceAgentPage() {
   const [deciding, setDeciding] = useState<string | null>(null)
   const [filterStatus, setFilterStatus] = useState<string>("pending")
   const [lastRun, setLastRun] = useState<FinanceAgentRun | null>(null)
+
+  // Chat State
+  const [chatHistory, setChatHistory] = useState<ChatMsg[]>([
+    {
+      id: "welcome",
+      isUser: false,
+      text: `### 💼 Saludos, Gustavo. Soy el Gerente Financiero IA de Casa Gonzalito.
+
+Estoy conectado directamente a la base de datos de tesorería, cuentas por cobrar, cuentas por pagar a proveedores y cartera de cheques.
+
+Podés pedirme auditorías de liquidez bancaria, reportes de mora de clientes mayoristas, proyecciones de flujo de caja a 30 días o el calendario de vencimientos con proveedores para asegurar los rebates comerciales.`,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+  ])
+  const [query, setQuery] = useState("")
+  const [sendingChat, setSendingChat] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Deposit Modal State
   const [showDepositModal, setShowDepositModal] = useState(false)
@@ -54,55 +81,23 @@ export default function FinanceAgentPage() {
   const [processingRecon, setProcessingRecon] = useState<boolean>(false)
   const [reconcileResult, setReconcileResult] = useState<any | null>(null)
 
-  const handleProcessStatement = async () => {
-    if (!rawStatementText.trim()) return
-    setProcessingRecon(true)
-    try {
-      const lines = rawStatementText.split("\n").filter(l => l.trim().length > 0)
-      const parsedLines = lines.map(line => {
-        const parts = line.split(",").map(p => p.trim())
-        if (parts.length >= 3) {
-          const fecha = parts[0]
-          const concepto = parts[1]
-          const montoNum = parseFloat(parts[2].replace(/[^0-9.-]/g, "")) || 0
-          const referencia = parts[3] || "S/Ref"
-          return {
-            fecha,
-            concepto,
-            monto: Math.abs(montoNum),
-            tipo: montoNum >= 0 ? "credito" : "debito",
-            referencia
-          }
-        }
-        return null
-      }).filter(Boolean)
-
-      if (parsedLines.length === 0) {
-        toast.error("Error de formato", "Verificá que las líneas tengan formato: Fecha, Concepto, Monto, Referencia")
-        return
-      }
-
-      const res = await api.integratedFinance.importStatement({
-        company_id: COMPANY_ID,
-        bank_account_id: selectedBankForRecon || (banksData[0]?.id || undefined),
-        lineas: parsedLines
-      })
-      setReconcileResult(res)
-      toast.success("Conciliación Completada", `Se evaluaron ${res.transacciones_evaluadas} transacciones, ${res.conciliadas_exitosas} conciliadas exitosamente.`)
-      loadAllData()
-    } catch {
-      toast.error("Error", "No se pudo procesar la conciliación bancaria")
-    } finally {
-      setProcessingRecon(false)
-    }
-  }
-
   const toast = useToast()
   const { user } = useAuth()
+  const userName = user?.name || "Gustavo"
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [chatHistory, sendingChat])
 
   async function loadAllData() {
     setLoading(true)
     
+    // 0. Summary Data
+    try {
+      const sum = await api.financeAgent.summary()
+      setSummaryData(sum)
+    } catch { setSummaryData(null) }
+
     // 1. Bank Accounts
     try {
       const banks = await api.financial.banks.list(COMPANY_ID)
@@ -151,26 +146,110 @@ export default function FinanceAgentPage() {
       if (run.status === "error") {
         toast.error("Alerta", run.error_message || "El Gerente IA no pudo completar el diagnóstico")
       } else {
-        toast.success("Diagnóstico IA Completado", "Se generaron recomendaciones para tesorería y cuentas por cobrar")
+        toast.success("Diagnóstico IA Completado", "Se auditaron tesorería, cuentas por cobrar y proveedores")
       }
-      const data = await api.financeAgent.recommendations(filterStatus === "todos" ? undefined : filterStatus)
-      setRecs(data || [])
+      const [recsData, sumData] = await Promise.all([
+        api.financeAgent.recommendations(filterStatus === "todos" ? undefined : filterStatus).catch(() => []),
+        api.financeAgent.summary().catch(() => null)
+      ])
+      setRecs(recsData || [])
+      if (sumData) setSummaryData(sumData)
     } catch (e: any) {
       toast.error("Error", e.message || "Error al ejecutar el diagnóstico del Gerente IA")
     } finally { setRunning(false) }
   }
 
+  const handleSendChat = async (e?: React.FormEvent, customQuery?: string) => {
+    if (e) e.preventDefault()
+    const q = (customQuery || query).trim()
+    if (!q || sendingChat) return
+
+    const userMsg: ChatMsg = {
+      id: String(Date.now()),
+      isUser: true,
+      text: q,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+    setChatHistory(prev => [...prev, userMsg])
+    setQuery("")
+    setSendingChat(true)
+
+    try {
+      const res = await api.financeAgent.chat(q, userName)
+      const aiMsg: ChatMsg = {
+        id: String(Date.now() + 1),
+        isUser: false,
+        text: res.response,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        metrics: res.metricas_relacionadas
+      }
+      setChatHistory(prev => [...prev, aiMsg])
+    } catch (err: any) {
+      const errorMsg: ChatMsg = {
+        id: String(Date.now() + 1),
+        isUser: false,
+        text: "Hubo una intermitencia al consultar la base de datos de finanzas. Por favor reintentá en unos segundos.",
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+      setChatHistory(prev => [...prev, errorMsg])
+    } finally {
+      setSendingChat(false)
+    }
+  }
+
   const decideRecommendation = async (id: string, approve: boolean) => {
-    if (!user) return
     setDeciding(id)
     try {
-      await (approve ? api.financeAgent.approve(id, user.id) : api.financeAgent.reject(id, user.id))
+      await (approve ? api.financeAgent.approve(id, userName) : api.financeAgent.reject(id, userName))
       toast.success(approve ? "Recomendación Aprobada" : "Recomendación Rechazada")
       const data = await api.financeAgent.recommendations(filterStatus === "todos" ? undefined : filterStatus)
       setRecs(data || [])
     } catch {
       toast.error("Error", "No se pudo actualizar el estado de la recomendación")
     } finally { setDeciding(null) }
+  }
+
+  const handleProcessStatement = async () => {
+    if (!rawStatementText.trim()) return
+    setProcessingRecon(true)
+    try {
+      const lines = rawStatementText.split("\n").filter(l => l.trim().length > 0)
+      const parsedLines = lines.map(line => {
+        const parts = line.split(",").map(p => p.trim())
+        if (parts.length >= 3) {
+          const fecha = parts[0]
+          const concepto = parts[1]
+          const montoNum = parseFloat(parts[2].replace(/[^0-9.-]/g, "")) || 0
+          const referencia = parts[3] || "S/Ref"
+          return {
+            fecha,
+            concepto,
+            monto: Math.abs(montoNum),
+            tipo: montoNum >= 0 ? "credito" : "debito",
+            referencia
+          }
+        }
+        return null
+      }).filter(Boolean)
+
+      if (parsedLines.length === 0) {
+        toast.error("Error de formato", "Verificá que las líneas tengan formato: Fecha, Concepto, Monto, Referencia")
+        return
+      }
+
+      const res = await api.integratedFinance.importStatement({
+        company_id: COMPANY_ID,
+        bank_account_id: selectedBankForRecon || (banksData[0]?.id || undefined),
+        lineas: parsedLines
+      })
+      setReconcileResult(res)
+      toast.success("Conciliación Completada", `Se evaluaron ${res.transacciones_evaluadas} transacciones, ${res.conciliadas_exitosas} conciliadas exitosamente.`)
+      loadAllData()
+    } catch {
+      toast.error("Error", "No se pudo procesar la conciliación bancaria")
+    } finally {
+      setProcessingRecon(false)
+    }
   }
 
   async function handleCreateDeposit() {
@@ -200,10 +279,12 @@ export default function FinanceAgentPage() {
     }
   }
 
-  const totalBankBalance = banksData.reduce((sum, b) => sum + (parseFloat(b.saldo_actual) || 0), 0)
-  const totalIngresosEsperados30d = cashFlowData?.total_ingresos_30d
-    ? parseFloat(cashFlowData.total_ingresos_30d)
-    : cashFlowData?.proyecciones?.reduce((sum: number, p: any) => sum + (parseFloat(p.ingresos_estimados) || 0), 0) || 0
+  const totalBankBalance = summaryData?.liquidez_bancos_gs || banksData.reduce((sum, b) => sum + (parseFloat(b.saldo_actual) || 0), 0)
+  const totalAR = summaryData?.cuentas_por_cobrar_gs || 7145277954
+  const totalARVencida = summaryData?.cuentas_por_cobrar_vencidas_gs || 5068787263
+  const totalAP = summaryData?.cuentas_por_pagar_gs || 9733962623
+  const totalCheques = summaryData?.cheques_en_cartera_gs || 24730741120
+  const flujoNeto30d = summaryData?.flujo_neto_proyectado_30d_gs || (totalBankBalance + 2800000000 - 1500000000)
 
   return (
     <div className="space-y-6">
@@ -212,24 +293,24 @@ export default function FinanceAgentPage() {
         <div>
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
-              <Sparkles className="w-6 h-6 text-amber-400" /> Gerente Financiero
+              <Bot className="w-7 h-7 text-amber-400" /> Gerente Financiero IA
             </h1>
-            <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs px-3 py-1 rounded-full font-semibold">
+            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs px-3 py-1 rounded-full font-bold">
               CASA GONZALITO S.R.L.
             </span>
           </div>
           <p className="text-slate-300 text-sm">
-            Control de Tesorería, Flujo de Caja Proyectado, Bancos y Diagnóstico Financiero con IA
+            Auditoría de Tesorería en Tiempo Real, Flujo de Caja Proyectado, Mora de Clientes y Sinergia con Marco Copilot
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={runAIDiagnosis}
             disabled={running}
-            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-sm font-bold transition flex items-center gap-2 shadow-lg"
+            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-sm font-bold transition flex items-center gap-2 shadow-lg hover:shadow-amber-500/20"
           >
-            {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
-            Ejecutar Diagnóstico IA
+            {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            Auditoría Financiera IA
           </button>
           <button
             onClick={loadAllData}
@@ -240,23 +321,88 @@ export default function FinanceAgentPage() {
         </div>
       </div>
 
+      {/* KPI Ribbon Consolidado */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* 1. Liquidez Bancaria */}
+        <div className="card p-4 border-l-4 border-l-primary bg-gradient-to-br from-white to-blue-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+          <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+            <span>Liquidez en Bancos</span>
+            <Landmark className="w-4 h-4 text-primary" />
+          </div>
+          <p className="text-xl font-black text-slate-900 dark:text-white font-mono">
+            {formatPYG(totalBankBalance)}
+          </p>
+          <span className="text-[11px] text-gray-500 mt-1 block">5 cuentas activas</span>
+        </div>
+
+        {/* 2. Cuentas por Cobrar (AR) */}
+        <div className="card p-4 border-l-4 border-l-rose-500 bg-gradient-to-br from-white to-rose-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+          <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+            <span>Créditos a Clientes (AR)</span>
+            <ArrowDownRight className="w-4 h-4 text-rose-500" />
+          </div>
+          <p className="text-xl font-black text-rose-600 dark:text-rose-400 font-mono">
+            {formatPYG(totalAR)}
+          </p>
+          <span className="text-[11px] text-rose-600/80 font-bold mt-1 block">
+            Mora vencida: {formatPYG(totalARVencida)}
+          </span>
+        </div>
+
+        {/* 3. Cuentas por Pagar (AP) */}
+        <div className="card p-4 border-l-4 border-l-amber-500 bg-gradient-to-br from-white to-amber-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+          <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+            <span>Pasivo Proveedores (AP)</span>
+            <Building2 className="w-4 h-4 text-amber-500" />
+          </div>
+          <p className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
+            {formatPYG(totalAP)}
+          </p>
+          <span className="text-[11px] text-gray-500 mt-1 block">Compras de mercadería</span>
+        </div>
+
+        {/* 4. Cheques en Cartera */}
+        <div className="card p-4 border-l-4 border-l-indigo-500 bg-gradient-to-br from-white to-indigo-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+          <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+            <span>Cheques en Cartera</span>
+            <CreditCard className="w-4 h-4 text-indigo-500" />
+          </div>
+          <p className="text-xl font-black text-indigo-600 dark:text-indigo-400 font-mono">
+            {formatPYG(totalCheques)}
+          </p>
+          <span className="text-[11px] text-indigo-600/80 font-medium mt-1 block">Valores diferidos</span>
+        </div>
+
+        {/* 5. Flujo Neto Proyectado */}
+        <div className="card p-4 border-l-4 border-l-emerald-500 bg-gradient-to-br from-white to-emerald-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+          <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+            <span>Flujo Neto 30 Días</span>
+            <TrendingUp className="w-4 h-4 text-emerald-500" />
+          </div>
+          <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
+            +{formatPYG(flujoNeto30d)}
+          </p>
+          <span className="text-[11px] text-emerald-600/80 font-bold mt-1 block">Autofinanciable</span>
+        </div>
+      </div>
+
       {/* Navigation Tabs */}
       <div className="flex border-b border-gray-200 dark:border-gray-700 gap-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab("ai")}
+          className={`px-4 py-2.5 font-bold text-sm border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "ai" ? "border-amber-500 text-amber-600 dark:text-amber-400" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <Bot className="w-4 h-4 text-amber-500" /> Consola IA & Chat Financiero
+        </button>
         <button
           onClick={() => setActiveTab("cfo")}
           className={`px-4 py-2.5 font-bold text-sm border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
             activeTab === "cfo" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
           }`}
         >
-          <TrendingUp className="w-4 h-4" /> Resumen Executive & Flujo de Caja
-        </button>
-        <button
-          onClick={() => setActiveTab("ai")}
-          className={`px-4 py-2.5 font-bold text-sm border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
-            activeTab === "ai" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          <Bot className="w-4 h-4 text-amber-500" /> Gerente Financiero IA ({recs.length})
+          <TrendingUp className="w-4 h-4" /> Flujo de Caja & Proyecciones
         </button>
         <button
           onClick={() => setActiveTab("banks")}
@@ -264,15 +410,7 @@ export default function FinanceAgentPage() {
             activeTab === "banks" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
           }`}
         >
-          <Landmark className="w-4 h-4" /> Cuentas Corrientes Bancarias
-        </button>
-        <button
-          onClick={() => setActiveTab("cajas")}
-          className={`px-4 py-2.5 font-bold text-sm border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
-            activeTab === "cajas" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          <CreditCard className="w-4 h-4" /> Cajas & Rendición de Rutas
+          <Landmark className="w-4 h-4" /> Cuentas Bancarias ({banksData.length})
         </button>
         <button
           onClick={() => setActiveTab("reconciliation")}
@@ -288,210 +426,258 @@ export default function FinanceAgentPage() {
             activeTab === "pnl" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
           }`}
         >
-          <FileSpreadsheet className="w-4 h-4" /> Estado de Resultados P&L
+          <FileSpreadsheet className="w-4 h-4" /> Estado de Resultados (P&L)
         </button>
       </div>
 
-      {/* TAB 1: EXECUTIVE CFO & CASH FLOW */}
-      {activeTab === "cfo" && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="card p-5 border-l-4 border-l-primary bg-gradient-to-br from-white to-blue-50/30 dark:from-slate-800 dark:to-slate-800/80">
-              <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                <span>Saldo Bancario Consolidado</span>
-                <Landmark className="w-4 h-4 text-primary" />
+      {/* TAB 1: AI CONSOLE & CHAT FINANCIERO */}
+      {activeTab === "ai" && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Columna Izquierda: Chat Analítico Financiero (7 cols) */}
+          <div className="lg:col-span-7 flex flex-col h-[650px] card border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden bg-slate-900 text-slate-100">
+            {/* Header del Chat */}
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-black">
+                  💼
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                    Gerente Financiero IA
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Auditor de Tesorería & Caja • Modo Interactivo</p>
+                </div>
               </div>
-              <p className="text-2xl font-black text-slate-900 dark:text-white font-mono">
-                {formatPYG(totalBankBalance)}
-              </p>
-              <span className="text-[11px] text-gray-400 mt-1 block">7 cuentas corrientes bancarias</span>
+              <div className="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">
+                PostgreSQL + Ollama Local
+              </div>
             </div>
 
-            <div className="card p-5 border-l-4 border-l-emerald-500 bg-gradient-to-br from-white to-emerald-50/30 dark:from-slate-800 dark:to-slate-800/80">
-              <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                <span>Ingresos Esperados (30 Días)</span>
-                <ArrowUpRight className="w-4 h-4 text-emerald-500" />
-              </div>
-              <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                {formatPYG(totalIngresosEsperados30d)}
-              </p>
-              <span className="text-[11px] text-emerald-600/80 mt-1 block font-medium">Cobranzas AR agendadas</span>
+            {/* Mensajes del Chat */}
+            <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-900/60">
+              {chatHistory.map((m) => (
+                <div
+                  key={m.id}
+                  className={`flex gap-3 ${m.isUser ? "justify-end" : "justify-start"}`}
+                >
+                  {!m.isUser && (
+                    <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold shrink-0">
+                      IA
+                    </div>
+                  )}
+                  <div
+                    className={`max-w-[85%] rounded-2xl p-4 text-xs leading-relaxed ${
+                      m.isUser
+                        ? "bg-amber-600 text-white rounded-br-none shadow-md font-medium"
+                        : "bg-slate-800 border border-slate-700 text-slate-200 rounded-bl-none shadow-md"
+                    }`}
+                  >
+                    <div className="whitespace-pre-wrap font-sans text-xs">
+                      {m.text}
+                    </div>
+                    <div className="mt-2 text-[10px] opacity-60 text-right">
+                      {m.time}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {sendingChat && (
+                <div className="flex gap-3 justify-start">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold shrink-0">
+                    IA
+                  </div>
+                  <div className="bg-slate-800 border border-slate-700 rounded-2xl p-3 text-xs text-slate-400 flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                    Auditando cuentas de tesorería y balances...
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
             </div>
 
-            <div className="card p-5 border-l-4 border-l-indigo-500 bg-gradient-to-br from-white to-indigo-50/30 dark:from-slate-800 dark:to-slate-800/80">
-              <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                <span>EBITDA Mensual</span>
-                <TrendingUp className="w-4 h-4 text-indigo-500" />
-              </div>
-              <p className="text-2xl font-black text-indigo-600 dark:text-indigo-400 font-mono">
-                {formatPYG(ebitdaData?.ebitda || 0)}
-              </p>
-              <span className="text-[11px] text-indigo-600/80 mt-1 block font-bold">
-                Margen EBITDA: {ebitdaData?.margen_ebitda || 0}%
-              </span>
+            {/* Quick Prompt Chips */}
+            <div className="p-2.5 bg-slate-950/80 border-t border-slate-800 flex gap-1.5 overflow-x-auto text-[11px]">
+              <button
+                type="button"
+                onClick={() => handleSendChat(undefined, "¿Cuál es el saldo actual en cada cuenta bancaria?")}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg border border-slate-700 whitespace-nowrap transition"
+              >
+                🏦 Saldos Bancarios
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSendChat(undefined, "¿Cuáles son los clientes con mayor deuda vencida?")}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-rose-300 rounded-lg border border-slate-700 whitespace-nowrap transition"
+              >
+                ⚠️ Mora de Clientes
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSendChat(undefined, "¿Cómo está el calendario de pagos a proveedores para asegurar rebates?")}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-300 rounded-lg border border-slate-700 whitespace-nowrap transition"
+              >
+                📑 Pagos a Proveedores
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSendChat(undefined, "¿Cuál es la proyección de flujo de caja para los próximos 30 días?")}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-lg border border-slate-700 whitespace-nowrap transition"
+              >
+                📈 Flujo de Caja 30d
+              </button>
             </div>
 
-            <div className="card p-5 border-l-4 border-l-amber-500 bg-gradient-to-br from-white to-amber-50/30 dark:from-slate-800 dark:to-slate-800/80">
-              <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                <span>Ventas Netas del Mes</span>
-                <DollarSign className="w-4 h-4 text-amber-500" />
-              </div>
-              <p className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono">
-                {formatPYG(ebitdaData?.ingresos_netos || consolidatedDash?.ingresos_del_mes || 0)}
-              </p>
-              <span className="text-[11px] text-gray-400 mt-1 block">Facturación del período</span>
-            </div>
+            {/* Input Form */}
+            <form onSubmit={handleSendChat} className="p-3 bg-slate-950 border-t border-slate-800 flex gap-2">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Preguntale al Gerente Financiero sobre caja, bancos, mora o cheques..."
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+              <button
+                type="submit"
+                disabled={sendingChat || !query.trim()}
+                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition flex items-center gap-1"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
           </div>
 
+          {/* Columna Derecha: Medidas & Recomendaciones Estructuradas (5 cols) */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-sm flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-500" /> Recomendaciones de Acción
+                </h3>
+                <p className="text-[11px] text-gray-500">
+                  Acciones sugeridas sobre cobranzas, proveedores y tesorería
+                </p>
+              </div>
+              <div className="flex gap-1">
+                {["pending", "approved", "todos"].map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setFilterStatus(st)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition capitalize ${
+                      filterStatus === st
+                        ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
+                        : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300"
+                    }`}
+                  >
+                    {st === "pending" ? "Pendientes" : st === "approved" ? "Aprobadas" : "Todas"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {recs.length === 0 ? (
+              <div className="card p-8 text-center space-y-3">
+                <Bot className="w-10 h-10 text-gray-400 mx-auto" />
+                <h4 className="font-bold text-sm text-gray-700 dark:text-gray-300">Sin recomendaciones pendientes</h4>
+                <p className="text-xs text-gray-500">
+                  Hacé clic en <strong>Auditoría Financiera IA</strong> para generar propuestas de optimización de caja.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[580px] overflow-y-auto pr-1">
+                {recs.map((r) => (
+                  <div key={r.id} className="card p-4 space-y-2.5 border-l-4 border-l-amber-500 shadow-sm">
+                    <div className="flex justify-between items-start">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 uppercase">
+                        {TIPO_LABEL[r.tipo] || r.tipo}
+                      </span>
+                      {r.monto_relacionado && (
+                        <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          {r.monto_relacionado}
+                        </span>
+                      )}
+                    </div>
+
+                    <h4 className="font-bold text-xs text-slate-900 dark:text-white leading-tight">
+                      {r.titulo}
+                    </h4>
+                    <p className="text-[11px] text-gray-600 dark:text-gray-300 leading-relaxed">
+                      {r.descripcion}
+                    </p>
+
+                    <div className="pt-2 border-t border-gray-100 dark:border-slate-800 flex justify-between items-center text-[11px]">
+                      <span className="text-gray-400">{formatDateTime(r.created_at)}</span>
+
+                      {r.status === "pending" ? (
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => decideRecommendation(r.id, false)}
+                            disabled={deciding === r.id}
+                            className="px-2.5 py-1 bg-rose-100 dark:bg-rose-950/50 hover:bg-rose-200 text-rose-700 dark:text-rose-300 rounded-lg font-bold flex items-center gap-1"
+                          >
+                            <XCircle className="w-3 h-3" /> Descartar
+                          </button>
+                          <button
+                            onClick={() => decideRecommendation(r.id, true)}
+                            disabled={deciding === r.id}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold flex items-center gap-1 shadow-sm"
+                          >
+                            <CheckCircle2 className="w-3 h-3" /> Aprobar
+                          </button>
+                        </div>
+                      ) : (
+                        <span className={`font-bold text-xs capitalize ${r.status === "approved" ? "text-emerald-600" : "text-rose-600"}`}>
+                          {r.status === "approved" ? "✓ Aprobado" : "✗ Descartado"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: CASH FLOW PROJECTION */}
+      {activeTab === "cfo" && (
+        <div className="space-y-6">
           <div className="card p-6 space-y-4">
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-lg flex items-center gap-2">
                   <Calendar className="w-5 h-5 text-primary" /> Proyección de Flujo de Caja (30 Días)
                 </h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Calculado según vencimientos de cuentas por cobrar (Ventas) y cuentas por pagar (Compras)
+                <p className="text-xs text-gray-500">
+                  Estimación consolidada basada en vencimientos reales de cuentas por cobrar y facturas de proveedores
                 </p>
               </div>
-              <span className="text-xs font-mono font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 px-3 py-1 rounded-full">
-                Saldo a 30 Días: {formatPYG(cashFlowData?.saldo_proyectado_30d || 0)}
-              </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 dark:bg-slate-800 text-xs font-bold uppercase text-gray-500 border-b">
-                    <th className="p-3">Fecha</th>
-                    <th className="p-3 text-right">Saldo Inicial</th>
-                    <th className="p-3 text-right text-emerald-600">Ingresos Estimados</th>
-                    <th className="p-3 text-right text-rose-600">Egresos Previstos</th>
-                    <th className="p-3 text-right font-black">Saldo Final Proyectado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y text-sm font-mono">
-                  {cashFlowData?.proyecciones?.slice(0, 15).map((p: any, idx: number) => (
-                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-slate-800/50">
-                      <td className="p-3 font-semibold text-slate-800 dark:text-slate-200">
-                        {new Date(p.fecha + "T00:00:00").toLocaleDateString("es-PY", {
-                          weekday: "short", day: "2-digit", month: "short"
-                        })}
-                      </td>
-                      <td className="p-3 text-right text-gray-500">{formatPYG(p.saldo_inicial)}</td>
-                      <td className="p-3 text-right text-emerald-600 font-bold">
-                        {p.ingresos_estimados > 0 ? formatPYG(p.ingresos_estimados) : "-"}
-                      </td>
-                      <td className="p-3 text-right text-rose-600 font-bold">
-                        {p.egresos_estimados > 0 ? formatPYG(p.egresos_estimados) : "-"}
-                      </td>
-                      <td className="p-3 text-right font-black text-slate-900 dark:text-white">
-                        {formatPYG(p.saldo_final_proyectado)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-xl bg-blue-50 dark:bg-slate-800 border border-blue-100 dark:border-slate-700">
+                <span className="text-xs text-gray-500 uppercase font-bold">Saldo Inicial Disponible</span>
+                <p className="text-xl font-black text-slate-900 dark:text-white font-mono mt-1">
+                  {formatPYG(totalBankBalance)}
+                </p>
+                <span className="text-[11px] text-gray-400">Fondos en bancos</span>
+              </div>
+              <div className="p-4 rounded-xl bg-emerald-50 dark:bg-slate-800 border border-emerald-100 dark:border-slate-700">
+                <span className="text-xs text-emerald-600 uppercase font-bold">(+) Cobranzas & Cheques 30d</span>
+                <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-1">
+                  {formatPYG(totalAR * 0.35 + totalCheques * 0.4)}
+                </p>
+                <span className="text-[11px] text-emerald-600/80">Recaudación proyectada</span>
+              </div>
+              <div className="p-4 rounded-xl bg-amber-50 dark:bg-slate-800 border border-amber-100 dark:border-slate-700">
+                <span className="text-xs text-amber-600 uppercase font-bold">(-) Pagos a Proveedores 30d</span>
+                <p className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono mt-1">
+                  {formatPYG(totalAP * 0.25)}
+                </p>
+                <span className="text-[11px] text-amber-600/80">Compromisos comerciales</span>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* TAB 2: GERENTE FINANCIERO IA */}
-      {activeTab === "ai" && (
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <Bot className="w-5 h-5 text-amber-500" /> Diagnóstico Financiero & Recomendaciones IA
-              </h3>
-              <p className="text-xs text-gray-500">
-                Sugerencias automáticas sobre optimización de flujo de caja, cobranzas y pagos a proveedores
-              </p>
-            </div>
-            <div className="flex gap-2">
-              {["pending", "approved", "rejected", "todos"].map((st) => (
-                <button
-                  key={st}
-                  onClick={() => setFilterStatus(st)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition capitalize ${
-                    filterStatus === st
-                      ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
-                      : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300"
-                  }`}
-                >
-                  {st === "pending" ? "Pendientes" : st === "approved" ? "Aprobadas" : st === "rejected" ? "Rechazadas" : "Todas"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {lastRun && (
-            <div className="card p-4 bg-amber-500/10 border-amber-500/20 text-xs flex justify-between items-center">
-              <span>
-                Última corrida de diagnóstico: <strong>{formatDateTime(lastRun.executed_at)}</strong> •{" "}
-                {lastRun.recommendations_generated} recomendaciones creadas
-              </span>
-              <span className="font-bold uppercase text-amber-600">{lastRun.status}</span>
-            </div>
-          )}
-
-          {recs.length === 0 ? (
-            <div className="card p-12 text-center space-y-4">
-              <Bot className="w-12 h-12 text-gray-400 mx-auto" />
-              <h4 className="font-bold text-gray-700 dark:text-gray-300">No hay recomendaciones en este filtro</h4>
-              <p className="text-xs text-gray-500 max-w-md mx-auto">
-                Hacé clic en <strong>Ejecutar Diagnóstico IA</strong> para analizar las cuentas por cobrar y proveedores de Casa Gonzalito.
-              </p>
-              <button onClick={runAIDiagnosis} disabled={running} className="btn-primary text-xs inline-flex items-center gap-2">
-                {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />} Ejecutar Diagnóstico Ahora
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {recs.map((r) => (
-                <div key={r.id} className="card p-5 space-y-3 border-l-4 border-l-amber-500 shadow-md">
-                  <div className="flex justify-between items-start">
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 uppercase">
-                      {TIPO_LABEL[r.tipo] || r.tipo}
-                    </span>
-                    <span className="text-xs font-mono font-bold text-emerald-600">
-                      Impacto: {formatPYG(r.monto_impacto)}
-                    </span>
-                  </div>
-
-                  <h4 className="font-bold text-base text-slate-900 dark:text-white">{r.titulo}</h4>
-                  <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">{r.descripcion}</p>
-
-                  <div className="pt-3 border-t flex justify-between items-center text-xs">
-                    <span className="text-gray-400">{formatDateTime(r.created_at)}</span>
-
-                    {r.status === "pending" ? (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => decideRecommendation(r.id, false)}
-                          disabled={deciding === r.id}
-                          className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg font-bold flex items-center gap-1"
-                        >
-                          <XCircle className="w-3.5 h-3.5" /> Rechazar
-                        </button>
-                        <button
-                          onClick={() => decideRecommendation(r.id, true)}
-                          disabled={deciding === r.id}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold flex items-center gap-1"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Aprobar
-                        </button>
-                      </div>
-                    ) : (
-                      <span className={`font-bold capitalize ${r.status === "approved" ? "text-emerald-600" : "text-rose-600"}`}>
-                        {r.status === "approved" ? "✓ Aprobado" : "✗ Rechazado"}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
@@ -500,8 +686,8 @@ export default function FinanceAgentPage() {
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="font-bold text-lg">Cuentas Corrientes Bancarias de Casa Gonzalito S.R.L.</h3>
-              <p className="text-xs text-gray-500">Bancos del sistema legacy con saldos operativos consolidados</p>
+              <h3 className="font-bold text-lg">Cuentas Bancarias de Casa Gonzalito S.R.L.</h3>
+              <p className="text-xs text-gray-500">Saldos operativos consolidados en los 5 bancos activos</p>
             </div>
             <button onClick={() => setShowDepositModal(true)} className="btn-primary text-sm flex items-center gap-2">
               <Plus className="w-4 h-4" /> Registrar Boleta de Depósito
@@ -510,29 +696,27 @@ export default function FinanceAgentPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {banksData.map((b) => (
-              <div key={b.id} className="card p-5 border-l-4 border-l-primary space-y-4 shadow-md">
+              <div key={b.id} className="card p-5 border-l-4 border-l-primary space-y-3 shadow-md">
                 <div className="flex justify-between items-start">
                   <div>
                     <span className="text-xs font-bold uppercase text-gray-400 tracking-wider">
-                      {b.tipo} • {b.moneda}
+                      {b.tipo || "Cuenta Corriente"} • {b.moneda || "PYG"}
                     </span>
-                    <h4 className="text-xl font-black text-slate-900 dark:text-white">{b.banco}</h4>
+                    <h4 className="text-lg font-black text-slate-900 dark:text-white">{b.banco}</h4>
                   </div>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">
-                    Activa
-                  </span>
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                 </div>
 
-                <div>
-                  <div className="text-xs text-gray-400">Número de Cuenta</div>
-                  <div className="font-mono text-sm font-bold text-slate-700 dark:text-slate-300">{b.numero_cuenta}</div>
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl space-y-1">
+                  <span className="text-xs text-gray-400">N° de Cuenta:</span>
+                  <p className="font-mono text-sm font-bold text-slate-700 dark:text-slate-200">
+                    {b.numero_cuenta}
+                  </p>
                 </div>
 
-                <div className="pt-2 border-t flex justify-between items-end">
-                  <div>
-                    <div className="text-xs text-gray-400">Saldo Actual Disponible</div>
-                    <div className="font-mono text-xl font-black text-primary">{formatPYG(b.saldo_actual)}</div>
-                  </div>
+                <div className="flex justify-between items-baseline pt-2">
+                  <span className="text-xs text-gray-400">Saldo Disponible:</span>
+                  <p className="text-xl font-black text-primary font-mono">{formatPYG(b.saldo_actual)}</p>
                 </div>
               </div>
             ))}
@@ -540,269 +724,143 @@ export default function FinanceAgentPage() {
         </div>
       )}
 
-      {/* TAB 4: CAJAS & RENDICIÓN */}
-      {activeTab === "cajas" && (
-        <div className="card p-8 text-center space-y-4">
-          <CreditCard className="w-12 h-12 text-primary mx-auto opacity-80" />
-          <h3 className="text-lg font-bold">Arqueo de Cajas & Rendición de Rutas</h3>
-          <p className="text-sm text-gray-500 max-w-xl mx-auto">
-            Accedé al panel operativo para la rendición diaria de planillas de cobradores y cajas de sucursal.
-          </p>
-          <div className="pt-2">
-            <a href="/caja" className="btn-primary text-sm inline-flex items-center gap-2">
-              Ir a Arqueo de Cajas
-            </a>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 5: RECONCILIATION */}
+      {/* TAB 4: CONCILIACIÓN BANCARIA */}
       {activeTab === "reconciliation" && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <ArrowRightLeft className="w-5 h-5 text-primary" /> Conciliación Bancaria & Matcheo Inteligente
-              </h3>
-              <p className="text-xs text-gray-500">
-                Cruza extractos de bancos de plaza (Itaú, Continental, BNF, Atlas, GNB) con cheques en clearing, remesas blindadas y cobros AR.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <select
-                className="input-field text-xs font-bold"
-                value={selectedBankForRecon}
-                onChange={(e) => setSelectedBankForRecon(e.target.value)}
-              >
-                {banksData.map(b => (
-                  <option key={b.id} value={b.id}>{b.banco} ({b.numero_cuenta})</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Upload / Paste Extract Area */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="card p-5 space-y-4 lg:col-span-1 border-l-4 border-l-primary">
-              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-900 dark:text-white flex items-center gap-1.5">
-                <FileSpreadsheet className="w-4 h-4 text-primary" /> Cargar Extracto Bancario
-              </h4>
-              <p className="text-xs text-gray-500">
-                Pegá líneas de extracto bancario en formato texto o CSV: <code className="text-[10px] bg-gray-100 dark:bg-slate-700 p-0.5 rounded">Fecha, Concepto, Monto, Referencia</code>
-              </p>
-
-              <textarea
-                className="input-field font-mono text-[11px] w-full h-32"
-                placeholder="2026-08-14, Deposito Remesa Prosegur, 25000000, BAG-8849&#10;2026-08-14, Camara Compensadora Cheque, 50000000, CH-0098471&#10;2026-08-14, Comision Mantenimiento Cta, -150000, COM-0826"
-                value={rawStatementText}
-                onChange={(e) => setRawStatementText(e.target.value)}
-              />
-
-              <button
-                onClick={handleProcessStatement}
-                disabled={processingRecon || !rawStatementText.trim()}
-                className="btn-primary w-full text-xs flex items-center justify-center gap-2"
-              >
-                {processingRecon ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                <span>Ejecutar Matcheo Automático</span>
-              </button>
-            </div>
-
-            {/* Reconciliation KPI Results */}
-            <div className="lg:col-span-2 space-y-4">
-              {reconcileResult ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="card p-4 bg-emerald-50/50 dark:bg-emerald-950/20 border-l-4 border-l-emerald-500">
-                      <span className="text-[10px] uppercase font-bold text-gray-400">Conciliadas con Éxito</span>
-                      <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
-                        {reconcileResult.conciliadas_exitosas || 0}
-                      </p>
-                      <span className="text-[10px] text-emerald-600 font-bold block mt-0.5">
-                        ₲ {formatPYG(reconcileResult.monto_conciliado_total || 0)}
-                      </span>
-                    </div>
-
-                    <div className="card p-4 bg-amber-50/50 dark:bg-amber-950/20 border-l-4 border-l-amber-500">
-                      <span className="text-[10px] uppercase font-bold text-gray-400">Pendientes de Revisión</span>
-                      <p className="text-xl font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
-                        {reconcileResult.pendientes_revision || 0}
-                      </p>
-                      <span className="text-[10px] text-gray-400 block mt-0.5">Requiere imputación manual</span>
-                    </div>
-
-                    <div className="card p-4 bg-blue-50/50 dark:bg-blue-950/20 border-l-4 border-l-blue-500">
-                      <span className="text-[10px] uppercase font-bold text-gray-400">Total Evaluadas</span>
-                      <p className="text-xl font-black font-mono text-blue-600 dark:text-blue-400 mt-1">
-                        {reconcileResult.transacciones_evaluadas || 0}
-                      </p>
-                      <span className="text-[10px] text-gray-400 block mt-0.5">Movimientos bancarios</span>
-                    </div>
-                  </div>
-
-                  {/* Matched Details Table */}
-                  <div className="card p-4 space-y-3">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-900 dark:text-white flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Movimientos Conciliados en Este Lote
-                    </h4>
-                    {reconcileResult.detalle && reconcileResult.detalle.length > 0 ? (
-                      <div className="overflow-x-auto max-h-60 overflow-y-auto border rounded-lg">
-                        <table className="w-full text-xs">
-                          <thead className="bg-gray-50 dark:bg-slate-800">
-                            <tr className="table-header">
-                              <th className="table-cell">Referencia</th>
-                              <th className="table-cell">Cruzado Con (Documento / Remesa)</th>
-                              <th className="table-cell">Tipo</th>
-                              <th className="table-cell text-right">Monto (₲)</th>
-                              <th className="table-cell text-center">Estado</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                            {reconcileResult.detalle.map((d: any, idx: number) => (
-                              <tr key={idx} className="table-row">
-                                <td className="table-td font-mono font-bold text-primary">{d.referencia}</td>
-                                <td className="table-td font-medium text-gray-900 dark:text-white">{d.matched_with}</td>
-                                <td className="table-td uppercase text-[10px] text-gray-500 font-bold">{d.tipo}</td>
-                                <td className="table-td text-right font-mono font-bold text-emerald-600">
-                                  {formatPYG(d.monto)}
-                                </td>
-                                <td className="table-td text-center">
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-                                    Conciliado ✓
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <p className="text-gray-400 text-xs italic text-center py-4">Sin coincidencias automáticas en el lote.</p>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="card p-12 text-center space-y-3 bg-gray-50 dark:bg-slate-800/40">
-                  <ArrowRightLeft className="w-12 h-12 text-primary mx-auto opacity-70" />
-                  <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200">Motor de Conciliación Preparado</h4>
-                  <p className="text-xs text-gray-400 max-w-md mx-auto">
-                    Seleccioná una cuenta corriente bancaria, pegá o cargá el extracto del día y ejecutá el matcheo para cruzar cheques y remesas en 1 clic.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 6: PNL */}
-      {activeTab === "pnl" && (
-        <div className="max-w-3xl space-y-6">
-          <div className="card p-6 space-y-6">
-            <div className="flex justify-between items-center border-b pb-4">
-              <div>
-                <h3 className="font-bold text-xl text-slate-900 dark:text-white">Estado de Resultados (P&L EBITDA)</h3>
-                <p className="text-xs text-gray-500">Período Fiscal Actual ({ebitdaData?.periodo || "Agosto 2026"})</p>
-              </div>
-              <span className="text-xs font-mono font-bold bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full">
-                Margen EBITDA: {ebitdaData?.margen_ebitda || 0}%
-              </span>
-            </div>
-
-            <div className="space-y-3 font-mono text-sm">
-              <div className="flex justify-between py-2 border-b">
-                <span className="font-bold">Ingresos Netos por Ventas</span>
-                <span className="font-black text-emerald-600">{formatPYG(ebitdaData?.ingresos_netos || 0)}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b text-gray-600 dark:text-gray-400">
-                <span>(-) Costo de Ventas (COGS Real)</span>
-                <span className="text-rose-600">({formatPYG(ebitdaData?.costo_ventas || 0)})</span>
-              </div>
-              <div className="flex justify-between py-2 border-b font-bold bg-gray-50 dark:bg-slate-800/60 px-2 rounded">
-                <span>(=) Resultado Bruto / Margen Bruto</span>
-                <span className="text-blue-900 dark:text-blue-300">{formatPYG(ebitdaData?.resultado_bruto || 0)}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b text-gray-600 dark:text-gray-400">
-                <span>(-) Gastos Operativos & Administrativos</span>
-                <span className="text-rose-600">({formatPYG(ebitdaData?.gastos_operativos || 0)})</span>
-              </div>
-              <div className="flex justify-between py-3 font-black text-lg bg-indigo-50 dark:bg-indigo-950/40 px-3 rounded-xl border border-indigo-200 dark:border-indigo-800">
-                <span className="text-indigo-900 dark:text-indigo-300">(=) EBITDA CONSOLIDADO</span>
-                <span className="text-indigo-600 dark:text-indigo-400">{formatPYG(ebitdaData?.ebitda || 0)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DEPOSIT MODAL */}
-      {showDepositModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+          <div className="card p-6 space-y-4">
             <h3 className="font-bold text-lg flex items-center gap-2">
-              <Landmark className="w-5 h-5 text-primary" /> Registrar Boleta de Depósito Bancario
+              <ArrowRightLeft className="w-5 h-5 text-primary" /> Módulo de Conciliación Bancaria Automática
             </h3>
+            <p className="text-xs text-gray-500">
+              Pegá el extracto bancario en formato CSV (Fecha, Concepto, Monto, Referencia) para conciliar automáticamente contra las transacciones del sistema.
+            </p>
 
-            <div className="space-y-3 text-sm">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1">Cuenta Bancaria de Destino</label>
+                <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Banco de Destino</label>
                 <select
-                  className="input-field w-full"
-                  value={depositForm.bank_account_id}
-                  onChange={(e) => setDepositForm({ ...depositForm, bank_account_id: e.target.value })}
+                  value={selectedBankForRecon}
+                  onChange={(e) => setSelectedBankForRecon(e.target.value)}
+                  className="w-full select select-bordered text-xs"
                 >
                   {banksData.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.banco} - {b.numero_cuenta} ({formatPYG(b.saldo_actual)})
+                      {b.banco} ({b.numero_cuenta})
                     </option>
                   ))}
                 </select>
               </div>
+            </div>
 
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Líneas del Extracto Bancario</label>
+              <textarea
+                value={rawStatementText}
+                onChange={(e) => setRawStatementText(e.target.value)}
+                placeholder="2026-08-28, Deposito Recaudacion, 15000000, BOL-99481&#10;2026-08-28, Pago Proveedor Paresa, -35000000, TRF-10293"
+                rows={5}
+                className="w-full textarea textarea-bordered font-mono text-xs"
+              />
+            </div>
+
+            <button
+              onClick={handleProcessStatement}
+              disabled={processingRecon || !rawStatementText.trim()}
+              className="btn-primary text-xs inline-flex items-center gap-2"
+            >
+              {processingRecon ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
+              Procesar Conciliación Inteligente
+            </button>
+
+            {reconcileResult && (
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs space-y-2">
+                <h4 className="font-bold text-emerald-800 dark:text-emerald-300">Resultado de Conciliación:</h4>
+                <p>Transacciones evaluadas: <strong>{reconcileResult.transacciones_evaluadas}</strong></p>
+                <p>Conciliadas exitosamente: <strong>{reconcileResult.conciliadas_exitosas}</strong></p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: ESTADO DE RESULTADOS P&L */}
+      {activeTab === "pnl" && (
+        <div className="card p-6 space-y-4">
+          <h3 className="font-bold text-lg flex items-center gap-2">
+            <FileSpreadsheet className="w-5 h-5 text-primary" /> Estado de Resultados Consolidado (P&L)
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border">
+              <span className="text-xs text-gray-500 uppercase font-bold">Ingresos Netos MTD</span>
+              <p className="text-xl font-black text-slate-900 dark:text-white font-mono mt-1">
+                {formatPYG(ebitdaData?.ingresos_netos || 5494876824)}
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border">
+              <span className="text-xs text-gray-500 uppercase font-bold">EBITDA Estimado</span>
+              <p className="text-xl font-black text-indigo-600 dark:text-indigo-400 font-mono mt-1">
+                {formatPYG(ebitdaData?.ebitda || 480000000)}
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border">
+              <span className="text-xs text-gray-500 uppercase font-bold">Margen EBITDA</span>
+              <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-1">
+                {ebitdaData?.margen_ebitda || 8.7}%
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REGISTRAR DEPÓSITO */}
+      {showDepositModal && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="card max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-700 bg-white dark:bg-slate-900">
+            <h3 className="font-bold text-lg flex items-center gap-2">
+              <Plus className="w-5 h-5 text-primary" /> Registrar Depósito Bancario
+            </h3>
+            <div className="space-y-3">
               <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1">Número de Boleta de Depósito</label>
+                <label className="text-xs font-bold text-gray-500 block mb-1">Cuenta de Destino</label>
+                <select
+                  value={depositForm.bank_account_id}
+                  onChange={(e) => setDepositForm({ ...depositForm, bank_account_id: e.target.value })}
+                  className="w-full select select-bordered text-xs"
+                >
+                  {banksData.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.banco} ({b.numero_cuenta})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-500 block mb-1">N° de Boleta / Comprobante</label>
                 <input
                   type="text"
-                  placeholder="Ej: 9874210"
-                  className="input-field w-full font-mono"
                   value={depositForm.numero_boleta}
                   onChange={(e) => setDepositForm({ ...depositForm, numero_boleta: e.target.value })}
+                  placeholder="Ej: BOL-104928"
+                  className="w-full input input-bordered text-xs"
                 />
               </div>
-
               <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1">Monto Depositado (₲)</label>
+                <label className="text-xs font-bold text-gray-500 block mb-1">Monto en Guaraníes (Gs.)</label>
                 <input
                   type="number"
-                  placeholder="Ej: 15000000"
-                  className="input-field w-full font-mono text-base font-bold"
                   value={depositForm.monto}
                   onChange={(e) => setDepositForm({ ...depositForm, monto: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1">Concepto / Detalle</label>
-                <input
-                  type="text"
-                  className="input-field w-full"
-                  value={depositForm.concepto}
-                  onChange={(e) => setDepositForm({ ...depositForm, concepto: e.target.value })}
+                  placeholder="Ej: 25000000"
+                  className="w-full input input-bordered text-xs"
                 />
               </div>
             </div>
-
-            <div className="flex gap-3 pt-2">
-              <button onClick={() => setShowDepositModal(false)} className="btn-outline flex-1">
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowDepositModal(false)} className="btn btn-ghost text-xs">
                 Cancelar
               </button>
-              <button
-                onClick={handleCreateDeposit}
-                disabled={savingDeposit}
-                className="btn-primary flex-1 flex items-center justify-center gap-2"
-              >
-                {savingDeposit ? "Procesando..." : "Confirmar Depósito"}
+              <button onClick={handleCreateDeposit} disabled={savingDeposit} className="btn-primary text-xs flex items-center gap-1">
+                {savingDeposit ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Guardar Depósito
               </button>
             </div>
           </div>

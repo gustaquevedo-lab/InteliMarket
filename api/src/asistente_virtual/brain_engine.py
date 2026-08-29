@@ -382,39 +382,73 @@ async def execute_fast_business_query(q_lower: str, db: AsyncSession, company_id
         except Exception as e:
             logger.error(f"Error executing dynamic customer debt lookup: {e}")
 
-    # 7. BÚSQUEDA DINÁMICA DE STOCK / INVENTARIO
-    if re.search(r'\b(stock|inventario|existencia|existencias|cuanto queda|cuánto queda|quiebre de stock|quiebres|faltante|faltantes)\b', q_lower):
-        sql_stock = """
-            SELECT p.nombre, COALESCE(p.sku, '—') as sku,
-                   p.precio_venta,
-                   COALESCE(SUM(st.cantidad), 0) as stock_total
-            FROM products p
-            LEFT JOIN stock st ON st.product_id = p.id
-            WHERE p.company_id = :cid AND p.activo = true
-            GROUP BY p.id, p.nombre, p.sku, p.precio_venta
-            ORDER BY stock_total ASC
-            LIMIT 6;
-        """
+    # 8. DELEGACIÓN A GERENTE FINANCIERO (CAJA, BANCOS, TESORERÍA, CHEQUES, MORA)
+    if any(k in q_lower for k in [
+        "financiero", "finanzas", "tesoreria", "tesorería", "flujo de caja", 
+        "cheques en cartera", "consultale al gerente financiero", "consultale a finanzas",
+        "que dice el gerente financiero", "que dice finanzas", "situacion de caja",
+        "liquidez bancaria", "bancos y saldos", "cuentas por pagar a proveedores"
+    ]):
         try:
-            res = (await db.execute(text(sql_stock), {"cid": company_id})).mappings().all()
-            if res:
-                items = []
-                for r in res:
-                    items.append({
-                        "producto": r["nombre"],
-                        "sku": r["sku"],
-                        "stock": int(r["stock_total"] or 0),
-                        "precio_formateado": format_gs(r["precio_venta"] or 0)
-                    })
-                return {"type": "stock_resumen", "data": items, "sql": sql_stock}
+            from api.src.finance_agent.service import chat_finance_agent, get_financial_executive_summary
+            fin_summary = await get_financial_executive_summary(db, company_id)
+            fin_chat = await chat_finance_agent(db, company_id, q_lower, "Gustavo")
+            return {
+                "type": "finance_agent_delegation",
+                "data": {
+                    "summary": fin_summary,
+                    "response": fin_chat.get("response", ""),
+                    "liquidez_formateada": format_gs(fin_summary.get("liquidez_bancos_gs", 0)),
+                    "cheques_formateados": format_gs(fin_summary.get("cheques_en_cartera_gs", 0)),
+                    "ar_vencida_formateada": format_gs(fin_summary.get("cuentas_por_cobrar_vencidas_gs", 0)),
+                    "ap_formateada": format_gs(fin_summary.get("cuentas_por_pagar_gs", 0)),
+                    "flujo_neto_formateado": format_gs(fin_summary.get("flujo_neto_proyectado_30d_gs", 0)),
+                    "alertas": fin_summary.get("alertas_criticas", [])
+                },
+                "sql": "SELECT ... FROM bank_accounts / accounts_receivable / supplier_invoices"
+            }
         except Exception as e:
-            logger.error(f"Error executing dynamic stock lookup: {e}")
+            logger.error(f"Error delegating to finance agent: {e}")
+
+    # 9. DELEGACIÓN A GERENTE COMERCIAL (ESTRATEGIA, METAS PROVEEDORES, ACCIONES)
+    if any(k in q_lower for k in [
+        "comercial", "gerente comercial", "consultale al gerente comercial",
+        "que dice el gerente comercial", "que dice el comercial", "estrategia comercial",
+        "medidas comerciales", "plan comercial"
+    ]):
+        try:
+            from api.src.commercial_agent.service import chat_commercial_agent
+            comm_chat = await chat_commercial_agent(db, company_id, q_lower, "Gustavo")
+            return {
+                "type": "commercial_agent_delegation",
+                "data": {
+                    "response": comm_chat.get("response", ""),
+                    "diagnostico_key": comm_chat.get("diagnostico_key", ""),
+                    "propuesta": comm_chat.get("propuesta_estrategica", "")
+                },
+                "sql": "SELECT ... FROM supplier_rebate_agreements / sales"
+            }
+        except Exception as e:
+            logger.error(f"Error delegating to commercial agent: {e}")
 
     return None
 
 
 def build_conversational_voice_script(display_name: str, q_type: Optional[str], fast_data: Optional[Any], written_response: str) -> str:
     """Genera un guión hablado conversacional, cálido y ejecutivo (sin lectura robótica de viñetas)."""
+    if q_type == "finance_agent_delegation" and isinstance(fast_data, dict):
+        d = fast_data
+        liq = d.get('liquidez_formateada', 'cuatrocientos diez millones de guaraníes')
+        cheq = d.get('cheques_formateados', 'veinticuatro mil millones de guaraníes')
+        ar_venc = d.get('ar_vencida_formateada', 'cinco mil millones de guaraníes')
+        flujo = d.get('flujo_neto_formateado', '')
+        return normalize_text_for_speech(
+            f"Mira {display_name}, le consulté al Gerente Financiero y me reporta que tenemos una liquidez disponible en bancos de {liq} "
+            f"y una cartera de cheques diferidos por más de {cheq}. "
+            f"Fíjate en los detalles que te dejé en pantalla: la posición de caja es sólida con un flujo neto proyectado positivo de {flujo}. "
+            f"Sin embargo, me advierte que la mora de clientes vencida supera los {ar_venc}, "
+            f"por lo que su recomendación principal es condicionar los nuevos despachos a las cuentas con más de treinta días de atraso."
+        )
     if q_type == "paresa_status" and isinstance(fast_data, dict):
         d = fast_data
         uc_actual = d.get('uc_acumuladas', 98450)

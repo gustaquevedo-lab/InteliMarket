@@ -433,6 +433,20 @@ export default function MarcoCopilot() {
 
   const getContextSuggestions = () => {
     const p = location.pathname
+    if (p.includes("finance-agent") || p.includes("financial") || p.includes("treasury")) {
+      return [
+        "Marco, consultale al Gerente Financiero cómo está la liquidez bancaria y los cheques",
+        "Marco, consultale al Gerente Financiero cuáles son las cuentas por cobrar más vencidas",
+        "Marco, consultale al Gerente Financiero la proyección de flujo de caja a 30 días"
+      ]
+    }
+    if (p.includes("commercial-agent") || p.includes("supplier-kpis") || p.includes("supplier-rebates")) {
+      return [
+        "Marco, consultale al Gerente Comercial cómo viene el avance de metas y rebates",
+        "Marco, consultale al Gerente Comercial qué medidas tomar para PARESA",
+        "¿Cuáles son los principales proveedores por facturación?"
+      ]
+    }
     if (p.includes("clientes") || p.includes("accounts-receivable") || p.includes("deudas")) {
       return ["¿Quiénes son los clientes con mayor deuda vencida?", "¿Cuáles son los últimos pagos registrados?", "¿Qué clientes superaron su límite de crédito?"]
     }
@@ -445,7 +459,7 @@ export default function MarcoCopilot() {
     if (p.includes("logistics") || p.includes("intelientregas") || p.includes("rutas")) {
       return ["¿Qué camiones tienen resumen de carga activo hoy?", "¿Cuáles son las rutas con más entregas pendientes?", "¿Quiénes son los choferes en reparto ahora mismo?"]
     }
-    return ["¿Cómo vienen las ventas y cobranzas de este mes?", "¿Qué alertas operativas o de stock tenemos para hoy?", "Mostrame los 5 clientes top de Casa Gonzalito"]
+    return ["¿Cómo vienen las ventas y cobranzas de este mes?", "Marco, consultale al Gerente Financiero la situación de caja y cheques", "Marco, consultale al Gerente Comercial el avance de metas con PARESA"]
   }
 
   return (
