@@ -15,8 +15,12 @@ from google import genai
 from google.genai import types
 
 from api.src.config import settings
-from api.src.cupones.models import CuponCliente, CuponTicket, CuponTicketItem, CuponConfig
-from api.src.cupones.schemas import RegistrarCuponRequest, CuponClienteOut, CuponConfigUpdate
+from api.src.cupones.models import CuponCliente, CuponTicket, CuponTicketItem, CuponConfig, SorteoCampana
+from api.src.cupones.schemas import (
+    RegistrarCuponRequest, CuponClienteOut, CuponConfigUpdate,
+    SorteoCampanaCreate, SorteoCampanaUpdate, EvaluarCarritoItem,
+    CampanaCalificadaOut, EvaluarCarritoResponse, RegistrarCuponesMultipleRequest
+)
 from api.src.cupones.whatsapp_service import send_cupon_whatsapp_confirmation, normalize_phone_e164
 from api.src.customers.models import Customer
 from api.src.sales.models import Sale, SaleItem
@@ -757,4 +761,393 @@ REGLAS OBLIGATORIAS:
         "mensaje_generado": msg,
         "audiencia_estimada": audiencia
     }
+
+
+# ── SERVICIOS DEL MOTOR MULTI-CAMPAÑA DE SORTEOS ─────────────────────────────
+
+async def list_campanas(
+    db: AsyncSession,
+    company_id: UUID,
+    solo_activas: bool = False
+) -> List[Dict[str, Any]]:
+    """Lista todas las campañas de sorteos con el conteo de cupones emitidos."""
+    q = select(SorteoCampana).where(SorteoCampana.company_id == company_id)
+    if solo_activas:
+        q = q.where(SorteoCampana.activo == True)
+    q = q.order_by(desc(SorteoCampana.activo), desc(SorteoCampana.created_at))
+
+    res = await db.execute(q)
+    campanas = res.scalars().all()
+
+    # Obtener conteo de cupones emitidos por campaña
+    q_counts = select(
+        CuponTicket.campana_id,
+        func.sum(CuponTicket.cantidad).label("total_cupones")
+    ).where(
+        CuponTicket.company_id == company_id,
+        CuponTicket.campana_id != None
+    ).group_by(CuponTicket.campana_id)
+    
+    r_counts = await db.execute(q_counts)
+    counts_map = {row[0]: int(row[1] or 0) for row in r_counts.all()}
+
+    output = []
+    for c in campanas:
+        item = {
+            "id": c.id,
+            "company_id": c.company_id,
+            "nombre": c.nombre,
+            "codigo": c.codigo,
+            "descripcion": c.descripcion,
+            "patrocinador": c.patrocinador,
+            "premio_destacado": c.premio_destacado,
+            "tipo_trigger": c.tipo_trigger,
+            "criterio_evaluacion": c.criterio_evaluacion,
+            "valor_umbral": float(c.valor_umbral or 0),
+            "productos_participantes": c.productos_participantes or [],
+            "marcas_participantes": c.marcas_participantes or [],
+            "categorias_participantes": c.categorias_participantes or [],
+            "fecha_inicio": c.fecha_inicio,
+            "fecha_fin": c.fecha_fin,
+            "activo": c.activo,
+            "whatsapp_template": c.whatsapp_template,
+            "whatsapp_activo": c.whatsapp_activo,
+            "ticket_encabezado": c.ticket_encabezado,
+            "ticket_subtitulo": c.ticket_subtitulo,
+            "ticket_pie_urna": c.ticket_pie_urna,
+            "total_cupones_emitidos": counts_map.get(c.id, 0),
+            "created_at": c.created_at,
+            "updated_at": c.updated_at
+        }
+        output.append(item)
+    return output
+
+
+async def get_campana(
+    db: AsyncSession,
+    company_id: UUID,
+    campana_id: UUID
+) -> Optional[SorteoCampana]:
+    """Obtiene una campaña por ID."""
+    q = select(SorteoCampana).where(
+        SorteoCampana.company_id == company_id,
+        SorteoCampana.id == campana_id
+    )
+    res = await db.execute(q)
+    return res.scalar_one_or_none()
+
+
+async def create_campana(
+    db: AsyncSession,
+    company_id: UUID,
+    data: SorteoCampanaCreate
+) -> SorteoCampana:
+    """Crea una nueva campaña de sorteo."""
+    nueva = SorteoCampana(
+        company_id=company_id,
+        nombre=data.nombre.strip(),
+        codigo=data.codigo.strip() if data.codigo else None,
+        descripcion=data.descripcion.strip() if data.descripcion else None,
+        patrocinador=data.patrocinador.strip() if data.patrocinador else "Extra Supermercado",
+        premio_destacado=data.premio_destacado.strip() if data.premio_destacado else None,
+        tipo_trigger=data.tipo_trigger,
+        criterio_evaluacion=data.criterio_evaluacion,
+        valor_umbral=data.valor_umbral,
+        productos_participantes=data.productos_participantes or [],
+        marcas_participantes=data.marcas_participantes or [],
+        categorias_participantes=data.categorias_participantes or [],
+        fecha_inicio=data.fecha_inicio,
+        fecha_fin=data.fecha_fin,
+        activo=data.activo,
+        whatsapp_template=data.whatsapp_template,
+        whatsapp_activo=data.whatsapp_activo,
+        ticket_encabezado=data.ticket_encabezado or "EXTRA SUPERMERCADO",
+        ticket_subtitulo=data.ticket_subtitulo,
+        ticket_pie_urna=data.ticket_pie_urna or "¡Deposita este cupon en la urna de la sucursal!"
+    )
+    db.add(nueva)
+    await db.commit()
+    await db.refresh(nueva)
+    return nueva
+
+
+async def update_campana(
+    db: AsyncSession,
+    company_id: UUID,
+    campana_id: UUID,
+    data: SorteoCampanaUpdate
+) -> Optional[SorteoCampana]:
+    """Actualiza una campaña de sorteo existente."""
+    campana = await get_campana(db, company_id, campana_id)
+    if not campana:
+        return None
+
+    update_data = data.model_dump(exclude_unset=True)
+    for field, val in update_data.items():
+        setattr(campana, field, val)
+
+    campana.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(campana)
+    return campana
+
+
+async def delete_campana(
+    db: AsyncSession,
+    company_id: UUID,
+    campana_id: UUID
+) -> bool:
+    """Elimina o desactiva una campaña de sorteo."""
+    campana = await get_campana(db, company_id, campana_id)
+    if not campana:
+        return False
+
+    await db.delete(campana)
+    await db.commit()
+    return True
+
+
+async def evaluar_carrito_campanas(
+    db: AsyncSession,
+    company_id: UUID,
+    total_monto: float,
+    items: List[EvaluarCarritoItem]
+) -> EvaluarCarritoResponse:
+    """
+    Evalúa el carrito de compras contra todas las campañas de sorteos activas.
+    Retorna la lista de campañas calificadas con la cantidad exacta de cupones ganados para cada una.
+    """
+    now = datetime.now(timezone.utc)
+    q = select(SorteoCampana).where(
+        SorteoCampana.company_id == company_id,
+        SorteoCampana.activo == True
+    )
+    res = await db.execute(q)
+    campanas = res.scalars().all()
+
+    campanas_calificadas: List[CampanaCalificadaOut] = []
+    total_cupones_acumulados = 0
+
+    for c in campanas:
+        # Verificar fechas de vigencia si están definidas
+        if c.fecha_inicio and c.fecha_inicio > now:
+            continue
+        if c.fecha_fin and c.fecha_fin < now:
+            continue
+
+        cupones_ganados = 0
+        monto_o_cantidad_base = 0.0
+        umbral = float(c.valor_umbral or 0)
+
+        if c.tipo_trigger == "MONTO_GLOBAL":
+            if umbral > 0:
+                cupones_ganados = int(total_monto // umbral)
+                monto_o_cantidad_base = total_monto
+
+        elif c.tipo_trigger == "PRODUCTOS_ESPECIFICOS":
+            participantes = c.productos_participantes or []
+            if participantes and items:
+                part_ids = {str(p.get("id") or p.get("producto_id") or "") for p in participantes if p.get("id") or p.get("producto_id")}
+                part_skus = {str(p.get("sku") or "").strip().upper() for p in participantes if p.get("sku")}
+                part_barcodes = {str(p.get("codigo_barra") or "").strip() for p in participantes if p.get("codigo_barra")}
+
+                matching_items = []
+                for it in items:
+                    it_id = str(it.producto_id) if it.producto_id else ""
+                    it_sku = str(it.sku or "").strip().upper()
+                    it_cb = str(it.codigo_barra or "").strip()
+
+                    if (it_id and it_id in part_ids) or (it_sku and it_sku in part_skus) or (it_cb and it_cb in part_barcodes):
+                        matching_items.append(it)
+
+                if matching_items and umbral > 0:
+                    if c.criterio_evaluacion == "CANTIDAD_UNIDADES":
+                        total_units = sum(float(it.cantidad) for it in matching_items)
+                        cupones_ganados = int(total_units // umbral)
+                        monto_o_cantidad_base = total_units
+                    else:  # MONTO_ACUMULADO
+                        total_spent = sum(float(it.total) for it in matching_items)
+                        cupones_ganados = int(total_spent // umbral)
+                        monto_o_cantidad_base = total_spent
+
+        elif c.tipo_trigger == "MARCA_PROVEEDOR":
+            marcas = {str(m).strip().upper() for m in (c.marcas_participantes or []) if m}
+            if marcas and items:
+                matching_items = [it for it in items if it.marca and str(it.marca).strip().upper() in marcas]
+                if matching_items and umbral > 0:
+                    total_spent = sum(float(it.total) for it in matching_items)
+                    cupones_ganados = int(total_spent // umbral)
+                    monto_o_cantidad_base = total_spent
+
+        elif c.tipo_trigger == "CATEGORIA":
+            cats = {str(cat).strip().upper() for cat in (c.categorias_participantes or []) if cat}
+            if cats and items:
+                matching_items = [it for it in items if it.categoria and str(it.categoria).strip().upper() in cats]
+                if matching_items and umbral > 0:
+                    total_spent = sum(float(it.total) for it in matching_items)
+                    cupones_ganados = int(total_spent // umbral)
+                    monto_o_cantidad_base = total_spent
+
+        if cupones_ganados > 0:
+            total_cupones_acumulados += cupones_ganados
+            campanas_calificadas.append(CampanaCalificadaOut(
+                campana_id=c.id,
+                nombre=c.nombre,
+                patrocinador=c.patrocinador or "Extra Supermercado",
+                premio_destacado=c.premio_destacado,
+                tipo_trigger=c.tipo_trigger,
+                cupones_ganados=cupones_ganados,
+                monto_o_cantidad_base=monto_o_cantidad_base,
+                ticket_encabezado=c.ticket_encabezado or "EXTRA SUPERMERCADO",
+                ticket_subtitulo=c.ticket_subtitulo or f"*** {c.nombre.upper()} ***",
+                ticket_pie_urna=c.ticket_pie_urna or "¡Deposita este cupon en la urna de la sucursal!",
+                whatsapp_template=c.whatsapp_template,
+                whatsapp_activo=c.whatsapp_activo
+            ))
+
+    return EvaluarCarritoResponse(
+        total_cupones=total_cupones_acumulados,
+        campanas_calificadas=campanas_calificadas
+    )
+
+
+async def registrar_cupones_multiples(
+    db: AsyncSession,
+    company_id: UUID,
+    data: RegistrarCuponesMultipleRequest
+) -> Dict[str, Any]:
+    """
+    Registra cupones para múltiples campañas en una sola transacción.
+    Crea o actualiza el cliente y emite los comprobantes con sus tickets correspondientes.
+    """
+    cleaned_doc = clean_documento(data.documento)
+    if not cleaned_doc:
+        raise ValueError("Documento de identidad requerido")
+
+    # 1. Buscar o crear cliente
+    q_cli = select(CuponCliente).where(
+        CuponCliente.company_id == company_id,
+        CuponCliente.documento == cleaned_doc
+    )
+    res_cli = await db.execute(q_cli)
+    cliente = res_cli.scalar_one_or_none()
+
+    phone_clean = normalize_phone_e164(data.telefono) if data.telefono else None
+
+    if not cliente:
+        cliente = CuponCliente(
+            company_id=company_id,
+            documento=cleaned_doc,
+            nombre=data.nombre.strip().title(),
+            telefono=phone_clean or data.telefono,
+            direccion=data.direccion,
+            barrio=data.barrio or "Centro",
+            ciudad=data.ciudad or "Pedro Juan Caballero",
+            total_gastado=data.monto_compra,
+            cantidad_compras=1,
+            ticket_promedio=data.monto_compra,
+            ultimo_consumo=datetime.now(timezone.utc)
+        )
+        db.add(cliente)
+        await db.flush()
+    else:
+        cliente.nombre = data.nombre.strip().title()
+        if phone_clean:
+            cliente.telefono = phone_clean
+        if data.barrio:
+            cliente.barrio = data.barrio
+        if data.ciudad:
+            cliente.ciudad = data.ciudad
+        cliente.total_gastado = (cliente.total_gastado or 0) + data.monto_compra
+        cliente.cantidad_compras = (cliente.cantidad_compras or 0) + 1
+        if cliente.cantidad_compras > 0:
+            cliente.ticket_promedio = cliente.total_gastado / cliente.cantidad_compras
+        cliente.ultimo_consumo = datetime.now(timezone.utc)
+
+    # 2. Registrar cada lote de cupones por campaña
+    total_cupones_creados = 0
+    tickets_registrados = []
+
+    for item_camp in data.cupones_por_campana:
+        if item_camp.cantidad <= 0:
+            continue
+
+        ticket = CuponTicket(
+            company_id=company_id,
+            cliente_id=cliente.id,
+            campana_id=item_camp.campana_id,
+            campana_nombre=item_camp.campana_nombre,
+            sale_id=data.sale_id,
+            nro_ticket=data.nro_ticket,
+            cantidad=item_camp.cantidad,
+            monto_compra=data.monto_compra,
+            fecha_compra=datetime.now(timezone.utc),
+            usuario_nombre=data.usuario_nombre or "Cajero POS",
+            sincronizado=data.sale_id is not None
+        )
+        db.add(ticket)
+        await db.flush()
+
+        # Guardar items si vinieron
+        if data.items:
+            for it in data.items:
+                t_item = CuponTicketItem(
+                    ticket_id=ticket.id,
+                    producto_id=it.get("producto_id"),
+                    descripcion=it.get("nombre") or it.get("descripcion") or "Producto",
+                    cantidad=float(it.get("cantidad") or 1),
+                    precio_unitario=float(it.get("precio_unitario") or 0),
+                    total=float(it.get("total") or 0)
+                )
+                db.add(t_item)
+
+        total_cupones_creados += item_camp.cantidad
+        tickets_registrados.append({
+            "ticket_id": ticket.id,
+            "campana_id": item_camp.campana_id,
+            "campana_nombre": item_camp.campana_nombre,
+            "cantidad": item_camp.cantidad
+        })
+
+        # Disparar WhatsApp para esta campaña si está configurado
+        if data.enviar_whatsapp and cliente.telefono:
+            # Obtener template de la campaña o default
+            campana_obj = await get_campana(db, company_id, item_camp.campana_id) if item_camp.campana_id else None
+            tmpl = campana_obj.whatsapp_template if campana_obj and campana_obj.whatsapp_template else None
+            premio_str = campana_obj.premio_destacado if campana_obj and campana_obj.premio_destacado else "Gran Sorteo"
+
+            async def _send_wa(t_id=ticket.id, t_cant=item_camp.cantidad, c_nombre=item_camp.campana_nombre, t_tmpl=tmpl, p_str=premio_str):
+                try:
+                    res_wa = await send_cupon_whatsapp_confirmation(
+                        phone=cliente.telefono,
+                        cliente_nombre=cliente.nombre,
+                        cantidad_cupones=t_cant,
+                        nro_ticket=data.nro_ticket,
+                        template=t_tmpl,
+                        sorteo_nombre=c_nombre,
+                        premio_destacado=p_str
+                    )
+                    # Actualizar status en bd
+                    async with db.begin_nested():
+                        t_db = await db.get(CuponTicket, t_id)
+                        if t_db:
+                            t_db.whatsapp_enviado = res_wa.get("success", False)
+                            t_db.whatsapp_status = "enviado" if res_wa.get("success") else res_wa.get("error", "error")
+                            await db.commit()
+                except Exception as wa_err:
+                    logger.error(f"Error despachando WhatsApp para ticket {t_id}: {wa_err}")
+
+            import asyncio
+            asyncio.create_task(_send_wa())
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "cliente_id": str(cliente.id),
+        "cliente_nombre": cliente.nombre,
+        "total_cupones": total_cupones_creados,
+        "tickets": tickets_registrados
+    }
+
 

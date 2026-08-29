@@ -185,3 +185,126 @@ class SyncBatchProgressResponse(BaseModel):
     inicio: Optional[datetime] = None
     fin: Optional[datetime] = None
 
+
+# ── MOTOR MULTI-CAMPAÑA DE SORTEOS Y CUPONES ─────────────────────────────────
+
+class SorteoCampanaBase(BaseModel):
+    nombre: str
+    codigo: Optional[str] = None
+    descripcion: Optional[str] = None
+    patrocinador: Optional[str] = "Extra Supermercado"
+    premio_destacado: Optional[str] = None
+    tipo_trigger: str = "MONTO_GLOBAL"  # MONTO_GLOBAL | PRODUCTOS_ESPECIFICOS | MARCA_PROVEEDOR | CATEGORIA
+    criterio_evaluacion: str = "MONTO_ACUMULADO"  # MONTO_ACUMULADO | CANTIDAD_UNIDADES
+    valor_umbral: float = 50000
+    productos_participantes: Optional[List[Dict[str, Any]]] = []
+    marcas_participantes: Optional[List[str]] = []
+    categorias_participantes: Optional[List[str]] = []
+    fecha_inicio: Optional[datetime] = None
+    fecha_fin: Optional[datetime] = None
+    activo: bool = True
+    whatsapp_template: Optional[str] = None
+    whatsapp_activo: bool = True
+    ticket_encabezado: Optional[str] = "EXTRA SUPERMERCADO"
+    ticket_subtitulo: Optional[str] = None
+    ticket_pie_urna: Optional[str] = "¡Deposita este cupon en la urna de la sucursal!"
+
+
+class SorteoCampanaCreate(SorteoCampanaBase):
+    pass
+
+
+class SorteoCampanaUpdate(BaseModel):
+    nombre: Optional[str] = None
+    codigo: Optional[str] = None
+    descripcion: Optional[str] = None
+    patrocinador: Optional[str] = None
+    premio_destacado: Optional[str] = None
+    tipo_trigger: Optional[str] = None
+    criterio_evaluacion: Optional[str] = None
+    valor_umbral: Optional[float] = None
+    productos_participantes: Optional[List[Dict[str, Any]]] = None
+    marcas_participantes: Optional[List[str]] = None
+    categorias_participantes: Optional[List[str]] = None
+    fecha_inicio: Optional[datetime] = None
+    fecha_fin: Optional[datetime] = None
+    activo: Optional[bool] = None
+    whatsapp_template: Optional[str] = None
+    whatsapp_activo: Optional[bool] = None
+    ticket_encabezado: Optional[str] = None
+    ticket_subtitulo: Optional[str] = None
+    ticket_pie_urna: Optional[str] = None
+
+
+class SorteoCampanaOut(SorteoCampanaBase):
+    id: UUID
+    company_id: UUID
+    total_cupones_emitidos: Optional[int] = 0
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EvaluarCarritoItem(BaseModel):
+    producto_id: Optional[UUID] = None
+    sku: Optional[str] = None
+    nombre: str
+    cantidad: float = 1.0
+    precio_unitario: float = 0.0
+    total: float = 0.0
+    marca: Optional[str] = None
+    categoria: Optional[str] = None
+    codigo_barra: Optional[str] = None
+
+
+class EvaluarCarritoRequest(BaseModel):
+    total_monto: float
+    items: List[EvaluarCarritoItem] = []
+    cliente_id: Optional[UUID] = None
+    cliente_doc: Optional[str] = None
+
+
+class CampanaCalificadaOut(BaseModel):
+    campana_id: UUID
+    nombre: str
+    patrocinador: str
+    premio_destacado: Optional[str] = None
+    tipo_trigger: str
+    cupones_ganados: int
+    monto_o_cantidad_base: float
+    ticket_encabezado: Optional[str] = "EXTRA SUPERMERCADO"
+    ticket_subtitulo: Optional[str] = None
+    ticket_pie_urna: Optional[str] = "¡Deposita este cupon en la urna de la sucursal!"
+    whatsapp_template: Optional[str] = None
+    whatsapp_activo: bool = True
+
+
+class EvaluarCarritoResponse(BaseModel):
+    total_cupones: int
+    campanas_calificadas: List[CampanaCalificadaOut]
+
+
+class RegistrarCuponesMultipleItem(BaseModel):
+    campana_id: Optional[UUID] = None
+    campana_nombre: str
+    cantidad: int
+
+
+class RegistrarCuponesMultipleRequest(BaseModel):
+    documento: str
+    nombre: str
+    telefono: Optional[str] = None
+    direccion: Optional[str] = None
+    barrio: Optional[str] = None
+    ciudad: Optional[str] = "Pedro Juan Caballero"
+    nro_ticket: str
+    monto_compra: float
+    sale_id: Optional[UUID] = None
+    usuario_nombre: Optional[str] = None
+    cupones_por_campana: List[RegistrarCuponesMultipleItem]
+    items: Optional[List[Dict[str, Any]]] = None
+    enviar_whatsapp: bool = True
+
+

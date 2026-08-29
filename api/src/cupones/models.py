@@ -43,6 +43,8 @@ class CuponTicket(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     cliente_id = Column(UUID(as_uuid=True), ForeignKey("cupones_clientes.id", ondelete="CASCADE"), nullable=False, index=True)
+    campana_id = Column(UUID(as_uuid=True), ForeignKey("sorteo_campanas.id", ondelete="SET NULL"), nullable=True, index=True)
+    campana_nombre = Column(String(255), nullable=True)
     sale_id = Column(UUID(as_uuid=True), nullable=True)
     nro_ticket = Column(String(100), nullable=False, index=True)
     cantidad = Column(Integer, default=1, server_default=text("1"), nullable=False)
@@ -59,6 +61,7 @@ class CuponTicket(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     cliente = relationship("CuponCliente", back_populates="tickets")
+    campana = relationship("SorteoCampana", back_populates="tickets")
     items = relationship("CuponTicketItem", back_populates="ticket", cascade="all, delete-orphan")
 
 
@@ -75,6 +78,51 @@ class CuponTicketItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     ticket = relationship("CuponTicket", back_populates="items")
+
+
+class SorteoCampana(Base):
+    __tablename__ = "sorteo_campanas"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    nombre = Column(String(255), nullable=False)
+    codigo = Column(String(50), nullable=True, index=True)
+    descripcion = Column(Text, nullable=True)
+    patrocinador = Column(String(150), default="Extra Supermercado", server_default="Extra Supermercado", nullable=False)
+    premio_destacado = Column(String(255), nullable=True)
+
+    # Reglas de activación
+    tipo_trigger = Column(String(50), default="MONTO_GLOBAL", server_default="MONTO_GLOBAL", nullable=False) # MONTO_GLOBAL | PRODUCTOS_ESPECIFICOS | MARCA_PROVEEDOR | CATEGORIA
+    criterio_evaluacion = Column(String(50), default="MONTO_ACUMULADO", server_default="MONTO_ACUMULADO", nullable=False) # MONTO_ACUMULADO | CANTIDAD_UNIDADES
+    valor_umbral = Column(Numeric(15, 2), default=50000, server_default=text("50000"), nullable=False)
+
+    # Filtros de aplicabilidad
+    productos_participantes = Column(JSONB, nullable=True, default=list, server_default=text("'[]'::jsonb"))
+    marcas_participantes = Column(JSONB, nullable=True, default=list, server_default=text("'[]'::jsonb"))
+    categorias_participantes = Column(JSONB, nullable=True, default=list, server_default=text("'[]'::jsonb"))
+
+    fecha_inicio = Column(DateTime(timezone=True), nullable=True)
+    fecha_fin = Column(DateTime(timezone=True), nullable=True)
+    activo = Column(Boolean, default=True, server_default=text("true"), nullable=False)
+
+    # Mensajería WhatsApp exclusiva de la campaña
+    whatsapp_template = Column(
+        Text,
+        default="¡Hola *{{nombre}}*! 👋\n\n🎉 Registramos exitosamente tus *{{cantidad}} cupones* para el *{{sorteo}}* (Premio: {{premio}}) con tu Ticket *#{{ticket}}* en *Extra Supermercado*.\n\n🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨",
+        server_default="¡Hola *{{nombre}}*! 👋\n\n🎉 Registramos exitosamente tus *{{cantidad}} cupones* para el *{{sorteo}}* (Premio: {{premio}}) con tu Ticket *#{{ticket}}* en *Extra Supermercado*.\n\n🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨",
+        nullable=True
+    )
+    whatsapp_activo = Column(Boolean, default=True, server_default=text("true"), nullable=False)
+
+    # Textos de Personalización de Ticket Térmico
+    ticket_encabezado = Column(String(255), nullable=True, default="EXTRA SUPERMERCADO", server_default="EXTRA SUPERMERCADO")
+    ticket_subtitulo = Column(String(255), nullable=True)
+    ticket_pie_urna = Column(String(255), nullable=True, default="¡Deposita este cupon en la urna de la sucursal!", server_default="¡Deposita este cupon en la urna de la sucursal!")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    tickets = relationship("CuponTicket", back_populates="campana")
 
 
 class CuponConfig(Base):
@@ -95,4 +143,5 @@ class CuponConfig(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 

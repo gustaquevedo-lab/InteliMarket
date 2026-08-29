@@ -2044,48 +2044,50 @@ export default function POSPage() {
   const [reabrirFacturaSearching, setReabrirFacturaSearching] = useState(false)
   const [submittingReabrirFactura, setSubmittingReabrirFactura] = useState(false)
 
-  // ── CUPONES DE SORTEO EN CAJA (ELECTRON / POS) ──────────────────────────────
-  const [cuponConfig, setCuponConfig] = useState<{
-    monto_por_cupon: number
-    sorteo_nombre: string
-    activo: boolean
-    disparo_whatsapp_activo: boolean
-  } | null>(null)
-
+  // ── CUPONES DE SORTEO EN CAJA (ELECTRON / POS MULTI-CAMPAÑA) ────────────────
   const [showCuponModal, setShowCuponModal] = useState(false)
   const [cuponModalStep, setCuponModalStep] = useState<"pregunta" | "formulario">("pregunta")
   const [pendingCuponData, setPendingCuponData] = useState<{
     saleNumero: string
     montoCompra: number
-    cantidadCupones: number
+    totalCupones: number
+    campanasCalificadas: Array<{
+      campana_id: string
+      nombre: string
+      patrocinador: string
+      premio_destacado?: string
+      tipo_trigger: string
+      cupones_ganados: number
+      ticket_encabezado?: string
+      ticket_subtitulo?: string
+      ticket_pie_urna?: string
+      whatsapp_template?: string
+      whatsapp_activo?: boolean
+    }>
     doc: string
     nombre: string
     telCodigo: "595" | "55"
     telefono: string
     barrio: string
     ciudad: string
+    items: any[]
   } | null>(null)
   const [savingCupon, setSavingCupon] = useState(false)
 
-  useEffect(() => {
-    api.cupones.getConfig().then((cfg: any) => {
-      if (cfg) {
-        setCuponConfig({
-          monto_por_cupon: Number(cfg.monto_por_cupon) || 50000,
-          sorteo_nombre: cfg.sorteo_nombre || "Gran Sorteo Aniversario Extra Supermercado",
-          activo: cfg.activo ?? true,
-          disparo_whatsapp_activo: cfg.disparo_whatsapp_activo ?? true
-        })
-      }
-    }).catch(() => {})
-  }, [])
-
-  const printCuponesEscPos = async (
+  const printCuponesMultiCampanaEscPos = async (
     cuponData: {
-      sorteoNombre: string
       saleNumero: string
-      cantidadCupones: number
       montoCompra: number
+      campanasCalificadas: Array<{
+        campana_id: string
+        nombre: string
+        patrocinador: string
+        premio_destacado?: string
+        cupones_ganados: number
+        ticket_encabezado?: string
+        ticket_subtitulo?: string
+        ticket_pie_urna?: string
+      }>
       nombre: string
       documento: string
       telefono: string
@@ -2098,40 +2100,49 @@ export default function POSPage() {
     const printerName = tpl.nombre_impresora_windows || 'ZKP8008'
     const feedLines = Math.max(6, Number(tpl.lineas_avance_final) || 8)
 
-    for (let i = 1; i <= cuponData.cantidadCupones; i++) {
-      let t = ''
-      t += ESCPOS_INIT
-      t += ESCPOS_ALIGN_CENTER
-      t += ESCPOS_BOLD_ON + escposStripAccents("EXTRA SUPERMERCADO") + ESCPOS_BOLD_OFF + '\n'
-      t += "Pedro Juan Caballero - Paraguay\n"
-      t += ESCPOS_BOLD_ON + "*** " + escposStripAccents(cuponData.sorteoNombre) + " ***" + ESCPOS_BOLD_OFF + '\n\n'
+    for (const camp of cuponData.campanasCalificadas) {
+      for (let i = 1; i <= camp.cupones_ganados; i++) {
+        let t = ''
+        t += ESCPOS_INIT
+        t += ESCPOS_ALIGN_CENTER
+        t += ESCPOS_BOLD_ON + escposStripAccents(camp.ticket_encabezado || "EXTRA SUPERMERCADO") + ESCPOS_BOLD_OFF + '\n'
+        t += "Pedro Juan Caballero - Paraguay\n"
+        t += ESCPOS_BOLD_ON + "*** " + escposStripAccents(camp.nombre) + " ***" + ESCPOS_BOLD_OFF + '\n'
+        if (camp.patrocinador && camp.patrocinador !== "Extra Supermercado") {
+          t += `Patrocinador: ${escposStripAccents(camp.patrocinador)}\n`
+        }
+        if (camp.premio_destacado) {
+          t += `Premio: ${escposStripAccents(camp.premio_destacado)}\n`
+        }
+        t += '\n'
 
-      t += ESCPOS_DOUBLE_ON + `CUPON ${i} DE ${cuponData.cantidadCupones}` + ESCPOS_DOUBLE_OFF + '\n'
-      t += escposDashes() + '\n'
-      t += escposTwoCol(`Ticket Venta:`, `#${cuponData.saleNumero}`) + '\n'
-      t += escposTwoCol(`Fecha:`, new Date().toLocaleDateString("es-PY") + " " + new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })) + '\n'
-      t += escposTwoCol(`Monto Compra:`, `Gs. ${formatPYG(cuponData.montoCompra)}`) + '\n'
-      t += escposDashes() + '\n'
+        t += ESCPOS_DOUBLE_ON + `CUPON ${i} DE ${camp.cupones_ganados}` + ESCPOS_DOUBLE_OFF + '\n'
+        t += escposDashes() + '\n'
+        t += escposTwoCol(`Ticket Venta:`, `#${cuponData.saleNumero}`) + '\n'
+        t += escposTwoCol(`Fecha:`, new Date().toLocaleDateString("es-PY") + " " + new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })) + '\n'
+        t += escposTwoCol(`Monto Compra:`, `Gs. ${formatPYG(cuponData.montoCompra)}`) + '\n'
+        t += escposDashes() + '\n'
 
-      t += ESCPOS_ALIGN_LEFT
-      t += `CLIENTE: ${escposStripAccents(cuponData.nombre).toUpperCase()}\n`
-      t += `DOC: ${cuponData.documento}\n`
-      t += `TEL: ${cuponData.telefono}\n`
-      t += `BARRIO/CIUDAD: ${escposStripAccents(cuponData.barrio)} - ${escposStripAccents(cuponData.ciudad)}\n`
-      t += escposDashes() + '\n'
+        t += ESCPOS_ALIGN_LEFT
+        t += `CLIENTE: ${escposStripAccents(cuponData.nombre).toUpperCase()}\n`
+        t += `DOC: ${cuponData.documento}\n`
+        t += `TEL: ${cuponData.telefono}\n`
+        t += `BARRIO/CIUDAD: ${escposStripAccents(cuponData.barrio)} - ${escposStripAccents(cuponData.ciudad)}\n`
+        t += escposDashes() + '\n'
 
-      t += ESCPOS_ALIGN_CENTER
-      t += ESCPOS_BOLD_ON + "¡Deposita este cupon en la urna!" + ESCPOS_BOLD_OFF + '\n'
-      t += "Valido para los sorteos de la campana\n"
+        t += ESCPOS_ALIGN_CENTER
+        t += ESCPOS_BOLD_ON + (camp.ticket_pie_urna || "¡Deposita este cupon en la urna de la sucursal!") + ESCPOS_BOLD_OFF + '\n'
+        t += "Valido para los sorteos de la campana\n"
 
-      t += '\n'.repeat(feedLines)
-      t += GS + 'V' + '\x01'
+        t += '\n'.repeat(feedLines)
+        t += GS + 'V' + '\x01'
 
-      const escposB64 = escposToBase64(t)
-      try {
-        await (window as any).electronAPI.printEscPos(escposB64, printerName)
-      } catch (e) {
-        console.error(`Error imprimiendo cupón ${i}:`, e)
+        const escposB64 = escposToBase64(t)
+        try {
+          await (window as any).electronAPI.printEscPos(escposB64, printerName)
+        } catch (e) {
+          console.error(`Error imprimiendo cupón de ${camp.nombre}:`, e)
+        }
       }
     }
   }
@@ -2146,24 +2157,28 @@ export default function POSPage() {
     setSavingCupon(true)
     const fullTel = `${pendingCuponData.telCodigo}${pendingCuponData.telefono.trim()}`
     try {
-      await api.cupones.registrar({
+      await api.cupones.registrarMultiple({
         documento: pendingCuponData.doc.trim(),
         nombre: pendingCuponData.nombre.trim(),
         telefono: fullTel,
         barrio: pendingCuponData.barrio.trim() || "Centro",
         ciudad: pendingCuponData.ciudad.trim() || "Pedro Juan Caballero",
         nro_ticket: pendingCuponData.saleNumero,
-        cantidad: pendingCuponData.cantidadCupones,
         monto_compra: pendingCuponData.montoCompra,
         usuario_nombre: user?.nombre || "Cajero POS",
-        enviar_whatsapp: cuponConfig?.disparo_whatsapp_activo ?? true
+        cupones_por_campana: pendingCuponData.campanasCalificadas.map(c => ({
+          campana_id: c.campana_id,
+          campana_nombre: c.nombre,
+          cantidad: c.cupones_ganados
+        })),
+        items: pendingCuponData.items,
+        enviar_whatsapp: true
       })
 
-      await printCuponesEscPos({
-        sorteoNombre: cuponConfig?.sorteo_nombre || "Gran Sorteo Aniversario Extra Supermercado",
+      await printCuponesMultiCampanaEscPos({
         saleNumero: pendingCuponData.saleNumero,
-        cantidadCupones: pendingCuponData.cantidadCupones,
         montoCompra: pendingCuponData.montoCompra,
+        campanasCalificadas: pendingCuponData.campanasCalificadas,
         nombre: pendingCuponData.nombre.trim(),
         documento: pendingCuponData.doc.trim(),
         telefono: fullTel,
@@ -2171,7 +2186,7 @@ export default function POSPage() {
         ciudad: pendingCuponData.ciudad.trim() || "Pedro Juan Caballero",
       })
 
-      toast.success("Cupones Emitidos", `Se generaron e imprimieron ${pendingCuponData.cantidadCupones} cupón(es) para el sorteo.`)
+      toast.success("Cupones Emitidos", `Se emitieron ${pendingCuponData.totalCupones} cupón(es) para ${pendingCuponData.campanasCalificadas.length} sorteo(s).`)
       setShowCuponModal(false)
       setPendingCuponData(null)
     } catch (err: any) {
@@ -4282,35 +4297,54 @@ export default function POSPage() {
         await (window as any).electronAPI.printReceipt(receiptHtml, paperWidthMm)
       }
 
-      // ── DETECCIÓN AUTOMÁTICA DE CUPONES DE SORTEO ──────────────────────
-      const totalVentaGs = totalPyg
-      const divisorCupon = cuponConfig?.monto_por_cupon || 50000
-      const cuponesCalculados = Math.floor(totalVentaGs / divisorCupon)
+      // ── EVALUACIÓN MULTI-CAMPAÑA DE SORTEOS Y CUPONES ──────────────────
+      try {
+        const itemsEvaluacion = cart.map(item => ({
+          producto_id: item.product.id,
+          sku: item.product.sku,
+          nombre: item.product.nombre,
+          cantidad: item.quantity,
+          precio_unitario: item.unitPrice,
+          total: item.total,
+          marca: item.product.marca,
+          categoria: item.product.categoria,
+          codigo_barra: item.product.codigo_barra
+        }))
 
-      if (cuponConfig?.activo && cuponesCalculados >= 1) {
-        let initialTelCod: "595" | "55" = "595"
-        let initialTelNum = customer?.telefono || ""
-        if (initialTelNum.startsWith("55")) {
-          initialTelCod = "55"
-          initialTelNum = initialTelNum.slice(2)
-        } else if (initialTelNum.startsWith("595")) {
-          initialTelCod = "595"
-          initialTelNum = initialTelNum.slice(3)
-        }
-
-        setPendingCuponData({
-          saleNumero: numeroComprobante,
-          montoCompra: totalVentaGs,
-          cantidadCupones: cuponesCalculados,
-          doc: customer?.ci || customer?.ruc || "",
-          nombre: (customer?.nombre && customer?.nombre !== "Consumidor Final") ? customer.nombre : "",
-          telCodigo: initialTelCod,
-          telefono: initialTelNum,
-          barrio: (customer as any)?.barrio || "Centro",
-          ciudad: (customer as any)?.ciudad || "Pedro Juan Caballero",
+        const evalRes = await api.cupones.evaluarCarrito({
+          total_monto: totalPyg,
+          items: itemsEvaluacion
         })
-        setCuponModalStep("pregunta")
-        setShowCuponModal(true)
+
+        if (evalRes && evalRes.total_cupones > 0 && evalRes.campanas_calificadas?.length > 0) {
+          let initialTelCod: "595" | "55" = "595"
+          let initialTelNum = customer?.telefono || ""
+          if (initialTelNum.startsWith("55")) {
+            initialTelCod = "55"
+            initialTelNum = initialTelNum.slice(2)
+          } else if (initialTelNum.startsWith("595")) {
+            initialTelCod = "595"
+            initialTelNum = initialTelNum.slice(3)
+          }
+
+          setPendingCuponData({
+            saleNumero: numeroComprobante,
+            montoCompra: totalPyg,
+            totalCupones: evalRes.total_cupones,
+            campanasCalificadas: evalRes.campanas_calificadas,
+            doc: customer?.ci || customer?.ruc || "",
+            nombre: (customer?.nombre && customer?.nombre !== "Consumidor Final") ? customer.nombre : "",
+            telCodigo: initialTelCod,
+            telefono: initialTelNum,
+            barrio: (customer as any)?.barrio || "Centro",
+            ciudad: (customer as any)?.ciudad || "Pedro Juan Caballero",
+            items: itemsEvaluacion
+          })
+          setCuponModalStep("pregunta")
+          setShowCuponModal(true)
+        }
+      } catch (e) {
+        console.warn("Error evaluando cupones:", e)
       }
 
       setShowPaymentModal(false)
@@ -8298,7 +8332,7 @@ export default function POSPage() {
           </div>
         </div>
       )}
-      {/* ── MODAL DE PARTICIPACIÓN EN SORTEO & IMPRESIÓN DE CUPONES ────────── */}
+      {/* ── MODAL DE PARTICIPACIÓN EN SORTEO & IMPRESIÓN DE CUPONES (MULTI-CAMPAÑA) ── */}
       {showCuponModal && pendingCuponData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-fade-in">
           <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-orange-500/50 p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6">
@@ -8316,18 +8350,32 @@ export default function POSPage() {
                     Esta compra de {formatPYG(pendingCuponData.montoCompra)} generó:
                   </h2>
                   <div className="text-3xl font-black text-orange-600 dark:text-orange-400 font-posMono tracking-tight">
-                    {pendingCuponData.cantidadCupones} {pendingCuponData.cantidadCupones === 1 ? "Cupón" : "Cupones"}
+                    {pendingCuponData.totalCupones} {pendingCuponData.totalCupones === 1 ? "Cupón" : "Cupones"}
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    para el <strong className="text-slate-700 dark:text-slate-300">{cuponConfig?.sorteo_nombre || "Gran Sorteo Aniversario"}</strong>
-                  </p>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 text-xs font-bold text-amber-900 dark:text-amber-200">
-                  ¿El cliente desea participar del sorteo e imprimir sus cupones?
+                {/* Desglose de Campañas Calificadas */}
+                <div className="space-y-2 max-h-48 overflow-y-auto text-left">
+                  {pendingCuponData.campanasCalificadas.map(c => (
+                    <div key={c.campana_id} className="p-3 rounded-2xl bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 flex items-center justify-between text-xs">
+                      <div>
+                        <div className="font-bold text-slate-900 dark:text-white">{c.nombre}</div>
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                          Patrocinador: {c.patrocinador} {c.premio_destacado ? `· Premio: ${c.premio_destacado}` : ""}
+                        </div>
+                      </div>
+                      <span className="font-black text-orange-600 dark:text-orange-400 font-posMono text-sm">
+                        {c.cupones_ganados} {c.cupones_ganados === 1 ? "Cupón" : "Cupones"}
+                      </span>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-2">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300">
+                  ¿El cliente desea participar de los sorteos e imprimir sus cupones?
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
                   <button
                     onClick={() => setShowCuponModal(false)}
                     className="py-3 px-4 rounded-2xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
@@ -8353,16 +8401,16 @@ export default function POSPage() {
                     </div>
                     <div>
                       <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                        Datos para el Sorteo ({pendingCuponData.cantidadCupones} Cupones)
+                        Datos para Sorteos ({pendingCuponData.totalCupones} Cupones)
                       </h3>
                       <span className="text-[10px] text-slate-400">
-                        Ticket #{pendingCuponData.saleNumero}
+                        Ticket #{pendingCuponData.saleNumero} · {pendingCuponData.campanasCalificadas.length} sorteo(s)
                       </span>
                     </div>
                   </div>
                   <button
                     onClick={() => setShowCuponModal(false)}
-                    className="text-slate-400 hover:text-slate-600"
+                    className="text-slate-400 hover:text-slate-600 cursor-pointer"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -8458,7 +8506,7 @@ export default function POSPage() {
                   ) : (
                     <>
                       <Printer className="w-4 h-4" />
-                      <span>Emitir e Imprimir {pendingCuponData.cantidadCupones} Cupones con Corte</span>
+                      <span>Emitir e Imprimir {pendingCuponData.totalCupones} Cupones con Corte</span>
                     </>
                   )}
                 </button>

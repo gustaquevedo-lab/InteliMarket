@@ -2726,6 +2726,13 @@ export const api = {
   },
   cupones: {
     registrar: (data: any) => client.post<any>("/v1/cupones/registrar", data),
+    registrarMultiple: (data: any) => client.post<any>("/v1/cupones/registrar-multiple", data),
+    evaluarCarrito: (data: any) => client.post<any>("/v1/cupones/evaluar-carrito", data),
+    listCampanas: (params?: any) => client.get<any[]>("/v1/cupones/campanas", params),
+    getCampana: (id: string) => client.get<any>(`/v1/cupones/campanas/${id}`),
+    createCampana: (data: any) => client.post<any>("/v1/cupones/campanas", data),
+    updateCampana: (id: string, data: any) => client.put<any>(`/v1/cupones/campanas/${id}`, data),
+    deleteCampana: (id: string) => client.delete<any>(`/v1/cupones/campanas/${id}`),
     tickets: (params?: any) => client.get<any[]>("/v1/cupones/tickets", params),
     listarTickets: (params?: any) => client.get<any[]>("/v1/cupones/tickets", params),
     clientes: (params?: any) => client.get<any[]>("/v1/cupones/clientes", params),

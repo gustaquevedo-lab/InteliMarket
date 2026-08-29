@@ -185,3 +185,104 @@ async def generar_campana_ia_endpoint(
     )
     return res
 
+
+# ── ENDPOINTS DE MOTOR MULTI-CAMPAÑA DE SORTEOS ──────────────────────────────
+
+@router.get("/campanas", response_model=List[schemas.SorteoCampanaOut])
+async def list_campanas_endpoint(
+    solo_activas: bool = Query(False, description="Filtrar solo campañas activas"),
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lista todas las campañas de sorteos configuradas."""
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    return await service.list_campanas(db, cid, solo_activas=solo_activas)
+
+
+@router.post("/campanas", response_model=schemas.SorteoCampanaOut)
+async def create_campana_endpoint(
+    payload: schemas.SorteoCampanaCreate,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Crea una nueva campaña de sorteo (global, por productos o por marca/categoría)."""
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    return await service.create_campana(db, cid, payload)
+
+
+@router.get("/campanas/{campana_id}", response_model=schemas.SorteoCampanaOut)
+async def get_campana_endpoint(
+    campana_id: UUID,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Obtiene el detalle de una campaña específica."""
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    camp = await service.get_campana(db, cid, campana_id)
+    if not camp:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    return camp
+
+
+@router.put("/campanas/{campana_id}", response_model=schemas.SorteoCampanaOut)
+async def update_campana_endpoint(
+    campana_id: UUID,
+    payload: schemas.SorteoCampanaUpdate,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Actualiza una campaña de sorteo."""
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    camp = await service.update_campana(db, cid, campana_id, payload)
+    if not camp:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    return camp
+
+
+@router.delete("/campanas/{campana_id}")
+async def delete_campana_endpoint(
+    campana_id: UUID,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Elimina una campaña de sorteo."""
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    ok = await service.delete_campana(db, cid, campana_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    return {"success": True, "mensaje": "Campaña eliminada exitosamente"}
+
+
+@router.post("/evaluar-carrito", response_model=schemas.EvaluarCarritoResponse)
+async def evaluar_carrito_endpoint(
+    payload: schemas.EvaluarCarritoRequest,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Evalúa los items del carrito y el monto total contra todas las campañas activas.
+    Retorna el listado de campañas que calificaron y la cantidad de cupones ganados para cada una.
+    """
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    return await service.evaluar_carrito_campanas(db, cid, total_monto=payload.total_monto, items=payload.items)
+
+
+@router.post("/registrar-multiple")
+async def registrar_cupones_multiple_endpoint(
+    payload: schemas.RegistrarCuponesMultipleRequest,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Registra cupones para múltiples campañas en una sola operación atómica.
+    """
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    try:
+        res = await service.registrar_cupones_multiples(db, cid, payload)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error registrando cupones: {e}")
+
+
