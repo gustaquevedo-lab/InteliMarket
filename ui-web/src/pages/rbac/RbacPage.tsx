@@ -323,7 +323,7 @@ export default function RbacPage() {
             {/* Micro pills */}
             <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
-                🏢 Extra Supermercado (RUC 80092451-2)
+                🏢 Extra Supermercado · GRUPO SANTA TERESA E.A.S. (RUC 80150377-9)
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
                 👥 {users.filter(u => u.activo).length} Colaboradores Activos

@@ -14,10 +14,10 @@ export default function SifenPage() {
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<"puntos" | "libros_iva" | "timbrados">("puntos")
 
-  // Datos fiscales de Extra Supermercado
+  // Datos fiscales de Extra Supermercado (GRUPO SANTA TERESA E.A.S.)
   const [fiscalProfile, setFiscalProfile] = useState({
-    ruc: "80092451-2",
-    razon_social: "EXTRA SUPERMERCADO S.A.",
+    ruc: "80150377-9",
+    razon_social: "GRUPO SANTA TERESA E.A.S.",
     timbrado_numero: "18545636",
     timbrado_vigencia_hasta: "31/12/2026",
     establecimiento: "001",

@@ -151,9 +151,9 @@ export const DEFAULT_RECEIPT_CONFIG: ReceiptTemplateConfig = {
   mostrar_logo: true,
   logo_url: "/uploads/logos/logo_00000000-0000-0000-0000-000000000010.png?t=1787497787",
   logo_ancho_px: 160,
-  nombre_fantasia: "Extra Supermercado",
-  razon_social: "EXTRA SUPERMERCADO S.A.",
-  ruc: "80092451-2",
+  nombre_fantasia: "Extra Supermercado Mayorista",
+  razon_social: "GRUPO SANTA TERESA E.A.S.",
+  ruc: "80150377-9",
   timbrado: "18545636",
   timbrado_vencimiento: "31/12/2026",
   establecimiento: "001",
@@ -805,7 +805,7 @@ export default function SettingsPage() {
             {/* Micro pills */}
             <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
-                🏢 Extra Supermercado S.A. (RUC 80092451-2)
+                🏢 GRUPO SANTA TERESA E.A.S. (RUC 80150377-9)
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-cyan-300">
                 🧾 Ticket Térmico 80mm ESC/POS
@@ -858,7 +858,7 @@ export default function SettingsPage() {
             </div>
           </div>
           <p className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400">
-            {company.ruc || "80092451-2"}
+            {company.ruc || "80150377-9"}
           </p>
           <div className="flex items-center justify-between text-xs text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
             <span>Establecimiento: <strong className="text-slate-700 dark:text-slate-200 font-mono">001 Central</strong></span>
@@ -1952,7 +1952,7 @@ export default function SettingsPage() {
                           </svg>
                         </div>
                         <div className="text-[7px] text-slate-800 mt-0.5 break-all leading-none font-mono">
-                          CDC: 01800924512001012000004829120260829123456789
+                          CDC: 01{(receiptConfig.ruc || "80150377-9").replace("-", "").padStart(9, "0")}001012000004829120260829123456789
                         </div>
                         <div className="text-[7.5px] text-slate-700 font-bold">
                           Consulte en: https://ekuatia.set.gov.py/consultas

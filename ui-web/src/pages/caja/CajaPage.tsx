@@ -2354,7 +2354,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
             </div>
 
             <div className="text-center space-y-1">
-              <div className="text-sm font-black text-slate-900 uppercase">EXTRA SUPERMERCADO · RUC 80092451-2</div>
+              <div className="text-sm font-black text-slate-900 uppercase">GRUPO SANTA TERESA E.A.S. · RUC 80150377-9</div>
               <div className="text-xs text-slate-500">ACTA DE ENTREGA DE FONDOS SOLIDARIOS POR REDONDEO DE VUELTO</div>
               <div className="text-xs font-bold text-rose-600">CAMPAÑA "ABRE TU CORAZÓN" · CENTRO AMOR Y ESPERANZA</div>
             </div>

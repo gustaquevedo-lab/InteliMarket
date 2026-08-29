@@ -187,7 +187,7 @@ export function generateOfflineReceipt(
 </style></head><body>
 <div class="center">
   <h3 style="margin:0; font-size: 13px;">${branchName}</h3>
-  <p style="margin:2px 0;font-size:10px;">RUC: 80092451-2 | Timbrado DNIT: 18545636</p>
+  <p style="margin:2px 0;font-size:10px;">RUC: 80150377-9 | Timbrado DNIT: 18545636</p>
   <p style="margin:1px 0;font-size:9px;">Avda. Principal esq. Curupayty Nº 1450</p>
   <p style="margin:2px 0;font-size:10px;">${now}</p>
 </div>

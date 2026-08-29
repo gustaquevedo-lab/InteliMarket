@@ -98,7 +98,7 @@ export default function SueldokPage() {
                 </h1>
               </div>
               <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl font-normal">
-                Extra Supermercado (RUC 80092451-2) — Liquidación salarial, aporte patronal IPS (16.5%), obrero (9%), horas extras y bonos de productividad en cajas POS.
+                GRUPO SANTA TERESA E.A.S. (RUC 80150377-9) — Liquidación salarial, aporte patronal IPS (16.5%), obrero (9%), horas extras y bonos de productividad en cajas POS.
               </p>
               <div className="flex flex-wrap gap-2 mt-3">
                 <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-[11px] text-slate-300">

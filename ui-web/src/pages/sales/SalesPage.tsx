@@ -276,7 +276,7 @@ export default function SalesPage() {
             {/* Micro pills de estado */}
             <div className="flex items-center gap-2.5 pt-1 text-[11px] text-slate-300 flex-wrap">
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
-                🏢 Extra Supermercado (RUC 80092451-2)
+                🏢 Extra Supermercado · GRUPO SANTA TERESA E.A.S. (RUC 80150377-9)
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
                 💵 Cotización: R$ {rates.BRL} · USD {rates.USD}
@@ -594,13 +594,13 @@ export default function SalesPage() {
                 EXTRA
               </div>
               <h3 className="font-black text-sm text-slate-900 dark:text-white uppercase tracking-tight">
-                EXTRA SUPERMERCADO S.A.
+                GRUPO SANTA TERESA E.A.S.
               </h3>
               <p className="text-xs text-slate-500 font-bold">
-                Salón Comercial Central
+                Extra Supermercado Mayorista
               </p>
               <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                RUC: 80092451-2 · Casa Central
+                RUC: 80150377-9 · Casa Central
               </p>
               <div className="mt-2 p-2 bg-blue-50 dark:bg-slate-800 rounded-xl text-[10px] text-blue-700 dark:text-blue-300 font-mono">
                 DNIT Timbrado Autoimpresor Nº {timbradoFacturas} · Vence: {timbradoVencimiento}
