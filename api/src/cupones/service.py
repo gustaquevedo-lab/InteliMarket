@@ -15,8 +15,8 @@ from google import genai
 from google.genai import types
 
 from api.src.config import settings
-from api.src.cupones.models import CuponCliente, CuponTicket, CuponTicketItem
-from api.src.cupones.schemas import RegistrarCuponRequest, CuponClienteOut
+from api.src.cupones.models import CuponCliente, CuponTicket, CuponTicketItem, CuponConfig
+from api.src.cupones.schemas import RegistrarCuponRequest, CuponClienteOut, CuponConfigUpdate
 from api.src.cupones.whatsapp_service import send_cupon_whatsapp_confirmation, normalize_phone_e164
 from api.src.customers.models import Customer
 from api.src.sales.models import Sale, SaleItem
@@ -231,20 +231,24 @@ async def registrar_cupon(
     whatsapp_disparado = False
     if payload.enviar_whatsapp and cliente.telefono:
         try:
-            res_wa = await send_cupon_whatsapp_confirmation(
-                telefono=cliente.telefono,
-                nombre=cliente.nombre,
-                nro_ticket=cleaned_ticket,
-                cantidad_cupones=cupon_ticket.cantidad,
-                nombre_fantasia="Extra Supermercado"
-            )
-            if res_wa.get("success"):
-                cupon_ticket.whatsapp_enviado = True
-                cupon_ticket.whatsapp_status = "enviado"
-                whatsapp_disparado = True
-            else:
-                cupon_ticket.whatsapp_status = res_wa.get("status", "fallo_envio")
-            await db.commit()
+            cfg = await get_or_create_config(db, company_id)
+            if cfg.disparo_whatsapp_activo:
+                res_wa = await send_cupon_whatsapp_confirmation(
+                    telefono=cliente.telefono,
+                    nombre=cliente.nombre,
+                    nro_ticket=cleaned_ticket,
+                    cantidad_cupones=cupon_ticket.cantidad,
+                    nombre_fantasia="Extra Supermercado",
+                    template=cfg.whatsapp_mensaje_template,
+                    sorteo_nombre=cfg.sorteo_nombre
+                )
+                if res_wa.get("success"):
+                    cupon_ticket.whatsapp_enviado = True
+                    cupon_ticket.whatsapp_status = "enviado"
+                    whatsapp_disparado = True
+                else:
+                    cupon_ticket.whatsapp_status = res_wa.get("status", "fallo_envio")
+                await db.commit()
         except Exception as e:
             logger.error(f"Error al disparar WhatsApp para ticket {cleaned_ticket}: {e}")
 
@@ -506,3 +510,251 @@ Responde ÚNICAMENTE en formato JSON con la siguiente estructura exacta:
         "detalles": detalles,
         "mensaje": f"Se perfilaron {analizados} clientes con Gemini 2.5 Flash ({fallidos} fallos)"
     }
+
+
+# ── CONFIGURACIÓN DE SORTEO Y CUPONES ──────────────────────────────────────────
+
+async def get_or_create_config(db: AsyncSession, company_id: UUID) -> CuponConfig:
+    res = await db.execute(select(CuponConfig).where(CuponConfig.company_id == company_id))
+    cfg = res.scalars().first()
+    if not cfg:
+        cfg = CuponConfig(
+            company_id=company_id,
+            monto_por_cupon=50000,
+            sorteo_nombre="Gran Sorteo Aniversario Extra Supermercado",
+            whatsapp_mensaje_template="¡Hola *{{nombre}}*! 👋\n\n🎉 Registramos exitosamente tus *{{cantidad}} cupones* para el *{{sorteo}}* con tu Ticket *#{{ticket}}* en *Extra Supermercado*.\n\n🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨",
+            disparo_whatsapp_activo=True,
+            activo=True
+        )
+        db.add(cfg)
+        await db.commit()
+        await db.refresh(cfg)
+    return cfg
+
+
+async def update_config(db: AsyncSession, company_id: UUID, payload: CuponConfigUpdate) -> CuponConfig:
+    cfg = await get_or_create_config(db, company_id)
+    if payload.monto_por_cupon is not None:
+        cfg.monto_por_cupon = payload.monto_por_cupon
+    if payload.sorteo_nombre is not None:
+        cfg.sorteo_nombre = payload.sorteo_nombre
+    if payload.whatsapp_mensaje_template is not None:
+        cfg.whatsapp_mensaje_template = payload.whatsapp_mensaje_template
+    if payload.disparo_whatsapp_activo is not None:
+        cfg.disparo_whatsapp_activo = payload.disparo_whatsapp_activo
+    if payload.activo is not None:
+        cfg.activo = payload.activo
+    cfg.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(cfg)
+    return cfg
+
+
+# ── SINCRONIZACIÓN Y BATCH ───────────────────────────────────────────────────
+
+_sync_batch_state = {
+    "activo": False,
+    "total": 0,
+    "procesados": 0,
+    "exitos": 0,
+    "fallas": 0,
+    "porcentaje": 0.0,
+    "inicio": None,
+    "fin": None,
+}
+
+
+def get_sync_batch_progress() -> dict:
+    return dict(_sync_batch_state)
+
+
+async def sync_single_ticket(db: AsyncSession, company_id: UUID, ticket_id: UUID) -> dict:
+    """Sincroniza un ticket individual cruzándolo contra la tabla de ventas."""
+    query = select(CuponTicket).options(
+        selectinload(CuponTicket.cliente),
+        selectinload(CuponTicket.items)
+    ).where(CuponTicket.id == ticket_id, CuponTicket.company_id == company_id)
+    res = await db.execute(query)
+    ticket = res.scalars().first()
+    if not ticket:
+        raise ValueError("Ticket no encontrado")
+
+    cleaned_ticket = ticket.nro_ticket.strip().upper()
+    sale_query = select(Sale).options(selectinload(Sale.items)).where(
+        Sale.company_id == company_id,
+        or_(
+            Sale.numero == cleaned_ticket,
+            Sale.numero.ilike(f"%{cleaned_ticket}"),
+            Sale.numero.ilike(f"%{cleaned_ticket.replace('-', '')}%")
+        )
+    ).order_by(desc(Sale.fecha))
+    res_sale = await db.execute(sale_query)
+    sale = res_sale.scalars().first()
+
+    if sale:
+        ticket.sale_id = sale.id
+        ticket.monto_compra = float(sale.total or ticket.monto_compra)
+        ticket.fecha_compra = sale.fecha or ticket.fecha_captura
+        ticket.sincronizado = True
+
+        ticket.items.clear()
+        for it in sale.items:
+            ticket.items.append(
+                CuponTicketItem(
+                    producto_id=it.product_id,
+                    descripcion=it.descripcion or "Producto de Salón",
+                    cantidad=float(it.cantidad or 1),
+                    precio_unitario=float(it.precio_unitario or 0),
+                    total=float(it.total or 0)
+                )
+            )
+
+        if ticket.cliente:
+            cliente = ticket.cliente
+            all_tickets_query = select(func.count(CuponTicket.id), func.sum(CuponTicket.monto_compra)).where(
+                CuponTicket.cliente_id == cliente.id,
+                CuponTicket.sincronizado == True
+            )
+            r_all = await db.execute(all_tickets_query)
+            cnt, total_sum = r_all.first() or (0, 0)
+            cliente.cantidad_compras = cnt or 0
+            cliente.total_gastado = float(total_sum or 0)
+            if cliente.cantidad_compras > 0:
+                cliente.ticket_promedio = round(cliente.total_gastado / cliente.cantidad_compras, 2)
+            cliente.ultimo_consumo = ticket.fecha_compra
+
+        await db.commit()
+        await db.refresh(ticket)
+        return {"success": True, "ticket": ticket, "items": len(ticket.items)}
+    else:
+        ticket.sincronizado = False
+        await db.commit()
+        return {"success": False, "mensaje": "No se encontró una venta que coincida con el número de ticket"}
+
+
+async def run_sync_batch(db: AsyncSession, company_id: UUID, limite: int = 50, delay_ms: int = 200, force: bool = False):
+    global _sync_batch_state
+    if _sync_batch_state["activo"] and not force:
+        raise ValueError("Ya hay un proceso de sincronización en ejecución")
+
+    import asyncio
+    _sync_batch_state = {
+        "activo": True,
+        "total": 0,
+        "procesados": 0,
+        "exitos": 0,
+        "fallas": 0,
+        "porcentaje": 0.0,
+        "inicio": datetime.now(timezone.utc),
+        "fin": None,
+    }
+
+    try:
+        query = select(CuponTicket).where(
+            CuponTicket.company_id == company_id,
+            CuponTicket.sincronizado == False
+        ).limit(limite)
+        res = await db.execute(query)
+        tickets = res.scalars().all()
+        _sync_batch_state["total"] = len(tickets)
+
+        for t in tickets:
+            try:
+                r = await sync_single_ticket(db, company_id, t.id)
+                if r.get("success"):
+                    _sync_batch_state["exitos"] += 1
+                else:
+                    _sync_batch_state["fallas"] += 1
+            except Exception as e:
+                logger.error(f"Error sincronizando ticket {t.id}: {e}")
+                _sync_batch_state["fallas"] += 1
+
+            _sync_batch_state["procesados"] += 1
+            if _sync_batch_state["total"] > 0:
+                _sync_batch_state["porcentaje"] = round((_sync_batch_state["procesados"] / _sync_batch_state["total"]) * 100, 1)
+
+            if delay_ms > 0:
+                await asyncio.sleep(delay_ms / 1000.0)
+
+    finally:
+        _sync_batch_state["activo"] = False
+        _sync_batch_state["fin"] = datetime.now(timezone.utc)
+
+
+# ── GENERACIÓN DE CAMPAÑAS WHATSAPP CON IA ────────────────────────────────────
+
+async def generar_campana_ia(
+    db: AsyncSession,
+    company_id: UUID,
+    segmento: str,
+    tono: str = "Persuasivo",
+    oferta_especifica: Optional[str] = None
+) -> dict:
+    """Genera un mensaje publicitario optimizado para WhatsApp con Gemini 2.5 Flash enfocado en un segmento."""
+    q = select(CuponCliente).where(
+        CuponCliente.company_id == company_id,
+        CuponCliente.segmentos.ilike(f"%{segmento}%")
+    ).limit(10)
+    res = await db.execute(q)
+    clientes = res.scalars().all()
+
+    total_query = select(func.count(CuponCliente.id)).where(
+        CuponCliente.company_id == company_id,
+        CuponCliente.segmentos.ilike(f"%{segmento}%")
+    )
+    r_total = await db.execute(total_query)
+    audiencia = r_total.scalar_one_or_none() or 0
+
+    api_key = getattr(settings, "gemini_api_key", None)
+    if not api_key:
+        return {
+            "segmento": segmento,
+            "tono": tono,
+            "mensaje_generado": "¡Hola! 👋 En Extra Supermercado tenemos ofertas imperdibles seleccionadas para ti. ¡Te esperamos hoy!",
+            "audiencia_estimada": audiencia
+        }
+
+    client = genai.Client(api_key=api_key)
+
+    ejemplos_perfiles = []
+    for c in clientes[:5]:
+        if c.ia_analisis and isinstance(c.ia_analisis, dict):
+            ejemplos_perfiles.append(str(c.ia_analisis.get("resumen_conductual", "")))
+
+    contexto_perfil = "; ".join(ejemplos_perfiles) if ejemplos_perfiles else "Clientes habituales del supermercado"
+
+    prompt = f"""
+Eres el Copywriter Principal de Extra Supermercado en Pedro Juan Caballero, Paraguay.
+Escribe un mensaje de difusión de WhatsApp irresistente para el siguiente segmento de clientes:
+
+- Segmento objetivo: {segmento}
+- Tono deseado: {tono}
+- Oferta específica o producto a promocionar: {oferta_especifica or 'Nuestras mejores ofertas y sorteo aniversario'}
+- Perfil general de compradores en este segmento: {contexto_perfil}
+
+REGLAS OBLIGATORIAS:
+1. El mensaje debe ser para WhatsApp (usa negritas con asteriscos, emojis adecuados pero no excesivos).
+2. Debe ser directo, de máximo 4 a 6 líneas, con un llamado a la acción claro.
+3. Menciona la sucursal de Extra Supermercado.
+4. Genera ÚNICAMENTE el texto final del mensaje, sin introducciones ni explicaciones adicionales.
+"""
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.7,
+            )
+        )
+        msg = response.text.strip()
+    except Exception as e:
+        logger.error(f"Error generando campaña con Gemini: {e}")
+        msg = "¡Hola! 🎉 En Extra Supermercado tenemos promociones especiales para ti en nuestro sorteo. ¡Visítanos hoy y suma más cupones! 🍀"
+
+    return {
+        "segmento": segmento,
+        "tono": tono,
+        "mensaje_generado": msg,
+        "audiencia_estimada": audiencia
+    }
+

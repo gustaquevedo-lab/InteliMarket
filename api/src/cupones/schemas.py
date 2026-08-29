@@ -131,3 +131,57 @@ class CuponStatsResponse(BaseModel):
     monto_total_compras: float
     top_barrios: List[Dict[str, Any]]
     whatsapp_stats: Dict[str, int]
+
+
+class CuponConfigOut(BaseModel):
+    id: UUID
+    company_id: UUID
+    monto_por_cupon: float
+    sorteo_nombre: str
+    whatsapp_mensaje_template: Optional[str] = None
+    disparo_whatsapp_activo: bool
+    activo: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CuponConfigUpdate(BaseModel):
+    monto_por_cupon: Optional[float] = None
+    sorteo_nombre: Optional[str] = None
+    whatsapp_mensaje_template: Optional[str] = None
+    disparo_whatsapp_activo: Optional[bool] = None
+    activo: Optional[bool] = None
+
+
+class GenerarCampanaRequest(BaseModel):
+    segmento: str
+    tono: Optional[str] = "Persuasivo"  # Persuasivo, Amigable, Urgente, Formal
+    oferta_especifica: Optional[str] = None
+
+
+class GenerarCampanaResponse(BaseModel):
+    segmento: str
+    tono: str
+    mensaje_generado: str
+    audiencia_estimada: int
+
+
+class SyncBatchRequest(BaseModel):
+    limite: int = 50
+    delay_ms: int = 200
+    force: bool = False
+
+
+class SyncBatchProgressResponse(BaseModel):
+    activo: bool
+    total: int
+    procesados: int
+    exitos: int
+    fallas: int
+    porcentaje: float
+    inicio: Optional[datetime] = None
+    fin: Optional[datetime] = None
+

@@ -42,7 +42,9 @@ async def send_cupon_whatsapp_confirmation(
     nombre: str,
     nro_ticket: str,
     cantidad_cupones: int,
-    nombre_fantasia: str = "Extra Supermercado"
+    nombre_fantasia: str = "Extra Supermercado",
+    template: Optional[str] = None,
+    sorteo_nombre: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Envía mensaje humanizado de confirmación de cupones vía Evolution API local (:8085).
@@ -57,13 +59,22 @@ async def send_cupon_whatsapp_confirmation(
 
     endpoint = f"{evolution_url.rstrip('/')}/message/sendText/{instance}"
 
-    # Formato humanizado del mensaje de sorteo
     plural_cupon = "cupón" if cantidad_cupones == 1 else "cupones"
-    mensaje = (
-        f"¡Hola *{nombre.strip()}*! 👋\n\n"
-        f"🎉 Registramos exitosamente tus *{cantidad_cupones} {plural_cupon}* para el Gran Sorteo con tu Ticket *#{nro_ticket}* en *{nombre_fantasia}*.\n\n"
-        f"🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨"
-    )
+    sorteo_txt = sorteo_nombre or "Gran Sorteo Aniversario Extra Supermercado"
+
+    if template and template.strip():
+        mensaje = template
+        mensaje = mensaje.replace("{{nombre}}", nombre.strip())
+        mensaje = mensaje.replace("{{cantidad}}", f"{cantidad_cupones} {plural_cupon}")
+        mensaje = mensaje.replace("{{sorteo}}", sorteo_txt)
+        mensaje = mensaje.replace("{{ticket}}", nro_ticket)
+        mensaje = mensaje.replace("{{empresa}}", nombre_fantasia)
+    else:
+        mensaje = (
+            f"¡Hola *{nombre.strip()}*! 👋\n\n"
+            f"🎉 Registramos exitosamente tus *{cantidad_cupones} {plural_cupon}* para el *{sorteo_txt}* con tu Ticket *#{nro_ticket}* en *{nombre_fantasia}*.\n\n"
+            f"🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨"
+        )
 
     payload = {
         "number": normalized_num,

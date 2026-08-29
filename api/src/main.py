@@ -137,6 +137,7 @@ from api.src.ecommerce_sm.router import router as ecommerce_sm_router
 from api.src.delivery_integrations.router import router as delivery_integrations_router
 from api.src.suscripciones.router import router as suscripciones_router
 from api.src.servicios.router import router as servicios_router
+from api.src.cupones.router import router as cupones_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -368,4 +369,5 @@ app.include_router(client_app_router)
 app.include_router(supplier_portal_router)
 app.include_router(retail_router)
 app.include_router(servicios_router)
+app.include_router(cupones_router)
 

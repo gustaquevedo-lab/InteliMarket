@@ -111,3 +111,77 @@ async def ejecutar_analisis_ia(
         forzar_reanalisis=payload.forzar_reanalisis
     )
     return res
+
+
+@router.get("/config", response_model=schemas.CuponConfigOut)
+async def get_config(
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Obtiene la configuración actual del sorteo y disparo de cupones."""
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    cfg = await service.get_or_create_config(db, cid)
+    return cfg
+
+
+@router.put("/config", response_model=schemas.CuponConfigOut)
+async def update_config(
+    payload: schemas.CuponConfigUpdate,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Actualiza la configuración del sorteo, monto por cupón y mensaje de WhatsApp."""
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    cfg = await service.update_config(db, cid, payload)
+    return cfg
+
+
+@router.post("/sync/{ticket_id}", response_model=schemas.CuponTicketOut)
+async def sync_single_ticket_endpoint(
+    ticket_id: UUID,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Sincroniza un ticket específico cruzándolo contra ventas."""
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    res = await service.sync_single_ticket(db, cid, ticket_id)
+    if not res.get("success"):
+        raise HTTPException(status_code=404, detail=res.get("mensaje", "No se pudo sincronizar"))
+    return res["ticket"]
+
+
+@router.post("/sync-batch", response_model=schemas.SyncBatchProgressResponse)
+async def start_sync_batch(
+    payload: schemas.SyncBatchRequest,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Inicia la sincronización masiva de tickets pendientes."""
+    import asyncio
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    asyncio.create_task(service.run_sync_batch(db, cid, payload.limite, payload.delay_ms, payload.force))
+    return schemas.SyncBatchProgressResponse(
+        activo=True, total=0, procesados=0, exitos=0, fallas=0, porcentaje=0.0
+    )
+
+
+@router.get("/sync-batch/progress", response_model=schemas.SyncBatchProgressResponse)
+async def get_sync_batch_progress_endpoint():
+    """Consulta el progreso actual del lote de sincronización."""
+    return service.get_sync_batch_progress()
+
+
+@router.post("/generar-campana", response_model=schemas.GenerarCampanaResponse)
+async def generar_campana_ia_endpoint(
+    payload: schemas.GenerarCampanaRequest,
+    company_id: Optional[str] = Query(None, description="UUID de empresa"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Genera mensaje persuasivo para WhatsApp usando Gemini 2.5 Flash enfocado en el segmento."""
+    cid = UUID(company_id) if company_id else DEFAULT_COMPANY_ID
+    res = await service.generar_campana_ia(
+        db, cid, segmento=payload.segmento, tono=payload.tono or "Persuasivo",
+        oferta_especifica=payload.oferta_especifica
+    )
+    return res
+

@@ -75,3 +75,24 @@ class CuponTicketItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     ticket = relationship("CuponTicket", back_populates="items")
+
+
+class CuponConfig(Base):
+    __tablename__ = "cupon_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    monto_por_cupon = Column(Numeric(15, 2), default=50000, server_default=text("50000"), nullable=False)
+    sorteo_nombre = Column(String(255), default="Gran Sorteo Aniversario Extra Supermercado", server_default="Gran Sorteo Aniversario Extra Supermercado", nullable=False)
+    whatsapp_mensaje_template = Column(
+        Text,
+        default="¡Hola *{{nombre}}*! 👋\n\n🎉 Registramos exitosamente tus *{{cantidad}} cupones* para el *{{sorteo}}* con tu Ticket *#{{ticket}}* en *Extra Supermercado*.\n\n🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨",
+        server_default="¡Hola *{{nombre}}*! 👋\n\n🎉 Registramos exitosamente tus *{{cantidad}} cupones* para el *{{sorteo}}* con tu Ticket *#{{ticket}}* en *Extra Supermercado*.\n\n🛒 ¡Muchas gracias por tu compra y mucha suerte! 🍀✨",
+        nullable=True
+    )
+    disparo_whatsapp_activo = Column(Boolean, default=True, server_default=text("true"), nullable=False)
+    activo = Column(Boolean, default=True, server_default=text("true"), nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
