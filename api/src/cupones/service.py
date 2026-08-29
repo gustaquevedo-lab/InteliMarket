@@ -373,6 +373,15 @@ async def get_stats(db: AsyncSession, company_id: UUID) -> Dict[str, Any]:
         for r in res_barrios.all()
     ]
 
+    # Sincronización stats
+    res_sync = await db.execute(
+        select(
+            func.count().filter(CuponTicket.sincronizado == True).label("sincronizados"),
+            func.count().filter(CuponTicket.sincronizado == False).label("pendientes")
+        ).where(CuponTicket.company_id == company_id)
+    )
+    sincronizados, pendientes_sync = res_sync.first()
+
     # WhatsApp stats
     res_wa = await db.execute(
         select(
@@ -387,13 +396,14 @@ async def get_stats(db: AsyncSession, company_id: UUID) -> Dict[str, Any]:
         "total_cupones": int(total_cupones or 0),
         "total_tickets": int(total_tickets or 0),
         "total_clientes": int(total_clientes or 0),
-        "monto_total_compras": float(total_monto or 0),
+        "total_recaudado": float(total_monto or 0),
+        "tickets_sincronizados": int(sincronizados or 0),
+        "tickets_pendientes": int(pendientes_sync or 0),
+        "whatsapp_enviados": int(enviados or 0),
+        "whatsapp_pendientes": int(pendientes or 0),
+        "whatsapp_fallidos": int(fallidos or 0),
         "top_barrios": top_barrios,
-        "whatsapp_stats": {
-            "enviados": int(enviados or 0),
-            "pendientes": int(pendientes or 0),
-            "fallidos": int(fallidos or 0)
-        }
+        "distribucion_monto": []
     }
 
 
