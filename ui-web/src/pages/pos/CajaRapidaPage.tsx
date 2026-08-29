@@ -2195,9 +2195,9 @@ export default function POSPage() {
           t += `Patrocinador: ${escposStripAccents(camp.patrocinador)}\n`
         }
 
-        // 3. Número de cupón destacado
+        // 3. Número de cupón (tamaño normal en negrita, idéntico al diseñador)
         t += escposDashes(W) + '\n'
-        t += ESCPOS_BOLD_ON + ESCPOS_DOUBLE_ON + `CUPON ${i} DE ${camp.cupones_ganados}` + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
+        t += ESCPOS_BOLD_ON + `CUPON ${i} DE ${camp.cupones_ganados}` + ESCPOS_BOLD_OFF + '\n'
         t += escposDashes(W) + '\n'
 
         // 4. Datos del Ticket
