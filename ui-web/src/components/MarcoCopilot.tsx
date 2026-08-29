@@ -442,35 +442,53 @@ export default function MarcoCopilot() {
 
       {isOpen && (
         <div className="fixed bottom-6 right-6 z-50 w-[95vw] sm:w-[460px] h-[640px] max-h-[85vh] bg-white dark:bg-gray-850 rounded-3xl shadow-2xl border border-gray-200/80 dark:border-gray-700/80 flex flex-col overflow-hidden backdrop-blur-xl animate-in fade-in slide-in-from-bottom-5 duration-300">
-          <div className="p-4 bg-gradient-to-r from-indigo-600 via-indigo-700 to-violet-700 text-white flex items-center justify-between shadow-md">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-10 h-10 rounded-2xl bg-white/15 backdrop-blur-md flex items-center justify-center text-lg border border-white/20 shadow-inner">🧠</div>
+          {/* Header */}
+          <div className="px-4 py-3.5 bg-gradient-to-r from-indigo-600 via-indigo-700 to-violet-700 text-white flex items-center justify-between shadow-md select-none">
+            {/* Left: Avatar & Info */}
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="relative flex-shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-white/15 backdrop-blur-md flex items-center justify-center text-lg border border-white/20 shadow-inner">
+                  🧠
+                </div>
                 <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 border-2 border-indigo-700 rounded-full"></span>
               </div>
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-sm leading-tight">Marco</h3>
-                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-medium tracking-wide">Casa Gonzalito</span>
+                  <h3 className="font-bold text-sm leading-tight text-white whitespace-nowrap">Marco</h3>
+                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-medium tracking-wide whitespace-nowrap border border-white/15">
+                    Casa Gonzalito
+                  </span>
                 </div>
-                <p className="text-[11px] text-indigo-100/90 font-medium">Asesor Operativo Inteligente</p>
+                <p className="text-[11px] text-indigo-100/80 font-medium truncate mt-0.5">
+                  Asesor Operativo Inteligente
+                </p>
               </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <select
-                value={voice}
-                onChange={e => handleVoiceChange(e.target.value)}
-                className="bg-white/10 hover:bg-white/20 text-white text-[11px] font-medium rounded-xl px-2.5 py-1 outline-none border border-white/20 cursor-pointer transition"
-                title="Voz de Marco"
+
+            {/* Right: Voice selector & Close button */}
+            <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+              <div className="relative flex items-center">
+                <select
+                  value={voice}
+                  onChange={e => handleVoiceChange(e.target.value)}
+                  className="bg-white/15 hover:bg-white/25 text-white text-[11px] font-medium rounded-xl pl-2.5 pr-6 py-1.5 outline-none border border-white/20 cursor-pointer transition appearance-none max-w-[130px] sm:max-w-[145px] truncate"
+                  title="Voz de Marco"
+                >
+                  <option value="es-UY-MateoNeural" className="text-gray-900">🇺🇾 Mateo (Rioplatense)</option>
+                  <option value="es-MX-JorgeNeural" className="text-gray-900">🇲🇽 Jorge (Latinoamérica)</option>
+                  <option value="es-AR-TomasNeural" className="text-gray-900">🇦🇷 Tomás (Argentina)</option>
+                  <option value="es-ES-AlvaroNeural" className="text-gray-900">🇪🇸 Álvaro (España)</option>
+                  <option value="es-PY-TaniaNeural" className="text-gray-900">🇵🇾 Tania (Paraguay)</option>
+                  <option value="es-AR-ElenaNeural" className="text-gray-900">🇦🇷 Elena (Femenina)</option>
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-white/70 absolute right-2 pointer-events-none" />
+              </div>
+
+              <button
+                onClick={() => setIsOpen(false)}
+                className="p-1.5 hover:bg-white/20 active:bg-white/30 rounded-xl transition text-white/80 hover:text-white flex-shrink-0"
+                title="Cerrar copiloto"
               >
-                <option value="es-UY-MateoNeural" className="text-gray-900">🇺🇾 Mateo (Rioplatense - Más fluido y natural)</option>
-                <option value="es-MX-JorgeNeural" className="text-gray-900">🇲🇽 Jorge (Latinoamérica - Ejecutivo natural)</option>
-                <option value="es-AR-TomasNeural" className="text-gray-900">🇦🇷 Tomás (Argentina - Formal)</option>
-                <option value="es-ES-AlvaroNeural" className="text-gray-900">🇪🇸 Álvaro (Conversacional)</option>
-                <option value="es-PY-TaniaNeural" className="text-gray-900">🇵🇾 Tania (Paraguay - Femenina)</option>
-                <option value="es-AR-ElenaNeural" className="text-gray-900">🇦🇷 Elena (Argentina - Femenina suave)</option>
-              </select>
-              <button onClick={() => setIsOpen(false)} className="p-1.5 hover:bg-white/20 rounded-xl transition text-white/80 hover:text-white">
                 <X className="w-4 h-4" />
               </button>
             </div>
