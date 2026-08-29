@@ -6404,8 +6404,12 @@ export default function POSPage() {
                     if (savedTpl) {
                       const parsed = JSON.parse(savedTpl)
                       if (parsed.donacion_activa === false) isDonacionOn = false
-                    } else if ((companyData?.config as any)?.receipt_template?.donacion_activa === false) {
-                      isDonacionOn = false
+                    } else {
+                      const savedComp = localStorage.getItem("pos_company_data")
+                      if (savedComp) {
+                        const comp = JSON.parse(savedComp)
+                        if ((comp?.config as any)?.receipt_template?.donacion_activa === false) isDonacionOn = false
+                      }
                     }
                   } catch (e) {}
 
@@ -6515,8 +6519,12 @@ export default function POSPage() {
                         if (savedTpl) {
                           const parsed = JSON.parse(savedTpl)
                           if (parsed.habilitar_extra_club === false) isExtraClubOn = false
-                        } else if ((companyData?.config as any)?.receipt_template?.habilitar_extra_club === false) {
-                          isExtraClubOn = false
+                        } else {
+                          const savedComp = localStorage.getItem("pos_company_data")
+                          if (savedComp) {
+                            const comp = JSON.parse(savedComp)
+                            if ((comp?.config as any)?.receipt_template?.habilitar_extra_club === false) isExtraClubOn = false
+                          }
                         }
                       } catch (e) {}
 
