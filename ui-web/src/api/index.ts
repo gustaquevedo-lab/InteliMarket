@@ -23,8 +23,11 @@ const API_BASE = isLocalhostOrRelative ? "/api" : rawApiUrl
 export const API_ORIGIN = API_BASE.startsWith("http") ? API_BASE.replace(/\/api\/?$/, "") : (typeof window !== "undefined" ? window.location.origin : "")
 export const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
+let isRefreshing = false
+let refreshPromise: Promise<string | null> | null = null
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem("access_token")
+  let token = localStorage.getItem("access_token")
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
@@ -33,44 +36,47 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
   let response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
 
-  // Si el refresh falla, recargar la pagina actual en vez de mandar a
-  // /login -- ese es el login general del ERP, distinto al de paginas con
-  // login propio como /supervisor. Un redirect duro sacaba a la supervisora
-  // de su panel a una pantalla que no reconocia, sin ningun aviso, cada vez
-  // que su token expiraba en medio de un sondeo de fondo.
+  // Manejo de expiración de sesión (401)
   if (response.status === 401 && !cleanEndpoint.includes("/auth/")) {
     const refreshToken = localStorage.getItem("refresh_token")
     if (refreshToken) {
-      try {
-        const refreshRes = await fetch(`${API_BASE}/v1/auth/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        })
-        if (refreshRes.ok) {
-          const refreshData = await refreshRes.json()
-          localStorage.setItem("access_token", refreshData.access_token)
-          if (refreshData.refresh_token) localStorage.setItem("refresh_token", refreshData.refresh_token)
-          headers["Authorization"] = `Bearer ${refreshData.access_token}`
-          response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
-        } else {
-          localStorage.removeItem("access_token")
-          localStorage.removeItem("refresh_token")
-          localStorage.removeItem("user_email")
-          if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
-            window.location.reload()
+      if (!isRefreshing) {
+        isRefreshing = true
+        refreshPromise = (async () => {
+          try {
+            const refreshRes = await fetch(`${API_BASE}/v1/auth/refresh`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ refresh_token: refreshToken }),
+            })
+            if (refreshRes.ok) {
+              const refreshData = await refreshRes.json()
+              localStorage.setItem("access_token", refreshData.access_token)
+              if (refreshData.refresh_token) localStorage.setItem("refresh_token", refreshData.refresh_token)
+              return refreshData.access_token as string
+            } else {
+              localStorage.removeItem("access_token")
+              localStorage.removeItem("refresh_token")
+              localStorage.removeItem("user_email")
+              return null
+            }
+          } catch {
+            return null
+          } finally {
+            isRefreshing = false
           }
-        }
-      } catch {
-        // Refresh fallback
+        })()
+      }
+
+      const newToken = await refreshPromise
+      if (newToken) {
+        headers["Authorization"] = `Bearer ${newToken}`
+        response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
       }
     } else {
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")
       localStorage.removeItem("user_email")
-      if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
-        window.location.reload()
-      }
     }
   }
 
