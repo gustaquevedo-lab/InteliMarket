@@ -7,6 +7,7 @@ import {
 } from "lucide-react"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
+import { useScrollToTop } from "../../hooks/useScrollToTop"
 
 interface MarketingComboItem {
   product_id: string
@@ -72,6 +73,7 @@ export default function MarketingPage() {
   const userName = rawName.toLowerCase().includes("admin") || rawName.toLowerCase().includes("casa") ? "Gustavo" : rawName
 
   const [activeTab, setActiveTab] = useState<"ai" | "campaigns" | "segments">("ai")
+  useScrollToTop()
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<MarketingDashboardData | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)

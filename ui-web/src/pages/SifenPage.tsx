@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 import QRCode from "qrcode"
 import { api, type SifenTimbrado, type Sale, type PaymentMethod } from "../api"
+import { useScrollToTop } from "../hooks/useScrollToTop"
 import { useToast } from "../context/ToastContext"
 import { formatPYG } from "../utils/format"
 
@@ -15,6 +16,7 @@ type Tab = "invoices" | "credit_notes" | "cobranzas" | "emit" | "timbrados" | "t
 
 export default function SifenPage() {
   const [tab, setTab] = useState<Tab>("invoices")
+  useScrollToTop()
   const [invoices, setInvoices] = useState<any[]>([])
   const [creditNotes, setCreditNotes] = useState<any[]>([])
   const [pendingSales, setPendingSales] = useState<any[]>([])

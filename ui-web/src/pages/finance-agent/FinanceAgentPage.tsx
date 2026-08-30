@@ -8,6 +8,7 @@ import {
 import { api, type FinanceRecommendation, type FinanceAgentRun } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
+import { useScrollToTop } from "../../hooks/useScrollToTop"
 import { formatPYG, formatDateTime } from "../../utils/format"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
@@ -32,6 +33,7 @@ const TIPO_LABEL: Record<string, string> = {
 
 export default function FinanceAgentPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("ai")
+  useScrollToTop()
   const [loading, setLoading] = useState(true)
   
   // Executive Suite State

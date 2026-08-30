@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
+import { useScrollToTop } from "../../hooks/useScrollToTop"
 
 interface Recommendation {
   id: string
@@ -68,6 +69,7 @@ export default function CommercialAgentPage() {
   const userName = rawName.toLowerCase().includes("admin") || rawName.toLowerCase().includes("casa") ? "Gustavo" : rawName
 
   const [tab, setTab] = useState<"metas" | "chat" | "recommendations">("metas")
+  useScrollToTop()
   const [loading, setLoading] = useState(false)
   const [diagnosing, setDiagnosing] = useState(false)
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
