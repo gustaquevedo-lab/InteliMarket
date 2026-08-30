@@ -263,9 +263,16 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
   }
 
   return (
-    <div className="space-y-6 animate-fade-in-up pb-12">
+    <div className="relative space-y-6 animate-in fade-in duration-300 pb-12">
+      {/* Glassmorphism — Ambient background */}
+      <div className="fixed inset-0 -z-10 pointer-events-none bg-gradient-to-br from-slate-100 via-white to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950" />
+      <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
+        <div className="absolute -top-24 left-1/4 w-[500px] h-[500px] rounded-full bg-violet-400/10 dark:bg-violet-500/15 blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/6 w-[400px] h-[400px] rounded-full bg-indigo-400/8 dark:bg-indigo-500/10 blur-3xl" />
+      </div>
+
       {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 p-6 rounded-3xl border border-slate-800 shadow-xl text-white">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-violet-950/95 backdrop-blur-xl p-6 rounded-3xl border border-white/[0.12] shadow-2xl text-white">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-violet-500 to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20 font-black">
             <Megaphone className="w-7 h-7 stroke-[2.5]" />
@@ -304,7 +311,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
       {/* KPI Ribbon */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Ventas por Campañas IA */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm border-l-4 border-l-violet-500">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-violet-500">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Ventas por Campañas IA</span>
             <TrendingUp className="w-4 h-4 text-violet-500" />
@@ -318,7 +325,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
         </div>
 
         {/* Card 2: Fardos/Cajas para Rebates */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm border-l-4 border-l-emerald-500">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-emerald-500">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Volumen para Rebates</span>
             <Award className="w-4 h-4 text-emerald-500" />
@@ -332,7 +339,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
         </div>
 
         {/* Card 3: Tasa de Conversión */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm border-l-4 border-l-blue-500">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-blue-500">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Tasa de Conversión</span>
             <Zap className="w-4 h-4 text-blue-500" />
@@ -346,7 +353,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
         </div>
 
         {/* Card 4: Clientes Activados */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm border-l-4 border-l-amber-500">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-amber-500">
           <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Clientes Activados</span>
             <Users className="w-4 h-4 text-amber-500" />
@@ -367,7 +374,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             activeTab === "ai"
               ? "bg-violet-600 text-white shadow-md shadow-violet-600/20"
-              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50"
+              : "bg-white/70 dark:bg-slate-900/50 backdrop-blur-sm text-slate-600 dark:text-slate-300 border border-white/50 dark:border-white/[0.08] hover:bg-white/90"
           }`}
         >
           <Bot className="w-4 h-4" />
@@ -378,7 +385,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             activeTab === "campaigns"
               ? "bg-violet-600 text-white shadow-md shadow-violet-600/20"
-              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50"
+              : "bg-white/70 dark:bg-slate-900/50 backdrop-blur-sm text-slate-600 dark:text-slate-300 border border-white/50 dark:border-white/[0.08] hover:bg-white/90"
           }`}
         >
           <Sparkles className="w-4 h-4" />
@@ -389,7 +396,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             activeTab === "segments"
               ? "bg-violet-600 text-white shadow-md shadow-violet-600/20"
-              : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50"
+              : "bg-white/70 dark:bg-slate-900/50 backdrop-blur-sm text-slate-600 dark:text-slate-300 border border-white/50 dark:border-white/[0.08] hover:bg-white/90"
           }`}
         >
           <Users className="w-4 h-4" />
@@ -401,7 +408,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
       {activeTab === "ai" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Chat Container (7 cols) */}
-          <div className="lg:col-span-7 flex flex-col h-[640px] bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div className="lg:col-span-7 flex flex-col h-[640px] bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl border border-white/40 dark:border-white/[0.08] shadow-xl rounded-3xl overflow-hidden">
             {/* Chat Header */}
             <div className="p-4 bg-gradient-to-r from-violet-500/10 via-white to-indigo-500/5 dark:from-gray-800 dark:via-gray-800 dark:to-gray-750 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
               <div className="flex items-center gap-3">

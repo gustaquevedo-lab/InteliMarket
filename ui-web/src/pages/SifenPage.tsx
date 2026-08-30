@@ -222,7 +222,7 @@ export default function SifenPage() {
   }
 
   return (
-    <div className="relative min-h-screen text-slate-900 dark:text-slate-100 p-2 sm:p-4 md:p-6 lg:p-8 space-y-8 max-w-[1750px] mx-auto pb-20 font-sans transition-colors duration-300">
+    <div className="relative space-y-6 animate-in fade-in duration-300 pb-12">
 
       {/* Glassmorphism — Ambient background */}
       <div className="fixed inset-0 -z-10 pointer-events-none bg-gradient-to-br from-slate-100 via-white to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950" />
@@ -232,73 +232,66 @@ export default function SifenPage() {
         <div className="absolute inset-0 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] dark:bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-20 dark:opacity-25" />
       </div>
 
-      <div className="relative z-10 space-y-8">
 
-        {/* ──────────────────────────────────────────────────────────────────────────
-            1. TOP SIFEN MISSION CONTROL HEADER
-        ────────────────────────────────────────────────────────────────────────── */}
-        <div className="p-7 rounded-3xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-2xl border border-slate-200/90 dark:border-indigo-500/30 shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_0_50px_rgba(99,102,241,0.15)] flex flex-col xl:flex-row xl:items-center justify-between gap-6">
-          
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-black bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                <span className="w-2 h-2 rounded-full bg-emerald-500 -ml-4" />
-                SIFEN / e-Kuatia · PRODUCCIÓN ACTIVA
-              </div>
-              <span className="text-slate-300 dark:text-slate-700 font-mono">•</span>
-              <span className="text-xs font-mono font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Server className="w-3.5 h-3.5 text-indigo-500" />
-                MOTOR INTELIFACT LOCAL :3000 (AUTÓNOMO)
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-baseline gap-3">
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-3">
-                Facturación & Ventas <span className="bg-gradient-to-r from-indigo-600 via-indigo-400 to-teal-400 bg-clip-text text-transparent">SIFEN</span>
-              </h1>
-              <span className="text-xs px-3.5 py-1 rounded-xl bg-amber-500/15 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 font-black border border-amber-500/40 flex items-center gap-2 shadow-2xs font-mono">
-                <Building2 className="w-3.5 h-3.5" />
-                RUC: 80005427-0 · CASA GONZALITO S.R.L.
-              </span>
-              <span className="text-xs px-3.5 py-1 rounded-xl bg-indigo-500/15 dark:bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 font-black border border-indigo-500/40 flex items-center gap-1.5 font-mono">
-                Timbrado: 17090459 (Establ. 001 · Exp. 001)
-              </span>
-            </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-emerald-950/95 backdrop-blur-xl p-6 rounded-3xl border border-white/[0.12] shadow-2xl text-white">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/20 font-black">
+            <FileText className="w-7 h-7 stroke-[2.5]" />
           </div>
-
-          {/* Telemetry Stat Cards */}
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="px-5 py-3 rounded-2xl bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl space-y-0.5">
-              <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">Facturas Emitidas</span>
-              <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-mono">298.962+ docs</div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-2xl font-black text-white tracking-tight">Facturación &amp; Ventas SIFEN</h1>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                CASA GONZALITO S.R.L.
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-black bg-white/10 text-white border border-white/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                PRODUCCIÓN ACTIVA
+              </span>
             </div>
-            <div className="px-5 py-3 rounded-2xl bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl space-y-0.5">
-              <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">Notas de Crédito</span>
-              <div className="text-lg font-black text-purple-600 dark:text-purple-400 font-mono">281.977+ NCs</div>
-            </div>
-            <button
-              onClick={() => {
-                if (tab === "invoices") loadInvoices(true)
-                if (tab === "credit_notes") loadCreditNotes(true)
-                if (tab === "cobranzas") loadCobranzas()
-                if (tab === "telemetry") loadTelemetry()
-              }}
-              disabled={loading}
-              className="p-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-all cursor-pointer"
-              title="Recargar datos"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">ACTUALIZAR</span>
-            </button>
+            <p className="text-xs text-slate-300 mt-1">
+              RUC: 80005427-0 · Timbrado: 17090459 · Motor InteliFact Local :3000 (Autónomo)
+            </p>
           </div>
-
         </div>
 
-        {/* ──────────────────────────────────────────────────────────────────────────
-            2. NAVIGATION TABS (UNIFIED SIFEN & COMMERCIAL SUITE)
-        ────────────────────────────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-2">
+        <div className="flex items-center gap-3">
+          {/* Stat chips */}
+          <div className="hidden lg:flex items-center gap-3">
+            <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/15 space-y-0.5 text-center">
+              <div className="text-[10px] font-mono font-bold text-slate-300 uppercase">Facturas</div>
+              <div className="text-sm font-black text-emerald-300 font-mono">298.962+</div>
+            </div>
+            <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/15 space-y-0.5 text-center">
+              <div className="text-[10px] font-mono font-bold text-slate-300 uppercase">Notas de Créd.</div>
+              <div className="text-sm font-black text-violet-300 font-mono">281.977+</div>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              if (tab === "invoices") loadInvoices(true)
+              if (tab === "credit_notes") loadCreditNotes(true)
+              if (tab === "cobranzas") loadCobranzas()
+              if (tab === "telemetry") loadTelemetry()
+            }}
+            disabled={loading}
+            className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs rounded-xl transition flex items-center gap-2 shadow-lg shadow-emerald-500/20 hover:scale-[1.02] cursor-pointer"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <span>Actualizar</span>
+          </button>
+          <button
+            onClick={() => setTab("emit")}
+            className="px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold transition flex items-center gap-2 border border-white/10 text-white cursor-pointer"
+          >
+            <Zap className="w-4 h-4" />
+            <span>Emitir FE</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ─── NAVIGATION TABS ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-2">
           
           <div className="flex flex-wrap items-center gap-2 bg-slate-100 dark:bg-slate-900/80 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800">
             <button
@@ -970,8 +963,6 @@ export default function SifenPage() {
             </div>
           </div>
         )}
-
-      </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
           8. MODAL VISOR KUDE OFICIAL (IDÉNTICO AL PDF LEGAL DE CASA GONZALITO)
