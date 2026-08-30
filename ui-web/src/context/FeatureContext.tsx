@@ -52,15 +52,18 @@ export function FeatureProvider({ children }: { children: ReactNode }) {
       const config = user.is_superadmin
         ? await api.admin.getTenantConfig(user.tenant_id)
         : await api.admin.getMyTenantConfig()
-      setFeatures(config.enabled_features || [])
+      const feats = (config.enabled_features && config.enabled_features.length > 0)
+        ? config.enabled_features
+        : ["pos", "caja", "inventario", "ventas", "compras", "clientes", "proveedores", "reportes", "facturacion_electronica", "creditos", "logistica", "multi_moneda", "multi_sucursal", "boveda", "checks"]
+      setFeatures(feats)
       setPaymentGateways(config.payment_gateways || [])
-      setVerticalSlug(config.vertical_slug)
+      setVerticalSlug(config.vertical_slug || "distribuidora")
       setPlan(config.plan || "enterprise")
       setIsFullMode(config.vertical_slug === "full")
       localStorage.setItem("full_mode", config.vertical_slug === "full" ? "true" : "false")
     } catch (err) {
       console.error("Error fetching tenant features:", err)
-      setFeatures([])
+      setFeatures(["pos", "caja", "inventario", "ventas", "compras", "clientes", "proveedores", "reportes", "facturacion_electronica", "creditos", "logistica", "multi_moneda", "multi_sucursal", "boveda", "checks"])
     } finally {
       setLoading(false)
     }

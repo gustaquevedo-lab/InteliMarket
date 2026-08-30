@@ -4687,7 +4687,7 @@ export default function POSPage() {
                 {isSupervisorUser && <span className="text-[9px] bg-purple-500/20 text-purple-600 font-bold px-1 rounded shrink-0">SUPERVISOR</span>}
               </div>
               <div className={`text-[10px] font-posMono tabular-nums leading-none mt-0.5 ${textMuted}`}>
-                {PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre.split('·')[0] || puntoEmision}
+                {PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre?.split('·')?.[0] || puntoEmision}
               </div>
             </div>
 
@@ -4763,7 +4763,7 @@ export default function POSPage() {
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span className="text-[10px] hidden md:inline">POS {activePosConfig.bancardTerminalId.split('-')[1]}</span>
+            <span className="text-[10px] hidden md:inline">POS {activePosConfig?.bancardTerminalId ? (activePosConfig.bancardTerminalId.split('-')[1] || activePosConfig.bancardTerminalId) : '01'}</span>
           </button>
 
           <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />

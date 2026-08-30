@@ -247,7 +247,7 @@ function AppRoutes() {
         {/* Rutas que Layout.tsx gatea por feature en el menu pero antes no
             estaban protegidas a nivel de URL — cualquiera que adivinara/tipeara
             la ruta entraba igual, sin pasar por FeatureRoute. */}
-        <Route path="pos" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pos"><CajaRapidaPage /></FeatureRoute></Suspense>} />
+        <Route path="pos" element={<Suspense fallback={<PageLoader />}><CajaRapidaPage /></Suspense>} />
         <Route path="self-checkout" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SelfCheckoutPage /></FeatureRoute></Suspense>} />
         <Route path="transferencias" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><TransferenciasPage /></FeatureRoute></Suspense>} />
         <Route path="boveda" element={<Suspense fallback={<PageLoader />}><BovedaPage /></Suspense>} />
