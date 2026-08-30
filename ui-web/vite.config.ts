@@ -61,19 +61,19 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: process.env.VITE_API_PROXY_TARGET || 'http://100.83.91.76:8000',
+        target: process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/uploads': {
-        target: process.env.VITE_API_PROXY_TARGET || 'http://100.83.91.76:8000',
+        target: process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/download': {
-        target: process.env.VITE_API_PROXY_TARGET || 'http://100.83.91.76:8000',
+        target: process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/static': {
-        target: process.env.VITE_API_PROXY_TARGET || 'http://100.83.91.76:8000',
+        target: process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },
