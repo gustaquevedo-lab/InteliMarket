@@ -876,10 +876,31 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             margen_gs = 0.0
             costo_gs = 0.0
 
-        # Volumen PARESA (estimación o real en base a mix de bebidas)
-        paresa_uc = round((curr_total * 0.48) / 29000, 0)
+        # 2. Volumen PARESA y Rebates Reales desde la tabla de proveedores y contratos
+        q_paresa = text(f"""
+            SELECT 
+                COALESCE(SUM(si.total), 0) as paresa_monto_gs,
+                COALESCE(SUM(si.total - si.iva_monto), 0) as paresa_sin_iva,
+                COALESCE(SUM(si.cantidad), 0) as paresa_unidades
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            JOIN products p ON p.id = si.product_id
+            JOIN suppliers sup ON sup.id = p.supplier_id
+            WHERE s.company_id = :cid
+              AND s.fecha >= :s AND s.fecha <= :e
+              AND s.estado <> 'cancelado'
+              AND (sup.razon_social ILIKE '%PARAGUAY REFRESCOS%' OR sup.ruc LIKE '80003444%')
+              {where_branch}
+        """)
+        paresa_row = (await db.execute(q_paresa, curr_params)).mappings().first()
+        paresa_monto = float(paresa_row["paresa_monto_gs"] if paresa_row else 0)
+        paresa_sin_iva = float(paresa_row["paresa_sin_iva"] if paresa_row else 0)
+        paresa_unid = float(paresa_row["paresa_unidades"] if paresa_row else 0)
+        
+        # En gaseosas estándar 1 Caja Unitaria (UC) equivale a ~6 botellas grandes o 24 latas (promedio 6.7 un/caja)
+        paresa_uc = round(paresa_unid / 6.7, 0) if paresa_unid > 0 else 0
+        rebate_gs = round(paresa_sin_iva * 0.035, 0) # 3.5% según contrato oficial PARESA
         ticket = round(curr_total / max(curr_cnt, 1), 0)
-        rebate_gs = round(paresa_uc * 1515.0, 0)
 
         # 2. Mix de Categorías Reales desde la Base de Datos
         q_cats = text(f"""

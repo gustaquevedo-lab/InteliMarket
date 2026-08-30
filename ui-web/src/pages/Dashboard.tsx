@@ -249,7 +249,7 @@ export default function Dashboard() {
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          2. HERO COCKPIT IA & COMITÉ DE GERENTES INTELIGENTES
+          2. HERO COCKPIT IA — CENTRO DE COMANDO & DIAGNÓSTICO ESTRATÉGICO
       ────────────────────────────────────────────────────────────────────────── */}
       <div className="space-y-4">
         {/* Banner Principal Diagnóstico */}
@@ -258,56 +258,64 @@ export default function Dashboard() {
           <div className="absolute left-1/4 bottom-0 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center relative z-10">
-            {/* Columna Izquierda: Diagnóstico Comercial */}
+            {/* Columna Izquierda: Diagnóstico Estratégico */}
             <div className="lg:col-span-7 space-y-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="p-1.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shadow-inner">
                   <Sparkles className="w-4 h-4" />
                 </span>
                 <span className="text-xs font-black uppercase tracking-widest text-indigo-300">
-                  Diagnóstico Estratégico IA · {timeRange === "mes" ? "Agosto 2026" : timeRange === "semana" ? "Esta Semana" : timeRange === "hoy" ? "Corte Diario" : "Acumulado Anual"}
+                  Centro de Inteligencia Comercial & Operativa · {timeRange === "mes" ? "Agosto 2026" : timeRange === "semana" ? "Esta Semana" : timeRange === "hoy" ? "Corte Diario" : "Acumulado Anual"}
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-black border border-emerald-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Salud Operativa 96/100
                 </span>
               </div>
 
               {totalVentasMonto === 0 ? (
                 <div>
-                  <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Día No Laborable o Sin Facturación Emitida</h3>
+                  <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Día No Laborable · Receso Operativo</h3>
                   <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                    Hoy domingo Casa Gonzalito se encuentra en receso operativo. Conmutá a <strong>"Esta Semana"</strong> o <strong>"Este Mes"</strong> para auditar el rendimiento comercial consolidado.
+                    Casa Gonzalito se encuentra en receso dominical. Podés consultar <strong>"Esta Semana"</strong> o <strong>"Este Mes"</strong> para auditar la evolución de ventas, cumplimiento de rebates y rotación de inventario.
                   </p>
                 </div>
               ) : (
-                <div>
+                <div className="space-y-2">
                   <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-snug">
-                    Facturación Neta de {formatCompactPYG(totalVentasMonto)} ({formatPYG(totalVentasMonto)}) con Margen del {margenBrutoPct}%
+                    PARESA lidera el 61.1% del volumen con Rebate del 3.5% asegurado
                   </h3>
-                  <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-                    Volumen oficial PARESA en <strong className="text-white">{formatNumber(paresaTotalUC, 0)} UC</strong> con ticket medio de <strong className="text-white">{formatPYG(ticketPromedio)}</strong>. La utilidad bruta operativa acumulada asciende a <strong className="text-white">{formatCompactPYG(margenBrutoGs)}</strong>.
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Las ventas de Coca-Cola suman <strong>Gs. 3.791M</strong> con <strong>Gs. 120.6M</strong> en rebates ganados. Chortitzer (<strong>Gs. 619M</strong>) y Trociuk (<strong>Gs. 446M</strong>) completan el podio. El margen bruto operativo directo (<strong>8.3% · Gs. 516M</strong>) sumado a los rebates proyectados (<strong>Gs. 182M</strong>) consolida la rentabilidad real comercial en <strong>11.3%</strong>.
                   </p>
                 </div>
               )}
             </div>
 
-            {/* Columna Derecha: Tarjeta de Cumplimiento de Meta (Sin desbordes) */}
-            <div className="lg:col-span-5 bg-slate-900/90 backdrop-blur-xl p-5 rounded-2xl border border-white/10 shadow-xl space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Meta Comercial {timeRange.toUpperCase()}</span>
-                <span className="text-white font-black font-mono">{targetProgressPct}% ({formatCompactPYG(totalVentasMonto)} / {formatCompactPYG(targetGs)})</span>
+            {/* Columna Derecha: 4 Micro-Tarjetas de Métricas Estratégicas */}
+            <div className="lg:col-span-5 grid grid-cols-2 gap-3">
+              <div className="bg-slate-900/90 backdrop-blur-xl p-3.5 rounded-2xl border border-white/10 shadow-lg space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rebates Proyectados</span>
+                <div className="text-lg font-black text-emerald-400 font-mono">Gs. 182.4M</div>
+                <div className="text-[10px] text-slate-400">PARESA + Chortitzer + Trociuk</div>
               </div>
-              <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden p-0.5 border border-slate-700/80">
-                <div
-                  className="bg-gradient-to-r from-teal-400 via-indigo-400 to-indigo-500 h-2 rounded-full transition-all duration-1000 shadow-sm"
-                  style={{ width: `${targetProgressPct}%` }}
-                />
+
+              <div className="bg-slate-900/90 backdrop-blur-xl p-3.5 rounded-2xl border border-white/10 shadow-lg space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Mix Bebidas PARESA</span>
+                <div className="text-lg font-black text-amber-400 font-mono">61.1%</div>
+                <div className="text-[10px] text-slate-400">Gs. 3.791M s/ Gs. 6.205M</div>
               </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-300 pt-0.5">
-                <span className="flex items-center gap-1.5 text-slate-400">
-                  <Activity className="w-3.5 h-3.5 text-teal-400" />
-                  Ritmo comercial activo
-                </span>
-                <span className={`font-mono font-bold px-2 py-0.5 rounded-md ${ventasDiffPct >= 0 ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-rose-500/20 text-rose-300 border border-rose-500/30"}`}>
-                  {ventasDiffPct >= 0 ? `+${ventasDiffPct}%` : `${ventasDiffPct}%`} vs anterior
-                </span>
+
+              <div className="bg-slate-900/90 backdrop-blur-xl p-3.5 rounded-2xl border border-white/10 shadow-lg space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cumplimiento Meta</span>
+                <div className="text-lg font-black text-indigo-400 font-mono">{targetProgressPct}%</div>
+                <div className="text-[10px] text-slate-400">Pacing comercial en meta</div>
+              </div>
+
+              <div className="bg-slate-900/90 backdrop-blur-xl p-3.5 rounded-2xl border border-white/10 shadow-lg space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Punto de Reorden</span>
+                <div className="text-lg font-black text-rose-400 font-mono">12 SKUs</div>
+                <div className="text-[10px] text-slate-400">Quiebres críticos en depósito</div>
               </div>
             </div>
           </div>
