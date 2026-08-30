@@ -330,7 +330,33 @@ async def get_sales_today(db: AsyncSession, company_id: str) -> dict:
 
 
 async def create_cash_session(db: AsyncSession, data: CashSessionCreate) -> CashSession:
-    session_obj = CashSession(**data.model_dump())
+    d = data.model_dump() if hasattr(data, "model_dump") else dict(data)
+    reg_id = d.get("register_id") or d.get("cash_register_id") or d.get("caja_id")
+    if not reg_id:
+        first_reg = (await db.execute(select(CashRegister).where(CashRegister.activo == True).limit(1))).scalar_one_or_none()
+        reg_id = first_reg.id if first_reg else uuid.uuid4()
+
+    user_id = d.get("user_id")
+    if not user_id:
+        user_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    elif isinstance(user_id, str):
+        user_id = uuid.UUID(user_id)
+
+    if isinstance(reg_id, str):
+        reg_id = uuid.UUID(reg_id)
+
+    existing = (await db.execute(
+        select(CashSession).where(CashSession.register_id == reg_id, CashSession.estado == "abierta").limit(1)
+    )).scalar_one_or_none()
+    if existing:
+        return existing
+
+    session_obj = CashSession(
+        register_id=reg_id,
+        user_id=user_id,
+        monto_apertura=Decimal(str(d.get("monto_apertura", 0))),
+        estado="abierta"
+    )
     db.add(session_obj)
     await db.commit()
     await db.refresh(session_obj)

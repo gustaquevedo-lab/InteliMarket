@@ -32,8 +32,10 @@ class CashRegisterResponse(BaseModel):
 
 
 class CashSessionCreate(BaseModel):
-    cash_register_id: UUID
-    user_id: UUID
+    cash_register_id: Optional[UUID] = None
+    register_id: Optional[UUID] = None
+    user_id: Optional[UUID] = None
+    cajero_nombre: Optional[str] = None
     monto_apertura: Decimal = Decimal("0")
 
 

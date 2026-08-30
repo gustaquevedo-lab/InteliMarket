@@ -19,11 +19,14 @@ class CashRegister(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+from sqlalchemy.orm import synonym
+
 class CashSession(Base):
     __tablename__ = "cash_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     register_id = Column(UUID(as_uuid=True), ForeignKey("cash_registers.id"), nullable=False)
+    cash_register_id = synonym("register_id")
     user_id = Column(UUID(as_uuid=True), nullable=False)
     monto_apertura = Column(Numeric(15, 0), nullable=False)
     fecha_apertura = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
