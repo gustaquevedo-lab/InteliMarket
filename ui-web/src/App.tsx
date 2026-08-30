@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react"
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
+import { lazy, Suspense, useEffect } from "react"
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import { ThemeProvider } from "./context/ThemeContext"
 import { AuthProvider, useAuth } from "./context/AuthContext"
 import { FeatureProvider, useFeatures } from "./context/FeatureContext"
@@ -130,6 +130,17 @@ const LoyaltyPage = lazy(() => import("./pages/loyalty/LoyaltyPage"))
 const PortalPage = lazy(() => import("./pages/portal/PortalPage"))
 const ClientAppPage = lazy(() => import("./pages/client-app/ClientAppPage"))
 const SifenAvanzadoPage = lazy(() => import("./pages/sifen-avanzado/SifenAvanzadoPage"))
+
+/** Resetea el scroll del contenedor principal (<main>) en cada navegación */
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    // El Layout usa <main class="flex-1 overflow-y-auto"> como scroll host
+    const main = document.querySelector('main') as HTMLElement | null
+    if (main) main.scrollTop = 0
+  }, [pathname])
+  return null
+}
 
 function PageLoader() {
   return (
@@ -333,6 +344,7 @@ export default function App() {
           <BranchProvider>
             <OfflineProvider>
               <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                <ScrollToTop />
                 <PWAUpdatePrompt />
                 <ErrorBoundary>
                   <AppRoutes />
