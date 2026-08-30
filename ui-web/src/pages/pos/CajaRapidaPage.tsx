@@ -482,7 +482,8 @@ export default function POSPage() {
   // balanza real.
   const PESO_TOLERANCIA_KG = 0.020
   const [weightMismatch, setWeightMismatch] = useState<{ product: Product; etiquetaKg: number; balanzaKg: number } | null>(null)
-  const [scaleUsbConnected, setScaleUsbConnected] = useState<boolean>(false)
+    const [scaleUsbConnected, setScaleUsbConnected] = useState<boolean>(false)
+  const [isScaleEnabled, setIsScaleEnabled] = useState<boolean>(() => localStorage.getItem("pos_scale_enabled") === "true")
   const [scalePortName, setScalePortName] = useState<string>("COM3")
   const [scaleBaudRate, setScaleBaudRate] = useState<number>(9600)
   const [scaleRawLog, setScaleRawLog] = useState<string>("Balanza lista. Presione Probar Lectura.")
@@ -4598,7 +4599,7 @@ export default function POSPage() {
   const borderTone = dark ? "border-slate-800" : "border-slate-300"
 
   return (
-    <div className={`w-full min-h-[calc(100vh-6rem)] flex flex-col select-none overflow-hidden font-sans rounded-2xl ${bgMain}`}>
+    <div className={`w-full h-[calc(100vh-5.5rem)] flex flex-col select-none overflow-hidden font-sans rounded-2xl border ${bgMain}`}>
       
       {/* ── 1. HEADER EN DOS FILAS -- antes todo (identidad, balanza,
           cotizaciones, 10 botones de accion) se apretaba en una sola fila
@@ -4649,23 +4650,25 @@ export default function POSPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Widget Balanza USB Balmak BCK30 */}
-            <div
-              onClick={() => setShowScaleModal(true)}
-              title="Balanza Checkout Balmak BCK30. Haga clic para configurar o presione F3."
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer transition-all ${
-                scaleUsbConnected
-                  ? isScaleStable
-                    ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/40"
-                    : "bg-amber-500/15 text-amber-600 border-amber-500/50 animate-pulse"
-                  : "bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20"
-              }`}
-            >
-              <Scale className={`w-3.5 h-3.5 ${scaleUsbConnected ? (isScaleStable ? "text-emerald-500" : "text-amber-500") : "text-amber-500"}`} />
-              <span className="text-xs font-posMono tabular-nums font-black">
-                {scaleUsbConnected ? `${currentScaleWeight.toFixed(3)} KG` : "F3"}
-              </span>
-            </div>
+            {/* Widget Balanza USB (Opcional) */}
+            {isScaleEnabled && (
+              <div
+                onClick={() => setShowScaleModal(true)}
+                title="Balanza Checkout. Haga clic para configurar o presione F3."
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer transition-all ${
+                  scaleUsbConnected
+                    ? isScaleStable
+                      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/40"
+                      : "bg-amber-500/15 text-amber-600 border-amber-500/50 animate-pulse"
+                    : "bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20"
+                }`}
+              >
+                <Scale className={`w-3.5 h-3.5 ${scaleUsbConnected ? (isScaleStable ? "text-emerald-500" : "text-amber-500") : "text-amber-500"}`} />
+                <span className="text-xs font-posMono tabular-nums font-black">
+                  {scaleUsbConnected ? `${currentScaleWeight.toFixed(3)} KG` : "F3"}
+                </span>
+              </div>
+            )}
 
             {/* Cotizaciones -- sin candado: el titulo ya explica si es
                 editable o solo lectura, el icono no sumaba nada. */}
@@ -4743,13 +4746,7 @@ export default function POSPage() {
             <span className="text-[11px] hidden sm:inline">Productos</span>
           </button>
 
-          <button
-            onClick={() => setShowLostDemandModal(true)}
-            title="Registrar Producto que el Cliente No Encontró (F4)"
-            className="p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20 shrink-0"
-          >
-            <Package className="w-4 h-4" />
-          </button>
+
 
           <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
 
@@ -4789,14 +4786,7 @@ export default function POSPage() {
             )}
           </button>
 
-          <button
-            onClick={() => { setShowExtraClubBalanceModal(true); setBalanceModalQuery(""); setBalanceModalResults([]); setBalanceModalSelected(null) }}
-            title="Consultar saldo de línea de crédito Extra Club"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-600/10 text-purple-600 border border-purple-500/30 hover:bg-purple-600/20 cursor-pointer shrink-0"
-          >
-            <Star className="w-3.5 h-3.5" />
-            <span className="text-[11px] hidden sm:inline">Extra Club</span>
-          </button>
+
 
           <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
 
@@ -4827,11 +4817,7 @@ export default function POSPage() {
                   <div className={`font-bold text-xs truncate ${textHeading}`}>
                     {customer.nombre}
                   </div>
-                  {((customer as any).extra_club_numero || (customer as any).extra_club_activo) && (
-                    <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-600 dark:text-purple-300 text-[9px] font-black uppercase tracking-wider shrink-0 border border-purple-500/30 flex items-center gap-0.5">
-                      <Star className="w-2.5 h-2.5 fill-purple-500" /> Extra Club
-                    </span>
-                  )}
+
                 </div>
                 <div className={`text-[10px] font-posMono tabular-nums ${textMuted}`}>
                   {customer.ruc || customer.ci || "Sin RUC"} · {customer.razon_social || "Consumidor Final"}
