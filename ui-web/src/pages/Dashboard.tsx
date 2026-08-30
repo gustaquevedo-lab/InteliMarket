@@ -249,61 +249,151 @@ export default function Dashboard() {
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          2. HERO COCKPIT IA — DIAGNÓSTICO ESTRATÉGICO DISTRIBUIDORA
+          2. HERO COCKPIT IA & COMITÉ DE GERENTES INTELIGENTES
       ────────────────────────────────────────────────────────────────────────── */}
-      <div className="p-7 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white border border-indigo-500/30 shadow-2xl relative overflow-hidden">
-        <div className="absolute right-0 top-0 translate-x-12 -translate-y-8 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute left-1/3 bottom-0 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="space-y-4">
+        {/* Banner Principal Diagnóstico */}
+        <div className="p-6 sm:p-7 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white border border-indigo-500/30 shadow-2xl relative overflow-hidden">
+          <div className="absolute right-0 top-0 translate-x-12 -translate-y-8 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute left-1/4 bottom-0 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
-          <div className="space-y-2.5 max-w-2xl">
-            <div className="flex items-center gap-2">
-              <span className="p-1.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shadow-inner">
-                <Sparkles className="w-4 h-4" />
-              </span>
-              <span className="text-xs font-black uppercase tracking-widest text-indigo-300">
-                Diagnóstico Comercial IA ({timeRange === "mes" ? "Agosto 2026" : timeRange === "semana" ? "Esta Semana" : timeRange === "hoy" ? "Corte Diario" : "Acumulado Anual"})
-              </span>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center relative z-10">
+            {/* Columna Izquierda: Diagnóstico Comercial */}
+            <div className="lg:col-span-7 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shadow-inner">
+                  <Sparkles className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-black uppercase tracking-widest text-indigo-300">
+                  Diagnóstico Estratégico IA · {timeRange === "mes" ? "Agosto 2026" : timeRange === "semana" ? "Esta Semana" : timeRange === "hoy" ? "Corte Diario" : "Acumulado Anual"}
+                </span>
+              </div>
+
+              {totalVentasMonto === 0 ? (
+                <div>
+                  <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">Día No Laborable o Sin Facturación Emitida</h3>
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    Hoy domingo Casa Gonzalito se encuentra en receso operativo. Conmutá a <strong>"Esta Semana"</strong> o <strong>"Este Mes"</strong> para auditar el rendimiento comercial consolidado.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-snug">
+                    Facturación Neta de {formatCompactPYG(totalVentasMonto)} ({formatPYG(totalVentasMonto)}) con Margen del {margenBrutoPct}%
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                    Volumen oficial PARESA en <strong className="text-white">{formatNumber(paresaTotalUC, 0)} UC</strong> con ticket medio de <strong className="text-white">{formatPYG(ticketPromedio)}</strong>. La utilidad bruta operativa acumulada asciende a <strong className="text-white">{formatCompactPYG(margenBrutoGs)}</strong>.
+                  </p>
+                </div>
+              )}
             </div>
 
-            {totalVentasMonto === 0 ? (
-              <div>
-                <h3 className="text-lg sm:text-xl font-black text-white">Día No Laborable o Sin Facturación Emitida</h3>
-                <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                  Hoy domingo Casa Gonzalito se encuentra en receso operativo. Podés conmutar a <strong>"Esta Semana"</strong> o <strong>"Este Mes"</strong> para auditar el rendimiento consolidado del período.
-                </p>
+            {/* Columna Derecha: Tarjeta de Cumplimiento de Meta (Sin desbordes) */}
+            <div className="lg:col-span-5 bg-slate-900/90 backdrop-blur-xl p-5 rounded-2xl border border-white/10 shadow-xl space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Meta Comercial {timeRange.toUpperCase()}</span>
+                <span className="text-white font-black font-mono">{targetProgressPct}% ({formatCompactPYG(totalVentasMonto)} / {formatCompactPYG(targetGs)})</span>
               </div>
-            ) : (
-              <div>
-                <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                  Facturación en {formatPYG(totalVentasMonto)} con Margen Real del {margenBrutoPct}%
-                </h3>
-                <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                  Volumen PARESA en <strong>{formatNumber(paresaTotalUC, 0)} Cajas Unitarias</strong> con ticket medio de <strong>{formatPYG(ticketPromedio)}</strong>. La utilidad bruta operativa acumulada asciende a <strong>{formatPYG(margenBrutoGs)}</strong>.
-                </p>
+              <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden p-0.5 border border-slate-700/80">
+                <div
+                  className="bg-gradient-to-r from-teal-400 via-indigo-400 to-indigo-500 h-2 rounded-full transition-all duration-1000 shadow-sm"
+                  style={{ width: `${targetProgressPct}%` }}
+                />
               </div>
-            )}
+              <div className="flex items-center justify-between text-[11px] text-slate-300 pt-0.5">
+                <span className="flex items-center gap-1.5 text-slate-400">
+                  <Activity className="w-3.5 h-3.5 text-teal-400" />
+                  Ritmo comercial activo
+                </span>
+                <span className={`font-mono font-bold px-2 py-0.5 rounded-md ${ventasDiffPct >= 0 ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-rose-500/20 text-rose-300 border border-rose-500/30"}`}>
+                  {ventasDiffPct >= 0 ? `+${ventasDiffPct}%` : `${ventasDiffPct}%`} vs anterior
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 3 Tarjetas de Inteligencia Ejecutiva (Comercial, Financiero, Marketing) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          
+          {/* Gerente Comercial IA */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-indigo-500/30 transition-all flex flex-col justify-between group">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                    <TrendingUp className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-gray-900 dark:text-white">Gerente Comercial IA</h4>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">Pacing en Meta (+3.8%)</span>
+                  </div>
+                </div>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                La rotación de líneas CORE (Coca-Cola) lidera la facturación. Se recomienda impulsar <strong>Nuevas Bebidas</strong> para maximizar la escala de Rebate PARESA del trimestre.
+              </p>
+            </div>
+            <div className="pt-3 mt-2 border-t border-gray-100 dark:border-slate-800">
+              <button onClick={() => navigate("/commercial-agent")} className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1">
+                Consultar Estrategia Comercial <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
           </div>
 
-          {/* Medidor de Meta del Período */}
-          <div className="bg-slate-900/80 backdrop-blur-xl p-5 rounded-2xl border border-white/10 shrink-0 w-full lg:w-84 space-y-3 shadow-xl">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Meta {timeRange.toUpperCase()}</span>
-              <span className="text-white font-black font-mono">{targetProgressPct}% ({formatCompactPYG(totalVentasMonto)} / {formatCompactPYG(targetGs)})</span>
+          {/* Gerente Financiero IA */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-teal-100 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-teal-500/30 transition-all flex flex-col justify-between group">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold">
+                    <Wallet className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-gray-900 dark:text-white">Gerente Financiero IA</h4>
+                    <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold">Calce Operativo Óptimo</span>
+                  </div>
+                </div>
+                <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
+              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                Cuentas corrientes en plazo promedio de 18 días. Se proyecta un flujo positivo de caja y cobranzas de <strong>Gs. 410M</strong> para la próxima semana.
+              </p>
             </div>
-            <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden p-0.5 border border-slate-700">
-              <div
-                className="bg-gradient-to-r from-teal-400 via-indigo-400 to-indigo-500 h-2 rounded-full transition-all duration-1000 shadow-sm"
-                style={{ width: `${targetProgressPct}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
-              <span>Pacing comercial activo</span>
-              <span className={`font-mono font-bold px-2 py-0.5 rounded-md ${ventasDiffPct >= 0 ? "bg-emerald-500/20 text-emerald-300" : "bg-rose-500/20 text-rose-300"}`}>
-                {ventasDiffPct >= 0 ? `+${ventasDiffPct}%` : `${ventasDiffPct}%`} vs anterior
-              </span>
+            <div className="pt-3 mt-2 border-t border-gray-100 dark:border-slate-800">
+              <button onClick={() => navigate("/finance-agent")} className="text-xs font-bold text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1">
+                Auditar Tesorería & Calce <ArrowRight className="w-3 h-3" />
+              </button>
             </div>
           </div>
+
+          {/* Gerente de Marketing & Clientes IA */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-purple-500/30 transition-all flex flex-col justify-between group">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-gray-900 dark:text-white">Gerente de Marketing IA</h4>
+                    <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold">14 Cuentas Top en Crecimiento</span>
+                  </div>
+                </div>
+                <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                La cartera mayorista en Pedro Juan Caballero incrementó ticket en +12%. Se detectaron 6 clientes inactivos listos para campaña preventiva de WhatsApp.
+              </p>
+            </div>
+            <div className="pt-3 mt-2 border-t border-gray-100 dark:border-slate-800">
+              <button onClick={() => navigate("/marketing")} className="text-xs font-bold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1">
+                Lanzar Campaña Reactivación <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -325,7 +415,7 @@ export default function Dashboard() {
               <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
                 {totalVentasMonto > 0 ? formatCompactPYG(totalVentasMonto) : "Gs. 0"}
               </div>
-              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium">
+              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium truncate max-w-[200px]" title={formatPYG(totalVentasMonto)}>
                 {formatPYG(totalVentasMonto)}
               </div>
             </div>
@@ -362,7 +452,7 @@ export default function Dashboard() {
               <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
                 {margenBrutoGs > 0 ? formatCompactPYG(margenBrutoGs) : "Gs. 0"}
               </div>
-              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium">
+              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium truncate max-w-[200px]" title={formatPYG(costoTotalGs)}>
                 Costo: {formatCompactPYG(costoTotalGs)}
               </div>
             </div>
