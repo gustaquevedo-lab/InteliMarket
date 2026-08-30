@@ -46,8 +46,12 @@ export default function Dashboard() {
   const [timeRange, setTimeRange] = useState<TimeRange>("mes")
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  // Toggles de Magnitudes del Gráfico
   const [pacingMode, setPacingMode] = useState<"diario" | "acumulado">("diario")
-  const [mixViewMode, setMixViewMode] = useState<"venta" | "margen">("venta")
+  const [showActual, setShowActual] = useState(true)
+  const [showMeta, setShowMeta] = useState(true)
+  const [showPrevMonth, setShowPrevMonth] = useState(true)
+  const [showPrevYear, setShowPrevYear] = useState(true)
 
   // Master Dashboard Data retornado por el motor del backend
   const [allKpisData, setAllKpisData] = useState<any>(null)
@@ -424,10 +428,11 @@ export default function Dashboard() {
                 Curva de Pacing Comercial ({pacingMode === "acumulado" ? "Acumulado del Período" : "Ventas Diarias"})
               </h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Comparativa de facturación real contra meta proyectada y mes anterior.
+                Comparativa diaria/acumulada vs Meta (+5%), Mes Anterior y Año Anterior.
               </p>
             </div>
 
+            {/* Selector de Modo Diario / Acumulado */}
             <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-1 rounded-xl border border-gray-200 dark:border-slate-700">
               <button
                 onClick={() => setPacingMode("diario")}
@@ -452,8 +457,65 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Gráfico Recharts de Pacing */}
-          <div className="h-72 w-full">
+          {/* Selector Interactivo de Magnitudes (Toggles de Series) */}
+          <div className="flex flex-wrap items-center gap-2 mb-4 p-2 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200/60 dark:border-slate-700/60">
+            <span className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase px-1">Magnitudes:</span>
+            
+            {/* Toggle Venta Actual */}
+            <button
+              onClick={() => setShowActual(!showActual)}
+              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                showActual
+                  ? "bg-indigo-500/15 border-indigo-500/40 text-indigo-700 dark:text-indigo-300 shadow-2xs"
+                  : "bg-transparent border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              }`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-full ${showActual ? "bg-indigo-600" : "bg-gray-300"}`} />
+              Venta Actual
+            </button>
+
+            {/* Toggle Meta (+5% s/ anterior) */}
+            <button
+              onClick={() => setShowMeta(!showMeta)}
+              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                showMeta
+                  ? "bg-slate-500/15 border-slate-400/40 text-slate-700 dark:text-slate-300 shadow-2xs"
+                  : "bg-transparent border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              }`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-sm ${showMeta ? "bg-slate-400" : "bg-gray-300"}`} />
+              Meta Barras (+5% s/ anterior)
+            </button>
+
+            {/* Toggle Mes Pasado */}
+            <button
+              onClick={() => setShowPrevMonth(!showPrevMonth)}
+              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                showPrevMonth
+                  ? "bg-sky-500/15 border-sky-500/40 text-sky-700 dark:text-sky-300 shadow-2xs"
+                  : "bg-transparent border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              }`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-full ${showPrevMonth ? "bg-sky-500" : "bg-gray-300"}`} />
+              Mismo Período Mes Anterior
+            </button>
+
+            {/* Toggle Año Pasado */}
+            <button
+              onClick={() => setShowPrevYear(!showPrevYear)}
+              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                showPrevYear
+                  ? "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300 shadow-2xs"
+                  : "bg-transparent border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              }`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-full border border-dashed border-amber-600 ${showPrevYear ? "bg-amber-500" : "bg-gray-300"}`} />
+              Mismo Período Año Pasado
+            </button>
+          </div>
+
+          {/* Gráfico Recharts de Pacing ComposedChart */}
+          <div className="h-80 w-full">
             {salesTrendData.length === 0 ? (
               <div className="h-full flex items-center justify-center text-xs text-gray-400">
                 Sin datos de evolución para el rango seleccionado
@@ -463,7 +525,7 @@ export default function Dashboard() {
                 <ComposedChart data={salesTrendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="pacingGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4}/>
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.45}/>
                       <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0}/>
                     </linearGradient>
                   </defs>
@@ -480,25 +542,61 @@ export default function Dashboard() {
                     content={({ active, payload, label }) => {
                       if (active && payload && payload.length) {
                         const data = payload[0].payload
+                        const diffVsMesAnt = data.mes_anterior > 0 ? (((data.actual - data.mes_anterior) / data.mes_anterior) * 100).toFixed(1) : null
+                        const diffVsMeta = data.meta > 0 ? (((data.actual - data.meta) / data.meta) * 100).toFixed(1) : null
                         return (
-                          <div className="p-3 bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl text-white text-xs space-y-1.5 min-w-[200px]">
-                            <div className="font-bold text-slate-300 border-b border-slate-800 pb-1 flex justify-between">
-                              <span>{label} ({data.fecha})</span>
+                          <div className="p-3.5 bg-slate-950/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl shadow-2xl text-white text-xs space-y-2 min-w-[240px]">
+                            <div className="font-bold text-slate-200 border-b border-slate-800 pb-1.5 flex justify-between items-center">
+                              <span>{label}</span>
+                              <span className="font-mono text-[11px] text-slate-400">{data.fecha}</span>
                             </div>
-                            <div className="flex justify-between items-center text-indigo-300">
-                              <span>Actual:</span>
-                              <span className="font-mono font-black">{formatPYG(data.actual)}</span>
-                            </div>
-                            {data.meta > 0 && (
-                              <div className="flex justify-between items-center text-amber-300">
-                                <span>Meta:</span>
+
+                            {showActual && (
+                              <div className="flex justify-between items-center text-indigo-300 font-medium">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                                  Venta Actual:
+                                </span>
+                                <span className="font-mono font-black text-white">{formatPYG(data.actual)}</span>
+                              </div>
+                            )}
+
+                            {showMeta && data.meta > 0 && (
+                              <div className="flex justify-between items-center text-slate-300 font-medium">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-sm bg-slate-400" />
+                                  Meta (+5%):
+                                </span>
                                 <span className="font-mono">{formatPYG(data.meta)}</span>
                               </div>
                             )}
-                            {data.mes_anterior > 0 && (
-                              <div className="flex justify-between items-center text-slate-400">
-                                <span>Mes Ant.:</span>
+
+                            {showPrevMonth && data.mes_anterior > 0 && (
+                              <div className="flex justify-between items-center text-sky-300 font-medium">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-sky-400" />
+                                  Mes Anterior:
+                                </span>
                                 <span className="font-mono">{formatPYG(data.mes_anterior)}</span>
+                              </div>
+                            )}
+
+                            {showPrevYear && data.ano_anterior > 0 && (
+                              <div className="flex justify-between items-center text-amber-300 font-medium">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-amber-400" />
+                                  Año Anterior:
+                                </span>
+                                <span className="font-mono">{formatPYG(data.ano_anterior)}</span>
+                              </div>
+                            )}
+
+                            {diffVsMesAnt !== null && (
+                              <div className="pt-1.5 border-t border-slate-800 flex justify-between text-[11px]">
+                                <span className="text-slate-400">vs Mes Anterior:</span>
+                                <span className={`font-bold ${Number(diffVsMesAnt) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                  {Number(diffVsMesAnt) >= 0 ? `+${diffVsMesAnt}%` : `${diffVsMesAnt}%`}
+                                </span>
                               </div>
                             )}
                           </div>
@@ -507,30 +605,82 @@ export default function Dashboard() {
                       return null
                     }}
                   />
-                  <Area type="monotone" dataKey="actual" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#pacingGradient)" name="Venta Actual" />
-                  <Line type="monotone" dataKey="meta" stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 4" dot={false} name="Meta" />
-                  <Line type="monotone" dataKey="mes_anterior" stroke="#94a3b8" strokeWidth={1.5} dot={false} name="Mes Anterior" />
+                  
+                  {/* Capa de Fondo: Barras de Meta (+5% sobre el mes anterior) */}
+                  {showMeta && (
+                    <Bar
+                      dataKey="meta"
+                      name="Meta (+5%)"
+                      fill="rgba(148, 163, 184, 0.2)"
+                      stroke="#94a3b8"
+                      strokeWidth={1}
+                      radius={[4, 4, 0, 0]}
+                    />
+                  )}
+
+                  {/* Capa de Primer Plano: Venta Actual */}
+                  {showActual && (
+                    <Area
+                      type="monotone"
+                      dataKey="actual"
+                      stroke="#6366f1"
+                      strokeWidth={3}
+                      fillOpacity={1}
+                      fill="url(#pacingGradient)"
+                      dot={{ r: 3, fill: "#6366f1" }}
+                      name="Venta Actual"
+                    />
+                  )}
+
+                  {/* Capa de Comparativa: Mes Anterior */}
+                  {showPrevMonth && (
+                    <Line
+                      type="monotone"
+                      dataKey="mes_anterior"
+                      stroke="#0284c7"
+                      strokeWidth={2}
+                      dot={{ r: 2.5, fill: "#0284c7" }}
+                      name="Mes Anterior"
+                    />
+                  )}
+
+                  {/* Capa de Comparativa: Año Anterior */}
+                  {showPrevYear && (
+                    <Line
+                      type="monotone"
+                      dataKey="ano_anterior"
+                      stroke="#f59e0b"
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                      dot={{ r: 2.5, fill: "#f59e0b" }}
+                      name="Año Anterior"
+                    />
+                  )}
                 </ComposedChart>
               </ResponsiveContainer>
             )}
           </div>
 
           <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
                 <span className="w-3 h-3 rounded-full bg-indigo-600 inline-block" />
-                <span>Facturación Real</span>
+                <span>Venta Actual</span>
               </div>
               <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                <span className="w-3 h-0.5 bg-amber-500 inline-block" />
-                <span>Meta Proyectada</span>
+                <span className="w-3 h-3 rounded-sm bg-slate-300 dark:bg-slate-700 border border-slate-400 inline-block" />
+                <span>Meta Barras (+5% s/ anterior)</span>
               </div>
               <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                <span className="w-3 h-0.5 bg-gray-400 inline-block" />
+                <span className="w-3 h-0.5 bg-sky-500 inline-block" />
                 <span>Mes Anterior</span>
               </div>
+              <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+                <span className="w-3 h-0.5 bg-amber-500 inline-block border-b border-dashed border-amber-600" />
+                <span>Año Anterior</span>
+              </div>
             </div>
-            <span className="text-[11px] text-gray-400 font-mono">Actualizado con Postgres en Vivo</span>
+            <span className="text-[11px] text-gray-400 font-mono">Pacing Comercial Postgres en Vivo</span>
           </div>
         </div>
 

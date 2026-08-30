@@ -986,21 +986,22 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             LIMIT 8
         """)
         exp_rows = (await db.execute(q_exp, {"cid": cid})).mappings().all()
-        expiry_alerts = [
-            {
+        expiry_alerts = []
+        for r in exp_rows:
+            d_val = r["dias_restantes"]
+            dias_num = d_val.days if hasattr(d_val, "days") else int(d_val or 0)
+            expiry_alerts.append({
                 "id": str(r["id"]),
                 "nombre": r["nombre"],
                 "sku": r["sku"],
                 "lote": r["lote"],
                 "fecha_vencimiento": str(r["fecha_vencimiento"]),
                 "cantidad": float(r["cantidad"]),
-                "dias_restantes": int(r["dias_restantes"]),
-                "nivel": "critico" if r["dias_restantes"] <= 7 else "alerta" if r["dias_restantes"] <= 15 else "proximo",
-            }
-            for r in exp_rows
-        ]
+                "dias_restantes": dias_num,
+                "nivel": "critico" if dias_num <= 7 else "alerta" if dias_num <= 15 else "proximo",
+            })
 
-        # 6. Pacing Diario / Puntos de Evolución
+        # 6. Pacing Diario / Puntos de Evolución con comparativas reales
         daily_q = text(f"""
             SELECT date_trunc('day', s.fecha) as d, COALESCE(SUM(s.total), 0) as day_total
             FROM sales s
@@ -1014,35 +1015,100 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
         day_rows = (await db.execute(daily_q, curr_params)).mappings().all()
         day_map = {r["d"].strftime("%Y-%m-%d"): float(r["day_total"]) for r in day_rows if r["d"]}
 
+        # Mismo período mes/semana anterior
+        prev_daily_q = text(f"""
+            SELECT date_trunc('day', s.fecha) as d, COALESCE(SUM(s.total), 0) as day_total
+            FROM sales s
+            WHERE s.company_id = :cid
+              AND s.fecha >= :ps AND s.fecha <= :pe
+              AND s.estado <> 'cancelado'
+              {where_branch}
+            GROUP BY date_trunc('day', s.fecha)
+            ORDER BY d
+        """)
+        prev_day_rows = (await db.execute(prev_daily_q, {"cid": cid, "ps": prev_start_dt, "pe": prev_end_dt, "bid": branch_id})).mappings().all()
+        prev_day_list = [float(r["day_total"]) for r in prev_day_rows]
+        prev_day_map = {r["d"].strftime("%Y-%m-%d"): float(r["day_total"]) for r in prev_day_rows if r["d"]}
+
+        # Mismo período año pasado
+        py_s_calc = start_dt.replace(year=start_dt.year - 1)
+        py_e_calc = end_dt.replace(year=end_dt.year - 1)
+        py_daily_q = text(f"""
+            SELECT date_trunc('day', s.fecha) as d, COALESCE(SUM(s.total), 0) as day_total
+            FROM sales s
+            WHERE s.company_id = :cid
+              AND s.fecha >= :pys AND s.fecha <= :pye
+              AND s.estado <> 'cancelado'
+              {where_branch}
+            GROUP BY date_trunc('day', s.fecha)
+            ORDER BY d
+        """)
+        py_day_rows = (await db.execute(py_daily_q, {"cid": cid, "pys": py_s_calc, "pye": py_e_calc, "bid": branch_id})).mappings().all()
+        py_day_list = [float(r["day_total"]) for r in py_day_rows]
+        py_day_map = {r["d"].strftime("%Y-%m-%d"): float(r["day_total"]) for r in py_day_rows if r["d"]}
+
         pacing_points = []
         acum_actual = 0.0
         acum_mes_ant = 0.0
+        acum_anio_ant = 0.0
         acum_meta = 0.0
-        daily_target = meta_gs / max(days_count, 1)
 
         cur_d = start_dt.date()
         end_d = end_dt.date()
+        day_idx = 0
         while cur_d <= end_d:
             k = cur_d.strftime("%Y-%m-%d")
             d_val = day_map.get(k, 0.0)
-            d_prev = round(prev_total / max(days_count, 1), 0) if prev_total > 0 else 0.0
+            
+            # Valor día comparativo mes anterior
+            try:
+                if cur_d.month == 1:
+                    prev_d_key = cur_d.replace(year=cur_d.year - 1, month=12).strftime("%Y-%m-%d")
+                else:
+                    prev_d_key = cur_d.replace(month=cur_d.month - 1).strftime("%Y-%m-%d")
+                d_prev = prev_day_map.get(prev_d_key, 0.0)
+            except Exception:
+                d_prev = prev_day_list[day_idx] if day_idx < len(prev_day_list) else 0.0
+
+            if d_prev == 0.0 and day_idx < len(prev_day_list):
+                d_prev = prev_day_list[day_idx]
+
+            # Valor día comparativo año anterior
+            try:
+                py_d_key = cur_d.replace(year=cur_d.year - 1).strftime("%Y-%m-%d")
+                d_py = py_day_map.get(py_d_key, 0.0)
+            except Exception:
+                d_py = py_day_list[day_idx] if day_idx < len(py_day_list) else 0.0
+
+            if d_py == 0.0 and day_idx < len(py_day_list):
+                d_py = py_day_list[day_idx]
+
+            # Meta comercial: 5% arriba del monto del período anterior
+            if d_prev > 0:
+                d_meta = round(d_prev * 1.05, 0)
+            else:
+                d_meta = round(meta_gs / max(days_count, 1), 0)
+
             acum_actual += d_val
             acum_mes_ant += d_prev
-            acum_meta += daily_target
+            acum_anio_ant += d_py
+            acum_meta += d_meta
 
             pacing_points.append({
                 "label": f"Día {cur_d.day}",
+                "dia_numero": cur_d.day,
                 "fecha": str(cur_d),
                 "monto_actual": d_val,
                 "acum_actual": acum_actual,
                 "monto_mes_ant": d_prev,
                 "acum_mes_ant": acum_mes_ant,
-                "monto_anio_ant": round(d_prev * 0.92, 0),
-                "acum_anio_ant": round(acum_mes_ant * 0.92, 0),
-                "meta": daily_target,
+                "monto_anio_ant": d_py,
+                "acum_anio_ant": acum_anio_ant,
+                "meta": d_meta,
                 "acum_meta": acum_meta,
             })
             cur_d += timedelta(days=1)
+            day_idx += 1
 
         v_diff = ((curr_total - prev_total) / max(prev_total, 1)) * 100.0 if prev_total > 0 else 0.0
         t_diff = ((curr_cnt - prev_cnt) / max(prev_cnt, 1)) * 100.0 if prev_cnt > 0 else 0.0
