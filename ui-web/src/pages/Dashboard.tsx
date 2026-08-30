@@ -205,14 +205,14 @@ export default function Dashboard() {
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-gray-900 dark:text-white flex flex-wrap items-center gap-3">
-            {greeting}, {user?.nombre || "Gustavo"}
+            {greeting}, {user?.nombre && !user.nombre.toLowerCase().includes("admin") ? user.nombre : "Gustavo"}
             {selectedBranch ? (
-              <span className="text-xs px-3 py-1 rounded-xl bg-teal-500/15 text-teal-700 dark:text-teal-300 font-extrabold border border-teal-500/30 flex items-center gap-1.5">
+              <span className="text-xs px-3 py-1 rounded-xl bg-teal-500/15 text-teal-700 dark:text-teal-300 font-extrabold border border-teal-500/30 flex items-center gap-1.5 shadow-2xs">
                 <Store className="w-3.5 h-3.5" />
                 {selectedBranch.codigo} · {selectedBranch.nombre}
               </span>
             ) : (
-              <span className="text-xs px-3 py-1 rounded-xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-extrabold border border-indigo-500/30 flex items-center gap-1.5">
+              <span className="text-xs px-3 py-1 rounded-xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-extrabold border border-indigo-500/30 flex items-center gap-1.5 shadow-2xs">
                 <Building2 className="w-3.5 h-3.5" />
                 Consolidado Casa Gonzalito
               </span>
@@ -222,14 +222,14 @@ export default function Dashboard() {
 
         {/* Selector de Períodos & Botón Refresh */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl flex items-center gap-1 border border-gray-200 dark:border-slate-700">
+          <div className="bg-gray-100/90 dark:bg-slate-800/90 p-1.5 rounded-2xl flex items-center gap-1 border border-gray-200/80 dark:border-slate-700/80 shadow-inner">
             {(["hoy", "semana", "mes", "anio"] as TimeRange[]).map((r) => (
               <button
                 key={r}
                 onClick={() => setTimeRange(r)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
                   timeRange === r
-                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-gray-200/60 dark:border-slate-700"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-gray-200/60 dark:border-slate-700 scale-[1.02]"
                     : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
                 }`}
               >
@@ -241,7 +241,7 @@ export default function Dashboard() {
           <button
             onClick={handleManualRefresh}
             disabled={refreshing}
-            className="p-2.5 rounded-2xl bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 shadow-2xs transition-all flex items-center justify-center cursor-pointer"
+            className="p-3 rounded-2xl bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all flex items-center justify-center cursor-pointer active:scale-95"
             title="Recalcular Métricas"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-600" : ""}`} />
@@ -252,16 +252,17 @@ export default function Dashboard() {
       {/* ──────────────────────────────────────────────────────────────────────────
           2. HERO COCKPIT IA — DIAGNÓSTICO ESTRATÉGICO DISTRIBUIDORA
       ────────────────────────────────────────────────────────────────────────── */}
-      <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white border border-indigo-500/20 shadow-2xl relative overflow-hidden">
-        <div className="absolute right-0 top-0 translate-x-12 -translate-y-8 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="p-7 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white border border-indigo-500/30 shadow-2xl relative overflow-hidden">
+        <div className="absolute right-0 top-0 translate-x-12 -translate-y-8 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute left-1/3 bottom-0 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
-          <div className="space-y-2 max-w-2xl">
+          <div className="space-y-2.5 max-w-2xl">
             <div className="flex items-center gap-2">
-              <span className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+              <span className="p-1.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shadow-inner">
                 <Sparkles className="w-4 h-4" />
               </span>
-              <span className="text-xs font-bold uppercase tracking-widest text-indigo-300">
+              <span className="text-xs font-black uppercase tracking-widest text-indigo-300">
                 Diagnóstico Comercial IA ({timeRange === "mes" ? "Agosto 2026" : timeRange === "semana" ? "Esta Semana" : timeRange === "hoy" ? "Corte Diario" : "Acumulado Anual"})
               </span>
             </div>
@@ -275,31 +276,31 @@ export default function Dashboard() {
               </div>
             ) : (
               <div>
-                <h3 className="text-lg sm:text-xl font-black text-white">
+                <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
                   Facturación en {formatPYG(totalVentasMonto)} con Margen Real del {margenBrutoPct}%
                 </h3>
                 <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                  Volumen PARESA en <strong>{formatNumber(paresaTotalUC, 0)} Cajas Unitarias</strong> con ticket promedio de <strong>{formatPYG(ticketPromedio)}</strong>. La rentabilidad bruta operativa acumula <strong>{formatPYG(margenBrutoGs)}</strong>.
+                  Volumen PARESA en <strong>{formatNumber(paresaTotalUC, 0)} Cajas Unitarias</strong> con ticket medio de <strong>{formatPYG(ticketPromedio)}</strong>. La utilidad bruta operativa acumulada asciende a <strong>{formatPYG(margenBrutoGs)}</strong>.
                 </p>
               </div>
             )}
           </div>
 
           {/* Medidor de Meta del Período */}
-          <div className="bg-white/5 backdrop-blur-md p-4 rounded-2xl border border-white/10 shrink-0 w-full lg:w-80 space-y-2">
+          <div className="bg-slate-900/80 backdrop-blur-xl p-5 rounded-2xl border border-white/10 shrink-0 w-full lg:w-84 space-y-3 shadow-xl">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400 font-medium">Meta {timeRange.toUpperCase()}</span>
-              <span className="text-white font-bold">{targetProgressPct}% ({formatCompactPYG(totalVentasMonto)} / {formatCompactPYG(targetGs)})</span>
+              <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Meta {timeRange.toUpperCase()}</span>
+              <span className="text-white font-black font-mono">{targetProgressPct}% ({formatCompactPYG(totalVentasMonto)} / {formatCompactPYG(targetGs)})</span>
             </div>
-            <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+            <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden p-0.5 border border-slate-700">
               <div
-                className="bg-gradient-to-r from-teal-400 to-indigo-500 h-2.5 rounded-full transition-all duration-1000"
+                className="bg-gradient-to-r from-teal-400 via-indigo-400 to-indigo-500 h-2 rounded-full transition-all duration-1000 shadow-sm"
                 style={{ width: `${targetProgressPct}%` }}
               />
             </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
               <span>Pacing comercial activo</span>
-              <span className={ventasDiffPct >= 0 ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+              <span className={`font-mono font-bold px-2 py-0.5 rounded-md ${ventasDiffPct >= 0 ? "bg-emerald-500/20 text-emerald-300" : "bg-rose-500/20 text-rose-300"}`}>
                 {ventasDiffPct >= 0 ? `+${ventasDiffPct}%` : `${ventasDiffPct}%`} vs anterior
               </span>
             </div>
@@ -308,107 +309,134 @@ export default function Dashboard() {
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          3. 4 BENTO CARDS KPI DE ALTO IMPACTO (ANTI-DESBORDE)
+          3. 4 BENTO CARDS KPI DE ALTO IMPACTO (LUXURY EXECUTIVE DESIGN)
       ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         
         {/* KPI 1: Facturación Total */}
-        <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
-          <div className="flex items-start justify-between">
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/90 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-indigo-500/40 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl group-hover:bg-indigo-500/10 transition-all pointer-events-none" />
+          
+          <div className="flex items-start justify-between relative z-10">
             <div className="space-y-1">
-              <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ventas Netas</span>
-              <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white tracking-tight truncate max-w-[200px]" title={formatPYG(totalVentasMonto)}>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ventas Netas</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
                 {totalVentasMonto > 0 ? formatCompactPYG(totalVentasMonto) : "Gs. 0"}
               </div>
-              <div className="text-[11px] font-mono text-gray-400 truncate">
+              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium">
                 {formatPYG(totalVentasMonto)}
               </div>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
-              <DollarSign className="w-5 h-5" />
+            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300">
+              <DollarSign className="w-6 h-6" />
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs">
-            <span className={`inline-flex items-center gap-1 font-bold ${ventasDiffPct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+          <div className="mt-5 pt-3.5 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs relative z-10">
+            <span className={`inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-lg text-[11px] ${
+              ventasDiffPct >= 0
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+            }`}>
               {ventasDiffPct >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
               {ventasDiffPct >= 0 ? `+${ventasDiffPct}%` : `${ventasDiffPct}%`}
             </span>
-            <span className="text-gray-400 text-[11px]">vs período ant.</span>
+            <span className="text-gray-400 text-[11px] font-medium">Descontadas NC</span>
           </div>
         </div>
 
         {/* KPI 2: Margen Bruto Real & Rentabilidad */}
-        <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
-          <div className="flex items-start justify-between">
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/90 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-teal-500/40 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full blur-2xl group-hover:bg-teal-500/10 transition-all pointer-events-none" />
+
+          <div className="flex items-start justify-between relative z-10">
             <div className="space-y-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Margen Bruto Real</span>
-                <span className="px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-600 dark:text-teal-400 text-[10px] font-black">{margenBrutoPct}%</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-wider">Margen Bruto Real</span>
+                <span className="px-2 py-0.5 rounded-md bg-teal-500/15 text-teal-700 dark:text-teal-300 text-[10px] font-black border border-teal-500/30 font-mono">
+                  {margenBrutoPct}%
+                </span>
               </div>
-              <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white tracking-tight truncate max-w-[200px]" title={formatPYG(margenBrutoGs)}>
+              <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
                 {margenBrutoGs > 0 ? formatCompactPYG(margenBrutoGs) : "Gs. 0"}
               </div>
-              <div className="text-[11px] font-mono text-gray-400 truncate">
+              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium">
                 Costo: {formatCompactPYG(costoTotalGs)}
               </div>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold">
-              <Percent className="w-5 h-5" />
+            <div className="w-12 h-12 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-teal-600 group-hover:text-white transition-all duration-300">
+              <Percent className="w-6 h-6" />
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs">
-            <span className="text-teal-600 dark:text-teal-400 font-bold">Rentabilidad Real</span>
-            <span className="text-gray-400 text-[11px]">Deducido s/ costo</span>
+          <div className="mt-5 pt-3.5 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs relative z-10">
+            <span className="text-teal-600 dark:text-teal-400 font-bold text-[11px] flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+              Utilidad Mayorista
+            </span>
+            <span className="text-gray-400 text-[11px] font-mono">Real s/ COGS</span>
           </div>
         </div>
 
         {/* KPI 3: Volumen PARESA & Rebates */}
-        <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
-          <div className="flex items-start justify-between">
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/90 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-amber-500/40 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl group-hover:bg-amber-500/10 transition-all pointer-events-none" />
+
+          <div className="flex items-start justify-between relative z-10">
             <div className="space-y-1">
-              <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Volumen PARESA</span>
-              <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white tracking-tight truncate max-w-[200px]">
-                {formatNumber(paresaTotalUC, 0)} <span className="text-xs text-gray-500 font-bold">UC</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-wider">Volumen PARESA</span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[9px] font-black uppercase">Oficial</span>
               </div>
-              <div className="text-[11px] font-mono text-gray-400 truncate">
-                Rebate: {formatCompactPYG(rebateEstimadoGs)}
+              <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
+                {formatNumber(paresaTotalUC, 0)} <span className="text-sm font-bold text-gray-500">UC</span>
+              </div>
+              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium">
+                Rebate Proy.: {formatCompactPYG(rebateEstimadoGs)}
               </div>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
-              <Award className="w-5 h-5" />
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
+              <Award className="w-6 h-6" />
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs">
-            <span className="text-amber-600 dark:text-amber-400 font-bold">Distribuidor Oficial</span>
-            <span className="text-gray-400 text-[11px]">Amambay / Pedro Juan</span>
+          <div className="mt-5 pt-3.5 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs relative z-10">
+            <span className="text-amber-600 dark:text-amber-400 font-bold text-[11px]">Distribuidor Oficial</span>
+            <span className="text-gray-400 text-[11px]">Amambay / PJC</span>
           </div>
         </div>
 
         {/* KPI 4: Operaciones & Ticket Medio */}
-        <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
-          <div className="flex items-start justify-between">
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/90 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-purple-500/40 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/5 rounded-full blur-2xl group-hover:bg-purple-500/10 transition-all pointer-events-none" />
+
+          <div className="flex items-start justify-between relative z-10">
             <div className="space-y-1">
-              <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Facturas Emitidas</span>
-              <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white tracking-tight truncate max-w-[200px]">
-                {totalTickets.toLocaleString()} <span className="text-xs text-gray-500 font-bold">docs</span>
+              <span className="text-[11px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-wider">Facturas Emitidas</span>
+              <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
+                {totalTickets.toLocaleString()} <span className="text-sm font-bold text-gray-500">docs</span>
               </div>
-              <div className="text-[11px] font-mono text-gray-400 truncate">
-                Ticket: {formatCompactPYG(ticketPromedio)}
+              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium">
+                Ticket Medio: {formatCompactPYG(ticketPromedio)}
               </div>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold">
-              <ShoppingCart className="w-5 h-5" />
+            <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-purple-600 group-hover:text-white transition-all duration-300">
+              <ShoppingCart className="w-6 h-6" />
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs">
-            <span className={`inline-flex items-center gap-1 font-bold ${transaccionesDiffPct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+          <div className="mt-5 pt-3.5 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs relative z-10">
+            <span className={`inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-lg text-[11px] ${
+              transaccionesDiffPct >= 0
+                ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20"
+                : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+            }`}>
               {transaccionesDiffPct >= 0 ? `+${transaccionesDiffPct}%` : `${transaccionesDiffPct}%`}
             </span>
-            <span className="text-gray-400 text-[11px]">flujo transaccional</span>
+            <span className="text-gray-400 text-[11px] font-medium">Flujo Transaccional</span>
           </div>
         </div>
 

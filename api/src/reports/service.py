@@ -816,34 +816,51 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
     async def get_fast_period(start_dt: datetime, end_dt: datetime, prev_start_dt: datetime, prev_end_dt: datetime, meta_gs: float, paresa_meta_uc: float, days_count: int):
         where_branch = " AND s.branch_id = :bid" if bid else ""
         
-        # 1. Total ventas, transacciones y costo real ponderado
-        q = text(f"""
+        # 1. Total ventas netas y transacciones (sin producto cartesiano)
+        q_sales = text(f"""
             SELECT 
-                COUNT(DISTINCT s.id) as cnt,
-                COALESCE(SUM(s.total), 0) as total_gs,
-                COALESCE(SUM(si.costo_unitario * si.cantidad), 0) as total_costo_gs
+                COUNT(*) as cnt,
+                COALESCE(SUM(s.total), 0) as total_gs
             FROM sales s
-            LEFT JOIN sale_items si ON si.sale_id = s.id
             WHERE s.company_id = :cid
               AND s.fecha >= :s AND s.fecha <= :e
               AND s.estado <> 'cancelado'
               {where_branch}
         """)
+
+        # Costo real de mercadería vendida (COGS)
+        q_cost = text(f"""
+            SELECT 
+                COALESCE(SUM(
+                    COALESCE(NULLIF(si.costo_unitario, 0), p.costo_promedio, p.ultimo_costo, p.costo_landed, si.precio_unitario * 0.84) * si.cantidad
+                ), 0) as total_costo_gs
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            LEFT JOIN products p ON p.id = si.product_id
+            WHERE s.company_id = :cid
+              AND s.fecha >= :s AND s.fecha <= :e
+              AND s.estado <> 'cancelado'
+              {where_branch}
+        """)
+
         curr_params = {"cid": cid, "s": start_dt, "e": end_dt}
         prev_params = {"cid": cid, "s": prev_start_dt, "e": prev_end_dt}
         if bid:
             curr_params["bid"] = bid
             prev_params["bid"] = bid
 
-        curr_row = (await db.execute(q, curr_params)).mappings().first()
-        prev_row = (await db.execute(q, prev_params)).mappings().first()
+        curr_sales_row = (await db.execute(q_sales, curr_params)).mappings().first()
+        prev_sales_row = (await db.execute(q_sales, prev_params)).mappings().first()
+        curr_cost_row = (await db.execute(q_cost, curr_params)).mappings().first()
+        prev_cost_row = (await db.execute(q_cost, prev_params)).mappings().first()
 
-        curr_total = float(curr_row["total_gs"] if curr_row and curr_row["total_gs"] else 0)
-        curr_cnt = int(curr_row["cnt"] if curr_row and curr_row["cnt"] else 0)
-        curr_costo = float(curr_row["total_costo_gs"] if curr_row and curr_row["total_costo_gs"] else 0)
+        curr_total = float(curr_sales_row["total_gs"] if curr_sales_row and curr_sales_row["total_gs"] else 0)
+        curr_cnt = int(curr_sales_row["cnt"] if curr_sales_row and curr_sales_row["cnt"] else 0)
+        curr_costo = float(curr_cost_row["total_costo_gs"] if curr_cost_row and curr_cost_row["total_costo_gs"] else 0)
 
-        prev_total = float(prev_row["total_gs"] if prev_row and prev_row["total_gs"] else 0)
-        prev_cnt = int(prev_row["cnt"] if prev_row and prev_row["cnt"] else 0)
+        prev_total = float(prev_sales_row["total_gs"] if prev_sales_row and prev_sales_row["total_gs"] else 0)
+        prev_cnt = int(prev_sales_row["cnt"] if prev_sales_row and prev_sales_row["cnt"] else 0)
+        prev_costo = float(prev_cost_row["total_costo_gs"] if prev_cost_row and prev_cost_row["total_costo_gs"] else 0)
 
         # Cálculo de Rentabilidad y Margen Real
         if curr_costo > 0 and curr_costo < curr_total:
@@ -851,7 +868,7 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             margen_pct = round((margen_gs / max(curr_total, 1)) * 100.0, 1)
             costo_gs = curr_costo
         elif curr_total > 0:
-            margen_pct = 18.5
+            margen_pct = 15.5
             margen_gs = round(curr_total * (margen_pct / 100.0), 0)
             costo_gs = curr_total - margen_gs
         else:
