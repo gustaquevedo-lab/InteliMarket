@@ -1,5 +1,5 @@
-﻿import { useState, useEffect } from "react"
-import { Building2, CreditCard, DollarSign, Layers, Plus, Shield, Loader2, X, CheckCircle, AlertCircle } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Building2, CreditCard, DollarSign, Layers, Plus, Shield, Loader2, X, CheckCircle, AlertCircle, MonitorSmartphone, Heart, Ticket, Award, Printer, Sparkles } from "lucide-react"
 import { api, type Company, type SifenTimbrado, type Currency, type PaymentMethod, type Vertical, type CompanyVerticalConfig } from "../../api"
 import { useToast } from "../../context/ToastContext"
 
@@ -176,8 +176,23 @@ export default function SettingsPage() {
     }
   }
 
+  const [posConfig, setPosConfig] = useState({
+    pos_enable_donations: localStorage.getItem("pos_enable_donations") === "true",
+    pos_enable_coupons: localStorage.getItem("pos_enable_coupons") === "true",
+    pos_enable_loyalty: localStorage.getItem("pos_enable_loyalty") === "true",
+    pos_escpos_thermal: localStorage.getItem("pos_escpos_thermal") !== "false",
+    pos_b2c_mode: localStorage.getItem("pos_b2c_mode") === "true",
+  })
+
+  const togglePosSetting = (key: string, value: boolean) => {
+    localStorage.setItem(key, String(value))
+    setPosConfig(prev => ({ ...prev, [key]: value }))
+    toast.success("Configuración actualizada", `Ajuste del Punto de Venta guardado.`)
+  }
+
   const sections = [
     { id: "company", label: "Empresa", icon: Building2 },
+    { id: "pos", label: "Punto de Venta (POS)", icon: MonitorSmartphone },
     { id: "timbrados", label: "Timbrados", icon: Shield },
     { id: "currencies", label: "Monedas", icon: DollarSign },
     { id: "payments", label: "Métodos de pago", icon: CreditCard },
@@ -191,12 +206,12 @@ export default function SettingsPage() {
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Ajustes del sistema y datos de la empresa</p>
       </div>
 
-      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 w-fit">
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 w-fit overflow-x-auto">
         {sections.map((s) => (
           <button
             key={s.id}
             onClick={() => setActiveSection(s.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeSection === s.id ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeSection === s.id ? "bg-white dark:bg-slate-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 hover:text-gray-700"}`}
           >
             <s.icon className="w-4 h-4" />
             {s.label}
@@ -207,6 +222,128 @@ export default function SettingsPage() {
       {loading && (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+        </div>
+      )}
+
+      {!loading && activeSection === "pos" && (
+        <div className="card p-6 max-w-3xl space-y-6">
+          <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700 pb-4">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <MonitorSmartphone className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                Configuración del Punto de Venta (POS / Mostrador)
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Ajustes de hardware, ergonomía de cobro y módulos dinámicos de salón minorista B2C.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {/* Toggle 1: Abre tu Corazón */}
+            <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border border-gray-200 dark:border-gray-700">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-pink-500/10 text-pink-600 dark:text-pink-400 flex items-center justify-center font-bold shrink-0">
+                  <Heart className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white">Módulo "Abre tu Corazón" (Donación de Vuelto)</h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Habilita la sugerencia automática de redondeo de vuelto a Gs. 100/500/1.000 para causas benéficas en caja de salón minorista.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => togglePosSetting("pos_enable_donations", !posConfig.pos_enable_donations)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  posConfig.pos_enable_donations ? "bg-pink-600" : "bg-gray-200 dark:bg-gray-700"
+                }`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  posConfig.pos_enable_donations ? "translate-x-5" : "translate-x-0"
+                }`} />
+              </button>
+            </div>
+
+            {/* Toggle 2: Cupones de Sorteo */}
+            <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border border-gray-200 dark:border-gray-700">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-violet-500/10 text-violet-600 dark:text-violet-400 flex items-center justify-center font-bold shrink-0">
+                  <Ticket className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white">Cupones de Sorteos & Tómbolas B2C</h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Emite e imprime cupones numerados al pie del comprobante fiscal al superar montos mínimos o comprar marcas patrocinadoras.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => togglePosSetting("pos_enable_coupons", !posConfig.pos_enable_coupons)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  posConfig.pos_enable_coupons ? "bg-violet-600" : "bg-gray-200 dark:bg-gray-700"
+                }`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  posConfig.pos_enable_coupons ? "translate-x-5" : "translate-x-0"
+                }`} />
+              </button>
+            </div>
+
+            {/* Toggle 3: Fidelidad / Puntos */}
+            <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border border-gray-200 dark:border-gray-700">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold shrink-0">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white">Club de Fidelidad & Acumulación de Puntos</h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Muestra el saldo de puntos y cashback del cliente en el visor de cobro.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => togglePosSetting("pos_enable_loyalty", !posConfig.pos_enable_loyalty)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  posConfig.pos_enable_loyalty ? "bg-amber-600" : "bg-gray-200 dark:bg-gray-700"
+                }`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  posConfig.pos_enable_loyalty ? "translate-x-5" : "translate-x-0"
+                }`} />
+              </button>
+            </div>
+
+            {/* Toggle 4: Impresión Térmica ESC/POS Directa */}
+            <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border border-gray-200 dark:border-gray-700">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold shrink-0">
+                  <Printer className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white">Impresión Térmica ESC/POS Directa (80mm)</h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Envía comandos crudos a 48 columnas con corte de papel automático vía print-bridge.exe (sin diálogo de navegador).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => togglePosSetting("pos_escpos_thermal", !posConfig.pos_escpos_thermal)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  posConfig.pos_escpos_thermal ? "bg-emerald-600" : "bg-gray-200 dark:bg-gray-700"
+                }`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  posConfig.pos_escpos_thermal ? "translate-x-5" : "translate-x-0"
+                }`} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

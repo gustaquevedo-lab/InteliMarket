@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_URL || "/api"
+export const API_BASE = import.meta.env.VITE_API_URL || "/api"
+export const API_ORIGIN = typeof window !== "undefined" ? window.location.origin : ""
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("access_token")
@@ -46,7 +47,7 @@ export const client = {
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: "DELETE" }),
 }
 
-const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
+export const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 // ========== TYPE STUBS ==========
 export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; category_id?: string | null; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; precio_venta?: number; costo_promedio?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; category?: Category; categoria?: Category; stock?: number }
@@ -2186,4 +2187,127 @@ export const api = {
     suggest: (supplierId: string, productId: string, cantidad: number) =>
       client.get<{ scale_id: string | null; cantidad_bonificada_sugerida: number }>("/v1/purchase-bonus-scales/suggest", { supplier_id: supplierId, product_id: productId, cantidad: String(cantidad) }),
   },
+  cupones: {
+    registrar: (data: any) => client.post<any>("/v1/cupones/registrar", data),
+    registrarMultiple: (data: any) => client.post<any>("/v1/cupones/registrar-multiple", data),
+    evaluarCarrito: (data: any) => client.post<any>("/v1/cupones/evaluar-carrito", data),
+    listCampanas: (params?: any) => client.get<any[]>("/v1/cupones/campanas", params),
+    getCampana: (id: string) => client.get<any>(`/v1/cupones/campanas/${id}`),
+    createCampana: (data: any) => client.post<any>("/v1/cupones/campanas", data),
+    updateCampana: (id: string, data: any) => client.put<any>(`/v1/cupones/campanas/${id}`, data),
+    deleteCampana: (id: string) => client.delete<any>(`/v1/cupones/campanas/${id}`),
+    tickets: (params?: any) => client.get<any[]>("/v1/cupones/tickets", params),
+    listarTickets: (params?: any) => client.get<any[]>("/v1/cupones/tickets", params),
+    clientes: (params?: any) => client.get<any[]>("/v1/cupones/clientes", params),
+    listarClientes: (params?: any) => client.get<any[]>("/v1/cupones/clientes", params),
+    lookupCliente: (doc: string) => client.get<any>(`/v1/cupones/clientes/${encodeURIComponent(doc)}`),
+    buscarDocumento: (doc: string) => client.get<{ encontrado: boolean; origen?: string; documento: string; nombre?: string; telefono?: string; direccion?: string; barrio?: string; ciudad?: string }>(`/v1/cupones/buscar-documento/${encodeURIComponent(doc)}`),
+    stats: (params?: any) => client.get<any>("/v1/cupones/stats", params),
+    getConfig: () => client.get<any>("/v1/cupones/config"),
+    updateConfig: (data: any) => client.put<any>("/v1/cupones/config", data),
+    syncTicket: (id: string) => client.post<any>(`/v1/cupones/sync/${id}`),
+    syncBatch: (data?: any) => client.post<any>("/v1/cupones/sync-batch", data || {}),
+    getSyncBatchProgress: () => client.get<any>("/v1/cupones/sync-batch/progress"),
+    analizarIA: (data: any) => client.post<any>("/v1/cupones/analisis-ia", data),
+    generarCampana: (data: any) => client.post<any>("/v1/cupones/generar-campana", data),
+  },
+  posTerminals: {
+    list: () => client.get<any[]>(`/v1/pos-terminals`, { company_id: COMPANY_ID }),
+    getByHostname: (hostname: string) => client.get<any>(`/v1/pos-terminals/by-hostname/${encodeURIComponent(hostname)}`, { company_id: COMPANY_ID }),
+    getByIp: (ip: string) => client.get<any>(`/v1/pos-terminals/by-ip/${encodeURIComponent(ip)}`, { company_id: COMPANY_ID }),
+    detect: (params?: { hostname?: string; ip?: string }) => client.get<any>(`/v1/pos-terminals/detect`, { company_id: COMPANY_ID, ...params }),
+    create: (data: any) => client.post<any>("/v1/pos-terminals", { company_id: COMPANY_ID, ...data }),
+    update: (id: string, data: any) => client.put<any>(`/v1/pos-terminals/${id}`, data),
+    delete: (id: string) => client.delete<void>(`/v1/pos-terminals/${id}`),
+  },
+  supervisorRequests: {
+    list: (params?: any) => client.get<any[]>("/v1/supervisor-requests", { company_id: COMPANY_ID, ...params }),
+    get: (id: string) => client.get<any>(`/v1/supervisor-requests/${id}`),
+    create: (data: any) => client.post<any>("/v1/supervisor-requests", { company_id: COMPANY_ID, ...data }),
+    resolve: (id: string, data?: any) => client.post<any>(`/v1/supervisor-requests/${id}/resolve`, data),
+  },
+  donaciones: {
+    getCampanaActiva: (companyId?: string) => client.get<DonationCampaign>("/v1/donaciones/campana-activa", { company_id: companyId || COMPANY_ID }),
+    updateCampana: (id: string, data: any) => client.put<DonationCampaign>(`/v1/donaciones/campana/${id}`, data),
+    registrar: (data: any) => client.post<DonationRecord>("/v1/donaciones/registrar", data),
+    getStats: (params?: any) => client.get<DonationStats>("/v1/donaciones/stats", { company_id: COMPANY_ID, ...params }),
+    getRankingCajeros: (params?: any) => client.get<CajeroSolidarioRankingItem[]>("/v1/donaciones/ranking-cajeros", { company_id: COMPANY_ID, ...params }),
+    getHistorial: (params?: any) => client.get<DonationRecord[]>("/v1/donaciones/historial", { company_id: COMPANY_ID, ...params }),
+    getLiquidaciones: (companyId?: string) => client.get<DonationLiquidation[]>("/v1/donaciones/liquidaciones", { company_id: companyId || COMPANY_ID }),
+    liquidar: (data: any) => client.post<DonationLiquidation>("/v1/donaciones/liquidar", data),
+  },
+}
+
+export interface DonationCampaign {
+  id: string
+  company_id: string
+  nombre: string
+  ong_nombre: string
+  ong_ruc?: string | null
+  ong_web: string
+  slogan?: string | null
+  mensaje_ticket: string
+  meta_recaudacion_pyg: number
+  fecha_inicio: string
+  fecha_fin?: string | null
+  activa: boolean
+  created_at: string
+  updated_at?: string | null
+}
+
+export interface DonationRecord {
+  id: string
+  company_id: string
+  branch_id?: string | null
+  sale_id?: string | null
+  session_id?: string | null
+  user_id?: string | null
+  cajero_nombre?: string | null
+  campana_id: string
+  monto_pyg: number
+  monto_total_venta_pyg: number
+  numero_comprobante?: string | null
+  tipo_origen: string
+  estado: string
+  created_at: string
+}
+
+export interface DonationLiquidation {
+  id: string
+  company_id: string
+  campana_id: string
+  monto_total_pyg: number
+  cantidad_donaciones: number
+  fecha_desde: string
+  fecha_hasta: string
+  numero_acta: string
+  entregado_por_nombre?: string | null
+  recibido_por_nombre?: string | null
+  recibido_por_ci?: string | null
+  comprobante_transferencia?: string | null
+  observaciones?: string | null
+  estado: string
+  created_at: string
+}
+
+export interface DonationStats {
+  total_recaudado_pyg: number
+  total_mes_pyg: number
+  total_hoy_pyg: number
+  total_liquidado_pyg: number
+  total_pendiente_pyg: number
+  cantidad_donaciones: number
+  ticket_promedio_donacion: number
+  meta_pyg: number
+  progreso_meta_pct: number
+  campana_activa?: DonationCampaign | null
+}
+
+export interface CajeroSolidarioRankingItem {
+  user_id?: string | null
+  cajero_nombre: string
+  total_recaudado_pyg: number
+  cantidad_donaciones: number
+  total_ventas_atendidas: number
+  tasa_adhesion_pct: number
 }

@@ -1,18 +1,18 @@
-﻿export function formatPYG(value: number | string | null | undefined): string {
+export function formatPYG(value: number | string | null | undefined): string {
   if (value == null) return "₲ 0"
   let num: number
-  if (typeof value === "number") {
-    num = value
-  } else {
-    const str = String(value).trim()
-    if (str.includes(".") && str.includes(",")) {
-      num = parseFloat(str.replace(/\./g, "").replace(",", "."))
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+      num = Math.round(parseFloat(trimmed))
     } else {
-      num = parseFloat(str)
+      num = Math.round(parseFloat(trimmed.replace(/\./g, "").replace(",", ".")))
     }
+  } else {
+    num = Math.round(value)
   }
   if (isNaN(num)) return "₲ 0"
-  return `₲ ${Math.round(num).toLocaleString("es-PY")}`
+  return `₲ ${num.toLocaleString("es-PY", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 }
 
 export function formatUSD(value: number | string | null | undefined): string {
@@ -30,13 +30,19 @@ export function formatCurrency(value: number | string | null | undefined, curren
 export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return "—"
   const d = typeof date === "string" ? new Date(date) : date
-  return d.toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "numeric" })
+  return d.toLocaleDateString("es-PY", {
+    timeZone: "America/Asuncion",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
 }
 
 export function formatDateTime(date: string | Date | null | undefined): string {
   if (!date) return "—"
   const d = typeof date === "string" ? new Date(date) : date
-  return d.toLocaleDateString("es-PY", {
+  return d.toLocaleString("es-PY", {
+    timeZone: "America/Asuncion",
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -48,7 +54,11 @@ export function formatDateTime(date: string | Date | null | undefined): string {
 export function formatTime(date: string | Date | null | undefined): string {
   if (!date) return "—"
   const d = typeof date === "string" ? new Date(date) : date
-  return d.toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+  return d.toLocaleTimeString("es-PY", {
+    timeZone: "America/Asuncion",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 }
 
 export function formatNumber(value: number | string | null | undefined, decimals = 0): string {
