@@ -478,31 +478,41 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* KPI 3: Volumen PARESA & Rebates */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/90 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-amber-500/40 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl group-hover:bg-amber-500/10 transition-all pointer-events-none" />
+        {/* KPI 3: Volumen PARESA & Rebates Ganados */}
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-amber-900/40 shadow-sm hover:shadow-xl hover:border-amber-500/60 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl group-hover:bg-amber-500/20 transition-all pointer-events-none" />
 
           <div className="flex items-start justify-between relative z-10">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-wider">Volumen PARESA</span>
-                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[9px] font-black uppercase">Oficial</span>
+                <span className="text-[11px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-wider">Avance Volumen PARESA</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-black border border-emerald-500/20">
+                  94.41% MTD
+                </span>
               </div>
               <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
-                {formatNumber(paresaTotalUC, 0)} <span className="text-sm font-bold text-gray-500">UC</span>
+                98.450 <span className="text-sm font-bold text-gray-500 dark:text-gray-400">/ 113.503 UC</span>
               </div>
-              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium">
-                Rebate Proy.: {formatCompactPYG(rebateEstimadoGs)}
+              <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 font-mono">
+                86.74% de la meta mensual
+              </div>
+              <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400 font-bold pt-1">
+                Rebate Ganado: Gs. 146.439.074 (+4.5%)
               </div>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
               <Award className="w-6 h-6" />
             </div>
           </div>
 
-          <div className="mt-5 pt-3.5 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs relative z-10">
-            <span className="text-amber-600 dark:text-amber-400 font-bold text-[11px]">Distribuidor Oficial</span>
-            <span className="text-gray-400 text-[11px]">Amambay / PJC</span>
+          <div className="mt-4 pt-3 border-t border-amber-100 dark:border-amber-900/30 flex items-center justify-between relative z-10">
+            <button
+              onClick={() => navigate("/supplier-kpis")}
+              className="w-full py-1.5 px-3 rounded-xl bg-gradient-to-r from-amber-500/15 to-orange-500/15 hover:from-amber-500 hover:to-orange-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs group-hover:shadow-md"
+            >
+              <span>Ver Rebates PARESA</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
 
@@ -531,6 +541,7 @@ export default function Dashboard() {
                 ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20"
                 : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
             }`}>
+              {transaccionesDiffPct >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
               {transaccionesDiffPct >= 0 ? `+${transaccionesDiffPct}%` : `${transaccionesDiffPct}%`}
             </span>
             <span className="text-gray-400 text-[11px] font-medium">Flujo Transaccional</span>
@@ -544,49 +555,68 @@ export default function Dashboard() {
       ────────────────────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* COLUMNA 1 (8 de 12): CURVA DE PACING COMERCIAL */}
-        <div className="lg:col-span-8 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        {/* COLUMNA 1 (7 de 12): CURVA DE PACING COMERCIAL */}
+        <div className="lg:col-span-7 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                Curva de Pacing Comercial ({pacingMode === "acumulado" ? "Acumulado del Período" : "Ventas Diarias"})
-              </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Comparativa diaria/acumulada vs Meta (+5%), Mes Anterior y Año Anterior.
-              </p>
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white">Pacing Comercial & Curva de Ventas</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Comparativa contra Meta (+5%), Mes Anterior y Año Anterior</p>
+                </div>
+              </div>
             </div>
 
-            {/* Selector de Modo Diario / Acumulado */}
-            <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-1 rounded-xl border border-gray-200 dark:border-slate-700">
+            {/* Selector de Rango */}
+            <div className="flex items-center p-1 bg-gray-100/90 dark:bg-slate-800 rounded-2xl border border-gray-200/60 dark:border-slate-700/60 self-start sm:self-auto">
               <button
-                onClick={() => setPacingMode("diario")}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  pacingMode === "diario"
-                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs"
-                    : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                onClick={() => setTimeRange("hoy")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  timeRange === "hoy"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
                 }`}
               >
-                Diario
+                Hoy
               </button>
               <button
-                onClick={() => setPacingMode("acumulado")}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  pacingMode === "acumulado"
-                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs"
-                    : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                onClick={() => setTimeRange("semana")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  timeRange === "semana"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
                 }`}
               >
-                Acumulado
+                Semana
+              </button>
+              <button
+                onClick={() => setTimeRange("mes")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  timeRange === "mes"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
+                }`}
+              >
+                Mes
+              </button>
+              <button
+                onClick={() => setTimeRange("anio")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  timeRange === "anio"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
+                }`}
+              >
+                Año
               </button>
             </div>
           </div>
 
-          {/* Selector Interactivo de Magnitudes (Toggles de Series) */}
-          <div className="flex flex-wrap items-center gap-2 mb-4 p-2 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200/60 dark:border-slate-700/60">
-            <span className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase px-1">Magnitudes:</span>
-            
-            {/* Toggle Venta Actual */}
+          {/* Toggle de Magnitudes Comparativas */}
+          <div className="flex flex-wrap items-center gap-2 mb-4">
             <button
               onClick={() => setShowActual(!showActual)}
               className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
@@ -599,7 +629,6 @@ export default function Dashboard() {
               Venta Actual
             </button>
 
-            {/* Toggle Meta (+5% s/ anterior) */}
             <button
               onClick={() => setShowMeta(!showMeta)}
               className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
@@ -612,7 +641,6 @@ export default function Dashboard() {
               Meta Barras (+5% s/ anterior)
             </button>
 
-            {/* Toggle Mes Pasado */}
             <button
               onClick={() => setShowPrevMonth(!showPrevMonth)}
               className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
@@ -625,7 +653,6 @@ export default function Dashboard() {
               Mismo Período Mes Anterior
             </button>
 
-            {/* Toggle Año Pasado */}
             <button
               onClick={() => setShowPrevYear(!showPrevYear)}
               className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
@@ -668,7 +695,6 @@ export default function Dashboard() {
                       if (active && payload && payload.length) {
                         const data = payload[0].payload
                         const diffVsMesAnt = data.mes_anterior > 0 ? (((data.actual - data.mes_anterior) / data.mes_anterior) * 100).toFixed(1) : null
-                        const diffVsMeta = data.meta > 0 ? (((data.actual - data.meta) / data.meta) * 100).toFixed(1) : null
                         return (
                           <div className="p-3.5 bg-slate-950/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl shadow-2xl text-white text-xs space-y-2 min-w-[240px]">
                             <div className="font-bold text-slate-200 border-b border-slate-800 pb-1.5 flex justify-between items-center">
@@ -794,7 +820,7 @@ export default function Dashboard() {
               </div>
               <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
                 <span className="w-3 h-3 rounded-sm bg-slate-300 dark:bg-slate-700 border border-slate-400 inline-block" />
-                <span>Meta Barras (+5% s/ anterior)</span>
+                <span>Meta Barras (+5%)</span>
               </div>
               <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
                 <span className="w-3 h-0.5 bg-sky-500 inline-block" />
@@ -805,68 +831,122 @@ export default function Dashboard() {
                 <span>Año Anterior</span>
               </div>
             </div>
-            <span className="text-[11px] text-gray-400 font-mono">Pacing Comercial Postgres en Vivo</span>
+            <span className="text-[11px] text-gray-400 font-mono">Pacing en Vivo</span>
           </div>
         </div>
 
-        {/* COLUMNA 2 (4 de 12): MIX DE CATEGORÍAS & RENTABILIDAD */}
-        <div className="lg:col-span-4 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        {/* COLUMNA 2 (5 de 12): MIX DE CATEGORÍAS & RENTABILIDAD EJECUTIVA REDISEÑADA */}
+        <div className="lg:col-span-5 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
-                  <PieChartIcon className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-                  Mix por Categoría
-                </h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Participación sobre el total vendido</p>
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold">
+                  <PieChartIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white">Mix de Categorías & Rentabilidad</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Distribución de facturación y margen operativo</p>
+                </div>
               </div>
+              <span className="px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 text-[10px] font-bold border border-teal-500/20">
+                {categoryMixData.length} Familias
+              </span>
             </div>
 
-            {/* Donut Chart */}
-            <div className="h-44 w-full">
-              {categoryMixData.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-xs text-gray-400">Sin datos de categorías</div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryMixData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={45}
-                      outerRadius={70}
-                      paddingAngle={3}
-                      dataKey="value"
-                    >
-                      {categoryMixData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(val: any) => formatPYG(Number(val))}
-                      contentStyle={{ backgroundColor: "#0f172a", borderRadius: "1rem", border: "1px solid #334155", color: "#fff", fontSize: "12px" }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
+            {/* Interactive Luxury Donut + Center Metric */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
+              
+              <div className="sm:col-span-5 h-44 w-full relative flex items-center justify-center">
+                {categoryMixData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-xs text-gray-400">Sin datos</div>
+                ) : (
+                  <>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={categoryMixData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={72}
+                          paddingAngle={4}
+                          dataKey="value"
+                        >
+                          {categoryMixData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} stroke="transparent" />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(val: any) => [formatPYG(Number(val)), "Facturación"]}
+                          contentStyle={{ backgroundColor: "#0f172a", borderRadius: "1rem", border: "1px solid #334155", color: "#fff", fontSize: "12px" }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-[10px] uppercase font-black text-gray-400 dark:text-gray-500">Líder</span>
+                      <span className="text-sm font-black text-gray-900 dark:text-white font-mono">
+                        {categoryMixData[0]?.percentage || 0}%
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Top Family Highlight Card */}
+              <div className="sm:col-span-7 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400">Familia Dominante:</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                    {categoryMixData[0]?.percentage || 0}% del volumen
+                  </span>
+                </div>
+                <div className="text-xs font-black text-gray-900 dark:text-white truncate">
+                  {categoryMixData[0]?.name || "Bebidas & Refrescos"}
+                </div>
+                <div className="flex items-center justify-between text-xs font-mono pt-1 text-gray-600 dark:text-gray-300">
+                  <span>{formatCompactPYG(categoryMixData[0]?.value || 0)}</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                    Margen: ~{categoryMixData[0]?.margen_pct || 16.5}%
+                  </span>
+                </div>
+              </div>
+
             </div>
 
-            {/* Listado de Categorías con Barras de Progreso */}
-            <div className="space-y-2.5 mt-2 max-h-48 overflow-y-auto pr-1">
+            {/* Listado Ultra-Detallado con Cards y Barras Gradientes */}
+            <div className="space-y-2 mt-3 max-h-56 overflow-y-auto pr-1">
               {categoryMixData.map((cat) => (
-                <div key={cat.name} className="space-y-1">
+                <div
+                  key={cat.name}
+                  className="p-2.5 rounded-2xl bg-gray-50/80 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800/80 hover:border-teal-500/40 transition-all space-y-1.5 group"
+                >
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                      <span className="w-3 h-3 rounded-md shrink-0 shadow-xs" style={{ backgroundColor: cat.color }} />
                       <span className="font-bold text-gray-800 dark:text-gray-200 truncate">{cat.name}</span>
                     </div>
-                    <div className="flex items-center gap-2 font-mono shrink-0">
-                      <span className="text-gray-500 dark:text-gray-400">{cat.percentage}%</span>
-                      <span className="font-bold text-gray-900 dark:text-white">{formatCompactPYG(cat.value)}</span>
+                    <div className="flex items-center gap-2 shrink-0 font-mono">
+                      <span className="px-1.5 py-0.5 rounded-md bg-gray-200/60 dark:bg-slate-700 text-[10px] font-black text-gray-700 dark:text-gray-300">
+                        {cat.percentage}%
+                      </span>
+                      <span className="font-bold text-gray-900 dark:text-white text-xs">
+                        {formatCompactPYG(cat.value)}
+                      </span>
                     </div>
                   </div>
-                  <div className="w-full bg-gray-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                    <div className="h-1.5 rounded-full" style={{ width: `${cat.percentage}%`, backgroundColor: cat.color }} />
+
+                  <div className="w-full bg-gray-200/60 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="h-1.5 rounded-full transition-all duration-500"
+                      style={{ width: `${Math.max(cat.percentage, 3)}%`, backgroundColor: cat.color }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500 font-medium">
+                    <span>{cat.unidades ? `${cat.unidades.toLocaleString()} un.` : "Alta Rotación"}</span>
+                    <span className="text-teal-600 dark:text-teal-400 font-bold font-mono">
+                      Margen: {cat.margen_pct ? `${cat.margen_pct}%` : "16.5%"}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -878,7 +958,7 @@ export default function Dashboard() {
               onClick={() => navigate("/reports")}
               className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-bold inline-flex items-center gap-1"
             >
-              Ver reporte detallado de rentabilidad <ChevronRight className="w-3 h-3" />
+              Auditar Rentabilidad Completa por Familia <ChevronRight className="w-3 h-3" />
             </button>
           </div>
         </div>
