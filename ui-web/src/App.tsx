@@ -201,7 +201,7 @@ function AppRoutes() {
         <Route index element={<Navigate to={isElectron ? "/pos" : "/dashboard"} replace />} />
         {[
           ["dashboard", <Dashboard />],
-          ["sales", <SalesPage />],
+          ["sales", <SifenPage />],
           ["products", <ProductsPage />],
           ["inventory", <InventoryPage />],
           ["purchases", <PurchasesPage />],

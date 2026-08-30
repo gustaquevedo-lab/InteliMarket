@@ -128,24 +128,27 @@ async def list_credit_notes(
     offset: int = 0,
 ) -> dict:
     """List SIFEN Credit Notes."""
-    query = text("""
+    params: dict = {"limit": limit, "offset": offset}
+    where_clause = ""
+    if search and search.strip():
+        where_clause = "WHERE (cdc ILIKE :s_term OR factura_numero ILIKE :s_term OR concepto ILIKE :s_term)"
+        params["s_term"] = f"%{search.strip()}%"
+
+    query_str = f"""
         SELECT 
             id, numero, factura_numero, factura_referencia, fecha, concepto,
             monto, iva_10, cdc, link_qr, timbrado, sifen_estado, vendedor_nombre
         FROM credit_notes
-        WHERE (:search IS NULL OR cdc ILIKE :s_term OR factura_numero ILIKE :s_term OR concepto ILIKE :s_term)
+        {where_clause}
         ORDER BY fecha DESC
         LIMIT :limit OFFSET :offset;
-    """)
-
-    s_term = f"%{search.strip()}%" if search else None
-    res = await db.execute(query, {"search": search, "s_term": s_term, "limit": limit, "offset": offset})
+    """
+    res = await db.execute(text(query_str), params)
     rows = [dict(r) for r in res.mappings().all()]
 
-    count_res = await db.execute(
-        text("SELECT count(*) FROM credit_notes WHERE (:search IS NULL OR cdc ILIKE :s_term OR factura_numero ILIKE :s_term);"),
-        {"search": search, "s_term": s_term}
-    )
+    count_str = f"SELECT count(*) FROM credit_notes {where_clause};"
+    count_params = {"s_term": params.get("s_term")} if "s_term" in params else {}
+    count_res = await db.execute(text(count_str), count_params)
     total = count_res.scalar() or 0
 
     return {

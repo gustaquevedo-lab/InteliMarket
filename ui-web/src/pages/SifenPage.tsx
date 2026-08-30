@@ -2,19 +2,22 @@ import { useState, useEffect, useRef } from "react"
 import {
   FileText, RefreshCw, Search, X, Loader2, CheckCircle, XCircle, AlertTriangle, Clock,
   QrCode, ExternalLink, Plus, Shield, Copy, Key, Upload, FileCheck, Check,
-  Printer, Download, Eye, Send, ArrowUpRight, ChevronRight, Zap, Database, Server, Building2, HelpCircle
+  Printer, Download, Eye, Send, ArrowUpRight, ChevronRight, Zap, Database, Server,
+  Building2, HelpCircle, DollarSign, CreditCard, MessageCircle, RotateCcw, Filter,
+  CheckCircle2, Wallet, Receipt, Banknote
 } from "lucide-react"
 import QRCode from "qrcode"
-import { api, type SifenTimbrado } from "../api"
+import { api, type SifenTimbrado, type Sale, type PaymentMethod } from "../api"
 import { useToast } from "../context/ToastContext"
 import { formatPYG } from "../utils/format"
 
-type Tab = "invoices" | "credit_notes" | "emit" | "timbrados" | "telemetry"
+type Tab = "invoices" | "credit_notes" | "cobranzas" | "emit" | "timbrados" | "telemetry"
 
 export default function SifenPage() {
   const [tab, setTab] = useState<Tab>("invoices")
   const [invoices, setInvoices] = useState<any[]>([])
   const [creditNotes, setCreditNotes] = useState<any[]>([])
+  const [pendingSales, setPendingSales] = useState<any[]>([])
   const [timbrados, setTimbrados] = useState<SifenTimbrado[]>([])
   const [telemetry, setTelemetry] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -28,7 +31,12 @@ export default function SifenPage() {
   const [kudeLoading, setKudeLoading] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string>("")
   const [copiedCdc, setCopiedCdc] = useState(false)
-  const [showXmlModal, setShowXmlModal] = useState(false)
+
+  // Payment Modal state
+  const [paymentModal, setPaymentModal] = useState<any | null>(null)
+  const [payAmount, setPayAmount] = useState("")
+  const [payMethod, setPayMethod] = useState("efectivo")
+  const [paying, setPaying] = useState(false)
 
   // Emit form state
   const [emitRuc, setEmitRuc] = useState("")
@@ -36,7 +44,6 @@ export default function SifenPage() {
   const [emitItemDesc, setEmitItemDesc] = useState("DEL VALLE DURAZNO 1LX6")
   const [emitItemQty, setEmitItemQty] = useState(6)
   const [emitItemPrice, setEmitItemPrice] = useState(9283)
-  const [emitPayment, setEmitPayment] = useState("contado")
   const [emitting, setEmitting] = useState(false)
 
   const toast = useToast()
@@ -87,6 +94,20 @@ export default function SifenPage() {
     }
   }
 
+  // Load Cobranzas (Pending Sales)
+  async function loadCobranzas() {
+    setLoading(true)
+    try {
+      const res = await api.sales.list({ limit: 50, estado: "pendiente" })
+      setPendingSales(res || [])
+      setTotalCount(res?.length || 0)
+    } catch {
+      setPendingSales([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Load Telemetry & Engine status
   async function loadTelemetry() {
     try {
@@ -110,6 +131,7 @@ export default function SifenPage() {
   useEffect(() => {
     if (tab === "invoices") loadInvoices(true)
     if (tab === "credit_notes") loadCreditNotes(true)
+    if (tab === "cobranzas") loadCobranzas()
     if (tab === "timbrados") loadTimbrados()
     if (tab === "telemetry") loadTelemetry()
   }, [tab, estadoFilter])
@@ -122,7 +144,6 @@ export default function SifenPage() {
     try {
       const doc = await api.sifen.getKude(identifier)
       setSelectedKude(doc)
-      // Generate QR Code data URL
       const qrTarget = doc.link_qr || `https://ekuatia.set.gov.py/consultas/qr?n=${doc.cdc || ''}`
       const url = await QRCode.toDataURL(qrTarget, {
         width: 180,
@@ -155,7 +176,6 @@ export default function SifenPage() {
     setEmitting(true)
     try {
       toast.info("InteliFact SIFEN", "Generando CDC y firmando documento...")
-      // In normal flow this calls backend emit endpoint
       setTimeout(() => {
         setEmitting(false)
         toast.success("SIFEN e-Kuatia", "Comprobante electrónico #001-001-0260556 emitido y aprobado exitosamente")
@@ -168,7 +188,27 @@ export default function SifenPage() {
     }
   }
 
-  // Copy CDC to clipboard
+  // Handle Register Payment
+  async function handleRegisterPayment() {
+    if (!paymentModal || !payAmount) return
+    setPaying(true)
+    try {
+      toast.info("Cobranzas", "Registrando pago...")
+      await api.sales.addPayment(paymentModal.id, {
+        monto: Number(payAmount),
+        metodo_pago: payMethod,
+        referencia: "PAGO-LOCAL",
+      })
+      toast.success("Cobranzas", "Pago aplicado exitosamente")
+      setPaymentModal(null)
+      loadCobranzas()
+    } catch (err: any) {
+      toast.error("Error", err.message || "No se pudo registrar el pago")
+    } finally {
+      setPaying(false)
+    }
+  }
+
   function copyCdcToClipboard(cdc: string) {
     navigator.clipboard.writeText(cdc)
     setCopiedCdc(true)
@@ -176,7 +216,6 @@ export default function SifenPage() {
     setTimeout(() => setCopiedCdc(false), 2000)
   }
 
-  // Format 44 digits CDC with spaces (0180 0054 ...)
   function formatCdcFormatted(cdc: string) {
     if (!cdc) return "N/A"
     return cdc.replace(/(\d{4})/g, "$1 ").trim()
@@ -185,7 +224,7 @@ export default function SifenPage() {
   return (
     <div className="min-h-screen bg-slate-50/80 dark:bg-[#070a13] text-slate-900 dark:text-slate-100 p-2 sm:p-4 md:p-6 lg:p-8 space-y-8 max-w-[1750px] mx-auto pb-20 font-sans transition-colors duration-300">
       
-      {/* Background Ambient Glow & Grid */}
+      {/* Background Ambient Glow */}
       <div className="fixed inset-0 pointer-events-none z-0">
         <div className="absolute -top-40 left-1/4 w-[600px] h-[600px] bg-indigo-500/5 dark:bg-indigo-600/10 rounded-full blur-[140px]" />
         <div className="absolute top-1/3 -right-40 w-[600px] h-[600px] bg-emerald-500/5 dark:bg-emerald-600/10 rounded-full blur-[140px]" />
@@ -215,7 +254,7 @@ export default function SifenPage() {
 
             <div className="flex flex-wrap items-baseline gap-3">
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-3">
-                Facturación Electrónica <span className="bg-gradient-to-r from-indigo-600 via-indigo-400 to-teal-400 bg-clip-text text-transparent">SIFEN</span>
+                Facturación & Ventas <span className="bg-gradient-to-r from-indigo-600 via-indigo-400 to-teal-400 bg-clip-text text-transparent">SIFEN</span>
               </h1>
               <span className="text-xs px-3.5 py-1 rounded-xl bg-amber-500/15 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 font-black border border-amber-500/40 flex items-center gap-2 shadow-2xs font-mono">
                 <Building2 className="w-3.5 h-3.5" />
@@ -241,6 +280,7 @@ export default function SifenPage() {
               onClick={() => {
                 if (tab === "invoices") loadInvoices(true)
                 if (tab === "credit_notes") loadCreditNotes(true)
+                if (tab === "cobranzas") loadCobranzas()
                 if (tab === "telemetry") loadTelemetry()
               }}
               disabled={loading}
@@ -255,7 +295,7 @@ export default function SifenPage() {
         </div>
 
         {/* ──────────────────────────────────────────────────────────────────────────
-            2. NAVIGATION TABS (GLASSMORPHISM LUXURY PILLS)
+            2. NAVIGATION TABS (UNIFIED SIFEN & COMMERCIAL SUITE)
         ────────────────────────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-2">
           
@@ -285,6 +325,18 @@ export default function SifenPage() {
             </button>
 
             <button
+              onClick={() => setTab("cobranzas")}
+              className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                tab === "cobranzas"
+                  ? "bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-[0_2px_15px_rgba(245,158,11,0.35)] scale-[1.02]"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              <Wallet className="w-4 h-4" />
+              <span>COBRANZAS & PAGOS</span>
+            </button>
+
+            <button
               onClick={() => setTab("emit")}
               className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
                 tab === "emit"
@@ -293,19 +345,19 @@ export default function SifenPage() {
               }`}
             >
               <Zap className="w-4 h-4" />
-              <span>EMISIÓN RÁPIDA / AUTÓNOMA</span>
+              <span>EMISIÓN RÁPIDA</span>
             </button>
 
             <button
               onClick={() => setTab("timbrados")}
               className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
                 tab === "timbrados"
-                  ? "bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-[0_2px_15px_rgba(245,158,11,0.35)] scale-[1.02]"
+                  ? "bg-gradient-to-r from-slate-700 to-slate-600 text-white shadow-[0_2px_15px_rgba(100,116,139,0.35)] scale-[1.02]"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
               <Shield className="w-4 h-4" />
-              <span>TIMBRADOS & FIRMA .P12</span>
+              <span>TIMBRADOS & FIRMA</span>
             </button>
 
             <button
@@ -317,11 +369,11 @@ export default function SifenPage() {
               }`}
             >
               <Database className="w-4 h-4" />
-              <span>COLA RESILIENTE & DEV-SERVER</span>
+              <span>COLA RESILIENTE DEV-SERVER</span>
             </button>
           </div>
 
-          {/* Search Bar & Instant Filters */}
+          {/* Search Bar */}
           {(tab === "invoices" || tab === "credit_notes") && (
             <div className="flex items-center gap-3 w-full sm:w-auto">
               <div className="relative flex-1 sm:w-80">
@@ -390,7 +442,7 @@ export default function SifenPage() {
                       </tr>
                     ) : (
                       invoices.map((inv: any) => {
-                        const cleanDigits = "".join ? "".join(filterDigits(inv.factura_numero || inv.numero)) : String(inv.factura_numero || inv.numero || "0000001").replace(/\D/g, '')
+                        const cleanDigits = String(inv.factura_numero || inv.numero || "0000001").replace(/\D/g, '')
                         const formattedNumber = `001-001-${cleanDigits.slice(-7).padStart(7, '0')}`
 
                         return (
@@ -581,7 +633,7 @@ export default function SifenPage() {
                             </td>
 
                             <td className="py-4 px-5 font-mono text-slate-700 dark:text-slate-300">
-                              {nc.factura_referencia || "200010010259884"}
+                              {nc.factura_referencia ? `001-001-${String(nc.factura_referencia).replace(/\D/g, '').slice(-7).padStart(7, '0')}` : "200010010259884"}
                             </td>
 
                             <td className="py-4 px-5">
@@ -624,12 +676,121 @@ export default function SifenPage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination bar for NC */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs font-mono">
+                <span className="text-slate-500">
+                  Mostrando {creditNotes.length} de {totalCount.toLocaleString()} notas de crédito
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (page > 0) {
+                        setPage(page - 1)
+                        loadCreditNotes()
+                      }
+                    }}
+                    disabled={page === 0}
+                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-40 cursor-pointer"
+                  >
+                    ← Anterior
+                  </button>
+                  <span className="px-2 font-bold text-slate-700 dark:text-slate-300">Pág. {page + 1}</span>
+                  <button
+                    onClick={() => {
+                      if ((page + 1) * 50 < totalCount) {
+                        setPage(page + 1)
+                        loadCreditNotes()
+                      }
+                    }}
+                    disabled={(page + 1) * 50 >= totalCount}
+                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 disabled:opacity-40 cursor-pointer"
+                  >
+                    Siguiente →
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         )}
 
         {/* ──────────────────────────────────────────────────────────────────────────
-            5. TAB 3: EMISIÓN RÁPIDA SIFEN / SANDBOX
+            5. TAB 3: COBRANZAS & PAGOS
+        ────────────────────────────────────────────────────────────────────────── */}
+        {tab === "cobranzas" && (
+          <div className="space-y-4">
+            <div className="rounded-3xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-2xl border border-slate-200/90 dark:border-slate-800/90 shadow-[0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[0_0_40px_rgba(0,0,0,0.5)] overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-100/80 dark:bg-slate-950/80 text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="py-4 px-5">Venta / Factura</th>
+                      <th className="py-4 px-5">Fecha</th>
+                      <th className="py-4 px-5 text-right">Total</th>
+                      <th className="py-4 px-5 text-right">Saldo Pendiente</th>
+                      <th className="py-4 px-5 text-center">Estado</th>
+                      <th className="py-4 px-5 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
+                    {loading ? (
+                      <tr>
+                        <td colSpan={6} className="py-16 text-center text-slate-400">
+                          <Loader2 className="w-8 h-8 animate-spin mx-auto text-amber-500 mb-2" />
+                          <p className="font-mono text-xs">Cargando Cobranzas...</p>
+                        </td>
+                      </tr>
+                    ) : pendingSales.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-16 text-center text-slate-400 font-mono text-xs">
+                          No hay operaciones pendientes de cobro en este momento.
+                        </td>
+                      </tr>
+                    ) : (
+                      pendingSales.map((sale: any) => (
+                        <tr key={sale.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="py-4 px-5 font-mono font-bold text-slate-900 dark:text-white">
+                            #{sale.numero}
+                          </td>
+                          <td className="py-4 px-5 font-mono text-slate-500">
+                            {sale.fecha ? new Date(sale.fecha).toLocaleDateString("es-PY") : "N/A"}
+                          </td>
+                          <td className="py-4 px-5 text-right font-mono font-bold">
+                            {formatPYG(Number(sale.total || 0))}
+                          </td>
+                          <td className="py-4 px-5 text-right font-mono font-black text-amber-500">
+                            {formatPYG(Number(sale.saldo ?? sale.total ?? 0))}
+                          </td>
+                          <td className="py-4 px-5 text-center">
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                              PENDIENTE
+                            </span>
+                          </td>
+                          <td className="py-4 px-5 text-center">
+                            <button
+                              onClick={() => {
+                                setPaymentModal(sale)
+                                setPayAmount(String(sale.saldo ?? sale.total ?? ""))
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs flex items-center gap-1.5 mx-auto cursor-pointer"
+                            >
+                              <DollarSign className="w-3.5 h-3.5" />
+                              <span>COBRAR</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ──────────────────────────────────────────────────────────────────────────
+            6. TAB 4: EMISIÓN RÁPIDA SIFEN
         ────────────────────────────────────────────────────────────────────────── */}
         {tab === "emit" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -747,7 +908,7 @@ export default function SifenPage() {
         )}
 
         {/* ──────────────────────────────────────────────────────────────────────────
-            6. TAB 5: TELEMETRÍA RESILIENTE HACIA DEV-SERVER
+            7. TAB 5: TELEMETRÍA RESILIENTE HACIA DEV-SERVER
         ────────────────────────────────────────────────────────────────────────── */}
         {tab === "telemetry" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -812,7 +973,7 @@ export default function SifenPage() {
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          7. MODAL VISOR KUDE OFICIAL (IDÉNTICO AL PDF LEGAL DE CASA GONZALITO)
+          8. MODAL VISOR KUDE OFICIAL (IDÉNTICO AL PDF LEGAL DE CASA GONZALITO)
       ────────────────────────────────────────────────────────────────────────── */}
       {selectedKude && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
@@ -988,10 +1149,66 @@ export default function SifenPage() {
         </div>
       )}
 
+      {/* ──────────────────────────────────────────────────────────────────────────
+          9. MODAL COBRANZA / REGISTRO DE PAGO
+      ────────────────────────────────────────────────────────────────────────── */}
+      {paymentModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-md rounded-3xl p-6 space-y-5 shadow-2xl">
+            <div className="flex justify-between items-center">
+              <h3 className="font-black text-base text-slate-900 dark:text-white">Registrar Cobro de Venta #{paymentModal.numero}</h3>
+              <button onClick={() => setPaymentModal(null)} className="text-slate-400 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 font-mono text-xs">
+              <div className="flex justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                <span className="text-slate-400">Total Venta:</span>
+                <span className="font-bold text-white">{formatPYG(Number(paymentModal.total || 0))}</span>
+              </div>
+              <div className="flex justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                <span className="text-slate-400">Saldo Pendiente:</span>
+                <span className="font-bold text-amber-400">{formatPYG(Number(paymentModal.saldo ?? paymentModal.total ?? 0))}</span>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Monto a Cobrar (Gs.)</label>
+                <input
+                  type="number"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-white font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Método de Pago</label>
+                <select
+                  value={payMethod}
+                  onChange={(e) => setPayMethod(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-white font-bold"
+                >
+                  <option value="efectivo">Efectivo</option>
+                  <option value="transferencia">Transferencia Bancaria (SPI/SIPAP)</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="tarjeta">Tarjeta Débito / Crédito</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              onClick={handleRegisterPayment}
+              disabled={paying || !payAmount}
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs uppercase flex items-center justify-center gap-2 cursor-pointer shadow-lg"
+            >
+              {paying ? <Loader2 className="w-4 h-4 animate-spin text-black" /> : <CheckCircle className="w-4 h-4" />}
+              <span>CONFIRMAR PAGO</span>
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   )
-}
-
-function filterDigits(val: any): string {
-  return String(val || "").replace(/\D/g, "")
 }
