@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { ThemeProvider } from "./context/ThemeContext"
 import { AuthProvider, useAuth } from "./context/AuthContext"
 import { FeatureProvider, useFeatures } from "./context/FeatureContext"
+import { BranchProvider } from "./context/BranchContext"
 import { OfflineProvider } from "./context/OfflineContext"
 import { PWAUpdatePrompt } from "./components/PWAUpdatePrompt"
 import Layout from "./components/Layout"
@@ -329,14 +330,16 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <FeatureProvider>
-          <OfflineProvider>
-            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-              <PWAUpdatePrompt />
-              <ErrorBoundary>
-                <AppRoutes />
-              </ErrorBoundary>
-            </BrowserRouter>
-          </OfflineProvider>
+          <BranchProvider>
+            <OfflineProvider>
+              <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                <PWAUpdatePrompt />
+                <ErrorBoundary>
+                  <AppRoutes />
+                </ErrorBoundary>
+              </BrowserRouter>
+            </OfflineProvider>
+          </BranchProvider>
         </FeatureProvider>
       </AuthProvider>
     </ThemeProvider>
