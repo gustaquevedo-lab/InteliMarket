@@ -484,6 +484,8 @@ export default function POSPage() {
   const [weightMismatch, setWeightMismatch] = useState<{ product: Product; etiquetaKg: number; balanzaKg: number } | null>(null)
     const [scaleUsbConnected, setScaleUsbConnected] = useState<boolean>(false)
   const [isScaleEnabled, setIsScaleEnabled] = useState<boolean>(() => localStorage.getItem("pos_scale_enabled") === "true")
+  const [isLostDemandEnabled, setIsLostDemandEnabled] = useState<boolean>(() => localStorage.getItem("pos_lost_demand_enabled") === "true")
+  const [isExtraClubEnabled, setIsExtraClubEnabled] = useState<boolean>(() => localStorage.getItem("pos_extra_club_enabled") === "true")
   const [scalePortName, setScalePortName] = useState<string>("COM3")
   const [scaleBaudRate, setScaleBaudRate] = useState<number>(9600)
   const [scaleRawLog, setScaleRawLog] = useState<string>("Balanza lista. Presione Probar Lectura.")
@@ -4790,6 +4792,27 @@ export default function POSPage() {
 
           <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
 
+          {isLostDemandEnabled && (
+            <button
+              onClick={() => setShowLostDemandModal(true)}
+              title="Registrar Producto que el Cliente No Encontró (F4)"
+              className="p-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer bg-amber-500/10 text-amber-600 border-amber-500/40 hover:bg-amber-500/20 shrink-0"
+            >
+              <Package className="w-4 h-4" />
+            </button>
+          )}
+
+          {isExtraClubEnabled && (
+            <button
+              onClick={() => { setShowExtraClubBalanceModal(true); setBalanceModalQuery(""); setBalanceModalResults([]); setBalanceModalSelected(null) }}
+              title="Consultar saldo de línea de crédito Extra Club"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-600/10 text-purple-600 border border-purple-500/30 hover:bg-purple-600/20 cursor-pointer shrink-0"
+            >
+              <Star className="w-3.5 h-3.5" />
+              <span className="text-[11px] hidden sm:inline">Extra Club</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowCierreTurnoModal(true)}
             title="Cierre de Turno y Arqueo"
@@ -4817,6 +4840,11 @@ export default function POSPage() {
                   <div className={`font-bold text-xs truncate ${textHeading}`}>
                     {customer.nombre}
                   </div>
+                  {isExtraClubEnabled && ((customer as any).extra_club_numero || (customer as any).extra_club_activo) && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-600 dark:text-purple-300 text-[9px] font-black uppercase tracking-wider shrink-0 border border-purple-500/30 flex items-center gap-0.5">
+                      <Star className="w-2.5 h-2.5 fill-purple-500" /> Extra Club
+                    </span>
+                  )}
 
                 </div>
                 <div className={`text-[10px] font-posMono tabular-nums ${textMuted}`}>
@@ -5785,6 +5813,84 @@ export default function POSPage() {
                     </div>
                   )
                 })}
+              </div>
+
+              {/* Opciones Opcionales y Módulos Adicionales con Toggle */}
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider block">
+                  ⚙️ Módulos Opcionales del POS (Activar / Desactivar)
+                </span>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !isScaleEnabled
+                      setIsScaleEnabled(next)
+                      localStorage.setItem("pos_scale_enabled", next ? "true" : "false")
+                      toast.success(next ? "Balanza USB Habilitada" : "Balanza USB Deshabilitada")
+                    }}
+                    className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      isScaleEnabled
+                        ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 text-emerald-700 dark:text-emerald-300 shadow-xs"
+                        : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className="text-xs font-bold">⚖️ Balanza USB (F3)</span>
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isScaleEnabled ? "bg-emerald-500 text-white" : "bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}>
+                        {isScaleEnabled ? "ON" : "OFF"}
+                      </span>
+                    </div>
+                    <span className="text-[10px] opacity-80">Pesaje en caja Balmak/Toledo</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !isExtraClubEnabled
+                      setIsExtraClubEnabled(next)
+                      localStorage.setItem("pos_extra_club_enabled", next ? "true" : "false")
+                      toast.success(next ? "Extra Club Habilitado" : "Extra Club Deshabilitado")
+                    }}
+                    className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      isExtraClubEnabled
+                        ? "bg-purple-50 dark:bg-purple-950/30 border-purple-500 text-purple-700 dark:text-purple-300 shadow-xs"
+                        : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className="text-xs font-bold">⭐ Extra Club</span>
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isExtraClubEnabled ? "bg-purple-500 text-white" : "bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}>
+                        {isExtraClubEnabled ? "ON" : "OFF"}
+                      </span>
+                    </div>
+                    <span className="text-[10px] opacity-80">Puntos y crédito fidelidad</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !isLostDemandEnabled
+                      setIsLostDemandEnabled(next)
+                      localStorage.setItem("pos_lost_demand_enabled", next ? "true" : "false")
+                      toast.success(next ? "Demanda Insatisfecha Habilitada" : "Demanda Insatisfecha Deshabilitada")
+                    }}
+                    className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      isLostDemandEnabled
+                        ? "bg-amber-50 dark:bg-amber-950/30 border-amber-500 text-amber-700 dark:text-amber-300 shadow-xs"
+                        : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className="text-xs font-bold">📝 Demanda F4</span>
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isLostDemandEnabled ? "bg-amber-500 text-white" : "bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}>
+                        {isLostDemandEnabled ? "ON" : "OFF"}
+                      </span>
+                    </div>
+                    <span className="text-[10px] opacity-80">Productos no encontrados</span>
+                  </button>
+                </div>
               </div>
 
               <div className="flex gap-2 pt-2">
