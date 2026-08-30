@@ -23,16 +23,15 @@ const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 type TimeRange = "hoy" | "semana" | "mes" | "anio"
 
-// Formato compacto para cifras muy grandes en Guaraníes (evita desbordes)
+// Formato en Guaraníes: siempre en Millones (M) para evitar la confusión anglosajona de "B" (Billion)
 function formatCompactPYG(val: number): string {
-  if (Math.abs(val) >= 1_000_000_000) {
-    return `Gs. ${(val / 1_000_000_000).toFixed(2)}B`
+  const abs = Math.abs(val)
+  if (abs >= 1_000_000) {
+    const mill = Math.round(val / 1_000_000)
+    return `Gs. ${mill.toLocaleString('es-PY')}M`
   }
-  if (Math.abs(val) >= 1_000_000) {
-    return `Gs. ${(val / 1_000_000).toFixed(1)}M`
-  }
-  if (Math.abs(val) >= 1_000) {
-    return `Gs. ${(val / 1_000).toFixed(0)}k`
+  if (abs >= 1_000) {
+    return `Gs. ${Math.round(val / 1_000).toLocaleString('es-PY')}k`
   }
   return formatPYG(val)
 }
