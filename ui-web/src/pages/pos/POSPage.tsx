@@ -283,15 +283,12 @@ function normalizeCustomer(c: any): Customer {
 }
 
 const PUNTOS_EMISION = [
-  { id: "001-012", nombre: "Caja 01 · Salón Central (Boca 012)" },
-  { id: "001-013", nombre: "Caja 02 · Salón Central (Boca 013)" },
-  { id: "001-014", nombre: "Caja 03 · Salón Central (Boca 014)" },
-  { id: "001-015", nombre: "Caja 04 · Salón Central (Boca 015)" },
-  { id: "001-016", nombre: "Caja 05 · Salón Central (Boca 016)" },
-  { id: "001-017", nombre: "Caja 06 · Salón Central (Boca 017)" },
-  { id: "001-018", nombre: "Caja 07 · Línea de Caja (Boca 018)" },
-  { id: "001-019", nombre: "Caja Especial Mayorista / Administración (Boca 019)" },
-  { id: "001-020", nombre: "Caja Auxiliar / Refuerzo (Boca 020)" },
+  { id: "001-001", nombre: "Caja Mostrador 01 · Casa Central (Punto 001)" },
+  { id: "001-002", nombre: "Caja Mostrador 02 · Casa Central (Punto 002)" },
+  { id: "001-003", nombre: "Caja Mayorista 03 · Salón / Despacho (Punto 003)" },
+  { id: "001-004", nombre: "Caja Cobranzas / Créditos (Punto 004)" },
+  { id: "001-005", nombre: "Caja Ventas Salón B2C / Preventa (Punto 005)" },
+  { id: "001-010", nombre: "Caja Administración / Tesorería (Punto 010)" },
 ]
 
 // Padrón de Top Productos Verificados de Supermercado Extra
@@ -353,10 +350,10 @@ export default function POSPage() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        return parsed.puntoEmision || "001-012"
+        return parsed.puntoEmision || "001-001"
       } catch (e) {}
     }
-    return "001-012"
+    return "001-001"
   })
 
   // Caja/punto de emisión fijos por máquina física (hostname de Windows,
@@ -368,7 +365,7 @@ export default function POSPage() {
   const [terminalAssignment, setTerminalAssignment] = useState<{ id: string; punto_emision: string; caja_nombre: string } | null>(null)
   const [terminalAssignmentChecked, setTerminalAssignmentChecked] = useState(false)
   const [showAssignTerminalModal, setShowAssignTerminalModal] = useState(false)
-  const [assignPuntoEmision, setAssignPuntoEmision] = useState("012")
+  const [assignPuntoEmision, setAssignPuntoEmision] = useState("001")
   const [assignCajaNombre, setAssignCajaNombre] = useState("")
   const [showAperturaModal, setShowAperturaModal] = useState<boolean>(!cajaAbierta)
   const [montoAperturaPyg, setMontoAperturaPyg] = useState<string>("300.000")
@@ -5325,9 +5322,9 @@ export default function POSPage() {
       {/* ── 3. MODAL OBLIGATORIO DE APERTURA DE CAJA AL INICIAR SESIÓN ───────── */}
       {showAperturaModal && (
         <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border-2 border-blue-500 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100">
+          <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
                 <Wallet className="w-5 h-5" />
               </div>
               <div>
@@ -5431,7 +5428,7 @@ export default function POSPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-orange hover:brightness-95 text-[#1C1710] font-black py-3 rounded-xl shadow-lg shadow-orange-500/30 transition-all text-sm flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl shadow-lg shadow-emerald-500/20 transition-all text-sm flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CheckCircle className="w-4 h-4" />
                 <span>Confirmar Apertura e Iniciar Cobros</span>
@@ -5447,7 +5444,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center justify-between mb-3 border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
                   <Scale className="w-5 h-5" />
                 </div>
                 <div>
@@ -5626,7 +5623,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
                   <Scale className="w-5 h-5 animate-pulse" />
                 </div>
                 <div>
@@ -5713,7 +5710,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-3 border-b border-slate-200 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
                   <Sliders className="w-5 h-5" />
                 </div>
                 <div>
@@ -5865,7 +5862,7 @@ export default function POSPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 bg-brand-orange hover:brightness-95 text-[#1C1710] font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-orange-500/30 cursor-pointer"
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 cursor-pointer"
                 >
                   <Save className="w-4 h-4" />
                   <span>Guardar Asignaciones de POS</span>
@@ -5880,7 +5877,7 @@ export default function POSPage() {
       {showRemoteAuthModal && (
         <div className="fixed inset-0 z-[125] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-brand-orange rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in text-center">
-            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-brand-orange flex items-center justify-center text-[#1C1710] shadow-lg shadow-orange-500/30 animate-pulse">
+            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 animate-pulse">
               <ShieldAlert className="w-7 h-7" />
             </div>
             <h2 className="text-lg font-black font-posDisplay tracking-tight mb-1">Esperando Autorización</h2>
@@ -5912,7 +5909,7 @@ export default function POSPage() {
                 setSupervisorEmail("")
                 setShowSupervisorModal(true)
               }}
-              className="w-full py-3 rounded-xl bg-brand-orange hover:brightness-95 text-[#1C1710] font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-orange-500/30 cursor-pointer mb-2"
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer mb-2"
             >
               <KeyRound className="w-4 h-4" /> Tengo un supervisor acá — ingresar clave
             </button>
@@ -5946,7 +5943,7 @@ export default function POSPage() {
         <div className="fixed inset-0 z-[125] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
                 <ShieldAlert className="w-6 h-6" />
               </div>
               <div>
@@ -6044,7 +6041,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between mb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
                   <RotateCcw className="w-5 h-5" />
                 </div>
                 <div>
@@ -6248,9 +6245,9 @@ export default function POSPage() {
       {/* ── ASIGNAR ESTA MÁQUINA A UNA CAJA FIJA (requiere supervisor) ──────── */}
       {showAssignTerminalModal && (
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border-2 border-blue-500 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100">
+          <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
                 <Lock className="w-5 h-5" />
               </div>
               <div>
@@ -6301,7 +6298,7 @@ export default function POSPage() {
                     setShowAssignTerminalModal(false)
                     requestSupervisorAuthorization({ type: "assign_terminal" })
                   }}
-                  className="flex-1 py-3 bg-brand-orange hover:brightness-95 text-[#1C1710] font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-orange-500/30 cursor-pointer"
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 cursor-pointer"
                 >
                   <ShieldAlert className="w-4 h-4" />
                   <span>Autorizar y Asignar</span>
@@ -7382,7 +7379,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl max-w-lg w-full p-5 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center justify-between mb-3 border-b border-slate-200 dark:border-slate-800 pb-2">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
                   <User className="w-5 h-5" />
                 </div>
                 <h3 className="font-black text-sm text-slate-900 dark:text-white font-posDisplay tracking-tight">Seleccionar Cliente para Facturación</h3>
@@ -7561,7 +7558,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100 max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between mb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
                   <Pause className="w-5 h-5" />
                 </div>
                 <div>
@@ -7618,7 +7615,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between mb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
                   <Search className="w-5 h-5" />
                 </div>
                 <div>
@@ -7833,7 +7830,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-2xl max-w-lg w-full max-h-[80vh] flex flex-col shadow-2xl text-slate-900 dark:text-slate-100">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] shrink-0 shadow-sm shadow-orange-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-emerald-500/20">
                   <Printer className="w-5 h-5" />
                 </div>
                 <h2 className="text-base font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Reimprimir Comprobante</h2>
@@ -7847,7 +7844,7 @@ export default function POSPage() {
               <button
                 onClick={() => setReimprimirTab("ventas")}
                 className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer ${
-                  reimprimirTab === "ventas" ? "bg-brand-orange text-[#1C1710]" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                  reimprimirTab === "ventas" ? "bg-emerald-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                 }`}
               >
                 Ventas
@@ -7855,7 +7852,7 @@ export default function POSPage() {
               <button
                 onClick={() => { setReimprimirTab("devoluciones"); if (reimprimirReturns.length === 0) fetchReimprimirReturns() }}
                 className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer ${
-                  reimprimirTab === "devoluciones" ? "bg-brand-orange text-[#1C1710]" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                  reimprimirTab === "devoluciones" ? "bg-emerald-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                 }`}
               >
                 Devoluciones
@@ -7995,7 +7992,7 @@ export default function POSPage() {
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-amber-500/50 rounded-2xl max-w-2xl w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
                 <Package className="w-5 h-5" />
               </div>
               <div>
@@ -8206,7 +8203,7 @@ export default function POSPage() {
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
                 <Lock className="w-5 h-5" />
               </div>
               <div>
@@ -8326,7 +8323,7 @@ export default function POSPage() {
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-orange-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black shadow-sm shadow-emerald-500/20">
                 <Banknote className="w-5 h-5" />
               </div>
               <div>
@@ -8532,7 +8529,7 @@ export default function POSPage() {
           <div className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-orange-500/50 p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6">
             {cuponModalStep === "pregunta" ? (
               <div className="text-center space-y-4">
-                <div className="w-16 h-16 bg-gradient-to-tr from-orange-500 to-amber-400 text-white rounded-3xl mx-auto flex items-center justify-center shadow-lg shadow-orange-500/30 animate-bounce">
+                <div className="w-16 h-16 bg-gradient-to-tr from-orange-500 to-amber-400 text-white rounded-3xl mx-auto flex items-center justify-center shadow-lg shadow-emerald-500/20 animate-bounce">
                   <Ticket className="w-8 h-8" />
                 </div>
 
@@ -8579,7 +8576,7 @@ export default function POSPage() {
 
                   <button
                     onClick={() => setCuponModalStep("formulario")}
-                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-orange-500/30 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   >
                     <span>Sí, Participar</span>
                     <ArrowRight className="w-4 h-4" />
@@ -8709,7 +8706,7 @@ export default function POSPage() {
                 <button
                   onClick={handleConfirmCupon}
                   disabled={savingCupon}
-                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-orange-500/30 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 mt-2"
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 mt-2"
                 >
                   {savingCupon ? (
                     <>
