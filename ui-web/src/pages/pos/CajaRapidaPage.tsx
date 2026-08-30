@@ -293,30 +293,28 @@ const PUNTOS_EMISION = [
 
 // Padrón de Top Productos Verificados de Supermercado Extra
 const TOP_CATALOG_SEED: Partial<Product>[] = [
-  { id: "seed-1", nombre: "COCA COLA PET 250ML (6)", sku: "118971", codigo_barra: "7840058001887", precio_venta: 3500 as any, stock_minimo: 48, imagen_url: "/uploads/products/118971.jpg" },
-  { id: "seed-2", nombre: "COCA COLA PET 1L (4)", sku: "118900", codigo_barra: "7840058009449", precio_venta: 7900 as any, stock_minimo: 36, imagen_url: "/uploads/products/118900.jpg" },
-  { id: "seed-3", nombre: "COCA COLA PET 500ML (6)", sku: "6202", codigo_barra: "7840058000019", precio_venta: 6500 as any, stock_minimo: 24, imagen_url: "/uploads/products/6202.jpg" },
-  { id: "seed-4", nombre: "COCA COLA ZERO PET 250ML (6)", sku: "118974", codigo_barra: "7840058002556", precio_venta: 3500 as any, stock_minimo: 48, imagen_url: "/uploads/products/118974.jpg" },
-  { id: "seed-5", nombre: "FANTA NARANJA PET 250ML (6)", sku: "118895", codigo_barra: "7840058010339", precio_venta: 3500 as any, stock_minimo: 30, imagen_url: "/uploads/products/118895.jpg" },
-  { id: "seed-6", nombre: "PAN FRANCES KG", sku: "120257", codigo_barra: "2000098", precio_venta: 10000 as any, stock_minimo: 100, tipo_venta: "peso" as any },
-  { id: "seed-7", nombre: "TOMATE SALSA KG", sku: "120178", codigo_barra: "2000077", precio_venta: 11700 as any, stock_minimo: 80, tipo_venta: "peso" as any },
-  { id: "seed-8", nombre: "CEBOLLA KG", sku: "120179", codigo_barra: "2000078", precio_venta: 9477 as any, stock_minimo: 95, tipo_venta: "peso" as any, imagen_url: "/uploads/products/120179.jpg" },
-  { id: "seed-9", nombre: "BANANA KARAPE KG", sku: "120180", codigo_barra: "2000079", precio_venta: 7200 as any, stock_minimo: 60, tipo_venta: "peso" as any },
-  { id: "seed-10", nombre: "PAPA ESPECIAL KG", sku: "120396", codigo_barra: "2000164", precio_venta: 7500 as any, stock_minimo: 120, tipo_venta: "peso" as any },
-  { id: "seed-11", nombre: "COAMO ACEITE DE SOJA 900ML (20)", sku: "119293", codigo_barra: "7896279600538", precio_venta: 8750 as any, stock_minimo: 50, imagen_url: "/uploads/products/119293.jpg" },
-  { id: "seed-12", nombre: "HUEVO BLANCO C/30", sku: "121082", codigo_barra: "2000341", precio_venta: 17377 as any, stock_minimo: 40 },
-  { id: "seed-13", nombre: "LECHE SACHET ULTRA X1LT", sku: "120020", codigo_barra: "7840042000216", precio_venta: 6800 as any, stock_minimo: 72, imagen_url: "/uploads/products/120020.jpg" },
-  { id: "seed-14", nombre: "QUESO MUZZARELA B", sku: "122534", codigo_barra: "2000370", precio_venta: 55777 as any, stock_minimo: 35, tipo_venta: "peso" as any, imagen_url: "/uploads/products/122534.jpg" },
-  { id: "seed-15", nombre: "ML COSTILLA DE PRIMERA / MATAMBRE KG", sku: "120093", codigo_barra: "2000007", precio_venta: 34777 as any, stock_minimo: 45, tipo_venta: "peso" as any },
-  { id: "seed-16", nombre: "ML CARNE MOLIDA DE PRIMERA KG", sku: "120099", codigo_barra: "2000012", precio_venta: 38977 as any, stock_minimo: 50, tipo_venta: "peso" as any },
-  { id: "seed-17", nombre: "BENEDICTINO AGUA PET 500ML (12)", sku: "99109", codigo_barra: "7840058008381", precio_venta: 2000 as any, stock_minimo: 60, imagen_url: "/uploads/products/99109.jpg" },
-  { id: "seed-18", nombre: "BRAHMITA CERV ULTRA CERO LT 269ML (12)", sku: "120121", codigo_barra: "7840050008655", precio_venta: 2500 as any, stock_minimo: 48, imagen_url: "/uploads/products/120121.jpg" },
-  { id: "seed-19", nombre: "GALLETA CUARTEL KG", sku: "120254", codigo_barra: "2000096", precio_venta: 8977 as any, stock_minimo: 30, tipo_venta: "peso" as any },
-  { id: "seed-20", nombre: "BOLSA PLASTICA INTERNA", sku: "120594", codigo_barra: "2000265", precio_venta: 500 as any, stock_minimo: 500 },
-  { id: "seed-21", nombre: "CHIPA TRADICIONAL", sku: "120264", codigo_barra: "2000101", precio_venta: 30977 as any, stock_minimo: 25, tipo_venta: "peso" as any },
-  { id: "seed-22", nombre: "NARANJA KG", sku: "120363", codigo_barra: "2000133", precio_venta: 5200 as any, stock_minimo: 70, tipo_venta: "peso" as any },
-  { id: "seed-23", nombre: "LIMÓN TAITI KG", sku: "120290", codigo_barra: "2000106", precio_venta: 4800 as any, stock_minimo: 65, tipo_venta: "peso" as any, imagen_url: "/uploads/products/120290.jpg" },
-  { id: "seed-24", nombre: "ZANAHORIA KG", sku: "120289", codigo_barra: "2000105", precio_venta: 12500 as any, stock_minimo: 40, tipo_venta: "peso" as any, imagen_url: "/uploads/products/120289.jpg" }
+  { id: "seed-1", nombre: "CERVEZA DEL PUERTO 269MLX12", sku: "345601", codigo_barra: "7840058000001", precio_venta: 36000 as any, stock_minimo: 48, tipo_venta: "unidad" as any },
+  { id: "seed-2", nombre: "BENEDICTINO SIN GAS 500MLX12", sku: "829", codigo_barra: "7840058008381", precio_venta: 24000 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
+  { id: "seed-3", nombre: "TREBOL 1LT.ENTERA MID", sku: "317", codigo_barra: "7840005012379", precio_venta: 6800 as any, stock_minimo: 100, tipo_venta: "unidad" as any },
+  { id: "seed-4", nombre: "KRO JAMON SEMALLO 100GRX10UN", sku: "1151", codigo_barra: "7896221400483", precio_venta: 45000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
+  { id: "seed-5", nombre: "ONE WAY 500MLX6 COCA COLA", sku: "1055", codigo_barra: "7840058000019", precio_venta: 28000 as any, stock_minimo: 50, tipo_venta: "unidad" as any },
+  { id: "seed-6", nombre: "DEL VALLE DURAZNO 200MLX6", sku: "2911", codigo_barra: "7840058008992", precio_venta: 15000 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
+  { id: "seed-7", nombre: "DEL VALLE MANZANA 200MLX6", sku: "2912", codigo_barra: "7840058009050", precio_venta: 15000 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
+  { id: "seed-8", nombre: "PET 2.0 COCA COLA RA", sku: "118", codigo_barra: "7840058008084", precio_venta: 13500 as any, stock_minimo: 80, tipo_venta: "unidad" as any },
+  { id: "seed-9", nombre: "PAJARITO 250GR TRADICIONALX20", sku: "10092", codigo_barra: "7840013000030", precio_venta: 95000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
+  { id: "seed-10", nombre: "ADES MANZANA 200MLX6", sku: "3743", codigo_barra: "7790895643743", precio_venta: 18000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
+  { id: "seed-11", nombre: "FAMLAC 1LT. UAT ENTERA", sku: "325", codigo_barra: "7840005011174", precio_venta: 6200 as any, stock_minimo: 80, tipo_venta: "unidad" as any },
+  { id: "seed-12", nombre: "PAJARITO 500GR TRADICIONAL", sku: "10091", codigo_barra: "7840013000023", precio_venta: 11500 as any, stock_minimo: 50, tipo_venta: "unidad" as any },
+  { id: "seed-13", nombre: "TREBOLIN 200CC.CHOCOLAT.", sku: "313", codigo_barra: "7840005000062", precio_venta: 2500 as any, stock_minimo: 70, tipo_venta: "unidad" as any },
+  { id: "seed-14", nombre: "DASANI PLAIN CON GAS 500X6", sku: "5550", codigo_barra: "7840058002105", precio_venta: 12000 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
+  { id: "seed-15", nombre: "F.DEL VALLE FRESH NARANJA 1.5LTSX4", sku: "1260", codigo_barra: "7840058008312", precio_venta: 22000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
+  { id: "seed-16", nombre: "TANG LARANJA 10DSX18UNX18GR", sku: "71601", codigo_barra: "7622210571601", precio_venta: 38000 as any, stock_minimo: 50, tipo_venta: "unidad" as any },
+  { id: "seed-17", nombre: "ONE WAY C.COLA 250MLX6 FILM DEC.", sku: "3012", codigo_barra: "7840058007988", precio_venta: 18000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
+  { id: "seed-18", nombre: "PET 2.0 FANTA NARANJA FN", sku: "1018", codigo_barra: "7840058010391", precio_venta: 13500 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
+  { id: "seed-19", nombre: "PET 1.500 COCA COLA", sku: "31", codigo_barra: "7840058000675", precio_venta: 10500 as any, stock_minimo: 60, tipo_venta: "unidad" as any },
+  { id: "seed-20", nombre: "TANG UVA INTENSA 10DSX18UNX18GR", sku: "7256", codigo_barra: "7622210571663", precio_venta: 38000 as any, stock_minimo: 50, tipo_venta: "unidad" as any },
+  { id: "seed-21", nombre: "PLATITO P-15 VERDE(600)", sku: "11555", codigo_barra: "7840263111555", precio_venta: 48000 as any, stock_minimo: 30, tipo_venta: "unidad" as any },
+  { id: "seed-22", nombre: "COAMO ACEITE DE SOJA 900ML (20)", sku: "119293", codigo_barra: "7896279600538", precio_venta: 165000 as any, stock_minimo: 40, tipo_venta: "unidad" as any },
 ]
 
 export default function POSPage() {
@@ -2498,17 +2496,16 @@ export default function POSPage() {
     }
   }
 
-  // ── FILTROS DE CATEGORÍAS COMPLETOS ───────────────────────────────────────
+  // ── FILTROS DE CATEGORÍAS MAYORISTAS Y DISTRIBUIDORA ─────────────────────
   const CATEGORY_TABS = [
-    { key: "TOP", label: "⭐ Frecuentes" },
-    { key: "PESABLES", label: "⚖️ Pesables (Balanza)" },
-    { key: "CARNICERIA", label: "🥩 Carnicería" },
-    { key: "PANADERIA", label: "🥖 Panadería & Rotisería" },
-    { key: "VERDULERIA", label: "🥬 Frutas & Verduras" },
+    { key: "TOP", label: "⭐ Top Ventas" },
     { key: "BEBIDAS", label: "🥤 Bebidas & Cervezas" },
-    { key: "LACTEOS", label: "🧀 Lácteos & Fiambres" },
-    { key: "ALMACEN", label: "🥫 Almacén" },
-    { key: "LIMPIEZA", label: "🧼 Limpieza & Perfumería" },
+    { key: "LACTEOS", label: "🧀 Lácteos & Embutidos" },
+    { key: "YERBAS", label: "🌿 Yerba Mate & Despensa" },
+    { key: "JUGOS", label: "🧃 Jugos & Aguas" },
+    { key: "ALMACEN", label: "🥫 Alimentos & Abarrotes" },
+    { key: "DESCARTABLES", label: "📦 Bazar & Descartables" },
+    { key: "TODOS", label: "📋 Todo el Catálogo" },
   ]
 
   const filteredProducts = useMemo(() => {
@@ -2526,91 +2523,49 @@ export default function POSPage() {
       return Array.from(pool.values()).filter((p) => {
         const target = `${p.nombre || ""} ${p.codigo_barra || ""} ${p.sku || ""}`.toLowerCase()
         return tokens.every((token) => target.includes(token))
-      }).slice(0, 45)
+      }).slice(0, 50)
     }
+
+    const baseList = products.length > 0 ? products : (TOP_CATALOG_SEED as Product[])
 
     if (selectedCategoryTab === "TOP") {
-      if (topProductSkus.length > 0 && products.length > 0) {
-        const bySku = new Map(products.map((p) => [p.sku, p]))
-        const ranked = topProductSkus.map((sku) => bySku.get(sku)).filter(Boolean) as Product[]
-        if (ranked.length > 0) return ranked.slice(0, 30)
-      }
-      return (products.length > 0 ? products : TOP_CATALOG_SEED as Product[]).slice(0, 30)
+      return baseList.slice(0, 35)
     }
 
-    if (selectedCategoryTab === "PESABLES") {
-      return products.filter((p: any) => 
-        p.tipo_venta === "peso" || 
-        p.es_pesable || 
-        (p.nombre || "").toUpperCase().includes("KG") ||
-        (p.nombre || "").toUpperCase().includes("KILO")
-      ).slice(0, 35)
-    }
-
-    // A partir de aca, filtro por la categoria REAL del producto
-    // (categoria.nombre, la que ya carga y mantiene el catalogo), no por
-    // palabras sueltas adivinadas del nombre -- eso traia cualquier cosa
-    // (en Carnicería aparecía cualquier producto salvo carne, en Panadería
-    // cualquier cosa salvo pan) porque el nombre de un producto no dice de
-    // forma confiable a que rubro pertenece.
-    const catMatch = (p: Product, keywords: string[]) => {
-      const cat = escposStripAccents((p as any).categoria?.nombre || "").toUpperCase()
-      return cat.length > 0 && keywords.some((k) => cat.includes(k))
-    }
-
-    // Categorías grandes (Almacén tiene 3000+ productos, Limpieza 1600+) no
-    // entran enteras en pantalla ni conviene renderizar todo de una vez --
-    // se corta en CATEGORY_TILE_LIMIT, pero ordenado por lo más vendido
-    // (mismo ranking real de "Frecuentes"), no en cualquier orden. Así lo
-    // que se corta es lo menos relevante, no una selección arbitraria.
-    const topRankIndex = new Map(topProductSkus.map((sku, idx) => [sku, idx]))
-    const rankSlice = (list: Product[], limit: number) => {
-      if (topRankIndex.size === 0) return list.slice(0, limit)
-      const sorted = [...list].sort((a, b) => {
-        const ra = topRankIndex.has(a.sku) ? topRankIndex.get(a.sku)! : Infinity
-        const rb = topRankIndex.has(b.sku) ? topRankIndex.get(b.sku)! : Infinity
-        return ra - rb
-      })
-      return sorted.slice(0, limit)
-    }
-    const CATEGORY_TILE_LIMIT = 150
-
-    if (selectedCategoryTab === "CARNICERIA") {
-      return rankSlice(products.filter((p) => catMatch(p, ["CARNE", "CARNICERIA", "POLLO", "PESCADO", "TILAPIA", "CAMARON"])), CATEGORY_TILE_LIMIT)
-    }
-
-    if (selectedCategoryTab === "PANADERIA") {
-      return rankSlice(products.filter((p) => catMatch(p, ["PANIFIC", "PANADER", "REPOSTER", "HORNEAD", "MASAS"])), CATEGORY_TILE_LIMIT)
-    }
-
-    if (selectedCategoryTab === "VERDULERIA") {
-      return rankSlice(products.filter((p) => catMatch(p, ["VERDU", "FRUTA", "LEGUMBRE", "FLV"])), CATEGORY_TILE_LIMIT)
+    const matchName = (p: Product, keywords: string[]) => {
+      const nom = (p.nombre || "").toUpperCase()
+      return keywords.some((k) => nom.includes(k))
     }
 
     if (selectedCategoryTab === "BEBIDAS") {
-      return rankSlice(products.filter((p) => catMatch(p, ["ALCOHOL", "BEBIDA", "GASEOSA"])), CATEGORY_TILE_LIMIT)
+      return baseList.filter((p) => matchName(p, ["COCA", "CERV", "BEBIDA", "FANTA", "SPRITE", "CRUSH", "PUERTO", "BRAHMA", "SKOL", "HEINEKEN", "STELLA", "SCHIN", "CERVEZA"])).slice(0, 40)
     }
 
     if (selectedCategoryTab === "LACTEOS") {
-      return rankSlice(products.filter((p) => catMatch(p, ["LECHE", "LACTEO", "DERIVADO", "MANTECA", "EMBUTIDO", "FIAMBRE", "CUAJADA"])), CATEGORY_TILE_LIMIT)
+      return baseList.filter((p) => matchName(p, ["TREBOL", "LECHE", "QUESO", "JAMON", "KRO", "FAMLAC", "YOGUR", "MANTECA", "REQUESON", "DULCE DE LECHE"])).slice(0, 40)
+    }
+
+    if (selectedCategoryTab === "YERBAS") {
+      return baseList.filter((p) => matchName(p, ["PAJARITO", "YERBA", "KURUPI", "CAMPESINO", "COLON", "SELECTA", "MATE"])).slice(0, 40)
+    }
+
+    if (selectedCategoryTab === "JUGOS") {
+      return baseList.filter((p) => matchName(p, ["DEL VALLE", "TANG", "ADES", "BENEDICTINO", "DASANI", "AGUA", "CAMPELLA", "JUGO", "FRUGOS", "PULP"])).slice(0, 40)
     }
 
     if (selectedCategoryTab === "ALMACEN") {
-      return rankSlice(products.filter((p) => catMatch(p, [
-        "ALIMENTOS", "FIDEOS", "CONDIMENTOS", "ADEREZOS", "CONSERVADOS", "ARROZ", "AZUCAR",
-        "HARINAS", "ACEITES", "CEREALES", "COMESTIBLES", "ALMACEN", "ABARROTES", "YERBA",
-        "INFUSIONES", "GALLETITA", "DULCES", "SNACKS", "PASTAS",
-      ])), CATEGORY_TILE_LIMIT)
+      return baseList.filter((p) => matchName(p, ["ACEITE", "ARROZ", "HARINA", "AZUCAR", "FIDEO", "EXTRACTO", "SAL", "COAMO", "SOPA", "GALLETA"])).slice(0, 40)
     }
 
-    if (selectedCategoryTab === "LIMPIEZA") {
-      return rankSlice(products.filter((p) => catMatch(p, [
-        "LIMPIEZA", "JABON", "DESODORANTE", "DENTAL", "CAPILAR", "CORPORAL", "FEMENINO",
-        "PERFUMERIA", "HIGIENE", "PIEL", "PAÑAL", "PANAL", "BETUN", "PLAGAS",
-      ])), CATEGORY_TILE_LIMIT)
+    if (selectedCategoryTab === "DESCARTABLES") {
+      return baseList.filter((p) => matchName(p, ["PLATITO", "VASO", "BOLSA", "FILM", "SERVILLETA", "PAPEL", "DESCAR"])).slice(0, 40)
     }
 
-    return products.slice(0, 30)
+    if (selectedCategoryTab === "TODOS") {
+      return baseList.slice(0, 60)
+    }
+
+    return baseList.slice(0, 35)
   }, [search, selectedCategoryTab, products, searchResults, topProductSkus])
 
   // ── ESCANEO DIRECTO Y DECODIFICACIÓN DE BALANZAS DE GÓNDOLA (EAN-13 PREFIJO 2) ─

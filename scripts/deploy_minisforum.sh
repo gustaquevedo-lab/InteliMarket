@@ -13,6 +13,9 @@ rsync -avz --exclude 'node_modules' --exclude 'dist' ui-web/ ${HOST}:${REMOTE_DI
 echo "🔨 [3/4] Compilando Frontend con Vite en ${HOST}..."
 ssh ${HOST} "cd ${REMOTE_DIR}/ui-web && npx vite build"
 
+echo "⚡ [3.5/4] Reiniciando Vite Dev Server (5173) en ${HOST}..."
+ssh ${HOST} "systemctl --user stop intelimarket-vite || true; systemd-run --user --unit=intelimarket-vite --working-directory=${REMOTE_DIR}/ui-web ${REMOTE_DIR}/ui-web/node_modules/.bin/vite --host 0.0.0.0 --port 5173 --force"
+
 echo "🔄 [4/4] Reiniciando servicio backend systemd en ${HOST}..."
 ssh ${HOST} "systemctl --user restart intelimarket-backend"
 
