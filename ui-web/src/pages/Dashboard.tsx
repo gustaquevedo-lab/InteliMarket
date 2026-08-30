@@ -185,51 +185,51 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto pb-12 animate-fade-in font-sans">
+    <div className="space-y-7 max-w-[1680px] mx-auto pb-14 animate-fade-in font-sans">
       
       {/* ──────────────────────────────────────────────────────────────────────────
-          1. HEADER EJECUTIVO CON CONTROLES DE CONTEXTO & FECHA EN VIVO
+          1. HEADER EJECUTIVO SUIZO CON CONTROLES DE CONTEXTO & FECHA EN VIVO
       ────────────────────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-5 rounded-3xl border border-gray-200/80 dark:border-slate-800 shadow-sm">
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Base de Datos Conectada
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl p-6 rounded-3xl border border-slate-200/90 dark:border-slate-800/90 shadow-[0_4px_24px_-4px_rgba(15,23,42,0.06),0_1px_4px_rgba(15,23,42,0.04)]">
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Sincronización PostgreSQL en Vivo
             </span>
-            <span className="text-xs text-gray-400 dark:text-gray-500 font-medium">·</span>
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-semibold">
+            <span className="text-xs text-slate-300 dark:text-slate-600 font-medium">•</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider font-mono">
               {new Intl.DateTimeFormat('es-PY', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}
             </span>
           </div>
 
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-gray-900 dark:text-white flex flex-wrap items-center gap-3">
-            {greeting}, {user?.nombre && !user.nombre.toLowerCase().includes("admin") ? user.nombre : "Gustavo"}
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-slate-900 dark:text-white flex flex-wrap items-center gap-3">
+            {greeting}, <span className="bg-gradient-to-r from-slate-900 via-indigo-950 to-indigo-700 dark:from-white dark:via-slate-200 dark:to-indigo-300 bg-clip-text text-transparent">{user?.nombre && !user.nombre.toLowerCase().includes("admin") ? user.nombre : "Gustavo"}</span>
             {selectedBranch ? (
-              <span className="text-xs px-3 py-1 rounded-xl bg-teal-500/15 text-teal-700 dark:text-teal-300 font-extrabold border border-teal-500/30 flex items-center gap-1.5 shadow-2xs">
+              <span className="text-xs px-3 py-1 rounded-xl bg-teal-500/15 text-teal-800 dark:text-teal-300 font-extrabold border border-teal-500/30 flex items-center gap-1.5 shadow-2xs">
                 <Store className="w-3.5 h-3.5" />
                 {selectedBranch.codigo} · {selectedBranch.nombre}
               </span>
             ) : (
-              <span className="text-xs px-3 py-1 rounded-xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-extrabold border border-indigo-500/30 flex items-center gap-1.5 shadow-2xs">
+              <span className="text-xs px-3 py-1 rounded-xl bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 font-extrabold border border-indigo-500/30 flex items-center gap-1.5 shadow-2xs">
                 <Building2 className="w-3.5 h-3.5" />
-                Consolidado Casa Gonzalito
+                Casa Gonzalito S.R.L. · Consolidado General
               </span>
             )}
           </h1>
         </div>
 
-        {/* Selector de Períodos & Botón Refresh */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="bg-gray-100/90 dark:bg-slate-800/90 p-1.5 rounded-2xl flex items-center gap-1 border border-gray-200/80 dark:border-slate-700/80 shadow-inner">
+        {/* Selector de Períodos Suizo & Botón Refresh */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl flex items-center gap-1 border border-slate-200 dark:border-slate-700/80 shadow-inner">
             {(["hoy", "semana", "mes", "anio"] as TimeRange[]).map((r) => (
               <button
                 key={r}
                 onClick={() => setTimeRange(r)}
                 className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
                   timeRange === r
-                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-gray-200/60 dark:border-slate-700 scale-[1.02]"
-                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-[0_2px_8px_rgba(0,0,0,0.08)] border border-slate-200/80 dark:border-slate-700 scale-[1.02]"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 }`}
               >
                 {r === "hoy" ? "Hoy" : r === "semana" ? "Semana" : r === "mes" ? "Este Mes" : "Año 2026"}
@@ -240,7 +240,7 @@ export default function Dashboard() {
           <button
             onClick={handleManualRefresh}
             disabled={refreshing}
-            className="p-3 rounded-2xl bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all flex items-center justify-center cursor-pointer active:scale-95"
+            className="p-3 rounded-2xl bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all flex items-center justify-center cursor-pointer active:scale-95"
             title="Recalcular Métricas"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-600" : ""}`} />
@@ -253,22 +253,22 @@ export default function Dashboard() {
       ────────────────────────────────────────────────────────────────────────── */}
       <div className="space-y-4">
         {/* Banner Principal Diagnóstico */}
-        <div className="p-6 sm:p-7 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white border border-indigo-500/30 shadow-2xl relative overflow-hidden">
-          <div className="absolute right-0 top-0 translate-x-12 -translate-y-8 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute left-1/4 bottom-0 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="p-7 sm:p-8 rounded-3xl bg-gradient-to-br from-slate-950 via-[#0c1322] to-[#0f172a] text-white border border-indigo-500/30 shadow-[0_12px_40px_rgba(15,23,42,0.18)] relative overflow-hidden">
+          <div className="absolute right-0 top-0 translate-x-12 -translate-y-8 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute left-1/4 bottom-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center relative z-10">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-7 items-center relative z-10">
             {/* Columna Izquierda: Diagnóstico Estratégico */}
-            <div className="lg:col-span-7 space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="lg:col-span-7 space-y-3.5">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <span className="p-1.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shadow-inner">
                   <Sparkles className="w-4 h-4" />
                 </span>
                 <span className="text-xs font-black uppercase tracking-widest text-indigo-300">
                   Centro de Inteligencia Comercial & Operativa · {timeRange === "mes" ? "Agosto 2026" : timeRange === "semana" ? "Esta Semana" : timeRange === "hoy" ? "Corte Diario" : "Acumulado Anual"}
                 </span>
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-black border border-emerald-500/30 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-black border border-emerald-500/30 flex items-center gap-1.5 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   Salud Operativa 96/100
                 </span>
               </div>
@@ -282,122 +282,125 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-snug">
-                    PARESA lidera el 61.1% del volumen con Rebate del 3.5% asegurado
+                  <h3 className="text-xl sm:text-2xl lg:text-3xl font-black text-white tracking-tight leading-snug">
+                    PARESA lidera el 55.5% del mix con Rebate ganado de <span className="text-amber-400">Gs. 146.4M</span>
                   </h3>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Las ventas de Coca-Cola suman <strong>Gs. 3.791M</strong> con <strong>Gs. 120.6M</strong> en rebates ganados. Chortitzer (<strong>Gs. 619M</strong>) y Trociuk (<strong>Gs. 446M</strong>) completan el podio. El margen bruto operativo directo (<strong>8.3% · Gs. 516M</strong>) sumado a los rebates proyectados (<strong>Gs. 182M</strong>) consolida la rentabilidad real comercial en <strong>11.3%</strong>.
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-normal">
+                    La facturación de Coca-Cola suma <strong>Gs. 3.447M</strong> sin IVA con <strong>98.450 UC</strong> cumplidas (86.7% de meta). Chortitzer (<strong>Gs. 619M</strong>) y Trociuk (<strong>Gs. 446M</strong>) completan el podio mayorista. El margen bruto operativo directo (<strong>8.3% · Gs. 516M</strong>) sumado a los rebates proyectados (<strong>Gs. 182M</strong>) consolida la rentabilidad comercial real en <strong className="text-emerald-400">11.3%</strong>.
                   </p>
                 </div>
               )}
             </div>
 
             {/* Columna Derecha: 4 Micro-Tarjetas de Métricas Estratégicas */}
-            <div className="lg:col-span-5 grid grid-cols-2 gap-3">
-              <div className="bg-slate-900/90 backdrop-blur-xl p-3.5 rounded-2xl border border-white/10 shadow-lg space-y-1">
+            <div className="lg:col-span-5 grid grid-cols-2 gap-3.5">
+              <div className="bg-slate-900/90 backdrop-blur-xl p-4 rounded-2xl border border-white/10 shadow-lg space-y-1 hover:border-emerald-500/40 transition-all">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rebates Proyectados</span>
-                <div className="text-lg font-black text-emerald-400 font-mono">Gs. 182.4M</div>
-                <div className="text-[10px] text-slate-400">PARESA + Chortitzer + Trociuk</div>
+                <div className="text-xl font-black text-emerald-400 font-mono">Gs. 182.4M</div>
+                <div className="text-[10px] text-slate-400 font-medium">PARESA + Chortitzer + Trociuk</div>
               </div>
 
-              <div className="bg-slate-900/90 backdrop-blur-xl p-3.5 rounded-2xl border border-white/10 shadow-lg space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Mix Bebidas PARESA</span>
-                <div className="text-lg font-black text-amber-400 font-mono">61.1%</div>
-                <div className="text-[10px] text-slate-400">Gs. 3.791M s/ Gs. 6.205M</div>
+              <div className="bg-slate-900/90 backdrop-blur-xl p-4 rounded-2xl border border-white/10 shadow-lg space-y-1 hover:border-amber-500/40 transition-all">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Avance PARESA</span>
+                <div className="text-xl font-black text-amber-400 font-mono">98.450 UC</div>
+                <div className="text-[10px] text-slate-400 font-medium">86.74% meta · 94.4% MTD</div>
               </div>
 
-              <div className="bg-slate-900/90 backdrop-blur-xl p-3.5 rounded-2xl border border-white/10 shadow-lg space-y-1">
+              <div className="bg-slate-900/90 backdrop-blur-xl p-4 rounded-2xl border border-white/10 shadow-lg space-y-1 hover:border-indigo-500/40 transition-all">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cumplimiento Meta</span>
-                <div className="text-lg font-black text-indigo-400 font-mono">{targetProgressPct}%</div>
-                <div className="text-[10px] text-slate-400">Pacing comercial en meta</div>
+                <div className="text-xl font-black text-indigo-400 font-mono">{targetProgressPct}%</div>
+                <div className="text-[10px] text-slate-400 font-medium">Pacing comercial activo</div>
               </div>
 
-              <div className="bg-slate-900/90 backdrop-blur-xl p-3.5 rounded-2xl border border-white/10 shadow-lg space-y-1">
+              <div className="bg-slate-900/90 backdrop-blur-xl p-4 rounded-2xl border border-white/10 shadow-lg space-y-1 hover:border-rose-500/40 transition-all">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Punto de Reorden</span>
-                <div className="text-lg font-black text-rose-400 font-mono">12 SKUs</div>
-                <div className="text-[10px] text-slate-400">Quiebres críticos en depósito</div>
+                <div className="text-xl font-black text-rose-400 font-mono">12 SKUs</div>
+                <div className="text-[10px] text-slate-400 font-medium">Quiebres críticos en depósito</div>
               </div>
             </div>
           </div>
         </div>
 
         {/* 3 Tarjetas de Inteligencia Ejecutiva (Comercial, Financiero, Marketing) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           
           {/* Gerente Comercial IA */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-indigo-500/30 transition-all flex flex-col justify-between group">
-            <div className="space-y-2">
+          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] hover:shadow-xl hover:border-indigo-500/40 hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between group">
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
-                    <TrendingUp className="w-4 h-4" />
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-105 transition-all">
+                    <TrendingUp className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-black text-gray-900 dark:text-white">Gerente Comercial IA</h4>
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">Pacing en Meta (+3.8%)</span>
+                    <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Gerente Comercial IA</h4>
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-extrabold">Pacing en Meta (+3.8%)</span>
                   </div>
                 </div>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               </div>
-              <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
-                La rotación de líneas CORE (Coca-Cola) lidera la facturación. Se recomienda impulsar <strong>Nuevas Bebidas</strong> para maximizar la escala de Rebate PARESA del trimestre.
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+                La rotación de líneas CORE (Coca-Cola) lidera la facturación. Se recomienda impulsar <strong>Nuevas Bebidas & Aguas</strong> para maximizar el tramo de Rebate del trimestre.
               </p>
             </div>
-            <div className="pt-3 mt-2 border-t border-gray-100 dark:border-slate-800">
-              <button onClick={() => navigate("/commercial-agent")} className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1">
-                Consultar Estrategia Comercial <ArrowRight className="w-3 h-3" />
+            <div className="pt-3.5 mt-3 border-t border-slate-100 dark:border-slate-800">
+              <button onClick={() => navigate("/commercial-agent")} className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1.5 group-hover:translate-x-1 transition-all">
+                <span>Consultar Estrategia Comercial</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
           {/* Gerente Financiero IA */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-teal-100 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-teal-500/30 transition-all flex flex-col justify-between group">
-            <div className="space-y-2">
+          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] hover:shadow-xl hover:border-teal-500/40 hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between group">
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold">
-                    <Wallet className="w-4 h-4" />
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-105 transition-all">
+                    <Wallet className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-black text-gray-900 dark:text-white">Gerente Financiero IA</h4>
-                    <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold">Calce Operativo Óptimo</span>
+                    <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Gerente Financiero IA</h4>
+                    <span className="text-[11px] text-teal-600 dark:text-teal-400 font-extrabold">Calce Operativo Óptimo</span>
                   </div>
                 </div>
                 <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
               </div>
-              <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
                 Cuentas corrientes en plazo promedio de 18 días. Se proyecta un flujo positivo de caja y cobranzas de <strong>Gs. 410M</strong> para la próxima semana.
               </p>
             </div>
-            <div className="pt-3 mt-2 border-t border-gray-100 dark:border-slate-800">
-              <button onClick={() => navigate("/finance-agent")} className="text-xs font-bold text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1">
-                Auditar Tesorería & Calce <ArrowRight className="w-3 h-3" />
+            <div className="pt-3.5 mt-3 border-t border-slate-100 dark:border-slate-800">
+              <button onClick={() => navigate("/finance-agent")} className="text-xs font-bold text-teal-600 dark:text-teal-400 hover:text-teal-700 flex items-center gap-1.5 group-hover:translate-x-1 transition-all">
+                <span>Auditar Tesorería & Calce</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
           {/* Gerente de Marketing & Clientes IA */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-purple-500/30 transition-all flex flex-col justify-between group">
-            <div className="space-y-2">
+          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] hover:shadow-xl hover:border-purple-500/40 hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between group">
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold">
-                    <Users className="w-4 h-4" />
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-105 transition-all">
+                    <Users className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-black text-gray-900 dark:text-white">Gerente de Marketing IA</h4>
-                    <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold">14 Cuentas Top en Crecimiento</span>
+                    <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Gerente de Marketing IA</h4>
+                    <span className="text-[11px] text-purple-600 dark:text-purple-400 font-extrabold">14 Cuentas Top en Alza</span>
                   </div>
                 </div>
                 <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
               </div>
-              <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
                 La cartera mayorista en Pedro Juan Caballero incrementó ticket en +12%. Se detectaron 6 clientes inactivos listos para campaña preventiva de WhatsApp.
               </p>
             </div>
-            <div className="pt-3 mt-2 border-t border-gray-100 dark:border-slate-800">
-              <button onClick={() => navigate("/marketing")} className="text-xs font-bold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1">
-                Lanzar Campaña Reactivación <ArrowRight className="w-3 h-3" />
+            <div className="pt-3.5 mt-3 border-t border-slate-100 dark:border-slate-800">
+              <button onClick={() => navigate("/marketing")} className="text-xs font-bold text-purple-600 dark:text-purple-400 hover:text-purple-700 flex items-center gap-1.5 group-hover:translate-x-1 transition-all">
+                <span>Lanzar Campaña Reactivación</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -406,145 +409,145 @@ export default function Dashboard() {
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          3. 4 BENTO CARDS KPI DE ALTO IMPACTO (LUXURY EXECUTIVE DESIGN)
+          3. 4 BENTO CARDS KPI DE ALTO IMPACTO (SWISS EXECUTIVE LUXURY LIGHT)
       ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         
         {/* KPI 1: Facturación Total */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/90 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-indigo-500/40 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl group-hover:bg-indigo-500/10 transition-all pointer-events-none" />
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:shadow-2xl hover:border-indigo-500/50 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-36 h-36 bg-indigo-500/5 rounded-full blur-2xl group-hover:bg-indigo-500/10 transition-all pointer-events-none" />
           
           <div className="flex items-start justify-between relative z-10">
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ventas Netas</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                <span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">Ventas Netas</span>
+                <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
               </div>
-              <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
+              <div className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tight font-mono">
                 {totalVentasMonto > 0 ? formatCompactPYG(totalVentasMonto) : "Gs. 0"}
               </div>
-              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium truncate max-w-[200px]" title={formatPYG(totalVentasMonto)}>
+              <div className="text-xs font-mono text-slate-400 dark:text-slate-500 font-bold truncate max-w-[220px]" title={formatPYG(totalVentasMonto)}>
                 {formatPYG(totalVentasMonto)}
               </div>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300">
-              <DollarSign className="w-6 h-6" />
+            <div className="w-13 h-13 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300">
+              <DollarSign className="w-7 h-7" />
             </div>
           </div>
 
-          <div className="mt-5 pt-3.5 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs relative z-10">
-            <span className={`inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-lg text-[11px] ${
+          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs relative z-10">
+            <span className={`inline-flex items-center gap-1 font-extrabold px-2.5 py-1 rounded-xl text-xs ${
               ventasDiffPct >= 0
-                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
-                : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                : "bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20"
             }`}>
               {ventasDiffPct >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
-              {ventasDiffPct >= 0 ? `+${ventasDiffPct}%` : `${ventasDiffPct}%`}
+              {ventasDiffPct >= 0 ? `+${ventasDiffPct}%` : `${ventasDiffPct}%`} vs anterior
             </span>
-            <span className="text-gray-400 text-[11px] font-medium">Descontadas NC</span>
+            <span className="text-slate-400 text-xs font-semibold">Descontadas NC</span>
           </div>
         </div>
 
         {/* KPI 2: Margen Bruto Real & Rentabilidad */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/90 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-teal-500/40 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full blur-2xl group-hover:bg-teal-500/10 transition-all pointer-events-none" />
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:shadow-2xl hover:border-teal-500/50 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-36 h-36 bg-teal-500/5 rounded-full blur-2xl group-hover:bg-teal-500/10 transition-all pointer-events-none" />
 
           <div className="flex items-start justify-between relative z-10">
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-wider">Margen Bruto Real</span>
-                <span className="px-2 py-0.5 rounded-md bg-teal-500/15 text-teal-700 dark:text-teal-300 text-[10px] font-black border border-teal-500/30 font-mono">
-                  {margenBrutoPct}%
+                <span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">Margen Bruto Directo</span>
+                <span className="px-2 py-0.5 rounded-md bg-teal-500/10 text-teal-700 dark:text-teal-300 text-[10px] font-black uppercase">
+                  8.3% Directo
                 </span>
               </div>
-              <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
+              <div className="text-3xl sm:text-4xl font-black text-teal-600 dark:text-teal-400 tracking-tight font-mono">
                 {margenBrutoGs > 0 ? formatCompactPYG(margenBrutoGs) : "Gs. 0"}
               </div>
-              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium truncate max-w-[200px]" title={formatPYG(costoTotalGs)}>
-                Costo: {formatCompactPYG(costoTotalGs)}
+              <div className="text-xs font-mono text-slate-400 dark:text-slate-500 font-bold">
+                + Rebates: <span className="text-emerald-600 dark:text-emerald-400 font-black">11.3% Total (Gs. 698M)</span>
               </div>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-teal-600 group-hover:text-white transition-all duration-300">
-              <Percent className="w-6 h-6" />
+            <div className="w-13 h-13 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-teal-600 group-hover:text-white transition-all duration-300">
+              <TrendingUp className="w-7 h-7" />
             </div>
           </div>
 
-          <div className="mt-5 pt-3.5 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs relative z-10">
-            <span className="text-teal-600 dark:text-teal-400 font-bold text-[11px] flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs relative z-10">
+            <span className="text-teal-700 dark:text-teal-400 font-extrabold text-xs flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-teal-500" />
               Utilidad Mayorista
             </span>
-            <span className="text-gray-400 text-[11px] font-mono">Real s/ COGS</span>
+            <span className="text-slate-400 text-xs font-mono">COGS: Gs. 5.689M</span>
           </div>
         </div>
 
         {/* KPI 3: Volumen PARESA & Rebates Ganados */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-amber-900/40 shadow-sm hover:shadow-xl hover:border-amber-500/60 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-amber-300/80 dark:border-amber-900/40 shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:shadow-2xl hover:border-amber-500/60 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
           <div className="absolute top-0 right-0 w-36 h-36 bg-amber-500/10 rounded-full blur-2xl group-hover:bg-amber-500/20 transition-all pointer-events-none" />
 
           <div className="flex items-start justify-between relative z-10">
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-wider">Avance Volumen PARESA</span>
-                <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-black border border-emerald-500/20">
+                <span className="text-xs font-black text-amber-800 dark:text-amber-400 uppercase tracking-wider">Avance Volumen PARESA</span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[10px] font-black border border-emerald-500/20">
                   94.41% MTD
                 </span>
               </div>
-              <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
-                98.450 <span className="text-sm font-bold text-gray-500 dark:text-gray-400">/ 113.503 UC</span>
+              <div className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tight font-mono">
+                98.450 <span className="text-base font-bold text-slate-400 dark:text-slate-500">/ 113.503 UC</span>
               </div>
-              <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 font-mono">
+              <div className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
                 86.74% de la meta mensual
               </div>
-              <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400 font-bold pt-1">
+              <div className="text-xs font-mono text-amber-700 dark:text-amber-400 font-black pt-0.5">
                 Rebate Ganado: Gs. 146.439.074 (+4.5%)
               </div>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
-              <Award className="w-6 h-6" />
+            <div className="w-13 h-13 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
+              <Award className="w-7 h-7" />
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-amber-100 dark:border-amber-900/30 flex items-center justify-between relative z-10">
+          <div className="mt-5 pt-3.5 border-t border-amber-100 dark:border-amber-900/30 flex items-center justify-between relative z-10">
             <button
               onClick={() => navigate("/supplier-kpis")}
-              className="w-full py-1.5 px-3 rounded-xl bg-gradient-to-r from-amber-500/15 to-orange-500/15 hover:from-amber-500 hover:to-orange-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs group-hover:shadow-md"
+              className="w-full py-2 px-3 rounded-2xl bg-gradient-to-r from-amber-500/15 via-amber-500/20 to-orange-500/15 hover:from-amber-500 hover:to-orange-500 text-amber-800 dark:text-amber-300 hover:text-white border border-amber-500/30 font-black text-xs flex items-center justify-center gap-2 transition-all shadow-xs group-hover:shadow-md cursor-pointer"
             >
               <span>Ver Rebates PARESA</span>
-              <ArrowUpRight className="w-3.5 h-3.5" />
+              <ArrowUpRight className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         {/* KPI 4: Operaciones & Ticket Medio */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/90 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-purple-500/40 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/5 rounded-full blur-2xl group-hover:bg-purple-500/10 transition-all pointer-events-none" />
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgba(0,0,0,0.04)] hover:shadow-2xl hover:border-purple-500/50 transition-all duration-300 flex flex-col justify-between group relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-36 h-36 bg-purple-500/5 rounded-full blur-2xl group-hover:bg-purple-500/10 transition-all pointer-events-none" />
 
           <div className="flex items-start justify-between relative z-10">
-            <div className="space-y-1">
-              <span className="text-[11px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-wider">Facturas Emitidas</span>
-              <div className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight font-mono">
-                {totalTickets.toLocaleString()} <span className="text-sm font-bold text-gray-500">docs</span>
+            <div className="space-y-1.5">
+              <span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">Facturas Emitidas</span>
+              <div className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tight font-mono">
+                {totalTickets.toLocaleString()} <span className="text-base font-bold text-slate-400 dark:text-slate-500">docs</span>
               </div>
-              <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 font-medium">
-                Ticket Medio: {formatCompactPYG(ticketPromedio)}
+              <div className="text-xs font-mono text-slate-400 dark:text-slate-500 font-bold">
+                Ticket Medio: <span className="text-slate-800 dark:text-slate-200 font-black">{formatCompactPYG(ticketPromedio)}</span>
               </div>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-purple-600 group-hover:text-white transition-all duration-300">
-              <ShoppingCart className="w-6 h-6" />
+            <div className="w-13 h-13 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold shadow-inner group-hover:scale-110 group-hover:bg-purple-600 group-hover:text-white transition-all duration-300">
+              <ShoppingCart className="w-7 h-7" />
             </div>
           </div>
 
-          <div className="mt-5 pt-3.5 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-xs relative z-10">
-            <span className={`inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-lg text-[11px] ${
+          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs relative z-10">
+            <span className={`inline-flex items-center gap-1 font-extrabold px-2.5 py-1 rounded-xl text-xs ${
               transaccionesDiffPct >= 0
-                ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20"
-                : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+                ? "bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/20"
+                : "bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20"
             }`}>
               {transaccionesDiffPct >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
-              {transaccionesDiffPct >= 0 ? `+${transaccionesDiffPct}%` : `${transaccionesDiffPct}%`}
+              {transaccionesDiffPct >= 0 ? `+${transaccionesDiffPct}%` : `${transaccionesDiffPct}%`} flujo
             </span>
-            <span className="text-gray-400 text-[11px] font-medium">Flujo Transaccional</span>
+            <span className="text-slate-400 text-xs font-semibold">Actividad Comercial</span>
           </div>
         </div>
 
@@ -553,61 +556,61 @@ export default function Dashboard() {
       {/* ──────────────────────────────────────────────────────────────────────────
           4. ANALYTICS HUB CENTRAL — PACING COMERCIAL & MIX DE CATEGORÍAS
       ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-7">
         
         {/* COLUMNA 1 (7 de 12): CURVA DE PACING COMERCIAL */}
-        <div className="lg:col-span-7 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        <div className="lg:col-span-7 p-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgba(0,0,0,0.04)] flex flex-col justify-between">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shadow-inner">
                   <TrendingUp className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white">Pacing Comercial & Curva de Ventas</h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Comparativa contra Meta (+5%), Mes Anterior y Año Anterior</p>
+                  <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">Pacing Comercial & Curva de Ventas</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Comparativa contra Meta (+5%), Mes Anterior y Año Anterior</p>
                 </div>
               </div>
             </div>
 
             {/* Selector de Rango */}
-            <div className="flex items-center p-1 bg-gray-100/90 dark:bg-slate-800 rounded-2xl border border-gray-200/60 dark:border-slate-700/60 self-start sm:self-auto">
+            <div className="flex items-center p-1.5 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700/80 self-start sm:self-auto shadow-inner">
               <button
                 onClick={() => setTimeRange("hoy")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
                   timeRange === "hoy"
                     ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
-                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
                 }`}
               >
                 Hoy
               </button>
               <button
                 onClick={() => setTimeRange("semana")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
                   timeRange === "semana"
                     ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
-                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
                 }`}
               >
                 Semana
               </button>
               <button
                 onClick={() => setTimeRange("mes")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
                   timeRange === "mes"
                     ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
-                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
                 }`}
               >
                 Mes
               </button>
               <button
                 onClick={() => setTimeRange("anio")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
                   timeRange === "anio"
                     ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
-                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
                 }`}
               >
                 Año
@@ -616,60 +619,60 @@ export default function Dashboard() {
           </div>
 
           {/* Toggle de Magnitudes Comparativas */}
-          <div className="flex flex-wrap items-center gap-2 mb-4">
+          <div className="flex flex-wrap items-center gap-2 mb-5">
             <button
               onClick={() => setShowActual(!showActual)}
-              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 border cursor-pointer ${
                 showActual
-                  ? "bg-indigo-500/15 border-indigo-500/40 text-indigo-700 dark:text-indigo-300 shadow-2xs"
-                  : "bg-transparent border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  ? "bg-indigo-500/15 border-indigo-500/40 text-indigo-800 dark:text-indigo-300 shadow-2xs"
+                  : "bg-transparent border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
               }`}
             >
-              <span className={`w-2.5 h-2.5 rounded-full ${showActual ? "bg-indigo-600" : "bg-gray-300"}`} />
+              <span className={`w-2.5 h-2.5 rounded-full ${showActual ? "bg-indigo-600 shadow-xs" : "bg-slate-300"}`} />
               Venta Actual
             </button>
 
             <button
               onClick={() => setShowMeta(!showMeta)}
-              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 border cursor-pointer ${
                 showMeta
-                  ? "bg-slate-500/15 border-slate-400/40 text-slate-700 dark:text-slate-300 shadow-2xs"
-                  : "bg-transparent border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  ? "bg-slate-500/15 border-slate-400/40 text-slate-800 dark:text-slate-300 shadow-2xs"
+                  : "bg-transparent border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
               }`}
             >
-              <span className={`w-2.5 h-2.5 rounded-sm ${showMeta ? "bg-slate-400" : "bg-gray-300"}`} />
-              Meta Barras (+5% s/ anterior)
+              <span className={`w-2.5 h-2.5 rounded-sm ${showMeta ? "bg-slate-400" : "bg-slate-300"}`} />
+              Meta Barras (+5%)
             </button>
 
             <button
               onClick={() => setShowPrevMonth(!showPrevMonth)}
-              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 border cursor-pointer ${
                 showPrevMonth
-                  ? "bg-sky-500/15 border-sky-500/40 text-sky-700 dark:text-sky-300 shadow-2xs"
-                  : "bg-transparent border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  ? "bg-sky-500/15 border-sky-500/40 text-sky-800 dark:text-sky-300 shadow-2xs"
+                  : "bg-transparent border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
               }`}
             >
-              <span className={`w-2.5 h-2.5 rounded-full ${showPrevMonth ? "bg-sky-500" : "bg-gray-300"}`} />
-              Mismo Período Mes Anterior
+              <span className={`w-2.5 h-2.5 rounded-full ${showPrevMonth ? "bg-sky-500 shadow-xs" : "bg-slate-300"}`} />
+              Mes Anterior
             </button>
 
             <button
               onClick={() => setShowPrevYear(!showPrevYear)}
-              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 border cursor-pointer ${
                 showPrevYear
-                  ? "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300 shadow-2xs"
-                  : "bg-transparent border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  ? "bg-amber-500/15 border-amber-500/40 text-amber-800 dark:text-amber-300 shadow-2xs"
+                  : "bg-transparent border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
               }`}
             >
-              <span className={`w-2.5 h-2.5 rounded-full border border-dashed border-amber-600 ${showPrevYear ? "bg-amber-500" : "bg-gray-300"}`} />
-              Mismo Período Año Pasado
+              <span className={`w-2.5 h-2.5 rounded-full border border-dashed border-amber-600 ${showPrevYear ? "bg-amber-500 shadow-xs" : "bg-slate-300"}`} />
+              Año Anterior
             </button>
           </div>
 
           {/* Gráfico Recharts de Pacing ComposedChart */}
           <div className="h-80 w-full">
             {salesTrendData.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-xs text-gray-400">
+              <div className="h-full flex items-center justify-center text-xs text-slate-400 font-medium">
                 Sin datos de evolución para el rango seleccionado
               </div>
             ) : (
@@ -696,16 +699,16 @@ export default function Dashboard() {
                         const data = payload[0].payload
                         const diffVsMesAnt = data.mes_anterior > 0 ? (((data.actual - data.mes_anterior) / data.mes_anterior) * 100).toFixed(1) : null
                         return (
-                          <div className="p-3.5 bg-slate-950/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl shadow-2xl text-white text-xs space-y-2 min-w-[240px]">
-                            <div className="font-bold text-slate-200 border-b border-slate-800 pb-1.5 flex justify-between items-center">
+                          <div className="p-4 bg-slate-950/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl shadow-2xl text-white text-xs space-y-2.5 min-w-[250px]">
+                            <div className="font-bold text-slate-200 border-b border-slate-800 pb-2 flex justify-between items-center">
                               <span>{label}</span>
                               <span className="font-mono text-[11px] text-slate-400">{data.fecha}</span>
                             </div>
 
                             {showActual && (
                               <div className="flex justify-between items-center text-indigo-300 font-medium">
-                                <span className="flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                                <span className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
                                   Venta Actual:
                                 </span>
                                 <span className="font-mono font-black text-white">{formatPYG(data.actual)}</span>
@@ -714,8 +717,8 @@ export default function Dashboard() {
 
                             {showMeta && data.meta > 0 && (
                               <div className="flex justify-between items-center text-slate-300 font-medium">
-                                <span className="flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-sm bg-slate-400" />
+                                <span className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-sm bg-slate-400" />
                                   Meta (+5%):
                                 </span>
                                 <span className="font-mono">{formatPYG(data.meta)}</span>
@@ -724,8 +727,8 @@ export default function Dashboard() {
 
                             {showPrevMonth && data.mes_anterior > 0 && (
                               <div className="flex justify-between items-center text-sky-300 font-medium">
-                                <span className="flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-sky-400" />
+                                <span className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-sky-400" />
                                   Mes Anterior:
                                 </span>
                                 <span className="font-mono">{formatPYG(data.mes_anterior)}</span>
@@ -734,8 +737,8 @@ export default function Dashboard() {
 
                             {showPrevYear && data.ano_anterior > 0 && (
                               <div className="flex justify-between items-center text-amber-300 font-medium">
-                                <span className="flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-amber-400" />
+                                <span className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
                                   Año Anterior:
                                 </span>
                                 <span className="font-mono">{formatPYG(data.ano_anterior)}</span>
@@ -743,7 +746,7 @@ export default function Dashboard() {
                             )}
 
                             {diffVsMesAnt !== null && (
-                              <div className="pt-1.5 border-t border-slate-800 flex justify-between text-[11px]">
+                              <div className="pt-2 border-t border-slate-800 flex justify-between text-[11px]">
                                 <span className="text-slate-400">vs Mes Anterior:</span>
                                 <span className={`font-bold ${Number(diffVsMesAnt) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                                   {Number(diffVsMesAnt) >= 0 ? `+${diffVsMesAnt}%` : `${diffVsMesAnt}%`}
@@ -757,7 +760,6 @@ export default function Dashboard() {
                     }}
                   />
                   
-                  {/* Capa de Fondo: Barras de Meta (+5% sobre el mes anterior) */}
                   {showMeta && (
                     <Bar
                       dataKey="meta"
@@ -769,41 +771,37 @@ export default function Dashboard() {
                     />
                   )}
 
-                  {/* Capa de Primer Plano: Venta Actual */}
                   {showActual && (
                     <Area
                       type="monotone"
                       dataKey="actual"
                       stroke="#6366f1"
-                      strokeWidth={3}
+                      strokeWidth={3.5}
                       fillOpacity={1}
                       fill="url(#pacingGradient)"
-                      dot={{ r: 3, fill: "#6366f1" }}
                       name="Venta Actual"
                     />
                   )}
 
-                  {/* Capa de Comparativa: Mes Anterior */}
                   {showPrevMonth && (
                     <Line
                       type="monotone"
                       dataKey="mes_anterior"
                       stroke="#0284c7"
-                      strokeWidth={2}
-                      dot={{ r: 2.5, fill: "#0284c7" }}
+                      strokeWidth={2.5}
+                      dot={{ r: 3, fill: "#0284c7" }}
                       name="Mes Anterior"
                     />
                   )}
 
-                  {/* Capa de Comparativa: Año Anterior */}
                   {showPrevYear && (
                     <Line
                       type="monotone"
                       dataKey="ano_anterior"
                       stroke="#f59e0b"
-                      strokeWidth={2}
+                      strokeWidth={2.5}
                       strokeDasharray="4 4"
-                      dot={{ r: 2.5, fill: "#f59e0b" }}
+                      dot={{ r: 3, fill: "#f59e0b" }}
                       name="Año Anterior"
                     />
                   )}
@@ -812,53 +810,53 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                <span className="w-3 h-3 rounded-full bg-indigo-600 inline-block" />
+              <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-bold">
+                <span className="w-3 h-3 rounded-full bg-indigo-600 inline-block shadow-xs" />
                 <span>Venta Actual</span>
               </div>
-              <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+              <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-bold">
                 <span className="w-3 h-3 rounded-sm bg-slate-300 dark:bg-slate-700 border border-slate-400 inline-block" />
                 <span>Meta Barras (+5%)</span>
               </div>
-              <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+              <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-bold">
                 <span className="w-3 h-0.5 bg-sky-500 inline-block" />
                 <span>Mes Anterior</span>
               </div>
-              <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+              <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-bold">
                 <span className="w-3 h-0.5 bg-amber-500 inline-block border-b border-dashed border-amber-600" />
                 <span>Año Anterior</span>
               </div>
             </div>
-            <span className="text-[11px] text-gray-400 font-mono">Pacing en Vivo</span>
+            <span className="text-xs text-slate-400 font-mono font-medium">Pacing en Vivo</span>
           </div>
         </div>
 
         {/* COLUMNA 2 (5 de 12): MIX DE CATEGORÍAS & RENTABILIDAD EJECUTIVA REDISEÑADA */}
-        <div className="lg:col-span-5 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        <div className="lg:col-span-5 p-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgba(0,0,0,0.04)] flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold shadow-inner">
                   <PieChartIcon className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white">Mix de Categorías & Rentabilidad</h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Distribución de facturación y margen operativo</p>
+                  <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">Mix de Categorías & Margen</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Distribución de facturación y rentabilidad</p>
                 </div>
               </div>
-              <span className="px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 text-[10px] font-bold border border-teal-500/20">
+              <span className="px-3 py-1 rounded-full bg-teal-500/10 text-teal-700 dark:text-teal-400 text-xs font-black border border-teal-500/20 shadow-2xs">
                 {categoryMixData.length} Familias
               </span>
             </div>
 
             {/* Interactive Luxury Donut + Center Metric */}
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-5 items-center">
               
-              <div className="sm:col-span-5 h-44 w-full relative flex items-center justify-center">
+              <div className="sm:col-span-5 h-48 w-full relative flex items-center justify-center">
                 {categoryMixData.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-xs text-gray-400">Sin datos</div>
+                  <div className="h-full flex items-center justify-center text-xs text-slate-400 font-medium">Sin datos</div>
                 ) : (
                   <>
                     <ResponsiveContainer width="100%" height="100%">
@@ -867,8 +865,8 @@ export default function Dashboard() {
                           data={categoryMixData}
                           cx="50%"
                           cy="50%"
-                          innerRadius={50}
-                          outerRadius={72}
+                          innerRadius={52}
+                          outerRadius={76}
                           paddingAngle={4}
                           dataKey="value"
                         >
@@ -883,8 +881,8 @@ export default function Dashboard() {
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <span className="text-[10px] uppercase font-black text-gray-400 dark:text-gray-500">Líder</span>
-                      <span className="text-sm font-black text-gray-900 dark:text-white font-mono">
+                      <span className="text-[10px] uppercase font-black text-slate-400 dark:text-slate-500">Líder</span>
+                      <span className="text-base font-black text-slate-900 dark:text-white font-mono">
                         {categoryMixData[0]?.percentage || 0}%
                       </span>
                     </div>
@@ -893,20 +891,20 @@ export default function Dashboard() {
               </div>
 
               {/* Top Family Highlight Card */}
-              <div className="sm:col-span-7 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 space-y-1.5">
+              <div className="sm:col-span-7 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 space-y-2 shadow-2xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400">Familia Dominante:</span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                    {categoryMixData[0]?.percentage || 0}% del volumen
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Familia Dominante:</span>
+                  <span className="text-[10px] font-black px-2.5 py-0.5 rounded-md bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-500/20">
+                    {categoryMixData[0]?.percentage || 0}% mix
                   </span>
                 </div>
-                <div className="text-xs font-black text-gray-900 dark:text-white truncate">
+                <div className="text-sm font-black text-slate-900 dark:text-white truncate">
                   {categoryMixData[0]?.name || "Bebidas & Refrescos"}
                 </div>
-                <div className="flex items-center justify-between text-xs font-mono pt-1 text-gray-600 dark:text-gray-300">
-                  <span>{formatCompactPYG(categoryMixData[0]?.value || 0)}</span>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                    Margen: ~{categoryMixData[0]?.margen_pct || 16.5}%
+                <div className="flex items-center justify-between text-xs font-mono pt-1 text-slate-600 dark:text-slate-300">
+                  <span className="font-bold">{formatCompactPYG(categoryMixData[0]?.value || 0)}</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">
+                    Margen: ~{categoryMixData[0]?.margen || 16.5}%
                   </span>
                 </div>
               </div>
@@ -914,38 +912,38 @@ export default function Dashboard() {
             </div>
 
             {/* Listado Ultra-Detallado con Cards y Barras Gradientes */}
-            <div className="space-y-2 mt-3 max-h-56 overflow-y-auto pr-1">
+            <div className="space-y-2 mt-4 max-h-56 overflow-y-auto pr-1">
               {categoryMixData.map((cat) => (
                 <div
                   key={cat.name}
-                  className="p-2.5 rounded-2xl bg-gray-50/80 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800/80 hover:border-teal-500/40 transition-all space-y-1.5 group"
+                  className="p-3 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800/80 hover:border-teal-500/40 transition-all space-y-2 group shadow-2xs"
                 >
                   <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="w-3 h-3 rounded-md shrink-0 shadow-xs" style={{ backgroundColor: cat.color }} />
-                      <span className="font-bold text-gray-800 dark:text-gray-200 truncate">{cat.name}</span>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-3.5 h-3.5 rounded-md shrink-0 shadow-xs" style={{ backgroundColor: cat.color }} />
+                      <span className="font-bold text-slate-800 dark:text-slate-200 truncate">{cat.name}</span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 font-mono">
-                      <span className="px-1.5 py-0.5 rounded-md bg-gray-200/60 dark:bg-slate-700 text-[10px] font-black text-gray-700 dark:text-gray-300">
+                      <span className="px-2 py-0.5 rounded-md bg-slate-200/70 dark:bg-slate-700 text-[10px] font-black text-slate-700 dark:text-slate-300">
                         {cat.percentage}%
                       </span>
-                      <span className="font-bold text-gray-900 dark:text-white text-xs">
+                      <span className="font-black text-slate-900 dark:text-white text-xs">
                         {formatCompactPYG(cat.value)}
                       </span>
                     </div>
                   </div>
 
-                  <div className="w-full bg-gray-200/60 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                  <div className="w-full bg-slate-200/70 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
                     <div
-                      className="h-1.5 rounded-full transition-all duration-500"
+                      className="h-2 rounded-full transition-all duration-500"
                       style={{ width: `${Math.max(cat.percentage, 3)}%`, backgroundColor: cat.color }}
                     />
                   </div>
 
-                  <div className="flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500 font-medium">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 font-medium">
                     <span>{cat.unidades ? `${cat.unidades.toLocaleString()} un.` : "Alta Rotación"}</span>
-                    <span className="text-teal-600 dark:text-teal-400 font-bold font-mono">
-                      Margen: {cat.margen_pct ? `${cat.margen_pct}%` : "16.5%"}
+                    <span className="text-teal-600 dark:text-teal-400 font-extrabold font-mono">
+                      Margen: {cat.margen ? `${cat.margen}%` : "16.5%"}
                     </span>
                   </div>
                 </div>
@@ -953,12 +951,13 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="pt-3 border-t border-gray-100 dark:border-slate-800 text-center">
+          <div className="pt-4 mt-2 border-t border-slate-100 dark:border-slate-800 text-center">
             <button
               onClick={() => navigate("/reports")}
-              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-bold inline-flex items-center gap-1"
+              className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-bold inline-flex items-center gap-1.5 cursor-pointer"
             >
-              Auditar Rentabilidad Completa por Familia <ChevronRight className="w-3 h-3" />
+              <span>Auditar Rentabilidad Completa por Familia</span>
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -968,125 +967,132 @@ export default function Dashboard() {
       {/* ──────────────────────────────────────────────────────────────────────────
           5. BENTO ROW OPERATIVO: TOP 10 PRODUCTOS, TOP 10 CLIENTES Y ALERTAS FEFO
       ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-7">
         
         {/* COL 1: TOP 10 PRODUCTOS / SKUS MAYORISTAS */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        <div className="p-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgba(0,0,0,0.04)] flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-black text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                <Flame className="w-4 h-4 text-rose-500" />
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-black text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                <Flame className="w-5 h-5 text-rose-500" />
                 Top 10 SKUs de Mayor Rotación
               </h3>
-              <span className="text-[10px] font-mono text-gray-400 uppercase font-bold">Ranking Ventas</span>
+              <span className="text-[10px] font-mono text-slate-400 uppercase font-black tracking-wider">Ranking Ventas</span>
             </div>
 
             <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
               {topProducts.length === 0 ? (
-                <div className="py-8 text-center text-xs text-gray-400">Sin movimientos registrados en este período</div>
+                <div className="py-8 text-center text-xs text-slate-400 font-medium">Sin movimientos registrados en este período</div>
               ) : (
-                topProducts.map((p: any, idx: number) => (
-                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-800 text-xs hover:border-indigo-500/30 transition-all">
-                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                      <span className="w-5 h-5 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-mono font-black text-[10px] shrink-0">
-                        {idx + 1}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-bold text-gray-900 dark:text-white truncate">{p.nombre}</p>
-                        <p className="text-[10px] text-gray-400 font-mono">SKU: {p.sku || "N/A"} · {formatNumber(p.unidades, 0)} unids</p>
+                topProducts.map((p: any, idx: number) => {
+                  const isTop3 = idx < 3
+                  const rankBadgeBg = idx === 0 ? "bg-amber-500 text-white shadow-xs" : idx === 1 ? "bg-slate-300 dark:bg-slate-600 text-slate-800 dark:text-white" : idx === 2 ? "bg-amber-700 text-white" : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                  return (
+                    <div key={idx} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 text-xs hover:border-indigo-500/40 hover:bg-white dark:hover:bg-slate-800 transition-all shadow-2xs">
+                      <div className="flex items-center gap-3 min-w-0 pr-2">
+                        <span className={`w-6 h-6 rounded-xl flex items-center justify-center font-mono font-black text-xs shrink-0 ${rankBadgeBg}`}>
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-900 dark:text-white truncate">{p.nombre}</p>
+                          <p className="text-[10px] text-slate-400 font-mono mt-0.5">SKU: {p.sku || "N/A"} · {formatNumber(p.unidades, 0)} unids</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 font-mono">
+                        <span className="font-black text-indigo-600 dark:text-indigo-400 text-xs">{formatCompactPYG(p.monto)}</span>
                       </div>
                     </div>
-                    <div className="text-right shrink-0 font-mono">
-                      <span className="font-black text-indigo-600 dark:text-indigo-400">{formatCompactPYG(p.monto)}</span>
-                    </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
           </div>
 
-          <div className="pt-4 mt-2 border-t border-gray-100 dark:border-slate-800 text-center">
-            <button onClick={() => navigate("/products")} className="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline">
+          <div className="pt-4 mt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+            <button onClick={() => navigate("/products")} className="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer">
               Ir a Catálogo Completo →
             </button>
           </div>
         </div>
 
         {/* COL 2: TOP 10 CLIENTES MAYORISTAS */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        <div className="p-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgba(0,0,0,0.04)] flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-black text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                <Users className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-black text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                 Top 10 Clientes Mayoristas
               </h3>
-              <span className="text-[10px] font-mono text-gray-400 uppercase font-bold">Cartera Top</span>
+              <span className="text-[10px] font-mono text-slate-400 uppercase font-black tracking-wider">Cartera Top</span>
             </div>
 
             <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
               {topCustomers.length === 0 ? (
-                <div className="py-8 text-center text-xs text-gray-400">Sin compras registradas en este período</div>
+                <div className="py-8 text-center text-xs text-slate-400 font-medium">Sin compras registradas en este período</div>
               ) : (
-                topCustomers.map((c: any, idx: number) => (
-                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-800 text-xs hover:border-purple-500/30 transition-all">
-                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                      <span className="w-5 h-5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center font-mono font-black text-[10px] shrink-0">
-                        {idx + 1}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-bold text-gray-900 dark:text-white truncate">{c.nombre}</p>
-                        <p className="text-[10px] text-gray-400 font-mono">RUC: {c.ruc || "Sin RUC"} · {c.transacciones} facturas</p>
+                topCustomers.map((c: any, idx: number) => {
+                  const rankBadgeBg = idx === 0 ? "bg-amber-500 text-white shadow-xs" : idx === 1 ? "bg-slate-300 dark:bg-slate-600 text-slate-800 dark:text-white" : idx === 2 ? "bg-amber-700 text-white" : "bg-purple-500/10 text-purple-600 dark:text-purple-400"
+                  return (
+                    <div key={idx} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 text-xs hover:border-purple-500/40 hover:bg-white dark:hover:bg-slate-800 transition-all shadow-2xs">
+                      <div className="flex items-center gap-3 min-w-0 pr-2">
+                        <span className={`w-6 h-6 rounded-xl flex items-center justify-center font-mono font-black text-xs shrink-0 ${rankBadgeBg}`}>
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-900 dark:text-white truncate">{c.nombre}</p>
+                          <p className="text-[10px] text-slate-400 font-mono mt-0.5">RUC: {c.ruc || "Sin RUC"} · {c.transacciones} facturas</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 font-mono">
+                        <span className="font-black text-purple-600 dark:text-purple-400 text-xs">{formatCompactPYG(c.monto)}</span>
                       </div>
                     </div>
-                    <div className="text-right shrink-0 font-mono">
-                      <span className="font-black text-purple-600 dark:text-purple-400">{formatCompactPYG(c.monto)}</span>
-                    </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
           </div>
 
-          <div className="pt-4 mt-2 border-t border-gray-100 dark:border-slate-800 text-center">
-            <button onClick={() => navigate("/customers")} className="text-xs text-purple-600 dark:text-purple-400 font-bold hover:underline">
+          <div className="pt-4 mt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+            <button onClick={() => navigate("/customers")} className="text-xs text-purple-600 dark:text-purple-400 font-bold hover:underline cursor-pointer">
               Ver Cartera Mayorista Completa →
             </button>
           </div>
         </div>
 
         {/* COL 3: ALERTAS DE VENCIMIENTO FEFO & CONTROL DE STOCK */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+        <div className="p-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-[0_8px_30px_rgba(0,0,0,0.04)] flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-black text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                <Clock className="w-4 h-4 text-amber-500" />
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-black text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                <Clock className="w-5 h-5 text-amber-500" />
                 Alertas de Vencimiento (Control FEFO)
               </h3>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
                 Perecederos
               </span>
             </div>
 
             <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
               {expiryAlerts.length === 0 ? (
-                <div className="py-8 text-center text-xs text-gray-400">No hay lotes con alertas de vencimiento próximas</div>
+                <div className="py-8 text-center text-xs text-slate-400 font-medium">No hay lotes con alertas de vencimiento próximas</div>
               ) : (
                 expiryAlerts.map((exp: any) => (
                   <div
                     key={exp.id}
-                    className={`p-2.5 rounded-2xl border text-xs flex items-center justify-between transition-all ${
+                    className={`p-3 rounded-2xl border text-xs flex items-center justify-between transition-all shadow-2xs ${
                       exp.nivel === "critico"
-                        ? "bg-rose-500/5 border-rose-500/30 text-rose-900 dark:text-rose-100"
+                        ? "bg-rose-500/5 border-rose-500/30 text-rose-950 dark:text-rose-100"
                         : exp.nivel === "alerta"
-                        ? "bg-amber-500/5 border-amber-500/30 text-amber-900 dark:text-amber-100"
-                        : "bg-teal-500/5 border-teal-500/20 text-teal-900 dark:text-teal-100"
+                        ? "bg-amber-500/5 border-amber-500/30 text-amber-950 dark:text-amber-100"
+                        : "bg-teal-500/5 border-teal-500/20 text-teal-950 dark:text-teal-100"
                     }`}
                   >
                     <div className="min-w-0 pr-2">
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold truncate">{exp.nombre}</span>
                       </div>
-                      <p className="text-[10px] text-gray-500 dark:text-gray-400 font-mono mt-0.5">
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
                         Lote: {exp.lote} · Vence: {exp.fecha_vencimiento}
                       </p>
                     </div>
