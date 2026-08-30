@@ -35,11 +35,17 @@ class Sale(Base):
     total_pagado = Column(Numeric(15, 0), default=0)
     saldo = Column(Numeric(15, 0))
 
-    cdc = Column(String(44))
+    cdc = Column(String(50))
+    factura_numero = Column(String(30))
+    link_qr = Column(String(1000))
+    timbrado = Column(String(20))
+    codigo_hash = Column(String(100))
     sifen_estado = Column(String(20))
     sifen_fecha_respuesta = Column(DateTime(timezone=True))
     sifen_xml_sent = Column(Text)
     sifen_xml_response = Column(Text)
+    vendedor_codigo = Column(String(20))
+    vendedor_nombre = Column(String(150))
 
     observaciones = Column(Text)
     user_id = Column(UUID(as_uuid=True))

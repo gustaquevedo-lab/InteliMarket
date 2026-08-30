@@ -631,6 +631,13 @@ export const api = {
     deleteSupplier: (id: string) => client.delete<void>(`/v1/suppliers/${id}`),
   },
   sifen: {
+    invoices: (params?: { search?: string; estado?: string; limit?: number; offset?: number }) =>
+      client.get<{ items: any[]; total: number; limit: number; offset: number }>("/api/v1/sifen/invoices", params as any),
+    creditNotes: (params?: { search?: string; limit?: number; offset?: number }) =>
+      client.get<{ items: any[]; total: number; limit: number; offset: number }>("/api/v1/sifen/credit-notes", params as any),
+    getKude: (identifier: string) => client.get<any>(`/api/v1/sifen/kude/${identifier}`),
+    telemetry: () => client.get<any>("/api/v1/sifen/telemetry"),
+    flushTelemetry: () => client.post<any>("/api/v1/sifen/telemetry/flush"),
     timbrados: {
       list: () => client.get<SifenTimbrado[]>("/api/v1/sifen/timbrados"),
       get: (id: string) => client.get<SifenTimbrado>(`/api/v1/sifen/timbrados/${id}`),
