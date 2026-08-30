@@ -159,6 +159,15 @@ export default function Dashboard() {
           <h1 className="text-xl sm:text-2xl font-black tracking-tight text-gray-900 dark:text-white flex items-center gap-3">
             <Building2 className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
             Buenos días, {user?.nombre || "Gustavo"}
+            {selectedBranch ? (
+              <span className="text-xs px-2.5 py-1 rounded-full bg-teal-500/15 text-teal-700 dark:text-teal-300 font-extrabold border border-teal-500/30">
+                📍 {selectedBranch.codigo} - {selectedBranch.nombre}
+              </span>
+            ) : (
+              <span className="text-xs px-2.5 py-1 rounded-full bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-extrabold border border-indigo-500/30">
+                🏢 Consolidado (Todas las Sucursales)
+              </span>
+            )}
           </h1>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-3xl">
             Panel de Control 360° en tiempo real con Inteligencia Artificial, Margen Bruto Comercial y seguimiento de Metas PARESA.

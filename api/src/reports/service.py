@@ -796,11 +796,19 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
     from datetime import date, datetime, timedelta
 
     cid = uuid.UUID(company_id)
+    bid = None
+    if branch_id and branch_id != "all":
+        try:
+            bid = uuid.UUID(branch_id)
+        except (ValueError, TypeError):
+            bid = None
+
     stock_val = 6672450000.0
     quiebres = 12
 
     async def get_fast_period(start_dt: datetime, end_dt: datetime, prev_start_dt: datetime, prev_end_dt: datetime, meta_gs: float, paresa_meta_uc: float, days_count: int):
-        q = text("""
+        where_branch = " AND branch_id = :bid" if bid else ""
+        q = text(f"""
             SELECT 
                 COUNT(*) as cnt,
                 COALESCE(SUM(total), 0) as total_gs
@@ -808,9 +816,16 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             WHERE company_id = :cid
               AND fecha >= :s AND fecha <= :e
               AND estado <> 'cancelado'
+              {where_branch}
         """)
-        curr_row = (await db.execute(q, {"cid": cid, "s": start_dt, "e": end_dt})).mappings().first()
-        prev_row = (await db.execute(q, {"cid": cid, "s": prev_start_dt, "e": prev_end_dt})).mappings().first()
+        curr_params = {"cid": cid, "s": start_dt, "e": end_dt}
+        prev_params = {"cid": cid, "s": prev_start_dt, "e": prev_end_dt}
+        if bid:
+            curr_params["bid"] = bid
+            prev_params["bid"] = bid
+
+        curr_row = (await db.execute(q, curr_params)).mappings().first()
+        prev_row = (await db.execute(q, prev_params)).mappings().first()
 
         curr_total = float(curr_row["total_gs"] if curr_row and curr_row["total_gs"] else 0)
         curr_cnt = int(curr_row["cnt"] if curr_row and curr_row["cnt"] else 0)
@@ -836,16 +851,20 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             {"nombre": "Limpieza y Otros", "monto": round(curr_total * 0.04, 0), "pct": 4.0, "margen_pct": 22.5, "unidades": int(curr_cnt * 0.4), "color": "#ec4899"},
         ]
 
-        daily_q = text("""
+        daily_q = text(f"""
             SELECT date_trunc('day', fecha) as d, COALESCE(SUM(total), 0) as day_total
             FROM sales
             WHERE company_id = :cid
               AND fecha >= :s AND fecha <= :e
               AND estado <> 'cancelado'
+              {where_branch}
             GROUP BY date_trunc('day', fecha)
             ORDER BY d
         """)
-        day_rows = (await db.execute(daily_q, {"cid": cid, "s": start_dt, "e": end_dt})).mappings().all()
+        day_params = {"cid": cid, "s": start_dt, "e": end_dt}
+        if bid:
+            day_params["bid"] = bid
+        day_rows = (await db.execute(daily_q, day_params)).mappings().all()
         day_map = {r["d"].strftime("%Y-%m-%d"): float(r["day_total"]) for r in day_rows if r["d"]}
 
         pacing_points = []
