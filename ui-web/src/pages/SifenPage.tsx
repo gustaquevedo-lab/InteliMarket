@@ -222,12 +222,13 @@ export default function SifenPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/80 dark:bg-[#070a13] text-slate-900 dark:text-slate-100 p-2 sm:p-4 md:p-6 lg:p-8 space-y-8 max-w-[1750px] mx-auto pb-20 font-sans transition-colors duration-300">
-      
-      {/* Background Ambient Glow */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute -top-40 left-1/4 w-[600px] h-[600px] bg-indigo-500/5 dark:bg-indigo-600/10 rounded-full blur-[140px]" />
-        <div className="absolute top-1/3 -right-40 w-[600px] h-[600px] bg-emerald-500/5 dark:bg-emerald-600/10 rounded-full blur-[140px]" />
+    <div className="relative min-h-screen text-slate-900 dark:text-slate-100 p-2 sm:p-4 md:p-6 lg:p-8 space-y-8 max-w-[1750px] mx-auto pb-20 font-sans transition-colors duration-300">
+
+      {/* Glassmorphism — Ambient background */}
+      <div className="fixed inset-0 -z-10 pointer-events-none bg-gradient-to-br from-slate-100 via-white to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950" />
+      <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
+        <div className="absolute -top-40 left-1/4 w-[600px] h-[600px] rounded-full bg-emerald-400/8 dark:bg-emerald-500/12 blur-[140px]" />
+        <div className="absolute top-1/3 -right-40 w-[600px] h-[600px] rounded-full bg-indigo-500/5 dark:bg-indigo-600/10 blur-[140px]" />
         <div className="absolute inset-0 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] dark:bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-20 dark:opacity-25" />
       </div>
 
@@ -268,11 +269,11 @@ export default function SifenPage() {
 
           {/* Telemetry Stat Cards */}
           <div className="flex flex-wrap items-center gap-4">
-            <div className="px-5 py-3 rounded-2xl bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 space-y-0.5">
+            <div className="px-5 py-3 rounded-2xl bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl space-y-0.5">
               <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">Facturas Emitidas</span>
               <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-mono">298.962+ docs</div>
             </div>
-            <div className="px-5 py-3 rounded-2xl bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 space-y-0.5">
+            <div className="px-5 py-3 rounded-2xl bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl space-y-0.5">
               <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">Notas de Crédito</span>
               <div className="text-lg font-black text-purple-600 dark:text-purple-400 font-mono">281.977+ NCs</div>
             </div>

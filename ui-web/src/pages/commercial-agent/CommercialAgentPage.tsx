@@ -277,9 +277,16 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
   const paresaCentral = (multiDashboard?.proveedores || []).find(p => p.supplier_razon_social.includes("PARAGUAY REFRESCOS") && p.branch_nombre.includes("Central"))
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300 pb-12">
-      {/* Header Banner - High Contrast Deep Theme */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 p-6 rounded-3xl border border-slate-800 shadow-xl text-white">
+    <div className="relative space-y-6 animate-in fade-in duration-300 pb-12">
+      {/* Glassmorphism — Ambient background */}
+      <div className="fixed inset-0 -z-10 pointer-events-none bg-gradient-to-br from-slate-100 via-white to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950" />
+      <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
+        <div className="absolute -top-24 left-1/4 w-[500px] h-[500px] rounded-full bg-emerald-400/10 dark:bg-emerald-500/15 blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/6 w-[400px] h-[400px] rounded-full bg-teal-400/8 dark:bg-teal-500/10 blur-3xl" />
+      </div>
+
+      {/* Header Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-emerald-950/95 backdrop-blur-xl p-6 rounded-3xl border border-white/[0.12] shadow-2xl text-white">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/20 font-black">
             <TrendingUp className="w-7 h-7 stroke-[2.5]" />
@@ -318,7 +325,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
       {/* KPI Ribbon Consolidado Real */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: PARESA Core */}
-        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-rose-500">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-rose-500">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>PARESA (Casa Central)</span>
             <Target className="w-4 h-4 text-rose-500" />
@@ -341,7 +348,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
         </div>
 
         {/* Card 2: Rebates Totales Estimados */}
-        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-emerald-500">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-emerald-500">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Rebate Total Proyectado</span>
             <Award className="w-4 h-4 text-emerald-500" />
@@ -355,7 +362,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
         </div>
 
         {/* Card 3: Facturación Consolidada */}
-        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-blue-500">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-blue-500">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Ventas Acumuladas Mes</span>
             <ShoppingBag className="w-4 h-4 text-blue-500" />
@@ -369,7 +376,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
         </div>
 
         {/* Card 4: Meta Global Cartera */}
-        <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm border-l-4 border-l-violet-500">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-violet-500">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">
             <span>Meta Total Cartera</span>
             <Layers className="w-4 h-4 text-violet-500" />
@@ -424,7 +431,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
       {tab === "metas" && (
         <div className="space-y-4">
           {/* Controls: Search and Branch Filter */}
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-white/50 dark:bg-slate-800/40 backdrop-blur-md p-4 rounded-2xl border border-white/40 dark:border-white/[0.06] shadow-lg">
             <div className="relative flex-1 w-full">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
@@ -460,7 +467,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
                 : "bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/40"
 
               return (
-                <div key={p.agreement_id} className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 hover:border-emerald-500/50 transition">
+                <div key={p.agreement_id} className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl space-y-3 hover:border-emerald-500/40 transition">
                   <div className="flex justify-between items-start">
                     <div>
                       <h4 className="font-bold text-xs text-slate-900 dark:text-white leading-tight">
@@ -493,7 +500,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
 
                   {/* Metrics Grid */}
                   <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-center text-xs">
-                    <div className="p-2 bg-slate-50 dark:bg-slate-800/80 rounded-xl">
+                    <div className="p-2 bg-white/40 dark:bg-slate-800/50 backdrop-blur-sm rounded-xl">
                       <span className="text-[10px] text-slate-400 block font-bold">Proyección</span>
                       <strong className="text-blue-600 dark:text-blue-400 font-bold font-mono text-[11px]">
                         {formatCurrency(p.tendencia_proyectada_gs)}
@@ -537,7 +544,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
 
       {/* Tab: Chat Analítico */}
       {tab === "chat" && (
-        <div className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col h-[600px] overflow-hidden">
+        <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl border border-white/40 dark:border-white/[0.08] shadow-xl rounded-3xl flex flex-col h-[600px] overflow-hidden">
           {/* Chat Header */}
           <div className="p-4 bg-gradient-to-r from-emerald-500/10 via-white to-teal-500/5 dark:from-gray-800 dark:via-gray-800 dark:to-gray-750 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
             <div className="flex items-center gap-3">
@@ -637,7 +644,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
       {tab === "recommendations" && (
         <div className="space-y-4">
           {recommendations.length === 0 ? (
-            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
+            <div className="p-12 text-center bg-white/60 dark:bg-slate-900/50 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl">
               <Sparkles className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
               <h3 className="font-bold text-slate-900 dark:text-white text-base">No hay recomendaciones pendientes</h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
@@ -655,7 +662,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {recommendations.map(r => (
-                <div key={r.id} className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 border-l-4 border-l-emerald-500">
+                <div key={r.id} className="p-5 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] shadow-lg rounded-2xl space-y-3 border-l-4 border-l-emerald-500">
                   <div className="flex justify-between items-start">
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 uppercase">
                       {r.tipo}

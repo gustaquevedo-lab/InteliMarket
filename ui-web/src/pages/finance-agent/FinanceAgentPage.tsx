@@ -364,9 +364,16 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
   const flujoNeto30d = summaryData?.flujo_neto_proyectado_30d_gs || (totalBankBalance + 2800000000 - 1500000000)
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6 animate-in fade-in duration-300 pb-12">
+      {/* Glassmorphism — Ambient background */}
+      <div className="fixed inset-0 -z-10 pointer-events-none bg-gradient-to-br from-slate-100 via-white to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950" />
+      <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
+        <div className="absolute -top-24 right-1/4 w-[500px] h-[500px] rounded-full bg-indigo-400/10 dark:bg-indigo-500/15 blur-3xl" />
+        <div className="absolute bottom-1/3 left-1/6 w-[400px] h-[400px] rounded-full bg-violet-400/8 dark:bg-violet-500/10 blur-3xl" />
+      </div>
+
       {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white p-6 rounded-2xl shadow-xl border border-slate-800">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-indigo-950/95 backdrop-blur-xl text-white p-6 rounded-2xl shadow-2xl border border-white/[0.12]">
         <div>
           <div className="flex items-center gap-3 mb-1">
             <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
@@ -401,7 +408,7 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
       {/* KPI Ribbon Consolidado */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* 1. Liquidez Bancaria */}
-        <div className="card p-4 border-l-4 border-l-primary bg-gradient-to-br from-white to-blue-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-primary">
           <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
             <span>Liquidez en Bancos</span>
             <Landmark className="w-4 h-4 text-primary" />
@@ -413,7 +420,7 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
         </div>
 
         {/* 2. Cuentas por Cobrar (AR) */}
-        <div className="card p-4 border-l-4 border-l-rose-500 bg-gradient-to-br from-white to-rose-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-rose-500">
           <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
             <span>Créditos a Clientes (AR)</span>
             <ArrowDownRight className="w-4 h-4 text-rose-500" />
@@ -427,7 +434,7 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
         </div>
 
         {/* 3. Cuentas por Pagar (AP) */}
-        <div className="card p-4 border-l-4 border-l-amber-500 bg-gradient-to-br from-white to-amber-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-amber-500">
           <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
             <span>Pasivo Proveedores (AP)</span>
             <Building2 className="w-4 h-4 text-amber-500" />
@@ -439,7 +446,7 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
         </div>
 
         {/* 4. Cheques en Cartera */}
-        <div className="card p-4 border-l-4 border-l-indigo-500 bg-gradient-to-br from-white to-indigo-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-indigo-500">
           <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
             <span>Cheques en Cartera</span>
             <CreditCard className="w-4 h-4 text-indigo-500" />
@@ -451,7 +458,7 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
         </div>
 
         {/* 5. Flujo Neto Proyectado */}
-        <div className="card p-4 border-l-4 border-l-emerald-500 bg-gradient-to-br from-white to-emerald-50/40 dark:from-slate-900 dark:to-slate-800 shadow-sm">
+        <div className="p-4 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border border-white/60 dark:border-white/[0.08] shadow-xl shadow-black/5 rounded-2xl border-l-4 border-l-emerald-500">
           <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
             <span>Flujo Neto 30 Días</span>
             <TrendingUp className="w-4 h-4 text-emerald-500" />
@@ -511,7 +518,7 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
       {activeTab === "ai" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Columna Izquierda: Chat Analítico Financiero (7 cols) */}
-          <div className="lg:col-span-7 flex flex-col h-[650px] bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div className="lg:col-span-7 flex flex-col h-[650px] bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl border border-white/40 dark:border-white/[0.08] shadow-xl rounded-3xl overflow-hidden">
             {/* Header del Chat */}
             <div className="p-4 bg-gradient-to-r from-amber-500/10 via-white to-orange-500/5 dark:from-gray-800 dark:via-gray-800 dark:to-gray-750 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
               <div className="flex items-center gap-3">
