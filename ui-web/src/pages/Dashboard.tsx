@@ -15,6 +15,7 @@ import {
 import { api } from "../api"
 import { useAuth } from "../context/AuthContext"
 import { useToast } from "../context/ToastContext"
+import { useBranch } from "../context/BranchContext"
 import { formatPYG, formatNumber } from "../utils/format"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
@@ -23,6 +24,7 @@ type TimeRange = "hoy" | "semana" | "mes" | "anio"
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const { selectedBranch } = useBranch()
   const toast = useToast()
   const navigate = useNavigate()
 
@@ -39,7 +41,7 @@ export default function Dashboard() {
   const loadDashboardData = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true)
     try {
-      const data = await api.reports.dashboardAllKpis(COMPANY_ID)
+      const data = await api.reports.dashboardAllKpis(COMPANY_ID, selectedBranch?.id)
       if (data) {
         setAllKpisData(data)
       }
@@ -50,7 +52,7 @@ export default function Dashboard() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [toast])
+  }, [toast, selectedBranch])
 
   useEffect(() => {
     loadDashboardData(true)

@@ -1,7 +1,8 @@
-﻿import { useState, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { Search, ShoppingCart, TrendingUp, Eye, Loader2, FileDown, Download, Filter, X, DollarSign, CreditCard, Link2, Plus, RotateCcw, MessageCircle, Send } from "lucide-react"
 import { api, type Sale, type PaymentMethod } from "../../api"
 import { useToast } from "../../context/ToastContext"
+import { useBranch } from "../../context/BranchContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { StatusBadge } from "../../components/DataTable"
 import { Modal } from "../../components/Modal"
@@ -19,6 +20,7 @@ interface SalesSummary {
 }
 
 export default function SalesPage() {
+  const { selectedBranch } = useBranch()
   const [sales, setSales] = useState<Sale[]>([])
   const [summary, setSummary] = useState<SalesSummary | null>(null)
   const [tab, setTab] = useState<TabType>("todas")
@@ -58,9 +60,14 @@ export default function SalesPage() {
         api.sales.list({
           fecha_desde: dateFrom || undefined,
           fecha_hasta: dateTo || undefined,
+          branch_id: selectedBranch?.id || undefined,
           limit: 500,
         }),
-        api.reports.salesSummary({ fecha_desde: dateFrom || undefined, fecha_hasta: dateTo || undefined }),
+        api.reports.salesSummary({
+          fecha_desde: dateFrom || undefined,
+          fecha_hasta: dateTo || undefined,
+          branch_id: selectedBranch?.id || undefined,
+        }),
       ])
       setSales(data)
       setSummary(sum)
@@ -68,7 +75,7 @@ export default function SalesPage() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => { fetchData() }, [dateFrom, dateTo, selectedBranch])
 
   const filtered = sales.filter(s => {
     if (tab === "pendientes") { if (s.estado !== "confirmado" && s.estado !== "parcial" && s.estado !== "pendiente") return false }

@@ -390,7 +390,7 @@ export const api = {
     customerConsolidatedDebt: (companyId: string, customerId: string) => client.get<any>(`/v1/companies/${companyId || COMPANY_ID}/customers/${customerId}/consolidated-debt`),
   },
   sales: {
-    list: (params?: { fecha_desde?: string; fecha_hasta?: string; estado?: string; numero?: string; limit?: number; offset?: number }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
+    list: (params?: { fecha_desde?: string; fecha_hasta?: string; estado?: string; numero?: string; branch_id?: string; limit?: number; offset?: number }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
     get: (id: string) => client.get<Sale>(`/v1/sales/${id}`),
     create: (data: Partial<Sale> & { items: SaleItem[] }) => client.post<Sale>("/v1/sales", data),
     cancel: (id: string) => client.post<void>(`/v1/sales/${id}/cancel`),

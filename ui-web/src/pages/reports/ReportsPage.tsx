@@ -1,7 +1,8 @@
-﻿import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef } from "react"
 import { BarChart3, TrendingUp, Package, FileText, Download, Loader2, ChevronDown, FileSpreadsheet, Layers, ArrowUpDown } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
+import { useBranch } from "../../context/BranchContext"
 import { formatPYG } from "../../utils/format"
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api"
@@ -152,6 +153,7 @@ function ExportDropdown({ options, periodo }: { options: ExportOption[]; periodo
 }
 
 export default function ReportsPage() {
+  const { selectedBranch } = useBranch()
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState("7d")
   const [costingTab, setCostingTab] = useState<"fifo" | "lifo" | "comparison">("fifo")
@@ -170,11 +172,11 @@ export default function ReportsPage() {
     setLoading(true)
     try {
       const [sales, inventory, financial, category, period] = await Promise.allSettled([
-        api.reports.salesSummary(),
+        api.reports.salesSummary({ branch_id: selectedBranch?.id || undefined }),
         api.reports.inventorySummary(),
         api.reports.financialSummary(),
         api.reports.salesByCategory(),
-        api.reports.salesByPeriod({ agrupar_por: "dia" }),
+        api.reports.salesByPeriod({ agrupar_por: "dia", branch_id: selectedBranch?.id || undefined }),
       ])
       if (sales.status === "fulfilled") setSalesSummary(sales.value)
       if (inventory.status === "fulfilled") setInventorySummary(inventory.value)
@@ -189,7 +191,7 @@ export default function ReportsPage() {
     }
   }
 
-  useEffect(() => { fetchData() }, [periodo])
+  useEffect(() => { fetchData() }, [periodo, selectedBranch])
   useEffect(() => { fetchCosting() }, [costingTab])
 
   const fetchCosting = async () => {

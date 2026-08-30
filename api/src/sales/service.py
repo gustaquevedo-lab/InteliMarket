@@ -267,12 +267,17 @@ async def list_sales(
     customer_id: str | None = None,
     estado: str | None = None,
     fecha_desde: datetime | None = None,
-    fecha_hasta: datetime | None = None,
     numero: str | None = None,
+    branch_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Sale]:
     query = select(Sale).where(Sale.company_id == company_id)
+    if branch_id:
+        try:
+            query = query.where(Sale.branch_id == uuid.UUID(branch_id))
+        except (ValueError, TypeError):
+            pass
     if customer_id:
         query = query.where(Sale.customer_id == customer_id)
     if estado:
