@@ -1218,18 +1218,12 @@ export default function POSPage() {
       setLoading(true)
       try {
         const [prodData, custData, whData, staffData, topData, stockData] = await Promise.allSettled([
-          // limit=1500 se quedaba corto -- esta empresa tiene 11.370
-          // productos reales y el recorte no garantiza ningun orden de
-          // popularidad, asi que productos comunes (ej. gaseosas) quedaban
-          // afuera del catalogo cargado y el POS caia al respaldo con IDs
-          // falsos (seed-N) para esos casos, rompiendo el guardado de la
-          // venta. Se pide el catalogo completo con margen.
-          api.products.list({ limit: 15000 }),
-          api.customers.list({ limit: 300 }),
-          api.warehouses.list(),
-          api.auth.posAuthorizers(),
-          api.reports.salesByProduct({ limit: 100 }),
-          api.inventory.getStockMap(),
+          api.products.list({ limit: 5000 }).catch(() => []),
+          api.customers.list({ limit: 300 }).catch(() => []),
+          api.warehouses.list().catch(() => []),
+          api.auth.posAuthorizers().catch(() => ({ staff: [] })),
+          api.reports.salesByProduct({ limit: 100 }).catch(() => []),
+          api.inventory.getStockMap().catch(() => ({})),
         ])
 
         if (prodData.status === "fulfilled") {
@@ -4604,7 +4598,7 @@ export default function POSPage() {
   const borderTone = dark ? "border-slate-800" : "border-slate-300"
 
   return (
-    <div className={`fixed inset-0 h-screen w-screen flex flex-col select-none overflow-hidden font-sans ${bgMain}`}>
+    <div className={`w-full min-h-[calc(100vh-6rem)] flex flex-col select-none overflow-hidden font-sans rounded-2xl ${bgMain}`}>
       
       {/* ── 1. HEADER EN DOS FILAS -- antes todo (identidad, balanza,
           cotizaciones, 10 botones de accion) se apretaba en una sola fila

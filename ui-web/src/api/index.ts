@@ -339,6 +339,10 @@ export const api = {
     register: (data: { email: string; password: string; nombre: string; tenant_nombre: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/register", data),
     me: () => client.get<{ id: string; email: string; nombre: string; rol: string; activo: boolean; tenant_id?: string; tenant_slug?: string }>("/v1/auth/me"),
     myTenants: () => client.get<Array<{ tenant_id: string; tenant_nombre: string; tenant_slug: string; plan: string; rol: string }>>("/v1/auth/me/tenants"),
+    posAuthorizers: () => client.get<{ staff: any[] }>("/v1/auth/pos-authorizers").catch(() => ({ staff: [] })),
+    activeSupervisor: () => client.get<any>("/v1/auth/active-supervisor").catch(() => null),
+    verifySupervisor: (data: any) => client.post<any>("/v1/auth/verify-supervisor", data).catch(() => ({ verified: false })),
+    endPosShift: () => client.post<any>("/v1/auth/end-pos-shift", {}).catch(() => {}),
   },
   admin: {
     tenants: (params?: { estado?: string; plan?: string; search?: string }) => client.get<Tenant[]>("/v1/admin/tenants", params),
@@ -368,7 +372,8 @@ export const api = {
     delete: (id: string) => client.delete<void>(`/v1/categories/${id}`),
   },
   products: {
-    list: (params?: { search?: string; category_id?: string; activo?: boolean }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, category_id: params?.category_id, activo: params?.activo?.toString() }),
+    list: (params?: { search?: string; category_id?: string; activo?: boolean; limit?: number; offset?: number }) =>
+      client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, category_id: params?.category_id, activo: params?.activo?.toString(), limit: params?.limit, offset: params?.offset }),
     get: (id: string) => client.get<Product>(`/v1/products/${id}`),
     create: (data: Partial<Product> & { sku: string; nombre: string }) => client.post<Product>("/v1/products", { ...data, company_id: COMPANY_ID }),
     update: (id: string, data: Partial<Product>) => client.patch<Product>(`/v1/products/${id}`, data),
