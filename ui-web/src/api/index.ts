@@ -2226,6 +2226,55 @@ export const api = {
     create: (data: any) => client.post<any>("/v1/supervisor-requests", { company_id: COMPANY_ID, ...data }),
     resolve: (id: string, data?: any) => client.post<any>(`/v1/supervisor-requests/${id}/resolve`, data),
   },
+  posTerminalTransactions: {
+    create: (data: any) => client.post<any>("/v1/pos-terminal-transactions", data),
+    update: (id: string, data: any) => client.patch<any>(`/v1/pos-terminal-transactions/${id}`, data),
+  },
+  paymentIntegrations: {
+    get: (provider: "bancard" | "plugpay") => client.get<any>(`/v1/payment-integrations/${provider}`),
+    update: (provider: "bancard" | "plugpay", data: { environment?: string; enabled?: boolean; config?: Record<string, any> }) =>
+      client.put<any>(`/v1/payment-integrations/${provider}`, data),
+  },
+  plugpay: {
+    compliance: (cpf: string) => client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/compliance/${cpf}`),
+    createPix: (data: { monto: number; moneda?: string; customer_cpf?: string; customer_cpf_cnpj?: string; sale_id?: string; customer_id?: string }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/pix/create", data),
+    pixStatus: (referenciaInterna: string) =>
+      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/status/${referenciaInterna}`),
+    pixQrcode: (referenciaInterna: string) =>
+      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/qrcode/${referenciaInterna}`),
+    quotePix: (data: { monto: number; moneda?: string }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/pix/quote", data),
+    calcularParcelado: (data: { monto: number; moneda?: string; cuotas: number }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string }>("/v1/plugpay/credito-parcelado/calcular", data),
+    startParcelado: (data: { monto: number; moneda?: string; cuotas: number; customer_cpf: string; customer_phone: string; sale_id?: string; customer_id?: string }) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/credito-parcelado/start", data),
+    parceladoStatus: (referenciaInterna: string) =>
+      client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/${referenciaInterna}`),
+    cancelParcelado: (referenciaInterna: string) =>
+      client.post<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/cancel/${referenciaInterna}`, {}),
+    linkSale: (txnId: string, saleId: string) => client.patch<{ message: string }>(`/v1/plugpay/transactions/${txnId}/link-sale/${saleId}`, {}),
+  },
+  inteliaudit: {
+    syncConfig: () => client.get<any>("/v1/inteliaudit/sync-config"),
+    createSyncConfig: (data: unknown) => client.post<any>("/v1/inteliaudit/sync-config", data),
+    updateSyncConfig: (data: unknown) => client.put<any>("/v1/inteliaudit/sync-config", data),
+    logs: (params?: { accion?: string; entidad?: string; limit?: number; offset?: number }) => client.get<any[]>("/v1/inteliaudit/logs", { ...params }),
+    events: () => client.get<string[]>("/v1/inteliaudit/events"),
+    recordEvent: (data: any) => client.post<any>("/v1/inteliaudit/audit-event", data),
+    syncAll: () => client.post<any>("/v1/inteliaudit/sync-all"),
+    pushAnomalies: () => client.post<any>("/v1/inteliaudit/push-anomalies"),
+  },
+  sueldok: {
+    getSSOUrl: (redirect?: string, companyId?: string) => client.get<any>("/v1/sueldok/sso-url", { redirect, company_id: companyId }),
+    getSummary: (companyId?: string) => client.get<any>("/v1/sueldok/summary", { company_id: companyId }),
+    getShifts: (companyId?: string) => client.get<any>("/v1/sueldok/shifts", { company_id: companyId }),
+    syncShifts: (data: any) => client.post<any>("/v1/sueldok/sync-shifts", data),
+    getProductivityBonuses: (companyId?: string) => client.get<any[]>("/v1/sueldok/productivity-bonuses", { company_id: companyId }),
+    exportBonuses: (data: any) => client.post<any>("/v1/sueldok/export-bonuses", data),
+    syncConfig: () => client.get<any>("/v1/sueldok/sync-config"),
+    createSyncConfig: (data: unknown) => client.post<any>("/v1/sueldok/sync-config", data),
+  },
   donaciones: {
     getCampanaActiva: (companyId?: string) => client.get<DonationCampaign>("/v1/donaciones/campana-activa", { company_id: companyId || COMPANY_ID }),
     updateCampana: (id: string, data: any) => client.put<DonationCampaign>(`/v1/donaciones/campana/${id}`, data),
