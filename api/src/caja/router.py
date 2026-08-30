@@ -77,6 +77,7 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/cash-sessions", response_model=CashSessionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/cash-sessions/open", response_model=CashSessionResponse, status_code=status.HTTP_201_CREATED)
 async def open_session(body: CashSessionCreate, db: AsyncSession = Depends(get_db)):
     try:
         return await service.open_session(db, body.model_dump())

@@ -439,12 +439,15 @@ export const api = {
     },
     sessions: {
       list: (params?: { estado?: string }) => client.get<CashSession[]>("/v1/cash-sessions", params),
-      create: (data: { cash_register_id?: string; caja_id?: string; user_id?: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions/open", data),
+      create: (data: { cash_register_id?: string; caja_id?: string; user_id?: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions", data),
       close: (id: string, data: { monto_cierre_real: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
     },
-    openSession: (data: { caja_id: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions/open", data),
+    openSession: (data: { caja_id: string; monto_apertura: number }) => client.post<CashSession>("/v1/cash-sessions", data),
     closeSession: (id: string, data: { monto_cierre: number; observaciones?: string }) => client.post<CashSession>(`/v1/cash-sessions/${id}/close`, data),
     summary: (id: string) => client.get<CashSessionSummary>(`/v1/cash-sessions/${id}/summary`),
+    sessionsSummary: (params?: { register_id?: string; estado?: string }) => client.get<CashSession[]>("/v1/cash-sessions", params as any),
+    cashDrop: (sessionId: string, data: { monto: number; monto_usd?: number; monto_brl?: number; observaciones?: string }) =>
+      client.post<any>(`/v1/companies/${COMPANY_ID}/vault/drop-cash`, { ...data, session_id: sessionId, caja_nombre: "Caja Mostrador" }),
     vault: {
       summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/vault/summary`),
       movements: (params?: { tipo?: string; limit?: number; offset?: number }) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/vault/movements`, params as any),
