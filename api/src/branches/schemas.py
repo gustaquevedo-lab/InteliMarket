@@ -33,8 +33,8 @@ class BranchUpdate(BaseModel):
 
 
 class BranchResponse(BaseModel):
-    id: str
-    company_id: str
+    id: uuid.UUID | str
+    company_id: uuid.UUID | str
     codigo: str
     nombre: str
     direccion: Optional[str]

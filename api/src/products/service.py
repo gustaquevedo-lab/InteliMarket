@@ -1,5 +1,6 @@
 """Product service"""
 
+from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,13 +80,14 @@ async def list_products(
     if activo is not None:
         query = query.where(Product.activo == activo)
     query = query.order_by(Product.nombre).limit(limit).offset(offset)
+    result = await db.execute(query)
     products = list(result.scalars().all())
     for p in products:
         if not p.precio_venta or p.precio_venta <= 0:
             if p.costo_promedio and p.costo_promedio > 0:
-                p.precio_venta = round(p.costo_promedio * 1.25, 0)
+                p.precio_venta = round(p.costo_promedio * Decimal("1.25"), 0)
             elif p.ultimo_costo and p.ultimo_costo > 0:
-                p.precio_venta = round(p.ultimo_costo * 1.25, 0)
+                p.precio_venta = round(p.ultimo_costo * Decimal("1.25"), 0)
     return products
 
 
