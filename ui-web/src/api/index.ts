@@ -422,6 +422,16 @@ export const api = {
     createTransfer: (data: { warehouse_origen_id: string; warehouse_destino_id: string; items: { product_id: string; cantidad: number }[]; observaciones?: string }) =>
       client.post<any>("/v1/inventory/transfers", { ...data, company_id: COMPANY_ID }),
     completeTransfer: (id: string) => client.post<any>(`/v1/inventory/transfers/${id}/complete`, {}),
+    getStockMap: async () => {
+      const items = await client.get<any[]>(`/v1/companies/${COMPANY_ID}/stock`).catch(() => [])
+      const map: Record<string, number> = {}
+      if (Array.isArray(items)) {
+        for (const it of items) {
+          if (it && it.product_id) map[it.product_id] = (map[it.product_id] || 0) + Number(it.cantidad || 0)
+        }
+      }
+      return map
+    },
   },
   warehouses: {
     list: () => client.get<Warehouse[]>(`/v1/companies/${COMPANY_ID}/warehouses`),

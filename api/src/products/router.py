@@ -39,7 +39,7 @@ async def list_products(
     category_id: str | None = Query(None),
     search: str | None = Query(None),
     activo: bool | None = Query(None),
-    limit: int = Query(100, le=1000),
+    limit: int = Query(1000, le=50000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):

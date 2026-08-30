@@ -5076,7 +5076,7 @@ export default function POSPage() {
                 }
               }}
               title="Haga clic para ampliar fotografía en HD"
-              className={`w-36 h-36 lg:w-40 lg:h-40 rounded-xl overflow-hidden shrink-0 border flex items-center justify-center relative cursor-pointer group shadow-sm ${bgInner}`}
+              className={`w-24 h-24 lg:w-28 lg:h-28 rounded-xl overflow-hidden shrink-0 border flex items-center justify-center relative cursor-pointer group shadow-sm ${bgInner}`}
             >
               {lastScannedProduct?.imagen_url ? (
                 <>
