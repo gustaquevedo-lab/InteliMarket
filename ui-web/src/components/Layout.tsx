@@ -131,7 +131,6 @@ const navGroups: NavGroup[] = [
   {
     title: "Integraciones",
     items: [
-      { icon: ShieldCheck, label: "Facturación SIFEN", path: "/sifen" },
       { icon: CreditCard, label: "Bancard & Dinelco", path: "/bancard" },
       { icon: CreditCard, label: "Pagopar", path: "/pagopar" },
       { icon: QrCode, label: "Kuapay", path: "/kuapay" },
