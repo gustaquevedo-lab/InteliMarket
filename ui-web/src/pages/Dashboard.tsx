@@ -148,6 +148,12 @@ export default function Dashboard() {
     return activePeriod.top_clientes
   }, [activePeriod])
 
+  // Alertas de Vencimiento de Lotes (FEFO)
+  const expiryAlerts = useMemo(() => {
+    if (!activePeriod?.alertas_vencimiento) return []
+    return activePeriod.alertas_vencimiento
+  }, [activePeriod])
+
   // Meta del período
   const targetGs = useMemo(() => {
     if (timeRange === "hoy") return 272_000_000
@@ -605,33 +611,38 @@ export default function Dashboard() {
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          5. BENTO ROW OPERATIVO: TOP PRODUCTOS, QUIEBRES Y CLIENTES TOP
+          5. BENTO ROW OPERATIVO: TOP 10 PRODUCTOS, TOP 10 CLIENTES Y ALERTAS FEFO
       ────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* TOP PRODUCTOS / SKUS MAYORISTAS */}
+        {/* COL 1: TOP 10 PRODUCTOS / SKUS MAYORISTAS */}
         <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-black text-sm text-gray-900 dark:text-white flex items-center gap-2">
                 <Flame className="w-4 h-4 text-rose-500" />
-                SKUs de Mayor Rotación
+                Top 10 SKUs de Mayor Rotación
               </h3>
-              <span className="text-[10px] font-mono text-gray-400 uppercase font-bold">Top 5</span>
+              <span className="text-[10px] font-mono text-gray-400 uppercase font-bold">Ranking Ventas</span>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
               {topProducts.length === 0 ? (
                 <div className="py-8 text-center text-xs text-gray-400">Sin movimientos registrados en este período</div>
               ) : (
                 topProducts.map((p: any, idx: number) => (
-                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-800 text-xs">
-                    <div className="min-w-0 pr-2">
-                      <p className="font-bold text-gray-900 dark:text-white truncate">{p.nombre}</p>
-                      <p className="text-[10px] text-gray-400 font-mono">SKU: {p.sku || "N/A"} · {formatNumber(p.unidades, 0)} unids</p>
+                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-800 text-xs hover:border-indigo-500/30 transition-all">
+                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                      <span className="w-5 h-5 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-mono font-black text-[10px] shrink-0">
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-bold text-gray-900 dark:text-white truncate">{p.nombre}</p>
+                        <p className="text-[10px] text-gray-400 font-mono">SKU: {p.sku || "N/A"} · {formatNumber(p.unidades, 0)} unids</p>
+                      </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <span className="font-black font-mono text-indigo-600 dark:text-indigo-400">{formatCompactPYG(p.monto)}</span>
+                    <div className="text-right shrink-0 font-mono">
+                      <span className="font-black text-indigo-600 dark:text-indigo-400">{formatCompactPYG(p.monto)}</span>
                     </div>
                   </div>
                 ))
@@ -641,73 +652,39 @@ export default function Dashboard() {
 
           <div className="pt-4 mt-2 border-t border-gray-100 dark:border-slate-800 text-center">
             <button onClick={() => navigate("/products")} className="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline">
-              Ir a Catálogo de Productos →
+              Ir a Catálogo Completo →
             </button>
           </div>
         </div>
 
-        {/* MONITOREO DE INVENTARIO & QUIEBRES */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-black text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                <Warehouse className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                Control de Depósitos & Stock
-              </h3>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400">
-                Operativo
-              </span>
-            </div>
-
-            <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-teal-500/5 border border-teal-500/20 space-y-1">
-                <span className="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase">Stock Valorizado Depósito Central</span>
-                <p className="text-xl font-black text-gray-900 dark:text-white font-mono">{formatPYG(stockValorizadoGs)}</p>
-                <p className="text-[11px] text-teal-600 dark:text-teal-400 font-medium">98.4% de disponibilidad en líneas críticas PARESA</p>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                  <div>
-                    <p className="font-bold text-gray-900 dark:text-white">{quiebresCriticos} SKUs en Punto de Reorden</p>
-                    <p className="text-[10px] text-gray-500">Sugerencias de reposición automáticas listas</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-4 mt-2 border-t border-gray-100 dark:border-slate-800 text-center">
-            <button onClick={() => navigate("/inventory")} className="text-xs text-teal-600 dark:text-teal-400 font-bold hover:underline">
-              Gestionar Inventario & Compras →
-            </button>
-          </div>
-        </div>
-
-        {/* TOP CLIENTES MAYORISTAS */}
+        {/* COL 2: TOP 10 CLIENTES MAYORISTAS */}
         <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-black text-sm text-gray-900 dark:text-white flex items-center gap-2">
                 <Users className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                Clientes Mayoristas Destacados
+                Top 10 Clientes Mayoristas
               </h3>
-              <span className="text-[10px] font-mono text-gray-400 uppercase font-bold">Top 5</span>
+              <span className="text-[10px] font-mono text-gray-400 uppercase font-bold">Cartera Top</span>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
               {topCustomers.length === 0 ? (
                 <div className="py-8 text-center text-xs text-gray-400">Sin compras registradas en este período</div>
               ) : (
                 topCustomers.map((c: any, idx: number) => (
-                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-800 text-xs">
-                    <div className="min-w-0 pr-2">
-                      <p className="font-bold text-gray-900 dark:text-white truncate">{c.nombre}</p>
-                      <p className="text-[10px] text-gray-400 font-mono">RUC: {c.ruc || "Sin RUC"} · {c.transacciones} compras</p>
+                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-2xl bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-800 text-xs hover:border-purple-500/30 transition-all">
+                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                      <span className="w-5 h-5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center font-mono font-black text-[10px] shrink-0">
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-bold text-gray-900 dark:text-white truncate">{c.nombre}</p>
+                        <p className="text-[10px] text-gray-400 font-mono">RUC: {c.ruc || "Sin RUC"} · {c.transacciones} facturas</p>
+                      </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <span className="font-black font-mono text-purple-600 dark:text-purple-400">{formatCompactPYG(c.monto)}</span>
+                    <div className="text-right shrink-0 font-mono">
+                      <span className="font-black text-purple-600 dark:text-purple-400">{formatCompactPYG(c.monto)}</span>
                     </div>
                   </div>
                 ))
@@ -717,7 +694,73 @@ export default function Dashboard() {
 
           <div className="pt-4 mt-2 border-t border-gray-100 dark:border-slate-800 text-center">
             <button onClick={() => navigate("/customers")} className="text-xs text-purple-600 dark:text-purple-400 font-bold hover:underline">
-              Ver Cartera de Clientes Mayoristas →
+              Ver Cartera Mayorista Completa →
+            </button>
+          </div>
+        </div>
+
+        {/* COL 3: ALERTAS DE VENCIMIENTO FEFO & CONTROL DE STOCK */}
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-gray-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-black text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-500" />
+                Alertas de Vencimiento (Control FEFO)
+              </h3>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                Perecederos
+              </span>
+            </div>
+
+            <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+              {expiryAlerts.length === 0 ? (
+                <div className="py-8 text-center text-xs text-gray-400">No hay lotes con alertas de vencimiento próximas</div>
+              ) : (
+                expiryAlerts.map((exp: any) => (
+                  <div
+                    key={exp.id}
+                    className={`p-2.5 rounded-2xl border text-xs flex items-center justify-between transition-all ${
+                      exp.nivel === "critico"
+                        ? "bg-rose-500/5 border-rose-500/30 text-rose-900 dark:text-rose-100"
+                        : exp.nivel === "alerta"
+                        ? "bg-amber-500/5 border-amber-500/30 text-amber-900 dark:text-amber-100"
+                        : "bg-teal-500/5 border-teal-500/20 text-teal-900 dark:text-teal-100"
+                    }`}
+                  >
+                    <div className="min-w-0 pr-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold truncate">{exp.nombre}</span>
+                      </div>
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 font-mono mt-0.5">
+                        Lote: {exp.lote} · Vence: {exp.fecha_vencimiento}
+                      </p>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded-md font-mono font-black text-[10px] ${
+                          exp.nivel === "critico"
+                            ? "bg-rose-500/20 text-rose-600 dark:text-rose-300"
+                            : exp.nivel === "alerta"
+                            ? "bg-amber-500/20 text-amber-600 dark:text-amber-300"
+                            : "bg-teal-500/20 text-teal-600 dark:text-teal-300"
+                        }`}
+                      >
+                        {exp.dias_restantes <= 0 ? "VENCIDO" : `${exp.dias_restantes} días`}
+                      </span>
+                      <p className="text-[10px] font-mono text-gray-400 mt-0.5">
+                        Stock: {formatNumber(exp.cantidad, 0)}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="pt-4 mt-2 border-t border-gray-100 dark:border-slate-800 text-center">
+            <button onClick={() => navigate("/inventory")} className="text-xs text-amber-600 dark:text-amber-400 font-bold hover:underline">
+              Auditoría de Lotes & Despachos FEFO →
             </button>
           </div>
         </div>

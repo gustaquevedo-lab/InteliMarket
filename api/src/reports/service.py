@@ -910,7 +910,7 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
                 {"nombre": "Raciones & Otros", "monto": round(curr_total * 0.04, 0), "pct": 4.0, "margen_pct": 22.5, "unidades": int(curr_cnt * 0.4), "color": "#ec4899"},
             ]
 
-        # 3. Top Productos Mayoristas Reales
+        # 3. Top 10 Productos Mayoristas Reales
         q_prod = text(f"""
             SELECT 
                 COALESCE(p.nombre, si.descripcion, 'Producto') as nombre,
@@ -926,7 +926,7 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
               {where_branch}
             GROUP BY p.nombre, p.sku, si.descripcion
             ORDER BY monto DESC
-            LIMIT 5
+            LIMIT 10
         """)
         prod_rows = (await db.execute(q_prod, curr_params)).mappings().all()
         top_products = [
@@ -939,7 +939,7 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             for r in prod_rows
         ]
 
-        # 4. Top Clientes Mayoristas Reales
+        # 4. Top 10 Clientes Mayoristas Reales
         q_cli = text(f"""
             SELECT 
                 COALESCE(c.razon_social, 'Consumidor Final') as nombre,
@@ -954,7 +954,7 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
               {where_branch}
             GROUP BY c.razon_social, c.ruc
             ORDER BY monto DESC
-            LIMIT 5
+            LIMIT 10
         """)
         cli_rows = (await db.execute(q_cli, curr_params)).mappings().all()
         top_customers = [
@@ -967,7 +967,40 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             for r in cli_rows
         ]
 
-        # 5. Pacing Diario / Puntos de Evolución
+        # 5. Alertas de Vencimiento de Lotes (Control FEFO)
+        q_exp = text("""
+            SELECT 
+                l.id,
+                COALESCE(p.nombre, 'Producto') as nombre,
+                COALESCE(p.sku, '') as sku,
+                COALESCE(l.referencia, 'LOTE-GEN') as lote,
+                l.fecha_vencimiento,
+                l.cantidad_disponible as cantidad,
+                (l.fecha_vencimiento - CURRENT_DATE) as dias_restantes
+            FROM stock_lots l
+            JOIN products p ON p.id = l.product_id
+            WHERE l.company_id = :cid
+              AND l.cantidad_disponible > 0
+              AND l.fecha_vencimiento IS NOT NULL
+            ORDER BY l.fecha_vencimiento ASC
+            LIMIT 8
+        """)
+        exp_rows = (await db.execute(q_exp, {"cid": cid})).mappings().all()
+        expiry_alerts = [
+            {
+                "id": str(r["id"]),
+                "nombre": r["nombre"],
+                "sku": r["sku"],
+                "lote": r["lote"],
+                "fecha_vencimiento": str(r["fecha_vencimiento"]),
+                "cantidad": float(r["cantidad"]),
+                "dias_restantes": int(r["dias_restantes"]),
+                "nivel": "critico" if r["dias_restantes"] <= 7 else "alerta" if r["dias_restantes"] <= 15 else "proximo",
+            }
+            for r in exp_rows
+        ]
+
+        # 6. Pacing Diario / Puntos de Evolución
         daily_q = text(f"""
             SELECT date_trunc('day', s.fecha) as d, COALESCE(SUM(s.total), 0) as day_total
             FROM sales s
@@ -1028,6 +1061,7 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             "mix_categorias": {"items": categories},
             "top_productos": top_products,
             "top_clientes": top_customers,
+            "alertas_vencimiento": expiry_alerts,
             "evolucion_puntos": pacing_points,
             "pacing_comparativa": {
                 "ventas_monto": curr_total,
