@@ -100,14 +100,16 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
   ])
   const [query, setQuery] = useState("")
   const [sendingChat, setSendingChat] = useState(false)
-  const chatEndRef = useRef<HTMLDivElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadData()
   }, [])
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+    }
   }, [chatHistory, sendingChat])
 
   const loadData = async () => {
@@ -441,7 +443,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
             </div>
 
             {/* Chat Messages */}
-            <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/60 dark:bg-gray-900/60">
+            <div ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/60 dark:bg-gray-900/60">
               {chatHistory.map((m) => (
                 <div key={m.id} className={`flex gap-3 ${m.isUser ? "justify-end" : "justify-start"}`}>
                   {!m.isUser && (
@@ -483,7 +485,7 @@ Opero de forma transversal conectado al **Gerente Comercial** (para cubrir brech
                   </div>
                 </div>
               )}
-              <div ref={chatEndRef} />
+              {/* End of Chat */}
             </div>
 
             {/* Quick Prompt Chips */}

@@ -73,14 +73,16 @@ export default function IntelliZappPage() {
   const [simInput, setSimInput] = useState("")
   const [simSending, setSimSending] = useState(false)
   const [simState, setSimState] = useState("idle")
-  const simEndRef = useRef<HTMLDivElement>(null)
+  const simContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (tab !== "simulator") fetchAll()
   }, [tab])
 
   useEffect(() => {
-    simEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (simContainerRef.current) {
+      simContainerRef.current.scrollTop = simContainerRef.current.scrollHeight
+    }
   }, [simMessages])
 
   const fetchAll = async () => {

@@ -201,8 +201,12 @@ function BrainTab() {
     }
   }, [])
 
+  const chatContainerRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+    }
   }, [history, loading])
 
   const cleanupRecording = () => {
@@ -938,9 +942,13 @@ function ChatTab() {
   const [loading, setLoading] = useState(false)
   const [customerId, setCustomerId] = useState("00000000-0000-0000-0000-000000000010")
   const [customerName, setCustomerName] = useState("Cliente Demo")
-  const endRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }) }, [messages])
+  useEffect(() => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
+    }
+  }, [messages])
 
   const send = async () => {
     if (!message.trim()) return

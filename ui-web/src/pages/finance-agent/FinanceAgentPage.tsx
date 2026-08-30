@@ -68,7 +68,7 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
   ])
   const [query, setQuery] = useState("")
   const [sendingChat, setSendingChat] = useState(false)
-  const chatEndRef = useRef<HTMLDivElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
 
   const cleanText = (str: string) => {
     return str.replace(/\*\*/g, "").replace(/\*/g, "").replace(/`/g, "").trim()
@@ -165,7 +165,9 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
   const userName = user?.name || "Gustavo"
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+    }
   }, [chatHistory, sendingChat])
 
   async function loadAllData() {
@@ -541,7 +543,7 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
             </div>
 
             {/* Mensajes del Chat */}
-            <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/60 dark:bg-gray-900/60">
+            <div ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/60 dark:bg-gray-900/60">
               {chatHistory.map((m) => (
                 <div
                   key={m.id}
@@ -577,7 +579,7 @@ Estoy conectado en tiempo real a la base de datos de tesorería, cuentas por cob
                   </div>
                 </div>
               )}
-              <div ref={chatEndRef} />
+              {/* End of Chat */}
             </div>
 
             {/* Quick Prompt Chips */}

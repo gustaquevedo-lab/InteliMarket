@@ -92,14 +92,16 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
     }
   ])
   const [query, setQuery] = useState("")
-  const chatEndRef = useRef<HTMLDivElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadData()
   }, [])
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+    }
   }, [chatHistory, loading])
 
   const loadData = async () => {
@@ -567,7 +569,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
           </div>
 
           {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/60 dark:bg-gray-900/60">
+          <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/60 dark:bg-gray-900/60">
             {chatHistory.map((m) => (
               <div key={m.id} className={`flex gap-3 ${m.isUser ? "justify-end" : "justify-start"}`}>
                 {!m.isUser && (
@@ -596,7 +598,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
                 </div>
               </div>
             )}
-            <div ref={chatEndRef} />
+            {/* End of Chat */}
           </div>
 
           {/* Quick Prompts */}
