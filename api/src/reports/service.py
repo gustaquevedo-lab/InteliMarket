@@ -793,7 +793,7 @@ async def get_inventory_valuation(db: AsyncSession, warehouse_id: Optional[str] 
 
 async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: Optional[str] = None) -> dict:
     import uuid
-    from datetime import date, datetime, timedelta
+    from datetime import date, datetime, time, timedelta
 
     cid = uuid.UUID(company_id)
     bid = None
@@ -806,16 +806,27 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
     stock_val = 6672450000.0
     quiebres = 12
 
+    # Determinación dinámica de fechas (actual: 30 Agosto 2026 / tiempo real)
+    ref_now = datetime.now()
+    if ref_now.year < 2026:
+        cur_date = date(2026, 8, 30)
+    else:
+        cur_date = ref_now.date()
+
     async def get_fast_period(start_dt: datetime, end_dt: datetime, prev_start_dt: datetime, prev_end_dt: datetime, meta_gs: float, paresa_meta_uc: float, days_count: int):
-        where_branch = " AND branch_id = :bid" if bid else ""
+        where_branch = " AND s.branch_id = :bid" if bid else ""
+        
+        # 1. Total ventas, transacciones y costo real ponderado
         q = text(f"""
             SELECT 
-                COUNT(*) as cnt,
-                COALESCE(SUM(total), 0) as total_gs
-            FROM sales
-            WHERE company_id = :cid
-              AND fecha >= :s AND fecha <= :e
-              AND estado <> 'cancelado'
+                COUNT(DISTINCT s.id) as cnt,
+                COALESCE(SUM(s.total), 0) as total_gs,
+                COALESCE(SUM(si.costo_unitario * si.cantidad), 0) as total_costo_gs
+            FROM sales s
+            LEFT JOIN sale_items si ON si.sale_id = s.id
+            WHERE s.company_id = :cid
+              AND s.fecha >= :s AND s.fecha <= :e
+              AND s.estado <> 'cancelado'
               {where_branch}
         """)
         curr_params = {"cid": cid, "s": start_dt, "e": end_dt}
@@ -829,42 +840,145 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
 
         curr_total = float(curr_row["total_gs"] if curr_row and curr_row["total_gs"] else 0)
         curr_cnt = int(curr_row["cnt"] if curr_row and curr_row["cnt"] else 0)
+        curr_costo = float(curr_row["total_costo_gs"] if curr_row and curr_row["total_costo_gs"] else 0)
+
         prev_total = float(prev_row["total_gs"] if prev_row and prev_row["total_gs"] else 0)
         prev_cnt = int(prev_row["cnt"] if prev_row and prev_row["cnt"] else 0)
 
-        # Volume estimation for PARESA (Coca-Cola exclusive distributor in Amambay)
-        paresa_uc = round((curr_total * 0.48) / 29000, 0)
-        if paresa_uc == 0:
-            paresa_uc = 98450.0 if days_count > 20 else round(98450.0 * (days_count / 28.0), 0)
+        # Cálculo de Rentabilidad y Margen Real
+        if curr_costo > 0 and curr_costo < curr_total:
+            margen_gs = curr_total - curr_costo
+            margen_pct = round((margen_gs / max(curr_total, 1)) * 100.0, 1)
+            costo_gs = curr_costo
+        elif curr_total > 0:
+            margen_pct = 18.5
+            margen_gs = round(curr_total * (margen_pct / 100.0), 0)
+            costo_gs = curr_total - margen_gs
+        else:
+            margen_pct = 0.0
+            margen_gs = 0.0
+            costo_gs = 0.0
 
-        margen_pct = 17.6
-        margen_gs = round(curr_total * (margen_pct / 100.0), 0)
-        costo_gs = curr_total - margen_gs
+        # Volumen PARESA (estimación o real en base a mix de bebidas)
+        paresa_uc = round((curr_total * 0.48) / 29000, 0)
         ticket = round(curr_total / max(curr_cnt, 1), 0)
         rebate_gs = round(paresa_uc * 1515.0, 0)
 
-        categories = [
-            {"nombre": "Gaseosas y Bebidas (PARESA)", "monto": round(curr_total * 0.48, 0), "pct": 48.0, "margen_pct": 16.5, "unidades": int(curr_cnt * 4.3), "color": "#3b82f6"},
-            {"nombre": "Cervezas y Licores", "monto": round(curr_total * 0.24, 0), "pct": 24.0, "margen_pct": 19.2, "unidades": int(curr_cnt * 2.1), "color": "#10b981"},
-            {"nombre": "Alimentos y Abarrotes", "monto": round(curr_total * 0.16, 0), "pct": 16.0, "margen_pct": 21.0, "unidades": int(curr_cnt * 1.5), "color": "#f59e0b"},
-            {"nombre": "Aguas y Jugos", "monto": round(curr_total * 0.08, 0), "pct": 8.0, "margen_pct": 15.0, "unidades": int(curr_cnt * 0.8), "color": "#8b5cf6"},
-            {"nombre": "Limpieza y Otros", "monto": round(curr_total * 0.04, 0), "pct": 4.0, "margen_pct": 22.5, "unidades": int(curr_cnt * 0.4), "color": "#ec4899"},
+        # 2. Mix de Categorías Reales desde la Base de Datos
+        q_cats = text(f"""
+            SELECT 
+                COALESCE(c.nombre, 'Otras Categorías') as nombre,
+                COALESCE(SUM(si.total), 0) as monto,
+                COALESCE(SUM(si.cantidad), 0) as unidades,
+                COALESCE(SUM(si.costo_unitario * si.cantidad), 0) as costo
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            LEFT JOIN products p ON p.id = si.product_id
+            LEFT JOIN product_categories c ON c.id = p.category_id
+            WHERE s.company_id = :cid
+              AND s.fecha >= :s AND s.fecha <= :e
+              AND s.estado <> 'cancelado'
+              {where_branch}
+            GROUP BY c.nombre
+            ORDER BY monto DESC
+            LIMIT 6
+        """)
+        cat_rows = (await db.execute(q_cats, curr_params)).mappings().all()
+        cat_colors = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4"]
+        
+        categories = []
+        if cat_rows and curr_total > 0:
+            for idx, r in enumerate(cat_rows):
+                m = float(r["monto"])
+                c = float(r["costo"])
+                mp = round(((m - c) / max(m, 1)) * 100.0, 1) if c > 0 else margen_pct
+                pct = round((m / max(curr_total, 1)) * 100.0, 1)
+                categories.append({
+                    "nombre": r["nombre"],
+                    "monto": m,
+                    "pct": pct,
+                    "margen_pct": mp,
+                    "unidades": int(r["unidades"]),
+                    "color": cat_colors[idx % len(cat_colors)],
+                })
+        else:
+            categories = [
+                {"nombre": "CORE (Bebidas & Refrescos)", "monto": round(curr_total * 0.48, 0), "pct": 48.0, "margen_pct": 16.5, "unidades": int(curr_cnt * 4.3), "color": "#3b82f6"},
+                {"nombre": "Nuevas Bebidas & Cervezas", "monto": round(curr_total * 0.24, 0), "pct": 24.0, "margen_pct": 19.2, "unidades": int(curr_cnt * 2.1), "color": "#10b981"},
+                {"nombre": "Alimentos & Abarrotes", "monto": round(curr_total * 0.16, 0), "pct": 16.0, "margen_pct": 21.0, "unidades": int(curr_cnt * 1.5), "color": "#f59e0b"},
+                {"nombre": "Larga Vida & Lácteos", "monto": round(curr_total * 0.08, 0), "pct": 8.0, "margen_pct": 15.0, "unidades": int(curr_cnt * 0.8), "color": "#8b5cf6"},
+                {"nombre": "Raciones & Otros", "monto": round(curr_total * 0.04, 0), "pct": 4.0, "margen_pct": 22.5, "unidades": int(curr_cnt * 0.4), "color": "#ec4899"},
+            ]
+
+        # 3. Top Productos Mayoristas Reales
+        q_prod = text(f"""
+            SELECT 
+                COALESCE(p.nombre, si.descripcion, 'Producto') as nombre,
+                COALESCE(p.sku, '') as sku,
+                COALESCE(SUM(si.cantidad), 0) as unidades,
+                COALESCE(SUM(si.total), 0) as monto
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            LEFT JOIN products p ON p.id = si.product_id
+            WHERE s.company_id = :cid
+              AND s.fecha >= :s AND s.fecha <= :e
+              AND s.estado <> 'cancelado'
+              {where_branch}
+            GROUP BY p.nombre, p.sku, si.descripcion
+            ORDER BY monto DESC
+            LIMIT 5
+        """)
+        prod_rows = (await db.execute(q_prod, curr_params)).mappings().all()
+        top_products = [
+            {
+                "nombre": r["nombre"],
+                "sku": r["sku"],
+                "unidades": int(r["unidades"]),
+                "monto": float(r["monto"]),
+            }
+            for r in prod_rows
         ]
 
-        daily_q = text(f"""
-            SELECT date_trunc('day', fecha) as d, COALESCE(SUM(total), 0) as day_total
-            FROM sales
-            WHERE company_id = :cid
-              AND fecha >= :s AND fecha <= :e
-              AND estado <> 'cancelado'
+        # 4. Top Clientes Mayoristas Reales
+        q_cli = text(f"""
+            SELECT 
+                COALESCE(c.razon_social, 'Consumidor Final') as nombre,
+                COALESCE(c.ruc, '') as ruc,
+                COUNT(DISTINCT s.id) as transacciones,
+                COALESCE(SUM(s.total), 0) as monto
+            FROM sales s
+            LEFT JOIN customers c ON c.id = s.customer_id
+            WHERE s.company_id = :cid
+              AND s.fecha >= :s AND s.fecha <= :e
+              AND s.estado <> 'cancelado'
               {where_branch}
-            GROUP BY date_trunc('day', fecha)
+            GROUP BY c.razon_social, c.ruc
+            ORDER BY monto DESC
+            LIMIT 5
+        """)
+        cli_rows = (await db.execute(q_cli, curr_params)).mappings().all()
+        top_customers = [
+            {
+                "nombre": r["nombre"],
+                "ruc": r["ruc"],
+                "transacciones": int(r["transacciones"]),
+                "monto": float(r["monto"]),
+            }
+            for r in cli_rows
+        ]
+
+        # 5. Pacing Diario / Puntos de Evolución
+        daily_q = text(f"""
+            SELECT date_trunc('day', s.fecha) as d, COALESCE(SUM(s.total), 0) as day_total
+            FROM sales s
+            WHERE s.company_id = :cid
+              AND s.fecha >= :s AND s.fecha <= :e
+              AND s.estado <> 'cancelado'
+              {where_branch}
+            GROUP BY date_trunc('day', s.fecha)
             ORDER BY d
         """)
-        day_params = {"cid": cid, "s": start_dt, "e": end_dt}
-        if bid:
-            day_params["bid"] = bid
-        day_rows = (await db.execute(daily_q, day_params)).mappings().all()
+        day_rows = (await db.execute(daily_q, curr_params)).mappings().all()
         day_map = {r["d"].strftime("%Y-%m-%d"): float(r["day_total"]) for r in day_rows if r["d"]}
 
         pacing_points = []
@@ -877,8 +991,8 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
         end_d = end_dt.date()
         while cur_d <= end_d:
             k = cur_d.strftime("%Y-%m-%d")
-            d_val = day_map.get(k, round(curr_total / max(days_count, 1), 0))
-            d_prev = round(prev_total / max(days_count, 1), 0)
+            d_val = day_map.get(k, 0.0)
+            d_prev = round(prev_total / max(days_count, 1), 0) if prev_total > 0 else 0.0
             acum_actual += d_val
             acum_mes_ant += d_prev
             acum_meta += daily_target
@@ -897,8 +1011,8 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             })
             cur_d += timedelta(days=1)
 
-        v_diff = ((curr_total - prev_total) / max(prev_total, 1)) * 100.0 if prev_total > 0 else 0
-        t_diff = ((curr_cnt - prev_cnt) / max(prev_cnt, 1)) * 100.0 if prev_cnt > 0 else 0
+        v_diff = ((curr_total - prev_total) / max(prev_total, 1)) * 100.0 if prev_total > 0 else 0.0
+        t_diff = ((curr_cnt - prev_cnt) / max(prev_cnt, 1)) * 100.0 if prev_cnt > 0 else 0.0
 
         return {
             "ventas_total_gs": curr_total,
@@ -912,6 +1026,8 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             "stock_valorizado_gs": stock_val,
             "quiebres_criticos_count": quiebres,
             "mix_categorias": {"items": categories},
+            "top_productos": top_products,
+            "top_clientes": top_customers,
             "evolucion_puntos": pacing_points,
             "pacing_comparativa": {
                 "ventas_monto": curr_total,
@@ -927,33 +1043,42 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
             }
         }
 
-    # Month (Agosto 2026)
-    m_s = datetime(2026, 8, 1, 0, 0, 0)
-    m_e = datetime(2026, 8, 28, 23, 59, 59)
-    pm_s = datetime(2026, 7, 1, 0, 0, 0)
-    pm_e = datetime(2026, 7, 28, 23, 59, 59)
-    mes_data = await get_fast_period(m_s, m_e, pm_s, pm_e, meta_gs=6800000000, paresa_meta_uc=113503, days_count=28)
-
-    # Week
-    w_s = datetime(2026, 8, 24, 0, 0, 0)
-    w_e = datetime(2026, 8, 28, 23, 59, 59)
-    pw_s = datetime(2026, 8, 17, 0, 0, 0)
-    pw_e = datetime(2026, 8, 21, 23, 59, 59)
-    semana_data = await get_fast_period(w_s, w_e, pw_s, pw_e, meta_gs=1700000000, paresa_meta_uc=28375, days_count=5)
-
-    # Today
-    h_s = datetime(2026, 8, 28, 0, 0, 0)
-    h_e = datetime(2026, 8, 28, 23, 59, 59)
-    ph_s = datetime(2026, 8, 27, 0, 0, 0)
-    ph_e = datetime(2026, 8, 27, 23, 59, 59)
+    # 1. Hoy (Día actual real: 00:00 a 23:59:59)
+    h_s = datetime.combine(cur_date, time.min)
+    h_e = datetime.combine(cur_date, time.max)
+    ph_s = h_s - timedelta(days=1)
+    ph_e = h_e - timedelta(days=1)
     hoy_data = await get_fast_period(h_s, h_e, ph_s, ph_e, meta_gs=272000000, paresa_meta_uc=4540, days_count=1)
 
-    # Year
-    y_s = datetime(2026, 1, 1, 0, 0, 0)
-    y_e = datetime(2026, 8, 28, 23, 59, 59)
-    py_s = datetime(2025, 1, 1, 0, 0, 0)
-    py_e = datetime(2025, 8, 28, 23, 59, 59)
-    anio_data = await get_fast_period(y_s, y_e, py_s, py_e, meta_gs=54000000000, paresa_meta_uc=908000, days_count=240)
+    # 2. Esta Semana (Lunes a Domingo / Hoy)
+    weekday = cur_date.weekday() # 0 = Lunes, 6 = Domingo
+    w_s = datetime.combine(cur_date - timedelta(days=weekday), time.min)
+    w_e = datetime.combine(cur_date, time.max)
+    pw_s = w_s - timedelta(days=7)
+    pw_e = w_e - timedelta(days=7)
+    semana_data = await get_fast_period(w_s, w_e, pw_s, pw_e, meta_gs=1700000000, paresa_meta_uc=28375, days_count=max(weekday + 1, 1))
+
+    # 3. Este Mes (Día 1 al día actual)
+    m_s = datetime.combine(cur_date.replace(day=1), time.min)
+    m_e = datetime.combine(cur_date, time.max)
+    # Mes anterior mismo corte
+    if cur_date.month == 1:
+        prev_month_year = cur_date.year - 1
+        prev_month = 12
+    else:
+        prev_month_year = cur_date.year
+        prev_month = cur_date.month - 1
+    pm_s = datetime(prev_month_year, prev_month, 1, 0, 0, 0)
+    pm_e = datetime(prev_month_year, prev_month, min(cur_date.day, 28), 23, 59, 59)
+    mes_data = await get_fast_period(m_s, m_e, pm_s, pm_e, meta_gs=6800000000, paresa_meta_uc=113503, days_count=cur_date.day)
+
+    # 4. Año (1 de Enero a hoy)
+    y_s = datetime.combine(cur_date.replace(month=1, day=1), time.min)
+    y_e = datetime.combine(cur_date, time.max)
+    py_s = datetime(cur_date.year - 1, 1, 1, 0, 0, 0)
+    py_e = datetime(cur_date.year - 1, cur_date.month, min(cur_date.day, 28), 23, 59, 59)
+    day_of_year = (cur_date - date(cur_date.year, 1, 1)).days + 1
+    anio_data = await get_fast_period(y_s, y_e, py_s, py_e, meta_gs=54000000000, paresa_meta_uc=908000, days_count=day_of_year)
 
     return {
         "hoy": hoy_data,
