@@ -2793,6 +2793,36 @@ export default function POSPage() {
       }
     }
 
+    // 1.5 TARJETA QR DE SOCIO EXTRA CLUB -- cada socio tiene una tarjeta con
+    // QR que se escanea en caja para consultar saldo y demas. El numero de
+    // socio se sincroniza desde el legacy con formato UUID (8-4-4-4-12,
+    // ej. "8aab28e2-5040-443a-b730-b96ddd7f093e") -- eso es justamente lo
+    // que trae el QR. Antes esto caia derecho en "Producto no encontrado"
+    // (y hasta abria el modal de faltante de stock) porque el escaneo
+    // general solo sabia buscar productos, nunca clientes.
+    const looksLikeExtraClubCode = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(code)
+    if (!qtyPrefix && looksLikeExtraClubCode) {
+      try {
+        const found = (await api.customers.list({ search: code, limit: 5 })) || []
+        const match = found.find((c) => c.extra_club_numero?.toLowerCase() === code.toLowerCase())
+        if (match) {
+          const normalized = normalizeCustomer(match)
+          setShowExtraClubBalanceModal(true)
+          setBalanceModalQuery("")
+          setBalanceModalResults([])
+          setBalanceModalSelected(normalized)
+          setSearch("")
+          searchInputRef.current?.focus()
+          toast.success("Socio Extra Club", `${normalized.razon_social || normalized.nombre} -- consultando saldo.`)
+          return
+        }
+      } catch (e) {}
+      toast.warning("Socio no encontrado", `El código de socio ${code} no está registrado.`)
+      setSearch("")
+      searchInputRef.current?.focus()
+      return
+    }
+
     // 2. Coincidencia exacta en memoria local
     const localMatch = products.find(
       (p) => p.codigo_barra === code || p.sku === code || p.codigo_barra?.endsWith(code) || (p.codigo_barra && code.endsWith(p.codigo_barra))
