@@ -16,6 +16,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useTheme } from "../../context/ThemeContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
+import { DEFAULT_RECEIPT_CONFIG } from "../settings/SettingsPage"
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
 const FlagPY = () => (
@@ -1644,7 +1645,17 @@ export default function POSPage() {
           const merged = { ...c, nombre: fantasia, nombre_fantasia: fantasia }
           localStorage.setItem("pos_company_data", JSON.stringify(merged))
           if ((c.config as any)?.receipt_template) {
-            localStorage.setItem("pos_receipt_template_config", JSON.stringify((c.config as any).receipt_template))
+            // Merge en cascada: DEFAULT_RECEIPT_CONFIG (base) < DB (empresa) < localStorage (último guardado por el operador).
+            // El localStorage es la fuente de verdad del operador: si modificó algo en el Diseñador
+            // de Facturas y guardó, eso prevalece sobre lo que la DB tenga. Así los mensajes
+            // personalizados sobreviven al reiniciar la caja.
+            const dbTpl = (c.config as any).receipt_template as Record<string, unknown>
+            const localTplRaw = localStorage.getItem("pos_receipt_template_config")
+            const localTpl: Record<string, unknown> = localTplRaw
+              ? (() => { try { return JSON.parse(localTplRaw) } catch { return {} } })()
+              : {}
+            const mergedTpl = { ...DEFAULT_RECEIPT_CONFIG, ...dbTpl, ...localTpl }
+            localStorage.setItem("pos_receipt_template_config", JSON.stringify(mergedTpl))
           }
           if ((c.config as any)?.currencies) {
             const currs = (c.config as any).currencies
