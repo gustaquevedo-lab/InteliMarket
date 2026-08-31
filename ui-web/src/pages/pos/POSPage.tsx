@@ -3735,7 +3735,12 @@ export default function POSPage() {
     setDonacionActiva(nextActiva)
     if (customMonto !== undefined) {
       setMontoDonacionManual(customMonto)
-    } else if (!nextActiva) {
+    } else {
+      // Sin customMonto -- ya sea al desactivar, o al elegir el chip "Vuelto
+      // Total" (modo automatico/en vivo) -- se limpia cualquier monto
+      // congelado de un chip anterior para que vuelva a seguir el vuelto
+      // real/sugerido en cada recalculo, no un numero pegado del momento
+      // en que se hizo clic.
       setMontoDonacionManual(null)
     }
     const monto = customMonto !== undefined ? customMonto : (montoDonacionManual !== null ? montoDonacionManual : montoSugeridoDonacion)
@@ -6658,15 +6663,27 @@ export default function POSPage() {
                       {/* Chips de montos rápidos inteligentes */}
                       <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1 flex-wrap">
                         {(() => {
-                          const rawCash = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
-                          const vueltoSinDonar = Math.max(0, rawCash - totalPyg)
+                          // Antes esto recalculaba el vuelto mirando SOLO el campo
+                          // de Guaraníes (payCashPyg), ignorando R$/US$ -- con pago
+                          // multimoneda el chip de "Vuelto Total" mostraba (o de
+                          // hecho ofrecia) un monto que no era el vuelto real.
+                          // vueltoPyg (arriba, useMemo) ya suma las 3 monedas bien
+                          // -- se reutiliza esa misma fuente de verdad aca.
+                          const vueltoSinDonar = vueltoPyg
                           const restoCompra = totalPyg % 1000
                           const redondeoCompra = restoCompra > 0 ? 1000 - restoCompra : 500
 
-                          const quickChips: Array<{ label: string; val: number }> = []
+                          const quickChips: Array<{ label: string; val: number; live?: boolean }> = []
 
                           if (vueltoSinDonar > 0) {
-                            quickChips.push({ label: `Vuelto Total (${formatPYG(vueltoSinDonar)})`, val: vueltoSinDonar })
+                            // "live: true" -- este chip representa "seguir el vuelto
+                            // real", no un monto fijo. Antes, aunque mostrara el
+                            // vuelto del momento, al hacer clic quedaba CONGELADO
+                            // en ese numero (montoDonacionManual) -- si el cajero
+                            // despues cambiaba los montos ingresados (ej. R$ 22 ->
+                            // R$ 50), la sugerencia y el vuelto final ya no se
+                            // recalculaban, quedaban pegados al escenario anterior.
+                            quickChips.push({ label: `Vuelto Total (${formatPYG(vueltoSinDonar)})`, val: vueltoSinDonar, live: true })
                             if (redondeoCompra !== vueltoSinDonar) {
                               quickChips.push({ label: `Redondeo Compra (${formatPYG(redondeoCompra)})`, val: redondeoCompra })
                             }
@@ -6683,6 +6700,7 @@ export default function POSPage() {
 
                           return quickChips.map((btn, idx) => {
                             const isSelected = donacionActiva && (
+                              (btn.live && montoDonacionManual === null) ||
                               montoDonacionManual === btn.val ||
                               (montoDonacionManual === null && btn.val === montoSugeridoDonacion)
                             )
@@ -6690,7 +6708,7 @@ export default function POSPage() {
                               <button
                                 key={idx}
                                 type="button"
-                                onClick={() => handleToggleDonacion(true, btn.val)}
+                                onClick={() => btn.live ? handleToggleDonacion(true) : handleToggleDonacion(true, btn.val)}
                                 className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
                                   isSelected
                                     ? "bg-rose-600 text-white shadow-sm"
