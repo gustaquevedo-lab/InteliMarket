@@ -90,3 +90,4 @@ api/static/
 
 # Build info de TS
 ui-web/tsconfig.tsbuildinfo
+tsconfig.tsbuildinfo
