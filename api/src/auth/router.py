@@ -76,7 +76,8 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
             )
         )
     )
-    user = result.scalar_one_or_none()
+    user = result.scalars().first()
+
 
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Credenciales invalidas")

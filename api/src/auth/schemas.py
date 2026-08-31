@@ -7,13 +7,14 @@ from uuid import UUID
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str = Field(min_length=6)
 
 
 class VerifySupervisorRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
+
 
 
 class VerifySupervisorResponse(BaseModel):
