@@ -1220,6 +1220,7 @@ export default function POSPage() {
   const [mixedCardPyg, setMixedCardPyg] = useState("")
   const [mixedDinelcoPyg, setMixedDinelcoPyg] = useState("")
   const [mixedQrPyg, setMixedQrPyg] = useState("")
+  const [mixedParceladoPyg, setMixedParceladoPyg] = useState("")
   const [mixedExtraClubPyg, setMixedExtraClubPyg] = useState("")
 
   // ── Extra Club (pago a credito) -- busqueda propia dentro del tab de pago,
@@ -3832,6 +3833,9 @@ export default function POSPage() {
     if (activeMethods.has("qr")) {
       recibido += isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     }
+    if (activeMethods.has("plugpay_credito")) {
+      recibido += isMultiPayment ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    }
     if (activeMethods.has("extra_club")) {
       recibido += isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
     }
@@ -3853,7 +3857,7 @@ export default function POSPage() {
       saldoRestantePyg: Math.round(saldo),
       vueltoPyg: Math.round(vuelto)
     }
-  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedExtraClubPyg, totalPyg, rates])
+  }, [activeMethods, isMultiPayment, payCashPyg, payCashBrl, payCashUsd, mixedCardPyg, mixedDinelcoPyg, mixedQrPyg, mixedParceladoPyg, mixedExtraClubPyg, totalPyg, rates])
 
   // ── Detección inteligente de redondeo para Centro Amor y Esperanza ("Abre tu corazón") ──
   const montoSugeridoDonacion = useMemo(() => {
@@ -4040,6 +4044,7 @@ export default function POSPage() {
     setMixedCardPyg("")
     setMixedDinelcoPyg("")
     setMixedQrPyg("")
+    setMixedParceladoPyg("")
     setMixedExtraClubPyg("")
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
@@ -4282,7 +4287,7 @@ export default function POSPage() {
           }
         }
         if (activeMethods.has("plugpay_credito")) {
-          const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          const monto = isMultiPayment ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (monto > 0) out.push({ forma_pago: "PLUGPAY_CREDITO", monto, moneda: "PYG" })
         }
         if (activeMethods.has("extra_club")) {
@@ -6275,7 +6280,7 @@ export default function POSPage() {
 
       {/* ── 7. MODAL DE AUTORIZACIÓN DE SUPERVISOR (SEGURIDAD DE CAJA) ──────── */}
       {showSupervisorModal && (
-        <div className="fixed inset-0 z-[125] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[200] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
@@ -6695,12 +6700,11 @@ export default function POSPage() {
                   <div className="text-3xl font-black font-posMono tabular-nums text-slate-950 dark:text-white tracking-tight">
                     {formatPYG(totalPyg)}
                   </div>
-                  <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800 text-[11px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">
-                    <span className="flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
+                  <div className="flex items-center gap-2.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-sm font-posMono tabular-nums">
+                    <span className="flex items-center gap-1.5 font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/25">
                       <FlagBR /> R$ {totalBrl}
                     </span>
-                    <span>·</span>
-                    <span className="flex items-center gap-1 font-bold text-blue-600 dark:text-blue-400">
+                    <span className="flex items-center gap-1.5 font-black text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-xl border border-blue-500/25">
                       <FlagUS /> US$ {totalUsd}
                     </span>
                   </div>
@@ -6716,27 +6720,37 @@ export default function POSPage() {
 
                 {/* Hero Vuelto / Saldo Restante */}
                 {saldoRestantePyg > 0 ? (
-                  <div className="p-3 rounded-2xl border-2 border-rose-500 bg-rose-50/80 dark:bg-rose-950/40 text-center shadow-sm space-y-0.5">
-                    <span className="text-[11px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider block">
+                  <div className="p-3.5 rounded-2xl border-2 border-rose-500 bg-rose-50/80 dark:bg-rose-950/40 text-center shadow-sm space-y-1">
+                    <span className="text-xs font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider block">
                       Falta Cobrar
                     </span>
-                    <div className="text-2xl sm:text-3xl font-black font-posMono tabular-nums text-rose-600 dark:text-rose-400 leading-tight">
+                    <div className="text-3xl font-black font-posMono tabular-nums text-rose-600 dark:text-rose-400 leading-tight">
                       {formatPYG(saldoRestantePyg)}
                     </div>
-                    <div className="text-[10px] font-posMono tabular-nums text-rose-500 dark:text-rose-300/80">
-                      ≈ R$ {(saldoRestantePyg / rates.BRL).toFixed(2)} · US$ {(saldoRestantePyg / rates.USD).toFixed(2)}
+                    <div className="flex items-center justify-center gap-2 pt-1 font-posMono tabular-nums">
+                      <span className="px-2 py-0.5 rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-300 text-xs font-black">
+                        ≈ R$ {(saldoRestantePyg / rates.BRL).toFixed(2)}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-300 text-xs font-black">
+                        ≈ US$ {(saldoRestantePyg / rates.USD).toFixed(2)}
+                      </span>
                     </div>
                   </div>
                 ) : (
-                  <div className="p-3 rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-center shadow-sm space-y-0.5">
-                    <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                  <div className="p-3.5 rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-center shadow-sm space-y-1">
+                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
                       {donacionActiva && montoDonacionEfectiva > 0 ? "Vuelto Limpio a Entregar" : "Vuelto a Entregar"}
                     </span>
-                    <div className="text-2xl sm:text-3xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 leading-tight">
+                    <div className="text-3xl font-black font-posMono tabular-nums text-emerald-600 dark:text-emerald-400 leading-tight">
                       {formatPYG(vueltoFinalPyg)}
                     </div>
-                    <div className="text-[10px] font-posMono tabular-nums text-emerald-600 dark:text-emerald-300">
-                      R$ {(vueltoFinalPyg / rates.BRL).toFixed(2)} · US$ {(vueltoFinalPyg / rates.USD).toFixed(2)}
+                    <div className="flex items-center justify-center gap-2 pt-1 font-posMono tabular-nums">
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-black">
+                        R$ {(vueltoFinalPyg / rates.BRL).toFixed(2)}
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-700 dark:text-blue-300 text-xs font-black">
+                        US$ {(vueltoFinalPyg / rates.USD).toFixed(2)}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -6790,19 +6804,19 @@ export default function POSPage() {
                   if (!isDonacionOn) return null
 
                   return (
-                    <div className={`p-2.5 rounded-xl border transition-all ${
+                    <div className={`p-3 rounded-2xl border transition-all shadow-sm ${
                       donacionActiva
                         ? "bg-gradient-to-br from-rose-50/90 to-amber-50/80 dark:from-rose-950/50 dark:to-amber-950/40 border-rose-400 dark:border-rose-600"
                         : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
                     }`}>
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Heart className={`w-3.5 h-3.5 shrink-0 ${donacionActiva ? "fill-rose-500 text-rose-500" : "text-slate-400"}`} />
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Heart className={`w-4 h-4 shrink-0 ${donacionActiva ? "fill-rose-500 text-rose-500 animate-pulse" : "text-slate-400"}`} />
                           <div className="min-w-0">
-                            <span className="text-[11px] font-black text-slate-800 dark:text-slate-200 truncate block leading-tight">
-                              Abre tu corazón <span className="text-[9px] font-bold text-rose-500">(F8)</span>
+                            <span className="text-xs font-black text-slate-900 dark:text-white truncate block leading-tight">
+                              Abre tu corazón <span className="text-[10px] font-bold text-rose-500">(F8)</span>
                             </span>
-                            <p className="text-[9px] text-slate-400 truncate">
+                            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 truncate">
                               {campanaActivaDonacion?.ong_nombre || "Centro Amor y Esperanza"}
                             </p>
                           </div>
@@ -6810,25 +6824,19 @@ export default function POSPage() {
                         <button
                           type="button"
                           onClick={() => handleToggleDonacion(!donacionActiva)}
-                          className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
                             donacionActiva ? "bg-rose-600" : "bg-slate-300 dark:bg-slate-700"
                           }`}
                         >
-                          <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition ${
-                            donacionActiva ? "translate-x-3" : "translate-x-0"
+                          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition ${
+                            donacionActiva ? "translate-x-4" : "translate-x-0"
                           }`} />
                         </button>
                       </div>
 
                       {/* Chips de montos rápidos inteligentes */}
-                      <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1 flex-wrap">
+                      <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1 flex-wrap">
                         {(() => {
-                          // Antes esto recalculaba el vuelto mirando SOLO el campo
-                          // de Guaraníes (payCashPyg), ignorando R$/US$ -- con pago
-                          // multimoneda el chip de "Vuelto Total" mostraba (o de
-                          // hecho ofrecia) un monto que no era el vuelto real.
-                          // vueltoPyg (arriba, useMemo) ya suma las 3 monedas bien
-                          // -- se reutiliza esa misma fuente de verdad aca.
                           const vueltoSinDonar = vueltoPyg
                           const restoCompra = totalPyg % 1000
                           const redondeoCompra = restoCompra > 0 ? 1000 - restoCompra : 500
@@ -6836,16 +6844,9 @@ export default function POSPage() {
                           const quickChips: Array<{ label: string; val: number; live?: boolean }> = []
 
                           if (vueltoSinDonar > 0) {
-                            // "live: true" -- este chip representa "seguir el vuelto
-                            // real", no un monto fijo. Antes, aunque mostrara el
-                            // vuelto del momento, al hacer clic quedaba CONGELADO
-                            // en ese numero (montoDonacionManual) -- si el cajero
-                            // despues cambiaba los montos ingresados (ej. R$ 22 ->
-                            // R$ 50), la sugerencia y el vuelto final ya no se
-                            // recalculaban, quedaban pegados al escenario anterior.
                             quickChips.push({ label: `Vuelto Total (${formatPYG(vueltoSinDonar)})`, val: vueltoSinDonar, live: true })
                             if (redondeoCompra !== vueltoSinDonar) {
-                              quickChips.push({ label: `Redondeo Compra (${formatPYG(redondeoCompra)})`, val: redondeoCompra })
+                              quickChips.push({ label: `Redondeo (${formatPYG(redondeoCompra)})`, val: redondeoCompra })
                             }
                           } else {
                             quickChips.push({ label: `Sugerido (${formatPYG(redondeoCompra)})`, val: redondeoCompra })
@@ -6869,9 +6870,9 @@ export default function POSPage() {
                                 key={idx}
                                 type="button"
                                 onClick={() => btn.live ? handleToggleDonacion(true) : handleToggleDonacion(true, btn.val)}
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold font-posMono tabular-nums transition-all cursor-pointer ${
                                   isSelected
-                                    ? "bg-rose-600 text-white shadow-sm"
+                                    ? "bg-rose-600 text-white shadow-sm font-black"
                                     : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
                                 }`}
                               >
@@ -6880,6 +6881,27 @@ export default function POSPage() {
                             )
                           })
                         })()}
+                      </div>
+
+                      {/* Campo Manual de Donación */}
+                      <div className="mt-2 pt-2 border-t border-dashed border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                        <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 shrink-0">
+                          Monto Libre (₲):
+                        </label>
+                        <input
+                          type="text"
+                          value={montoDonacionManual !== null ? montoDonacionManual.toLocaleString("es-PY") : ""}
+                          onChange={(e) => {
+                            const clean = e.target.value.replace(/\D/g, "")
+                            if (clean) {
+                              handleToggleDonacion(true, parseInt(clean, 10))
+                            } else {
+                              handleToggleDonacion(true, undefined)
+                            }
+                          }}
+                          placeholder={montoSugeridoDonacion.toLocaleString("es-PY")}
+                          className="w-32 bg-white dark:bg-slate-950 border border-rose-300 dark:border-rose-700/80 rounded-xl px-2.5 py-1 text-xs font-posMono font-black text-rose-600 dark:text-rose-400 text-right outline-none focus:border-rose-500 shadow-inner"
+                        />
                       </div>
                     </div>
                   )
@@ -7552,6 +7574,30 @@ export default function POSPage() {
                           )}
                         </div>
 
+                        {isMultiPayment && (
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto en esta línea (₲):</label>
+                            <div className="flex gap-1">
+                              <input
+                                type="text"
+                                value={mixedParceladoPyg}
+                                onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedParceladoPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
+                                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-blue-600 dark:text-blue-400 outline-none focus:border-blue-500 text-center"
+                              />
+                              <button
+                                type="button"
+                                title="Completar con el resto"
+                                onClick={() => setMixedParceladoPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                              >
+                                Resto
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
                         {plugpayState === "idle" && (
                           <div className="space-y-2.5">
                             <div className="grid grid-cols-3 gap-2">
@@ -7621,10 +7667,6 @@ export default function POSPage() {
                                   e.preventDefault()
                                   const c = extraClubResults[extraClubHighlight]
                                   if (c) { setCustomer(c); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false); return }
-                                  // Mismo caso que en el modal de "Consultar Saldo": el
-                                  // escaneo de la tarjeta manda Enter antes de que el
-                                  // debounce de busqueda llegue a correr -- se busca ya
-                                  // mismo en vez de quedarse sin hacer nada.
                                   const q = extraClubQuery.trim()
                                   if (!q) return
                                   try {
@@ -7655,6 +7697,30 @@ export default function POSPage() {
                                 Cambiar
                               </button>
                             </div>
+
+                            {isMultiPayment && (
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Monto a Crédito Extra Club (₲):</label>
+                                <div className="flex gap-1">
+                                  <input
+                                    type="text"
+                                    value={mixedExtraClubPyg}
+                                    onChange={(e) => { const clean = e.target.value.replace(/\D/g, ""); setMixedExtraClubPyg(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "") }}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums font-bold text-sm text-purple-600 dark:text-purple-400 outline-none focus:border-purple-500 text-center"
+                                  />
+                                  <button
+                                    type="button"
+                                    title="Completar con el resto"
+                                    onClick={() => setMixedExtraClubPyg(Math.ceil(Math.max(0, totalPyg - totalRecibidoPyg + (parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10)))).toLocaleString("es-PY"))}
+                                    className="px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer shrink-0"
+                                  >
+                                    Resto
+                                  </button>
+                                </div>
+                              </div>
+                            )}
 
                             {extraClubCredit && extraClubCredit !== "loading" && (
                               <div className="grid grid-cols-2 gap-2">
