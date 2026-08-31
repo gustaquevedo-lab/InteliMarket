@@ -16,7 +16,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useTheme } from "../../context/ThemeContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
-import { DEFAULT_RECEIPT_CONFIG } from "../settings/SettingsPage"
+import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
 const FlagPY = () => (
