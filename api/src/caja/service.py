@@ -164,8 +164,9 @@ async def _efectivo_esperado_por_moneda(db: AsyncSession, session_id, moneda: st
         .join(Sale, Sale.id == SalePayment.sale_id)
         .where(
             Sale.session_id == session_id,
-            SalePayment.forma_pago == "EFECTIVO",
+            func.upper(SalePayment.forma_pago) == "EFECTIVO",
             SalePayment.moneda == moneda,
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
         )
     )
     return Decimal(str(result.scalar() or 0))
@@ -196,7 +197,7 @@ async def close_session(
         select(func.coalesce(func.sum(Sale.total), 0)).where(
             Sale.session_id == session_obj.id,
             Sale.fecha >= session_obj.fecha_apertura,
-            Sale.estado == "confirmado",
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
         )
     )
     total_cobrado = sales_result.scalar() or 0
@@ -1167,7 +1168,7 @@ async def get_session_pre_close_summary(db: AsyncSession, session_id: str) -> di
             func.coalesce(func.sum(Sale.monto_donacion), 0).label("total_donaciones"),
         ).where(
             Sale.session_id == session_obj.id,
-            Sale.estado == "confirmado",
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
         )
     )
     sales_row = sales_res.first()
@@ -1187,7 +1188,10 @@ async def get_session_pre_close_summary(db: AsyncSession, session_id: str) -> di
         )
         .select_from(SalePayment)
         .join(Sale, Sale.id == SalePayment.sale_id)
-        .where(Sale.session_id == session_obj.id, Sale.estado == "confirmado")
+        .where(
+            Sale.session_id == session_obj.id,
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+        )
         .group_by(SalePayment.forma_pago, SalePayment.moneda)
         .order_by(func.sum(SalePayment.monto).desc())
     )

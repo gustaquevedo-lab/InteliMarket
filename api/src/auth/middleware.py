@@ -15,14 +15,21 @@ security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    if not credentials:
+    token_str = None
+    if credentials and credentials.credentials:
+        token_str = credentials.credentials
+    elif request and (request.query_params.get("token") or request.query_params.get("auth_token")):
+        token_str = request.query_params.get("token") or request.query_params.get("auth_token")
+
+    if not token_str:
         raise HTTPException(status_code=401, detail="No se proporcionó token de autenticación")
 
     try:
-        user = get_current_user_from_token(credentials.credentials)
+        user = get_current_user_from_token(token_str)
         if "sub" in user and "id" not in user:
             user["id"] = user["sub"]
         if "company_id" not in user:
@@ -55,7 +62,8 @@ async def get_current_user(
 
 
 async def require_auth(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    return await get_current_user(credentials, db)
+    return await get_current_user(request, credentials, db)
