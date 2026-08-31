@@ -120,8 +120,23 @@ async def create_supplier(db: AsyncSession, data: SupplierCreate) -> Supplier:
     return supplier
 
 
-async def list_suppliers(db: AsyncSession, company_id: str, search: str | None = None) -> list[Supplier]:
+async def list_suppliers(
+    db: AsyncSession,
+    company_id: str,
+    search: str | None = None,
+    solo_mercaderia: bool = False,
+) -> list[Supplier]:
     query = select(Supplier).where(Supplier.company_id == uuid.UUID(company_id))
+
+    if solo_mercaderia:
+        subq = (
+            select(PurchaseOrder.supplier_id)
+            .join(PurchaseOrderItem, PurchaseOrderItem.purchase_order_id == PurchaseOrder.id)
+            .where(PurchaseOrder.supplier_id.is_not(None))
+            .distinct()
+        )
+        query = query.where(Supplier.id.in_(subq))
+
     if search:
         query = query.where(
             (Supplier.razon_social.ilike(f"%{search}%")) |

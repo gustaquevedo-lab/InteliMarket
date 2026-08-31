@@ -1760,12 +1760,24 @@ export default function POSPage() {
   // precio_base) -- ningun camino existente cambia de comportamiento.
   const applyTieredPrice = useCallback(async (productId: string, quantity: number, customerId?: string) => {
     try {
+      // Regla Comercial Extra Supermercado: Si el producto está en promoción activa,
+      // las escalas quedan ON HOLD (se preserva el precio promocional).
+      let isPromoActive = false
+      setCart((prev) => {
+        const existing = prev.find((i) => i.product_id === productId && !i.es_pesable)
+        if (existing && (existing as any).en_promocion) {
+          isPromoActive = true
+        }
+        return prev
+      })
+      if (isPromoActive) return
+
       if (customerId && customerId !== DEFAULT_CUSTOMER.id) {
         const resolved = await api.priceLists.resolvePrice(customerId, productId, Math.floor(quantity)).catch(() => null)
         const resolvedPrice = resolved && typeof resolved.precio !== "undefined" ? Number(resolved.precio) : null
         if (resolvedPrice !== null && !isNaN(resolvedPrice)) {
           setCart((prev) => prev.map((item) =>
-            item.product_id === productId && !item.es_pesable
+            item.product_id === productId && !item.es_pesable && !(item as any).en_promocion
               ? { ...item, precio: resolvedPrice }
               : item
           ))
@@ -1775,13 +1787,13 @@ export default function POSPage() {
       const tier = await api.smartPricing.calculateTieredPrice(productId, Math.floor(quantity))
       const tierPrice = tier && typeof tier.precio_unitario !== "undefined" ? Number(tier.precio_unitario) : null
       setCart((prev) => prev.map((item) =>
-        item.product_id === productId && !item.es_pesable
+        item.product_id === productId && !item.es_pesable && !(item as any).en_promocion
           ? { ...item, precio: tierPrice !== null && !isNaN(tierPrice) ? tierPrice : item.precio_base }
           : item
       ))
     } catch (e) {
       setCart((prev) => prev.map((item) =>
-        item.product_id === productId && !item.es_pesable
+        item.product_id === productId && !item.es_pesable && !(item as any).en_promocion
           ? { ...item, precio: item.precio_base }
           : item
       ))

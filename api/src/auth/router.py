@@ -236,16 +236,13 @@ async def list_pos_authorizers(
     db: AsyncSession = Depends(get_db),
     token_data: dict = Depends(get_current_user),
 ):
-    """Lista de usuarios con nivel supervisor/admin, para el selector del
+    """Lista de usuarios con nivel supervisor/admin/gerente, para el selector del
     modal de autorización de acciones sensibles dentro del POS (anular item,
-    devolución, etc). A diferencia de /pos-staff (pantalla de login, pública
-    y sin sesión), este endpoint exige sesión ya iniciada y también incluye
-    rol admin, porque en varias empresas no hay usuarios con rol "supervisor"
-    dedicado y quien autoriza en la práctica es un admin."""
+    devolución, etc)."""
     result = await db.execute(
         select(User)
         .where(
-            (User.rol.in_(["supervisor", "admin"])) | (User.is_superadmin == True),
+            (User.rol.in_(["supervisor", "admin", "gerente"])) | (User.is_superadmin == True),
             User.activo == True,
         )
         .order_by(User.nombre)
@@ -300,18 +297,37 @@ async def get_active_supervisor(
     db: AsyncSession = Depends(get_db),
     token_data: dict = Depends(get_current_user),
 ):
-    """Usado para exigir que exista un supervisor con turno realmente
-    iniciado antes de habilitar el flujo de autorizacion de acciones
-    sensibles en el POS (anular item, descuento, cierre de caja, etc)."""
+    """Verifica si hay un supervisor con turno activo o autorizadores disponibles en el sistema
+    para habilitar el flujo de autorización de acciones sensibles en el POS (devoluciones, anulaciones, etc)."""
+    # 1. Buscar si hay algún usuario con turno abierto que sea supervisor, admin o gerente
     result = await db.execute(
         select(User.nombre)
         .join(StaffShift, StaffShift.user_id == User.id)
-        .where(StaffShift.ended_at.is_(None), StaffShift.rol_en_turno == "supervisor")
+        .where(
+            StaffShift.ended_at.is_(None),
+            (StaffShift.rol_en_turno.in_(["supervisor", "admin", "gerente"])) | (User.rol.in_(["supervisor", "admin", "gerente"])) | (User.is_superadmin == True),
+            User.activo == True
+        )
         .limit(1)
     )
     row = result.first()
     if row:
         return ActiveSupervisorResponse(has_supervisor=True, nombre=row[0])
+    
+    # 2. Si no hay turno abierto registrado pero existen supervisores/administradores activos en la empresa:
+    user_res = await db.execute(
+        select(User.nombre)
+        .where(
+            (User.rol.in_(["supervisor", "admin", "gerente"])) | (User.is_superadmin == True),
+            User.activo == True
+        )
+        .order_by(User.rol == "supervisor", User.created_at.asc())
+        .limit(1)
+    )
+    user_row = user_res.first()
+    if user_row:
+        return ActiveSupervisorResponse(has_supervisor=True, nombre=user_row[0])
+
     return ActiveSupervisorResponse(has_supervisor=False)
 
 

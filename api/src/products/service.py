@@ -111,6 +111,7 @@ async def list_products(
     activo: Optional[bool] = None,
     limit: int = 100,
     offset: int = 0,
+    supplier_id: Optional[str] = None,
 ) -> list[Product]:
     try:
         c_uuid = UUID(company_id)
@@ -122,6 +123,18 @@ async def list_products(
         .options(selectinload(Product.categoria))
         .where(Product.company_id == c_uuid)
     )
+
+    if supplier_id:
+        try:
+            supp_uuid = UUID(supplier_id)
+            query = (
+                query.join(PurchaseOrderItem, PurchaseOrderItem.product_id == Product.id)
+                .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.purchase_order_id)
+                .where(PurchaseOrder.supplier_id == supp_uuid)
+                .distinct()
+            )
+        except ValueError:
+            pass
 
     if categoria_id:
         try:
@@ -143,7 +156,29 @@ async def list_products(
     # Filtrar productos con nombres válidos primero
     query = query.order_by(Product.nombre.asc()).limit(limit).offset(offset)
     result = await db.execute(query)
-    return result.scalars().all()
+    products = list(result.scalars().all())
+
+    # Asociar Proveedor Principal / Último proveedor a cada producto en lote
+    if products:
+        p_ids = [p.id for p in products]
+        supp_map_res = await db.execute(
+            text("""
+                SELECT DISTINCT ON (poi.product_id) poi.product_id, po.supplier_id, s.razon_social as supplier_nombre
+                FROM purchase_order_items poi
+                JOIN purchase_orders po ON po.id = poi.purchase_order_id
+                JOIN suppliers s ON s.id = po.supplier_id
+                WHERE poi.product_id = ANY(:p_ids)
+                ORDER BY poi.product_id, poi.created_at DESC
+            """),
+            {"p_ids": p_ids}
+        )
+        supp_map = {r.product_id: (r.supplier_id, r.supplier_nombre) for r in supp_map_res}
+        for p in products:
+            if p.id in supp_map:
+                setattr(p, "supplier_id", supp_map[p.id][0])
+                setattr(p, "supplier_nombre", supp_map[p.id][1])
+
+    return products
 
 
 async def get_products_stats(db: AsyncSession, company_id: str) -> dict:

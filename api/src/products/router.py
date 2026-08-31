@@ -42,13 +42,14 @@ async def create_product(body: ProductCreate, db: AsyncSession = Depends(get_db)
 async def list_products(
     company_id: str,
     categoria_id: str | None = Query(None),
+    supplier_id: str | None = Query(None),
     search: str | None = Query(None),
     activo: bool | None = Query(None),
     limit: int = Query(100, le=20000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_products(db, company_id, categoria_id, search, activo, limit, offset)
+    return await service.list_products(db, company_id, categoria_id, search, activo, limit, offset, supplier_id=supplier_id)
 
 
 @router.get("/companies/{company_id}/products/stats")

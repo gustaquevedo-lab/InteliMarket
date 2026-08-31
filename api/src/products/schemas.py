@@ -80,6 +80,8 @@ class ProductResponse(BaseModel):
     id: UUID
     company_id: UUID
     categoria_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None
+    supplier_nombre: Optional[str] = None
     sku: str
     codigo_barra: Optional[str] = None
     nombre: str

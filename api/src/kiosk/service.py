@@ -40,16 +40,34 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
         for t in tiers_result.scalars().all()
     ]
 
+    from api.src.promotions.service import resolve_product_promotions
+
+    base_price = float(product.precio_venta or 0)
+    promo_info = await resolve_product_promotions(db, company_id, str(product.id), base_price, 1.0)
+
+    effective_price = promo_info.precio_promocional if promo_info.en_promocion else base_price
+
     return {
         "id": product.id,
         "nombre": product.nombre,
         "sku": product.sku,
         "codigo_barra": product.codigo_barra,
-        "precio_venta": float(product.precio_venta or 0),
+        "precio_venta": effective_price,
         "imagen_url": product.imagen_url,
         "categoria_nombre": product.categoria.nombre if product.categoria else None,
         "tipo_venta": product.tipo_venta,
         "escalas": escalas,
+        "en_promocion": promo_info.en_promocion,
+        "precio_regular": promo_info.precio_regular,
+        "precio_promocional": promo_info.precio_promocional,
+        "ahorro_unitario": promo_info.ahorro_unitario,
+        "ahorro_porcentaje": promo_info.ahorro_porcentaje,
+        "badge_promo": promo_info.badge,
+        "promocion_nombre": promo_info.promocion_nombre,
+        "limite_por_compra": promo_info.limite_por_compra,
+        "valido_hasta": promo_info.valido_hasta,
+        "mensaje_dias": promo_info.mensaje_dias,
+        "es_activo_hoy": promo_info.es_activo_hoy,
     }
 
 

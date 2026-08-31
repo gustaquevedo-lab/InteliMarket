@@ -2,7 +2,7 @@
 
 **Cliente piloto**: Extra Supermercado (Pedro Juan Caballero, Paraguay — Grupo Santa Teresa E.A.S.)
 **Rama activa**: `vertical/supermercado`
-**VM de desarrollo real**: `intellihouse@192.168.0.242` (o Tailscale `100.83.91.76`) — **el IP viejo de la sección de abajo (100.83.91.76 como único acceso) está desactualizado, usar 192.168.0.242 directo**
+**VM de desarrollo real**: `intellihouse@192.168.0.10` (o Tailscale `100.83.91.76`) — IP local estática asignada **192.168.0.10**
 **Directorio raíz**: `/home/intellihouse/intelimarket`
 **Sandbox**: API `:8001` / UI `:5174` (schema `sandbox`) — arrancar con `/home/intellihouse/intelimarket/start-sandbox.sh`
 **Producción**: API `:8000` / UI `:5173` (schema `public`) — systemd `intelimarket-api.service` / `intelimarket-ui.service`

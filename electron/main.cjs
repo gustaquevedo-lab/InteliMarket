@@ -96,7 +96,7 @@ async function createWindow() {
   })
 
   // ── DETERMINAR URL DESTINO (SANDBOX POR DEFECTO) ──────────────────────────
-  let targetUrl = 'http://192.168.0.242:5174/pos'
+  let targetUrl = 'http://192.168.0.10:5174/pos'
 
   const argUrl = process.argv.find(arg => arg && arg.startsWith('--url='))
   if (argUrl) {
@@ -114,7 +114,8 @@ async function createWindow() {
       ]
       for (const cp of configPaths) {
         if (fs.existsSync(cp)) {
-          const cfg = JSON.parse(fs.readFileSync(cp, 'utf8'))
+          const raw = fs.readFileSync(cp, 'utf8').replace(/^\uFEFF/, '')
+          const cfg = JSON.parse(raw)
           if (cfg.serverUrl) {
             targetUrl = cfg.serverUrl
             break

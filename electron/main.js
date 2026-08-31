@@ -46,8 +46,8 @@ function createWindow() {
 
   const fs = require('fs')
   
-  // URL por defecto: Sandbox 5174 (Pruebas de Caja)
-  let targetUrl = 'http://192.168.0.242:5174/pos'
+  // URL por defecto: Produccion / Sandbox (Pruebas de Caja)
+  let targetUrl = 'http://192.168.0.10:5174/pos'
   
   // 1. Argumento por línea de comando (--url=http://...)
   const argUrl = process.argv.find(arg => arg && arg.startsWith('--url='))

@@ -72,6 +72,7 @@ const navGroups: NavGroup[] = [
     title: "Operaciones de Salón",
     items: [
       { icon: LayoutGrid, label: "Hub Operaciones (PWA)", path: "/operaciones-salon" },
+      { icon: Scan, label: "Verificador de Precios (Kiosko)", path: "/verificador" },
       { icon: Monitor, label: "TV Digital Carnicería (55\")", path: "/tv/carniceria" },
       { icon: Scale, label: "Carnicería & Desposte", path: "/desposte" },
       { icon: Carrot, label: "Verdulería & Frescos", path: "/frescos" },

@@ -77,6 +77,30 @@ async def get_applicable_tier_price(
     db: AsyncSession, company_id: str, product_id: str, quantity: int,
     price_list_id: Optional[str] = None
 ) -> Optional[dict]:
+    # Regla Comercial Extra Supermercado: Si un producto tiene una Promoción Activa,
+    # sus precios de escala mayorista quedan ON HOLD (suspendidos) mientras dure la promoción.
+    try:
+        cid = uuid.UUID(company_id)
+        pid = uuid.UUID(product_id)
+        today = datetime.now().date()
+        promo_q = select(Promotion).where(
+            Promotion.company_id == cid,
+            Promotion.activo == True,
+            Promotion.estado == "activa",
+            Promotion.valido_desde <= today,
+            Promotion.valido_hasta >= today,
+            or_(
+                Promotion.producto_ids.contains([pid]),
+                Promotion.aplica_a == "carrito"
+            )
+        )
+        promo_res = await db.execute(promo_q)
+        if promo_res.scalars().first():
+            # Producto en Promoción Activa -> Precios de Escala en HOLD
+            return None
+    except Exception:
+        pass
+
     q = select(TieredPrice).where(
         TieredPrice.company_id == uuid.UUID(company_id),
         TieredPrice.product_id == uuid.UUID(product_id),

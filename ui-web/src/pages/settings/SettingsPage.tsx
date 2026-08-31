@@ -135,6 +135,16 @@ export interface ReceiptTemplateConfig {
   cupon_descripcion: string
   cupon_validez_dias: number
 
+  // Recuadro Dinámico de Ahorro & Precios Mayoristas (45 columnas)
+  habilitar_recuadro_ahorro: boolean
+  titulo_ahorro_con_descuento: string
+  subtitulo_ahorro_promo: string
+  subtitulo_ahorro_mayorista: string
+  titulo_invitacion_ahorro: string
+  linea1_invitacion_ahorro: string
+  linea2_invitacion_ahorro: string
+  linea3_invitacion_ahorro: string
+
   // Pie de Página & Corte
   mostrar_qr_sifen: boolean
   sifen_consulta_url: string
@@ -205,6 +215,15 @@ export const DEFAULT_RECEIPT_CONFIG: ReceiptTemplateConfig = {
   cupon_descripcion: "10% de descuento en tu próxima compra",
   cupon_validez_dias: 15,
 
+  habilitar_recuadro_ahorro: true,
+  titulo_ahorro_con_descuento: "¡FELICIDADES! TU EXTRA AHORRO HOY:",
+  subtitulo_ahorro_promo: "• En Promociones:",
+  subtitulo_ahorro_mayorista: "• En Precios Mayoristas:",
+  titulo_invitacion_ahorro: "¡SUMATE AL EXTRA AHORRO DIARIO!",
+  linea1_invitacion_ahorro: "• Comprá por fardo/caja a precio [M]",
+  linea2_invitacion_ahorro: "• Aprovechá las Ofertas de la Semana",
+  linea3_invitacion_ahorro: "¡Los mejores precios de la región!",
+
   mostrar_qr_sifen: true,
   sifen_consulta_url: "https://sifen.set.gov.py/consultas",
   facturacion_electronica: false,
@@ -227,6 +246,7 @@ export default function SettingsPage() {
     id: string
     hostname: string
     ip_address?: string
+    ip_pos_bancard?: string
     punto_emision: string
     caja_nombre: string
     activo: boolean
@@ -240,11 +260,14 @@ export default function SettingsPage() {
   const [loadingPosTerminals, setLoadingPosTerminals] = useState(false)
   const [newTerminalHostname, setNewTerminalHostname] = useState("")
   const [newTerminalIp, setNewTerminalIp] = useState("")
+  const [newTerminalIpPosBancard, setNewTerminalIpPosBancard] = useState("")
   const [newTerminalPunto, setNewTerminalPunto] = useState("011")
   const [newTerminalCajaNombre, setNewTerminalCajaNombre] = useState("")
   const [savingNewTerminal, setSavingNewTerminal] = useState(false)
   const [editingIpId, setEditingIpId] = useState<string | null>(null)
   const [editingIpVal, setEditingIpVal] = useState("")
+  const [editingBancardIpId, setEditingBancardIpId] = useState<string | null>(null)
+  const [editingBancardIpVal, setEditingBancardIpVal] = useState("")
 
   const fetchPosTerminals = useCallback(async () => {
     setLoadingPosTerminals(true)
@@ -268,12 +291,14 @@ export default function SettingsPage() {
       await api.posTerminals.create({
         hostname: newTerminalHostname.trim().toUpperCase() || `CAJA-${newTerminalPunto}`,
         ip_address: newTerminalIp.trim() || undefined,
+        ip_pos_bancard: newTerminalIpPosBancard.trim() || undefined,
         punto_emision: newTerminalPunto,
         caja_nombre: newTerminalCajaNombre.trim() || `Caja ${newTerminalPunto}`,
       })
       toast.success("Caja Asignada", `Caja vinculada al punto de emisión ${newTerminalPunto}.`)
       setNewTerminalHostname("")
       setNewTerminalIp("")
+      setNewTerminalIpPosBancard("")
       setNewTerminalCajaNombre("")
       fetchPosTerminals()
     } catch (e: any) {
@@ -291,6 +316,17 @@ export default function SettingsPage() {
       fetchPosTerminals()
     } catch (e: any) {
       toast.error("Error al actualizar IP", e?.message || "Intente nuevamente.")
+    }
+  }
+
+  const handleSaveTerminalBancardIp = async (id: string) => {
+    try {
+      await api.posTerminals.update(id, { ip_pos_bancard: editingBancardIpVal.trim() || null })
+      toast.success("IP POS Bancard Actualizada", "La dirección IP del POS Bancard quedó guardada y rige en cajas.")
+      setEditingBancardIpId(null)
+      fetchPosTerminals()
+    } catch (e: any) {
+      toast.error("Error al actualizar IP POS Bancard", e?.message || "Intente nuevamente.")
     }
   }
 
@@ -465,27 +501,21 @@ export default function SettingsPage() {
         setCompany(fullComp)
         localStorage.setItem("pos_company_data", JSON.stringify(fullComp))
 
-        // Si la empresa ya tiene plantilla de ticket guardada en DB en config.receipt_template, asumirla
+        // Si la empresa ya tiene plantilla de ticket guardada en DB, mezclarla asegurando todos los defaults de Extra Ahorro
         const dbReceiptTemplate = (comp.config as any)?.receipt_template
-        if (dbReceiptTemplate) {
-          setReceiptConfig(dbReceiptTemplate)
-          localStorage.setItem("pos_receipt_template_config", JSON.stringify(dbReceiptTemplate))
-        } else {
-          setReceiptConfig(prev => {
-            const updated = {
-              ...prev,
-              nombre_fantasia: fantasia,
-              razon_social: comp.razon_social || prev.razon_social,
-              ruc: comp.ruc || prev.ruc,
-              direccion: comp.direccion || prev.direccion,
-              telefono: comp.telefono || prev.telefono,
-              logo_url: comp.logo_url || prev.logo_url,
-              timbrado: String((comp.config as any)?.timbrado_dnit || prev.timbrado)
-            }
-            localStorage.setItem("pos_receipt_template_config", JSON.stringify(updated))
-            return updated
-          })
+        const mergedTemplate: ReceiptTemplateConfig = {
+          ...DEFAULT_RECEIPT_CONFIG,
+          ...(dbReceiptTemplate || {}),
+          nombre_fantasia: fantasia || DEFAULT_RECEIPT_CONFIG.nombre_fantasia,
+          razon_social: comp.razon_social || DEFAULT_RECEIPT_CONFIG.razon_social,
+          ruc: comp.ruc || DEFAULT_RECEIPT_CONFIG.ruc,
+          direccion: comp.direccion || DEFAULT_RECEIPT_CONFIG.direccion,
+          telefono: comp.telefono || DEFAULT_RECEIPT_CONFIG.telefono,
+          logo_url: comp.logo_url || DEFAULT_RECEIPT_CONFIG.logo_url,
+          timbrado: String((comp.config as any)?.timbrado_dnit || dbReceiptTemplate?.timbrado || DEFAULT_RECEIPT_CONFIG.timbrado)
         }
+        setReceiptConfig(mergedTemplate)
+        localStorage.setItem("pos_receipt_template_config", JSON.stringify(mergedTemplate))
 
         // Cargar medios de pago guardados en DB
         const dbPayments = (comp.config as any)?.payment_methods
@@ -1231,6 +1261,130 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            {/* BLOQUE 4.5: RECUADRO DINÁMICO DE EXTRA AHORRO Y PRECIOS MAYORISTAS [M] (45 COLS) */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border-2 border-emerald-500/30 dark:border-emerald-500/40 shadow-md space-y-4">
+              <div className="flex items-center justify-between border-b border-emerald-100 dark:border-emerald-900/40 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                      4.5. Recuadro Dinámico de Extra Ahorro & Precios Mayoristas (45 cols)
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Enmarcado térmico ┌──┐ │ └──┘ con ahorro real desglosado o invitación comercial si no hubo descuento.
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={receiptConfig.habilitar_recuadro_ahorro}
+                  onChange={e => setReceiptConfig({ ...receiptConfig, habilitar_recuadro_ahorro: e.target.checked })}
+                  className="w-5 h-5 text-emerald-600 rounded cursor-pointer"
+                />
+              </div>
+
+              {receiptConfig.habilitar_recuadro_ahorro && (
+                <div className="space-y-4 pt-1">
+                  {/* SECCIÓN A: MENSAJES CUANDO HUBO AHORRO */}
+                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 space-y-2.5">
+                    <span className="text-[11px] font-black text-emerald-900 dark:text-emerald-300 uppercase tracking-wider block">
+                      🟢 Mensajes cuando el Cliente AHORRÓ en su compra:
+                    </span>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block mb-1">
+                        Título de Felicitación (Línea Superior):
+                      </label>
+                      <input
+                        type="text"
+                        value={receiptConfig.titulo_ahorro_con_descuento}
+                        onChange={e => setReceiptConfig({ ...receiptConfig, titulo_ahorro_con_descuento: e.target.value })}
+                        className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block mb-1">
+                          Etiqueta Ahorro en Promociones:
+                        </label>
+                        <input
+                          type="text"
+                          value={receiptConfig.subtitulo_ahorro_promo}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, subtitulo_ahorro_promo: e.target.value })}
+                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block mb-1">
+                          Etiqueta Ahorro en Mayoristas [M]:
+                        </label>
+                        <input
+                          type="text"
+                          value={receiptConfig.subtitulo_ahorro_mayorista}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, subtitulo_ahorro_mayorista: e.target.value })}
+                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN B: MENSAJES CUANDO NO HUBO AHORRO (INVITACIÓN) */}
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2.5">
+                    <span className="text-[11px] font-black text-amber-900 dark:text-amber-300 uppercase tracking-wider block">
+                      🟡 Mensajes cuando NO HUBO Ahorro (Invitación & Fidelización):
+                    </span>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block mb-1">
+                        Título de Invitación:
+                      </label>
+                      <input
+                        type="text"
+                        value={receiptConfig.titulo_invitacion_ahorro}
+                        onChange={e => setReceiptConfig({ ...receiptConfig, titulo_invitacion_ahorro: e.target.value })}
+                        className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block mb-0.5">
+                          Línea 1 de Beneficio (Mayorista):
+                        </label>
+                        <input
+                          type="text"
+                          value={receiptConfig.linea1_invitacion_ahorro}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, linea1_invitacion_ahorro: e.target.value })}
+                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block mb-0.5">
+                          Línea 2 de Beneficio (Ofertas):
+                        </label>
+                        <input
+                          type="text"
+                          value={receiptConfig.linea2_invitacion_ahorro}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, linea2_invitacion_ahorro: e.target.value })}
+                          className="w-full text-xs font-mono p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block mb-0.5">
+                          Línea 3 / Lema Comercial:
+                        </label>
+                        <input
+                          type="text"
+                          value={receiptConfig.linea3_invitacion_ahorro}
+                          onChange={e => setReceiptConfig({ ...receiptConfig, linea3_invitacion_ahorro: e.target.value })}
+                          className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* BLOQUE 5: CAMPAÑA SOLIDARIA "ABRE TU CORAZÓN" */}
             <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
               <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/80 pb-3">
@@ -1551,70 +1705,88 @@ export default function SettingsPage() {
                     )}
                   </div>
 
-                  {/* 3. DETALLE DE PRODUCTOS */}
+                  {/* 3. DETALLE DE PRODUCTOS (FORMATO DOS LÍNEAS SUPERMERCADO) */}
                   <div className="py-1">
                     <div className="flex justify-between text-[9px] font-bold border-b border-black border-dashed pb-0.5 mb-1">
-                      <span>DESCRIPCIÓN</span>
-                      <span>TOTAL</span>
+                      <span>DESCRIPCIÓN / DETALLE</span>
+                      <span>TOTAL (GS)</span>
                     </div>
 
-                    <div className="space-y-1 text-[10px]">
-                      {/* Item 1 */}
+                    <div className="space-y-1.5 text-[9.5px]">
+                      {/* Item 1: En Promo [P] */}
                       <div>
-                        <div className="font-bold truncate">
-                          COCA COLA PET 250ML (6)
-                          {receiptConfig.mostrar_sku && <span className="font-normal text-[8.5px]"> [118971]</span>}
+                        <div className="font-bold uppercase tracking-tight">
+                          COCA COLA ORIGINAL PET 250ML
                         </div>
-                        <div className="flex justify-between text-[9.5px] pl-2 text-slate-800">
-                          <span>2 UN x Gs. 3.500</span>
-                          <span className="font-bold">Gs. 7.000</span>
+                        <div className="flex justify-between items-baseline text-[9px] pl-1 font-mono">
+                          <div className="flex items-center gap-1">
+                            <span>2 UN x Gs. 3.500</span>
+                            <span className="font-bold text-[8.5px] px-1 bg-black text-white rounded-sm">[P]</span>
+                            <span className="text-[8px] text-slate-700">7840058001234</span>
+                          </div>
+                          <span className="font-bold text-[9.5px]">Gs. 7.000</span>
                         </div>
                       </div>
 
-                      {/* Item 2 Balanza */}
+                      {/* Item 2: Mayorista [M] */}
                       <div>
-                        <div className="font-bold truncate">
-                          TOMATE SALSA KG {receiptConfig.mostrar_balanza_origen && <span className="text-[8.5px] font-normal">[Balanza]</span>}
-                          {receiptConfig.mostrar_sku && <span className="font-normal text-[8.5px]"> [120178]</span>}
+                        <div className="font-bold uppercase tracking-tight">
+                          ARROZ TIO LUCAS TIPO 1 5KG
                         </div>
-                        <div className="flex justify-between text-[9.5px] pl-2 text-slate-800">
-                          <span>0.850 KG x Gs. 11.700</span>
-                          <span className="font-bold">Gs. 9.945</span>
+                        <div className="flex justify-between items-baseline text-[9px] pl-1 font-mono">
+                          <div className="flex items-center gap-1">
+                            <span>3 UN x Gs. 28.500</span>
+                            <span className="font-bold text-[8.5px] px-1 bg-black text-white rounded-sm">[M]</span>
+                            <span className="text-[8px] text-slate-700">7891234567890</span>
+                          </div>
+                          <span className="font-bold text-[9.5px]">Gs. 85.500</span>
                         </div>
                       </div>
 
-                      {/* Item 3 Balanza */}
+                      {/* Item 3: Balanza */}
                       <div>
-                        <div className="font-bold truncate">
-                          PAN FRANCES KG {receiptConfig.mostrar_balanza_origen && <span className="text-[8.5px] font-normal">[Balanza]</span>}
+                        <div className="font-bold uppercase tracking-tight">
+                          TOMATE SALSA NACIONAL SELECCIONADO
                         </div>
-                        <div className="flex justify-between text-[9.5px] pl-2 text-slate-800">
-                          <span>0.510 KG x Gs. 10.000</span>
-                          <span className="font-bold">Gs. 5.100</span>
+                        <div className="flex justify-between items-baseline text-[9px] pl-1 font-mono">
+                          <div className="flex items-center gap-1">
+                            <span>0.850 KG x Gs. 11.700</span>
+                            {receiptConfig.mostrar_balanza_origen && <span className="text-[8.5px]" title="Origen Balanza">⚖</span>}
+                            <span className="text-[8px] text-slate-700">2000012017855</span>
+                          </div>
+                          <span className="font-bold text-[9.5px]">Gs. 9.945</span>
                         </div>
                       </div>
                     </div>
                   </div>
 
                   {/* 4. TOTALES & MULTIMONEDA */}
-                  <div className="border-t-2 border-black pt-1.5 mt-1">
-                    <div className="flex justify-between items-baseline font-black text-sm">
+                  <div className="border-t border-black border-dashed pt-1 mt-1 text-[9px] space-y-0.5">
+                    <div className="flex justify-between text-slate-700">
+                      <span>SUBTOTAL (Precio Lista):</span>
+                      <span className="font-mono font-bold">Gs. 201.000</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-emerald-950">
+                      <span>TOTAL EXTRA AHORRO:</span>
+                      <span className="font-mono font-black">-Gs. 55.500</span>
+                    </div>
+                    <div className="border-t-2 border-black pt-1 my-0.5 flex justify-between items-baseline font-black text-xs">
                       <span>TOTAL A PAGAR:</span>
-                      <span className="text-base">Gs. 22.045</span>
+                      <span className="text-sm font-mono font-black">Gs. 145.500</span>
                     </div>
 
                     {receiptConfig.mostrar_multimoneda && (
-                      <div className="pt-1 text-[9.5px] space-y-0.5 text-slate-800">
+                      <div className="pt-0.5 text-[8.5px] space-y-0.5 text-slate-800 border-t border-dotted border-black/40 mt-1">
                         {receiptConfig.mostrar_equivalente_brl && (
                           <div className="flex justify-between">
                             <span>Equivalente en Reales:</span>
-                            <span className="font-bold">R$ 15.50</span>
+                            <span className="font-bold font-mono">R$ 102.40</span>
                           </div>
                         )}
                         {receiptConfig.mostrar_equivalente_usd && (
                           <div className="flex justify-between">
                             <span>Equivalente en Dólares:</span>
-                            <span className="font-bold">US$ 2.95</span>
+                            <span className="font-bold font-mono">US$ 19.50</span>
                           </div>
                         )}
                       </div>
@@ -1623,41 +1795,76 @@ export default function SettingsPage() {
 
                   {/* 5. DESGLOSE DE MEDIOS DE PAGO */}
                   {receiptConfig.mostrar_desglose_pagos && (
-                    <div className="border-t border-black border-dashed pt-1 mt-1 text-[9.5px] space-y-0.5">
+                    <div className="border-t border-black border-dashed pt-1 mt-1 text-[8.5px] space-y-0.5">
                       <div className="font-bold">Medios de Pago:</div>
                       <div className="flex justify-between pl-1">
                         <span>EFECTIVO PYG:</span>
-                        <span>Gs. 25.000</span>
+                        <span className="font-mono">Gs. 150.000</span>
                       </div>
                       {receiptConfig.donacion_activa && (
-                        <div className="flex justify-between pl-1 font-bold">
+                        <div className="flex justify-between pl-1 font-bold text-[8px]">
                           <span>DONACIÓN SOLIDARIA:</span>
-                          <span>Gs. 250</span>
+                          <span className="font-mono">Gs. 500</span>
                         </div>
                       )}
-                      <div className="flex justify-between pl-1 font-black text-[10px] pt-0.5 border-t border-dotted border-black">
+                      <div className="flex justify-between pl-1 font-black text-[9px] pt-0.5 border-t border-dotted border-black">
                         <span>VUELTO ENTREGADO:</span>
-                        <span>Gs. 2.705 {receiptConfig.mostrar_vuelto_extranjero ? "(R$ 1.90)" : ""}</span>
+                        <span className="font-mono">Gs. 4.000 {receiptConfig.mostrar_vuelto_extranjero ? "(R$ 2.80)" : ""}</span>
                       </div>
                     </div>
                   )}
 
                   {/* 6. LIQUIDACIÓN IVA (DNIT / SIFEN) */}
                   {receiptConfig.mostrar_liquidacion_iva && (
-                    <div className="border-t border-black border-dashed pt-1 mt-1 text-[8.5px] space-y-0.5">
-                      <div className="font-bold text-[9px]">LIQUIDACIÓN DEL IVA (Ley Nº 6380/19):</div>
+                    <div className="border-t border-black border-dashed pt-1 mt-1 text-[8px] space-y-0.5">
+                      <div className="font-bold text-[8.5px]">LIQUIDACIÓN DEL IVA (Ley Nº 6380/19):</div>
                       <div className="flex justify-between">
-                        <span>Gravadas 10%: Gs. 20.041</span>
-                        <span>IVA 10%: Gs. 2.004</span>
+                        <span>Gravadas 10%: Gs. 132.273</span>
+                        <span>IVA 10%: Gs. 13.227</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Gravadas 5%: Gs. 0</span>
                         <span>IVA 5%: Gs. 0</span>
                       </div>
-                      <div className="flex justify-between">
+                      <div className="flex justify-between font-bold">
                         <span>Exentas: Gs. 0</span>
-                        <span className="font-bold">TOTAL IVA: Gs. 2.004</span>
+                        <span>TOTAL IVA: Gs. 13.227</span>
                       </div>
+                    </div>
+                  )}
+
+                  {/* 6.5. RECUADRO DE EXTRA AHORRO / PRECIOS MAYORISTAS (45 COLS) */}
+                  {receiptConfig.habilitar_recuadro_ahorro && (
+                    <div className="my-2 p-1.5 border-2 border-black rounded text-center text-[8.5px] font-mono leading-tight bg-white">
+                      {previewCustomerType === "socio" ? (
+                        <>
+                          <div className="font-black text-[9px] tracking-wide text-black uppercase">
+                            {receiptConfig.titulo_ahorro_con_descuento || "¡FELICIDADES! TU EXTRA AHORRO HOY:"}
+                          </div>
+                          <div className="text-xs font-black my-0.5 text-black font-mono">₲ 55.500 <span className="text-[8px] font-normal">(-27.6%)</span></div>
+                          <div className="text-[7.5px] text-left px-1 space-y-0.5 pt-0.5 border-t border-dotted border-black/40">
+                            <div className="flex justify-between">
+                              <span>{receiptConfig.subtitulo_ahorro_promo || "• En Promociones:"}</span>
+                              <strong className="font-mono">₲ 45.000</strong>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>{receiptConfig.subtitulo_ahorro_mayorista || "• En Precios Mayoristas:"}</span>
+                              <strong className="font-mono">₲ 10.500 [M]</strong>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="font-black text-[9px] tracking-wide text-black uppercase">
+                            {receiptConfig.titulo_invitacion_ahorro || "¡SUMATE AL EXTRA AHORRO DIARIO!"}
+                          </div>
+                          <div className="text-[7.5px] text-left px-1 space-y-0.5 mt-0.5 border-t border-dotted border-black/40 pt-0.5">
+                            <div>{receiptConfig.linea1_invitacion_ahorro || "• Comprá por fardo/caja a precio [M]"}</div>
+                            <div>{receiptConfig.linea2_invitacion_ahorro || "• Aprovechá las Ofertas de la Semana"}</div>
+                            <div className="font-black text-center pt-0.5">{receiptConfig.linea3_invitacion_ahorro || "¡Los mejores precios de la región!"}</div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -2636,7 +2843,7 @@ export default function SettingsPage() {
           {/* Alta de nueva asignación */}
           <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-3">
             <h3 className="text-sm font-black text-gray-900 dark:text-white">Asignar Nueva Caja / Máquina</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
               <div>
                 <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Hostname (Windows):</label>
                 <input
@@ -2648,7 +2855,7 @@ export default function SettingsPage() {
                 />
               </div>
               <div>
-                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Dirección IP (LAN):</label>
+                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">IP Máquina (LAN):</label>
                 <input
                   type="text"
                   value={newTerminalIp}
@@ -2658,7 +2865,17 @@ export default function SettingsPage() {
                 />
               </div>
               <div>
-                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Punto de Emisión (Boca):</label>
+                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">IP POS Bancard (REST):</label>
+                <input
+                  type="text"
+                  value={newTerminalIpPosBancard}
+                  onChange={(e) => setNewTerminalIpPosBancard(e.target.value.trim())}
+                  placeholder="192.168.0.51"
+                  className="w-full bg-gray-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-sm text-gray-900 dark:text-white outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Punto Emisión (Boca):</label>
                 <input
                   type="text"
                   value={newTerminalPunto}
@@ -2694,7 +2911,7 @@ export default function SettingsPage() {
               <div>
                 <h3 className="text-sm font-black text-gray-900 dark:text-white">Cajas & Puntos de Emisión Enlazados</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Enlace permanente de máquinas por Hostname o IP fija con sus puntos de Factura y Nota de Crédito.
+                  Enlace permanente de máquinas por Hostname o IP fija, su IP de POS Bancard asignada y sus puntos de Factura y Nota de Crédito.
                 </p>
               </div>
               <button onClick={fetchPosTerminals} disabled={loadingPosTerminals} className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1 cursor-pointer">
@@ -2707,7 +2924,8 @@ export default function SettingsPage() {
                   <tr>
                     <th className="p-3">Caja</th>
                     <th className="p-3">Hostname</th>
-                    <th className="p-3">Dirección IP (LAN)</th>
+                    <th className="p-3">IP Máquina (LAN)</th>
+                    <th className="p-3">IP POS Bancard</th>
                     <th className="p-3 text-center">Punto Fiscal</th>
                     <th className="p-3 text-center">Facturas (Actual / Final)</th>
                     <th className="p-3 text-center">Notas de Crédito</th>
@@ -2718,18 +2936,19 @@ export default function SettingsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-slate-700/60">
                   {!loadingPosTerminals && posTerminals.length === 0 && (
-                    <tr><td colSpan={9} className="p-6 text-center text-gray-400 text-xs">Ninguna caja asignada todavía.</td></tr>
+                    <tr><td colSpan={10} className="p-6 text-center text-gray-400 text-xs">Ninguna caja asignada todavía.</td></tr>
                   )}
                   {posTerminals.map((t) => {
                     const isFiscalOk = t.tiene_factura && t.tiene_nc
                     const isEditingIp = editingIpId === t.id
+                    const isEditingBancardIp = editingBancardIpId === t.id
 
                     return (
                       <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-slate-750/50">
                         <td className="p-3 font-bold text-gray-900 dark:text-white">{t.caja_nombre}</td>
                         <td className="p-3 font-mono font-bold text-blue-600 dark:text-blue-400">{t.hostname}</td>
                         
-                        {/* Celda de IP con edición rápida */}
+                        {/* Celda de IP Máquina con edición rápida */}
                         <td className="p-3 font-mono text-xs">
                           {isEditingIp ? (
                             <div className="flex items-center gap-1">
@@ -2743,13 +2962,13 @@ export default function SettingsPage() {
                               />
                               <button
                                 onClick={() => handleSaveTerminalIp(t.id)}
-                                className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-[10px]"
+                                className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-[10px] cursor-pointer"
                               >
                                 ✓
                               </button>
                               <button
                                 onClick={() => setEditingIpId(null)}
-                                className="px-1.5 py-0.5 rounded bg-gray-300 dark:bg-slate-700 text-gray-700 dark:text-gray-300 text-[10px]"
+                                className="px-1.5 py-0.5 rounded bg-gray-300 dark:bg-slate-700 text-gray-700 dark:text-gray-300 text-[10px] cursor-pointer"
                               >
                                 ✕
                               </button>
@@ -2761,12 +2980,54 @@ export default function SettingsPage() {
                                 setEditingIpVal(t.ip_address || "")
                               }}
                               className="group flex items-center gap-1.5 cursor-pointer hover:text-blue-600"
-                              title="Hacer clic para editar IP"
+                              title="Hacer clic para editar IP de la máquina"
                             >
                               <span className={t.ip_address ? "text-gray-800 dark:text-gray-200 font-bold" : "text-gray-400 italic"}>
                                 {t.ip_address || "Sin IP (Asignar)"}
                               </span>
                               <span className="opacity-0 group-hover:opacity-100 text-[10px] text-blue-500">✏️</span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Celda de IP POS Bancard con edición rápida */}
+                        <td className="p-3 font-mono text-xs">
+                          {isEditingBancardIp ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                value={editingBancardIpVal}
+                                onChange={(e) => setEditingBancardIpVal(e.target.value)}
+                                placeholder="192.168.0.X"
+                                className="w-28 bg-white dark:bg-slate-900 border border-emerald-500 rounded px-1.5 py-0.5 text-xs font-mono text-gray-900 dark:text-white"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => handleSaveTerminalBancardIp(t.id)}
+                                className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-[10px] cursor-pointer"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                onClick={() => setEditingBancardIpId(null)}
+                                className="px-1.5 py-0.5 rounded bg-gray-300 dark:bg-slate-700 text-gray-700 dark:text-gray-300 text-[10px] cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={() => {
+                                setEditingBancardIpId(t.id)
+                                setEditingBancardIpVal(t.ip_pos_bancard || "")
+                              }}
+                              className="group flex items-center gap-1.5 cursor-pointer hover:text-emerald-600"
+                              title="Hacer clic para editar IP del POS Bancard"
+                            >
+                              <span className={t.ip_pos_bancard ? "text-emerald-700 dark:text-emerald-400 font-bold" : "text-gray-400 italic"}>
+                                {t.ip_pos_bancard || "Sin POS (Asignar)"}
+                              </span>
+                              <span className="opacity-0 group-hover:opacity-100 text-[10px] text-emerald-500">✏️</span>
                             </div>
                           )}
                         </td>

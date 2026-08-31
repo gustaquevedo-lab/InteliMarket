@@ -146,7 +146,7 @@ async function downloadAuthenticated(path: string, params: Record<string, string
 }
 
 // ========== TYPE STUBS ==========
-export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; imagen_url?: string | null; precio_venta?: number; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
+export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; imagen_url?: string | null; precio_venta?: number; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
 export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; extra_club_numero?: string | null; empresa_vinculada_nombre?: string | null; empresa_vinculada_ruc?: string | null; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
 export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; numero_interno?: string; recibo_html?: string; recibo_escpos_b64?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
@@ -159,7 +159,7 @@ export interface Company { id: string; nombre?: string; nombre_fantasia?: string
 export interface CashRegister { id: string; nombre: string; codigo?: string; tipo?: string; branch_id?: string; sucursal_id?: string; warehouse_id?: string; activo?: boolean; cash_drop_threshold?: number | null; diferencia_maxima_tolerada?: number | null; created_at?: string }
 export interface CashHandoff { id: string; session_id: string; register_nombre: string | null; entregado_por_nombre: string | null; recibido_por_nombre?: string | null; monto_pyg: number; monto_usd: number; monto_brl: number; monto_confirmado_pyg?: number | null; monto_confirmado_usd?: number | null; monto_confirmado_brl?: number | null; discrepancia_confirmacion?: boolean; requiere_revision: boolean; estado: string; created_at: string; fecha_confirmacion?: string | null }
 export interface KioskPriceTier { min_qty: number; max_qty: number | null; precio_unitario: number; moneda: string }
-export interface KioskProductLookup { id: string; nombre: string; sku?: string | null; codigo_barra?: string | null; precio_venta: number; imagen_url?: string | null; categoria_nombre?: string | null; tipo_venta?: string | null; escalas: KioskPriceTier[] }
+export interface KioskProductLookup { id: string; nombre: string; sku?: string | null; codigo_barra?: string | null; precio_venta: number; imagen_url?: string | null; categoria_nombre?: string | null; tipo_venta?: string | null; escalas: KioskPriceTier[]; en_promocion?: boolean; badge_promo?: string; ahorro_unitario?: number; ahorro_porcentaje?: number; precio_regular?: number; limite_por_compra?: number; mensaje_dias?: string; promocion_nombre?: string | null; valido_hasta?: string | null }
 export interface KioskBanner { id: string; company_id: string; titulo: string; subtitulo?: string | null; etiqueta?: string | null; descuento_texto?: string | null; color?: string | null; imagen_url?: string | null; orden: number; activo: boolean; fecha_inicio?: string | null; fecha_fin?: string | null; created_at: string; updated_at?: string | null }
 export interface VaultEntry { id: string; origen: string; monto_pyg: number; monto_usd: number; monto_brl: number; estado: string; bank_transaction_id?: string | null; created_at: string; fecha_deposito?: string | null }
 export interface VaultDashboard { saldo_en_boveda_pyg: number; saldo_en_boveda_usd: number; saldo_en_boveda_brl: number; entradas_en_boveda: number; entregas_pendientes: number; entregas_pendientes_detalle: CashHandoff[]; retiros_pendientes: number; retiros_pendientes_detalle: any[]; movimientos_recientes: VaultEntry[] }
@@ -258,7 +258,7 @@ export interface FinanceAgentRun { id: string; company_id: string; started_at: s
 export interface FinanceRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
 export interface SalesAgentRun { id: string; company_id: string; started_at: string; finished_at?: string; model?: string; status: string; diagnostico?: string; error_message?: string }
 export interface SalesRecommendation { id: string; company_id: string; run_id: string; tipo: string; titulo: string; descripcion: string; entidad_relacionada?: string; monto_relacionado?: string; requested_by: string; approved_by?: string; status: string; comments?: string; created_at: string; updated_at: string }
-export interface Supplier { id: string; company_id?: string; ruc?: string; razon_social?: string; nombre_fantasia?: string; direccion?: string; telefono?: string; email?: string; contacto?: string; contacto_nombre?: string; contacto_telefono?: string; plazo_pago_dias?: number; plazo_entrega_promedio?: number; rating?: number; tipo?: string; activo?: boolean; created_at?: string; updated_at?: string }
+export interface Supplier { id: string; company_id?: string; ruc?: string; razon_social?: string; nombre_fantasia?: string; direccion?: string; telefono?: string; email?: string; contacto?: string; contacto_nombre?: string; contacto_telefono?: string; plazo_pago_dias?: number; plazo_entrega_promedio?: number; rating?: number; tipo?: string; tipo_proveedor?: string; grupo?: string; activo?: boolean; created_at?: string; updated_at?: string }
 export interface Quote { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_vencimiento?: string; valido_hasta?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; observaciones?: string; condiciones_pago?: string; descuento_total?: number; iva_10?: number; iva_5?: number; sale_id?: string; items?: QuoteItem[]; created_at?: string; updated_at?: string }
 export interface QuoteItem { id?: string; cotizacion_id?: string; producto_id?: string; producto?: Product; product?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; descripcion?: string; created_at?: string }
 export interface Discount { id: string; company_id?: string; nombre?: string; descripcion?: string; tipo?: string; valor?: number; aplica_a?: string; monto_minimo?: number; monto_maximo?: number; cantidad_minima?: number; fecha_inicio?: string; fecha_fin?: string; producto_ids?: string[]; categoria_ids?: string[]; cliente_ids?: string[]; activo?: boolean; created_at?: string; updated_at?: string }
@@ -548,7 +548,67 @@ export interface SupplierNegotiation { id: string; agreement_id?: string; suppli
 export interface InteliContEntry { id: string; company_id?: string; fecha?: string; tipo?: string; numero?: string; concepto?: string; monto_debe?: number; monto_haber?: number; cuenta_codigo?: string; cuenta_nombre?: string; documento_tipo?: string; documento_numero?: string; estado?: string; error_mensaje?: string; created_at?: string; updated_at?: string }
 export interface InteliAuditEvent { id: string; company_id?: string; fecha?: string; tipo?: string; modulo?: string; entidad_id?: string; entidad_tipo?: string; usuario_id?: string; accion?: string; datos_anteriores?: Record<string, unknown>; datos_nuevos?: Record<string, unknown>; ip_address?: string; user_agent?: string; riesgo_score?: number; estado?: string; created_at?: string }
 export interface SueldokPayroll { id: string; company_id?: string; periodo?: string; fecha_inicio?: string; fecha_fin?: string; total_neto?: number; total_bruto?: number; total_descuentos?: number; total_aportes?: number; cantidad_empleados?: number; estado?: string; created_at?: string; updated_at?: string }
-export interface Promotion { id: string; company_id?: string; nombre: string; descripcion?: string; tipo: string; valor?: number; valor_maximo?: number; aplica_a: string; producto_ids?: string[]; categoria_ids?: string[]; monto_minimo_compra?: number; cantidad_minima?: number; cantidad_maxima_items?: number; aplicaciones_por_cliente?: number; combinable?: boolean; valido_desde?: string; valido_hasta?: string; horario_desde?: string; horario_hasta?: string; dias_semana?: number[]; codigo_cupon?: string; requiere_cupon?: boolean; usos_maximos?: number; usos_actuales?: number; activo?: boolean; created_at?: string }
+export interface Promotion {
+  id: string
+  company_id?: string
+  nombre: string
+  descripcion?: string
+  tipo: string
+  valor?: number
+  precio_fijo_promocional?: number
+  valor_maximo?: number
+  aplica_a: string
+  producto_ids?: string[]
+  categoria_ids?: string[]
+  
+  origen?: string
+  financiamiento?: string
+  supplier_id?: string
+  purchases_invoices_ids?: string[]
+  
+  costo_unitario_referencia?: number
+  vende_bajo_costo?: boolean
+  estado?: string
+  aprobado_por?: string
+  fecha_aprobacion?: string
+  
+  limite_por_compra?: number
+  limitar_unidades?: boolean
+  stock_limite_unidades?: number
+  unidades_vendidas_promo?: number
+  unidades_disponibles_promo?: number
+  
+  monto_minimo_compra?: number
+  cantidad_minima?: number
+  cantidad_maxima_items?: number
+  aplicaciones_por_cliente?: number
+  combinable?: boolean
+  valido_desde?: string
+  valido_hasta?: string
+  horario_desde?: string
+  horario_hasta?: string
+  dias_semana?: number[]
+  codigo_cupon?: string
+  requiere_cupon?: boolean
+  
+  nc_estado?: string
+  nc_numero_proveedor?: string
+  nc_timbrado_proveedor?: string
+  nc_monto_total?: number
+  
+  porcentaje_aporte_proveedor?: number
+  porcentaje_aporte_tienda?: number
+  monto_aporte_proveedor_pyg?: number
+  monto_aporte_tienda_pyg?: number
+
+  origen_fuente?: string
+  legacy_id?: number
+  
+  usos_maximos?: number
+  usos_actuales?: number
+  activo?: boolean
+  created_at?: string
+}
 export interface PromotionUsage { id: string; promotion_id?: string; sale_id?: string; customer_id?: string; branch_id?: string; codigo_cupon?: string; descuento_aplicado?: number; items_aplicados?: string[]; created_at?: string }
 export interface MobileDashboard { recepciones_pendientes: number; inventarios_pendientes: number; sugerencias_pendientes: number; entregas_hoy: number }
 export interface InventoryCountItem { product_id: string; cantidad_real: number; lote?: string; fecha_vencimiento?: string }
@@ -690,7 +750,7 @@ export const api = {
     delete: (id: string) => client.delete<void>(`/v1/categories/${id}`),
   },
   products: {
-    list: (params?: { search?: string; categoria_id?: string; activo?: boolean; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, activo: params?.activo?.toString(), limit: params?.limit, offset: params?.offset }),
+    list: (params?: { search?: string; categoria_id?: string; supplier_id?: string; activo?: boolean; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, supplier_id: params?.supplier_id, activo: params?.activo?.toString(), limit: params?.limit, offset: params?.offset }),
     get: (id: string) => client.get<Product>(`/v1/products/${id}`),
     getStats: () => client.get<ProductsStatsResponse>(`/v1/companies/${COMPANY_ID}/products/stats`),
     get360: (id: string) => client.get<Product360Response>(`/v1/products/${id}/360`),
@@ -987,8 +1047,8 @@ export const api = {
     getReceipt: (id: string) => client.get<PurchaseReceipt>(`/v1/purchase-receipts/${id}`),
     cancelReceipt: (id: string) => client.post<PurchaseReceipt>(`/v1/purchase-receipts/${id}/cancel`),
     createReceipt: (data: Partial<PurchaseReceipt>) => client.post<PurchaseReceipt>("/v1/purchase-receipts", { ...data, company_id: COMPANY_ID }),
-    suppliers: (search?: string) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, search ? { search } : undefined),
-    listSuppliers: () => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`),
+    suppliers: (search?: string, solo_mercaderia?: boolean) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, { search, solo_mercaderia }),
+    listSuppliers: (params?: { search?: string; solo_mercaderia?: boolean }) => client.get<Supplier[]>(`/v1/companies/${COMPANY_ID}/suppliers`, params),
     getSupplier: (id: string) => client.get<Supplier>(`/v1/suppliers/${id}`),
     createSupplier: (data: Partial<Supplier>) => client.post<Supplier>("/v1/suppliers", { ...data, company_id: COMPANY_ID }),
     updateSupplier: (id: string, data: Partial<Supplier>) => client.patch<Supplier>(`/v1/suppliers/${id}`, data),
@@ -1559,11 +1619,20 @@ export const api = {
     },
   },
   promotions: {
-    list: (params?: { activo?: boolean; tipo?: string }) => client.get<Promotion[]>("/v1/promotions", params as any),
+    list: (params?: { activo?: boolean; tipo?: string; estado?: string; origen_fuente?: string; limit?: number; offset?: number }) => client.get<Promotion[]>("/v1/promotions", params as any),
     get: (id: string) => client.get<Promotion>(`/v1/promotions/${id}`),
     create: (data: any) => client.post<Promotion>("/v1/promotions", data),
     update: (id: string, data: any) => client.put<Promotion>(`/v1/promotions/${id}`, data),
     delete: (id: string) => client.delete(`/v1/promotions/${id}`),
+    toggle: (id: string) => client.post<Promotion>(`/v1/promotions/${id}/toggle`),
+    reactivate: (id: string, data: any) => client.post<Promotion>(`/v1/promotions/${id}/reactivate`, data),
+    approveLoss: (id: string, data?: any) => client.post<Promotion>(`/v1/promotions/${id}/approve-loss`, data || {}),
+    sellOutClaim: (id: string) => client.get<any>(`/v1/promotions/${id}/sell-out-claim`),
+    recordVendorCreditNote: (id: string, data: any) => client.post<Promotion>(`/v1/promotions/${id}/vendor-credit-note`, data),
+    syncNemuha: () => client.post<any>("/v1/promotions/sync-nemuha"),
+    expiringAlerts: () => client.get<any[]>("/v1/promotions/expiring-alerts"),
+    resolveProduct: (productId: string, precio: number, cantidad?: number) => client.get<any>(`/v1/promotions/resolve-product/${productId}`, { precio, cantidad: cantidad || 1 }),
+    authorizeFlashGrace: (data: any) => client.post<any>("/v1/promotions/authorize-flash-grace", data),
     calculate: (data: any) => client.post<any>("/v1/promotions/calculate", data),
     usage: (id: string, params?: { limit?: number; offset?: number }) => client.get<PromotionUsage[]>(`/v1/promotions/${id}/usage`, params as any),
   },

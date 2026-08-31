@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 
 
@@ -65,3 +65,17 @@ class ProductLookupResponse(BaseModel):
     categoria_nombre: Optional[str] = None
     tipo_venta: Optional[str] = None
     escalas: list[PriceScaleTier] = []
+    
+    # Dual Pricing Promocional
+    en_promocion: bool = False
+    precio_regular: Optional[float] = None
+    precio_promocional: Optional[float] = None
+    ahorro_unitario: Optional[float] = 0
+    ahorro_porcentaje: Optional[float] = 0
+    badge_promo: Optional[str] = None
+    promocion_nombre: Optional[str] = None
+    limite_por_compra: Optional[int] = None
+    valido_hasta: Optional[date] = None
+    mensaje_dias: Optional[str] = None
+    es_activo_hoy: Optional[bool] = True
+

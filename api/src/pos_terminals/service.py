@@ -1,14 +1,67 @@
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
+import json
 
 from api.src.pos_terminals.models import PosTerminalAssignment
 from api.src.pos_terminals.schemas import PosTerminalAssignmentCreate, PosTerminalAssignmentUpdate
 
 
+async def _sync_bancard_ips(db: AsyncSession, company_id: str | uuid.UUID):
+    """Sincroniza automáticamente ips_por_punto_emision en payment_integration_configs (Bancard)
+    a partir de las cajas configuradas en pos_terminal_assignments."""
+    cid = uuid.UUID(str(company_id))
+    assignments_res = await db.execute(
+        select(PosTerminalAssignment).where(
+            PosTerminalAssignment.company_id == cid,
+            PosTerminalAssignment.activo == True
+        )
+    )
+    assignments = assignments_res.scalars().all()
+    
+    ips_map: dict[str, str] = {}
+    for a in assignments:
+        if a.ip_pos_bancard and a.ip_pos_bancard.strip() and a.punto_emision:
+            clean_ip = a.ip_pos_bancard.strip()
+            p = a.punto_emision.strip().zfill(3)
+            ips_map[f"001-{p}"] = clean_ip
+            ips_map[p] = clean_ip
+
+    # Actualizar o insertar en payment_integration_configs
+    cfg_res = await db.execute(
+        text("""
+            SELECT id, config FROM payment_integration_configs
+            WHERE company_id = :company_id AND provider = 'bancard'
+        """),
+        {"company_id": cid}
+    )
+    row = cfg_res.fetchone()
+    if row:
+        current_config = row[1] if isinstance(row[1], dict) else (json.loads(row[1]) if row[1] else {})
+        current_config["ips_por_punto_emision"] = ips_map
+        await db.execute(
+            text("""
+                UPDATE payment_integration_configs
+                SET config = :config, updated_at = NOW()
+                WHERE id = :id
+            """),
+            {"config": json.dumps(current_config), "id": row[0]}
+        )
+    else:
+        new_config = {"ips_por_punto_emision": ips_map}
+        await db.execute(
+            text("""
+                INSERT INTO payment_integration_configs (company_id, provider, environment, enabled, config)
+                VALUES (:company_id, 'bancard', 'production', true, :config)
+            """),
+            {"company_id": cid, "config": json.dumps(new_config)}
+        )
+
+
 async def list_assignments(db: AsyncSession, company_id: str) -> list[dict]:
+    cid = uuid.UUID(str(company_id))
     result = await db.execute(
-        select(PosTerminalAssignment).where(PosTerminalAssignment.company_id == company_id).order_by(PosTerminalAssignment.punto_emision)
+        select(PosTerminalAssignment).where(PosTerminalAssignment.company_id == cid).order_by(PosTerminalAssignment.punto_emision)
     )
     assignments = list(result.scalars().all())
 
@@ -19,7 +72,7 @@ async def list_assignments(db: AsyncSession, company_id: str) -> list[dict]:
             FROM punto_emision_secuencias
             WHERE company_id = :company_id AND activo = true
         """),
-        {"company_id": company_id}
+        {"company_id": cid}
     )
     all_seqs = seq_result.fetchall()
 
@@ -47,6 +100,7 @@ async def list_assignments(db: AsyncSession, company_id: str) -> list[dict]:
             "id": a.id,
             "hostname": a.hostname,
             "ip_address": a.ip_address,
+            "ip_pos_bancard": a.ip_pos_bancard,
             "punto_emision": a.punto_emision,
             "caja_nombre": a.caja_nombre,
             "activo": a.activo,
@@ -64,10 +118,11 @@ async def list_assignments(db: AsyncSession, company_id: str) -> list[dict]:
 
 
 async def get_by_hostname(db: AsyncSession, company_id: str, hostname: str) -> PosTerminalAssignment | None:
+    cid = uuid.UUID(str(company_id))
     clean_host = hostname.strip().upper()
     result = await db.execute(
         select(PosTerminalAssignment).where(
-            PosTerminalAssignment.company_id == company_id,
+            PosTerminalAssignment.company_id == cid,
             PosTerminalAssignment.hostname == clean_host,
             PosTerminalAssignment.activo == True,
         )
@@ -76,10 +131,11 @@ async def get_by_hostname(db: AsyncSession, company_id: str, hostname: str) -> P
 
 
 async def get_by_ip(db: AsyncSession, company_id: str, ip_address: str) -> PosTerminalAssignment | None:
+    cid = uuid.UUID(str(company_id))
     clean_ip = ip_address.strip()
     result = await db.execute(
         select(PosTerminalAssignment).where(
-            PosTerminalAssignment.company_id == company_id,
+            PosTerminalAssignment.company_id == cid,
             PosTerminalAssignment.ip_address == clean_ip,
             PosTerminalAssignment.activo == True,
         )
@@ -101,8 +157,10 @@ async def detect_terminal(db: AsyncSession, company_id: str, client_ip: str | No
 
 
 async def create_assignment(db: AsyncSession, company_id: str, data: PosTerminalAssignmentCreate) -> PosTerminalAssignment:
+    cid = uuid.UUID(str(company_id))
     clean_host = data.hostname.strip().upper()
     clean_ip = data.ip_address.strip() if data.ip_address else None
+    clean_pos_ip = data.ip_pos_bancard.strip() if data.ip_pos_bancard else None
 
     existing_host = await db.execute(
         select(PosTerminalAssignment).where(PosTerminalAssignment.hostname == clean_host)
@@ -118,15 +176,22 @@ async def create_assignment(db: AsyncSession, company_id: str, data: PosTerminal
             raise ValueError(f"La IP '{clean_ip}' ya está asignada a otra caja")
 
     assignment = PosTerminalAssignment(
-        company_id=company_id,
+        company_id=cid,
         hostname=clean_host,
         ip_address=clean_ip,
+        ip_pos_bancard=clean_pos_ip,
         punto_emision=data.punto_emision.strip(),
         caja_nombre=data.caja_nombre.strip(),
     )
     db.add(assignment)
     await db.flush()
     await db.refresh(assignment)
+
+    try:
+        await _sync_bancard_ips(db, cid)
+    except Exception as e:
+        print(f"[pos_terminals] Warning al sincronizar bancard ips: {e}")
+
     return assignment
 
 
@@ -139,6 +204,8 @@ async def update_assignment(db: AsyncSession, assignment_id: str, data: PosTermi
         assignment.hostname = data.hostname.strip().upper()
     if data.ip_address is not None:
         assignment.ip_address = data.ip_address.strip() if data.ip_address.strip() else None
+    if data.ip_pos_bancard is not None:
+        assignment.ip_pos_bancard = data.ip_pos_bancard.strip() if data.ip_pos_bancard.strip() else None
     if data.punto_emision is not None:
         assignment.punto_emision = data.punto_emision.strip()
     if data.caja_nombre is not None:
@@ -147,6 +214,12 @@ async def update_assignment(db: AsyncSession, assignment_id: str, data: PosTermi
         assignment.activo = data.activo
     await db.flush()
     await db.refresh(assignment)
+
+    try:
+        await _sync_bancard_ips(db, assignment.company_id)
+    except Exception as e:
+        print(f"[pos_terminals] Warning al sincronizar bancard ips: {e}")
+
     return assignment
 
 
@@ -155,6 +228,14 @@ async def delete_assignment(db: AsyncSession, assignment_id: str) -> bool:
     assignment = result.scalar_one_or_none()
     if not assignment:
         return False
+    company_id = assignment.company_id
     await db.delete(assignment)
     await db.flush()
+
+    try:
+        await _sync_bancard_ips(db, company_id)
+    except Exception as e:
+        print(f"[pos_terminals] Warning al sincronizar bancard ips: {e}")
+
     return True
+

@@ -17,8 +17,10 @@ class PosTerminalAssignment(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False)
     hostname = Column(String(120), nullable=False, unique=True)
     ip_address = Column(String(45), nullable=True, index=True)
+    ip_pos_bancard = Column(String(45), nullable=True)
     punto_emision = Column(String(10), nullable=False)
     caja_nombre = Column(String(60), nullable=False)
     activo = Column(Boolean, default=True, server_default="true")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
