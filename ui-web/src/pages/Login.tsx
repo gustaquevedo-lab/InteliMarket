@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
-import { Eye, EyeOff, Loader2, User as UserIcon, ArrowLeft, ShieldCheck, Zap } from "lucide-react"
+import { Eye, EyeOff, Loader2, User as UserIcon, ArrowLeft, ShieldCheck, Zap, RefreshCw } from "lucide-react"
+
 import { useAuth } from "../context/AuthContext"
 import { useToast } from "../context/ToastContext"
 import { api } from "../api"
@@ -202,16 +203,28 @@ export default function Login() {
   const [posError, setPosError] = useState("")
   const [posLoading, setPosLoading] = useState(false)
 
+  const loadStaff = useCallback(() => {
+    setPosStaffLoading(true)
+    setPosStaffError("")
+    api.auth.posStaff()
+      .then((res) => {
+        setPosStaff(res.staff || [])
+        setPosStaffError("")
+      })
+      .catch((err) => {
+        console.error("Error al cargar pos-staff:", err)
+        setPosStaffError("No se pudo cargar la lista de personal. Verifique la conexión con el servidor.")
+      })
+      .finally(() => {
+        setPosStaffLoading(false)
+      })
+  }, [])
+
   useEffect(() => {
     if (!isElectron) return
-    let cancelled = false
-    setPosStaffLoading(true)
-    api.auth.posStaff()
-      .then((res) => { if (!cancelled) setPosStaff(res.staff || []) })
-      .catch(() => { if (!cancelled) setPosStaffError("No se pudo cargar la lista de personal. Verifique la conexión con el servidor.") })
-      .finally(() => { if (!cancelled) setPosStaffLoading(false) })
-    return () => { cancelled = true }
-  }, [isElectron])
+    loadStaff()
+  }, [isElectron, loadStaff])
+
 
   useEffect(() => {
     if (!isElectron) emailRef.current?.focus()
@@ -301,10 +314,18 @@ export default function Login() {
                   </div>
                 )}
                 {!posStaffLoading && posStaffError && (
-                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl px-4 py-3 text-sm text-red-300">
-                    {posStaffError}
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 text-center">
+                    <p className="text-sm text-red-300 mb-3">{posStaffError}</p>
+                    <button
+                      type="button"
+                      onClick={loadStaff}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 mx-auto"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> Reintentar Carga de Personal
+                    </button>
                   </div>
                 )}
+
                 {!posStaffLoading && !posStaffError && posStaff.length === 0 && (
                   <div className="text-center text-sm text-slate-400 py-12">
                     No hay cajeros ni supervisores cargados todavía. Pedile a un administrador que te dé de alta.
