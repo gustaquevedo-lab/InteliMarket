@@ -8780,7 +8780,7 @@ export default function POSPage() {
                     onClick={() => {
                       if (lastClosedSessionId) {
                         const token = localStorage.getItem("auth_token") || localStorage.getItem("token") || ""
-                        const url = `/api/caja/cash-sessions/${lastClosedSessionId}/export/cierre.pdf?token=${encodeURIComponent(token)}`
+                        const url = `/api/v1/cash-sessions/${lastClosedSessionId}/export/cierre.pdf?token=${encodeURIComponent(token)}`
                         window.open(url, "_blank")
                       }
                     }}

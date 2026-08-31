@@ -2049,7 +2049,7 @@ export default function POSPage() {
     }
     const targetId = lastClosedSessionId || cashSessionId
     const token = localStorage.getItem("token") || ""
-    const url = `${API_ORIGIN}/api/caja/cash-sessions/${targetId}/export/cierre.pdf?token=${encodeURIComponent(token)}`
+    const url = `${API_ORIGIN}/api/v1/cash-sessions/${targetId}/export/cierre.pdf?token=${encodeURIComponent(token)}`
     window.open(url, "_blank")
   }
 
@@ -8791,7 +8791,7 @@ export default function POSPage() {
                     onClick={() => {
                       if (lastClosedSessionId) {
                         const token = localStorage.getItem("auth_token") || localStorage.getItem("token") || ""
-                        const url = `/api/caja/cash-sessions/${lastClosedSessionId}/export/cierre.pdf?token=${encodeURIComponent(token)}`
+                        const url = `/api/v1/cash-sessions/${lastClosedSessionId}/export/cierre.pdf?token=${encodeURIComponent(token)}`
                         window.open(url, "_blank")
                       }
                     }}
