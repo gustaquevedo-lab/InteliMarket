@@ -3745,9 +3745,16 @@ export default function POSPage() {
     }
     const monto = customMonto !== undefined ? customMonto : (montoDonacionManual !== null ? montoDonacionManual : montoSugeridoDonacion)
     const currentCash = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
+    // Esta formula (total + donacion) solo tiene sentido para un cobro
+    // 100% en efectivo Gs -- si ya hay algo cargado en R$/US$ (pago
+    // multimoneda), pisar el campo de Gs con este numero arruinaba lo
+    // que el cajero ya venia armando. El vuelto y la donacion efectiva
+    // ya se recalculan solos via vueltoPyg/montoDonacionEfectiva sin
+    // necesidad de tocar ningun campo en ese caso.
+    const hayOtraMoneda = (parseFloat(payCashBrl.replace(/,/g, ".") || "0") || 0) > 0 || (parseFloat(payCashUsd.replace(/,/g, ".") || "0") || 0) > 0
     
     // Solo actualizar el campo de efectivo si el cajero estaba en el monto exacto base sin haber ingresado un billete mayor
-    if (currentCash <= totalPyg) {
+    if (currentCash <= totalPyg && !hayOtraMoneda) {
       if (nextActiva) {
         setPayCashPyg((totalPyg + monto).toLocaleString("es-PY"))
       } else {
