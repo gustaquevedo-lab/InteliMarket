@@ -1,6 +1,6 @@
 """Customer service"""
 
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.customers.models import Customer
@@ -41,25 +41,27 @@ async def list_customers(
     query = select(Customer).where(Customer.company_id == company_id)
     if search:
         search_terms = search.strip().split()
-        if len(search_terms) == 1:
-            term = search_terms[0]
-            query = query.where(
+        # El numero de socio Extra Club se guarda con formato UUID
+        # (con guiones), pero la tarjeta fisica/lector de QR a veces entrega
+        # el mismo valor SIN guiones (el formato crudo de 32 caracteres que
+        # usa el legacy antes de que nuestro sync le agregue el formato
+        # UUID) -- una comparacion de texto literal nunca matchea eso.
+        # func.replace(..., '-', '') compara ignorando los guiones de ambos
+        # lados, sin afectar el resto de los campos (ruc/ci/telefono/nombre).
+        def _term_conditions(term: str):
+            term_sin_guiones = term.replace("-", "")
+            return (
                 (Customer.razon_social.ilike(f"%{term}%")) |
                 (Customer.ruc.ilike(f"%{term}%")) |
                 (Customer.ci.ilike(f"%{term}%")) |
                 (Customer.telefono.ilike(f"%{term}%")) |
-                (Customer.extra_club_numero.ilike(f"%{term}%"))
+                (Customer.extra_club_numero.ilike(f"%{term}%")) |
+                (func.replace(Customer.extra_club_numero, "-", "").ilike(f"%{term_sin_guiones}%"))
             )
+        if len(search_terms) == 1:
+            query = query.where(_term_conditions(search_terms[0]))
         elif len(search_terms) > 1:
-            term_conditions = []
-            for term in search_terms:
-                term_conditions.append(
-                    (Customer.razon_social.ilike(f"%{term}%")) |
-                    (Customer.ruc.ilike(f"%{term}%")) |
-                    (Customer.ci.ilike(f"%{term}%")) |
-                    (Customer.telefono.ilike(f"%{term}%")) |
-                    (Customer.extra_club_numero.ilike(f"%{term}%"))
-                )
+            term_conditions = [_term_conditions(term) for term in search_terms]
             query = query.where(and_(*term_conditions))
     if activo is not None:
         query = query.where(Customer.activo == activo)
