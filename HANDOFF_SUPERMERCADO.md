@@ -9,6 +9,45 @@
 
 ---
 
+## Secuencias fiscales por punto de emisión — estado 31/8
+
+El legacy (ConceptoComercial/FlexPDV, MySQL `comercial_extra_py` en
+`100.76.95.42`, timbrado activo `18545636`, tabla `con_secuencia_fatura`)
+seguía emitiendo en paralelo con InteliMarket sobre el MISMO timbrado en
+varios puntos de emisión, sin coordinación -- riesgo real de numeros de
+factura duplicados ante el SET. Se comparo `con_secuencia_fatura.proximo`
+(legacy) contra `punto_emision_secuencias.numero_actual` (InteliMarket,
+misma semantica: "proximo numero a asignar") y se corrigio:
+
+- **012, 013, 014, 015, 019** (factura y NC donde aplica): el legacy estaba
+  adelante -- se subio el `numero_actual` de InteliMarket para igualar el
+  `proximo` del legacy, asi la proxima factura de InteliMarket continua
+  exactamente donde quedo el legacy, sin pisar numeros ya usados alli.
+- **018**: al reves -- InteliMarket ya tenia 3 facturas reales confirmadas
+  (001-018-0000124/125/126) que el legacy no conocia. Bajar el contador de
+  InteliMarket hubiera duplicado esos numeros. **Decision del cliente
+  (31/8): el legacy ya no se usa mas en el punto 018, InteliMarket sigue
+  siendo la fuente de verdad ahi de aca en adelante -- se dejo el contador
+  en 127 (sin cambios).**
+- **011, 016, 017, 020**: ya estaban sincronizados o sin uso, sin cambios.
+
+**Antes de tocar cualquier secuencia fiscal a futuro**: comparar primero
+`con_secuencia_fatura.proximo` (legacy, credenciales de solo lectura en
+`.env` -- `NEMUHA_MYSQL_*`) contra `punto_emision_secuencias.numero_actual`
+(InteliMarket) para ese punto especifico, y ANTES de bajar un contador de
+InteliMarket verificar en `sales` (`numero LIKE '%-<punto>-%'`, filtrar
+`estado='confirmado'`) que no haya facturas reales ya emitidas con esos
+numeros -- ver el caso 018 arriba, per el ejemplo real de por que este
+chequeo es obligatorio, no opcional.
+
+Las secuencias fiscales de `sandbox` estan (y deben seguir estando)
+completamente separadas de las de `public` -- nunca sincronizar numeros
+fiscales reales hacia sandbox, a diferencia de otras tablas de
+configuracion (`users`, `pos_terminal_assignments`) que si conviene
+mantener espejadas.
+
+---
+
 ## ⚠️ ANTES DE ASUMIR QUE UN FIX YA ESTÁ EN PRODUCCIÓN: VERIFICAR QUIÉN TIENE REALMENTE EL PUERTO 8000
 
 **Encontrado 31/8**: un `sudo systemctl restart intelimarket-api` que devuelve éxito **no garantiza que el proceso nuevo haya tomado el puerto**. Había un proceso uvicorn huérfano corriendo desde el 30/8 17:49 (arrancado a mano con `nohup .venv/bin/uvicorn ... --workers 2 &`, fuera de systemd — probablemente un `kill+restart` manual de una sesión anterior que nunca se limpió) que tenía el `0.0.0.0:8000` tomado. El proceso de systemd, al no poder bindear, quedaba reintentando en loop sin servir nada — pero seguía apareciendo "activo" en `ps`. Cualquier `git commit` + `systemctl restart` de esa noche (y posiblemente de noches anteriores) **no llegó a producción real**, aunque el flujo de deploy parecía exitoso.
