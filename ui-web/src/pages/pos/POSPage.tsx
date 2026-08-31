@@ -7454,13 +7454,26 @@ export default function POSPage() {
                               autoFocus
                               value={extraClubQuery}
                               onChange={(e) => setExtraClubQuery(e.target.value)}
-                              onKeyDown={(e) => {
+                              onKeyDown={async (e) => {
                                 if (e.key === "ArrowDown") { e.preventDefault(); setExtraClubHighlight((h) => Math.min(h + 1, extraClubResults.length - 1)) }
                                 else if (e.key === "ArrowUp") { e.preventDefault(); setExtraClubHighlight((h) => Math.max(h - 1, 0)) }
                                 else if (e.key === "Enter") {
                                   e.preventDefault()
                                   const c = extraClubResults[extraClubHighlight]
-                                  if (c) { setCustomer(c); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false) }
+                                  if (c) { setCustomer(c); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false); return }
+                                  // Mismo caso que en el modal de "Consultar Saldo": el
+                                  // escaneo de la tarjeta manda Enter antes de que el
+                                  // debounce de busqueda llegue a correr -- se busca ya
+                                  // mismo en vez de quedarse sin hacer nada.
+                                  const q = extraClubQuery.trim()
+                                  if (!q) return
+                                  try {
+                                    const found = (await api.customers.list({ search: q, limit: 5 })) || []
+                                    if (found.length > 0) {
+                                      const c2 = normalizeCustomer(found[0])
+                                      setCustomer(c2); setExtraClubQuery(""); setExtraClubResults([]); setExtraClubAdminOverride(false)
+                                    }
+                                  } catch (err) {}
                                 }
                               }}
                               placeholder="Número de socio / RUC / cédula / nombre"
@@ -8623,13 +8636,27 @@ export default function POSPage() {
                   autoFocus
                   value={balanceModalQuery}
                   onChange={(e) => setBalanceModalQuery(e.target.value)}
-                  onKeyDown={(e) => {
+                  onKeyDown={async (e) => {
                     if (e.key === "ArrowDown") { e.preventDefault(); setBalanceModalHighlight((h) => Math.min(h + 1, balanceModalResults.length - 1)) }
                     else if (e.key === "ArrowUp") { e.preventDefault(); setBalanceModalHighlight((h) => Math.max(h - 1, 0)) }
                     else if (e.key === "Enter") {
                       e.preventDefault()
                       const c = balanceModalResults[balanceModalHighlight]
-                      if (c) setBalanceModalSelected(c)
+                      if (c) { setBalanceModalSelected(c); return }
+                      // Un lector de codigo de barra/QR "tipea" rapidisimo y
+                      // manda Enter apenas termina -- mucho antes de que el
+                      // debounce de 250ms de arriba llegue siquiera a
+                      // disparar la busqueda, asi que balanceModalResults
+                      // todavia esta vacio en este momento y no habia nada
+                      // que seleccionar. En vez de quedarse sin hacer nada,
+                      // se dispara la busqueda ya mismo con lo que hay
+                      // tipeado/escaneado.
+                      const q = balanceModalQuery.trim()
+                      if (!q) return
+                      try {
+                        const found = (await api.customers.list({ search: q, limit: 5 })) || []
+                        if (found.length > 0) setBalanceModalSelected(normalizeCustomer(found[0]))
+                      } catch (err) {}
                     }
                   }}
                   placeholder="Número de socio / RUC / cédula / nombre"
