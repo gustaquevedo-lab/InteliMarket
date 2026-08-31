@@ -91,3 +91,11 @@ api/static/
 # Build info de TS
 ui-web/tsconfig.tsbuildinfo
 tsconfig.tsbuildinfo
+
+# Datos locales / extractos bancarios / zips temporales
+Bancos/
+*.xlsx
+*.zip
+.claude/
+BALANZA_ELECTRON_DIAGNOSTICO.md
+
