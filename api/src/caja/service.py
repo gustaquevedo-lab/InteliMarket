@@ -1145,3 +1145,184 @@ async def get_cajero_performance(db: AsyncSession, company_id: str) -> list[dict
         }
         for r in rows
     ]
+
+
+# ── Pre-Cierre y Reportes Individuales ─────────────────────────────────
+
+async def get_session_pre_close_summary(db: AsyncSession, session_id: str) -> dict | None:
+    """Resumen previo al cierre para que el cajero pueda visualizar los totales
+    por medio de pago, donaciones y retiros antes de ingresar el conteo final."""
+    result = await db.execute(
+        select(CashSession).where(CashSession.id == uuid.UUID(session_id))
+    )
+    session_obj = result.scalar_one_or_none()
+    if not session_obj:
+        return None
+
+    # 1. Total ventas y donaciones
+    sales_res = await db.execute(
+        select(
+            func.count(Sale.id).label("total_ventas"),
+            func.coalesce(func.sum(Sale.total), 0).label("total_cobrado"),
+            func.coalesce(func.sum(Sale.monto_donacion), 0).label("total_donaciones"),
+        ).where(
+            Sale.session_id == session_obj.id,
+            Sale.estado == "confirmado",
+        )
+    )
+    sales_row = sales_res.first()
+
+    # 2. Efectivo esperado por moneda
+    efectivo_pyg = await _efectivo_esperado_por_moneda(db, session_obj.id, "PYG")
+    efectivo_usd = await _efectivo_esperado_por_moneda(db, session_obj.id, "USD")
+    efectivo_brl = await _efectivo_esperado_por_moneda(db, session_obj.id, "BRL")
+
+    # 3. Desglose formas de pago
+    payments_res = await db.execute(
+        select(
+            SalePayment.forma_pago,
+            SalePayment.moneda,
+            func.count().label("cantidad"),
+            func.coalesce(func.sum(SalePayment.monto), 0).label("monto"),
+        )
+        .select_from(SalePayment)
+        .join(Sale, Sale.id == SalePayment.sale_id)
+        .where(Sale.session_id == session_obj.id, Sale.estado == "confirmado")
+        .group_by(SalePayment.forma_pago, SalePayment.moneda)
+        .order_by(func.sum(SalePayment.monto).desc())
+    )
+    payments_breakdown = [
+        {"forma_pago": fp, "moneda": mon, "cantidad": cant, "monto": float(monto)}
+        for fp, mon, cant, monto in payments_res.all()
+    ]
+
+    # 4. Retiros (Cash Drops) de esta sesión
+    cd_res = await db.execute(
+        select(CashDropRequest).where(CashDropRequest.session_id == session_obj.id).order_by(CashDropRequest.created_at.asc())
+    )
+    drops = list(cd_res.scalars().all())
+    drops_list = [
+        {
+            "id": str(d.id),
+            "monto_pyg": float(d.monto_pyg or 0),
+            "monto_usd": float(d.monto_usd or 0),
+            "monto_brl": float(d.monto_brl or 0),
+            "monto_confirmado_pyg": float(d.monto_confirmado_pyg) if d.monto_confirmado_pyg is not None else None,
+            "monto_confirmado_usd": float(d.monto_confirmado_usd) if d.monto_confirmado_usd is not None else None,
+            "monto_confirmado_brl": float(d.monto_confirmado_brl) if d.monto_confirmado_brl is not None else None,
+            "estado": d.estado,
+            "created_at": d.created_at.isoformat(),
+            "confirmado_por_nombre": d.confirmado_por_nombre,
+        }
+        for d in drops
+    ]
+
+    total_drops_confirmados_pyg = sum(float(d.monto_confirmado_pyg or d.monto_pyg or 0) for d in drops if d.estado == "confirmado")
+    total_drops_confirmados_usd = sum(float(d.monto_confirmado_usd or d.monto_usd or 0) for d in drops if d.estado == "confirmado")
+    total_drops_confirmados_brl = sum(float(d.monto_confirmado_brl or d.monto_brl or 0) for d in drops if d.estado == "confirmado")
+
+    monto_apertura = float(session_obj.monto_apertura or 0)
+    efectivo_en_gaveta_esperado_pyg = monto_apertura + float(efectivo_pyg) - total_drops_confirmados_pyg
+    efectivo_en_gaveta_esperado_usd = float(efectivo_usd) - total_drops_confirmados_usd
+    efectivo_en_gaveta_esperado_brl = float(efectivo_brl) - total_drops_confirmados_brl
+
+    return {
+        "session_id": str(session_obj.id),
+        "cajero_nombre": session_obj.cajero_nombre,
+        "fecha_apertura": session_obj.fecha_apertura.isoformat(),
+        "monto_apertura": monto_apertura,
+        "total_ventas_count": sales_row.total_ventas if sales_row else 0,
+        "total_cobrado_pyg": float(sales_row.total_cobrado if sales_row else 0),
+        "total_donaciones_pyg": float(sales_row.total_donaciones if sales_row else 0),
+        "efectivo_pyg_esperado": float(efectivo_pyg),
+        "efectivo_usd_esperado": float(efectivo_usd),
+        "efectivo_brl_esperado": float(efectivo_brl),
+        "monto_cierre_esperado_pyg": monto_apertura + float(efectivo_pyg),
+        "efectivo_en_gaveta_esperado_pyg": efectivo_en_gaveta_esperado_pyg,
+        "efectivo_en_gaveta_esperado_usd": efectivo_en_gaveta_esperado_usd,
+        "efectivo_en_gaveta_esperado_brl": efectivo_en_gaveta_esperado_brl,
+        "desglose_formas_pago": payments_breakdown,
+        "cash_drops": drops_list,
+        "total_drops_confirmados_pyg": total_drops_confirmados_pyg,
+        "total_drops_confirmados_usd": total_drops_confirmados_usd,
+        "total_drops_confirmados_brl": total_drops_confirmados_brl,
+    }
+
+
+async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, company_id: str) -> dict | None:
+    """Obtiene los datos completos del cierre de una sesión para el PDF."""
+    result = await db.execute(
+        select(CashSession).where(CashSession.id == uuid.UUID(session_id))
+    )
+    s = result.scalar_one_or_none()
+    if not s:
+        return None
+
+    # Obtener caja
+    reg_res = await db.execute(select(CashRegister).where(CashRegister.id == s.register_id))
+    reg = reg_res.scalar_one_or_none()
+    if reg and str(reg.company_id) != str(company_id):
+        return None
+
+    # Arqueo (CashCount)
+    count_res = await db.execute(
+        select(CashCount).where(CashCount.session_id == s.id).order_by(CashCount.created_at.desc()).limit(1)
+    )
+    count = count_res.scalar_one_or_none()
+
+    efectivo_pyg = await _efectivo_esperado_por_moneda(db, s.id, "PYG")
+    efectivo_usd = await _efectivo_esperado_por_moneda(db, s.id, "USD")
+    efectivo_brl = await _efectivo_esperado_por_moneda(db, s.id, "BRL")
+
+    monto_cierre_esperado = float(s.monto_apertura) + float(efectivo_pyg)
+
+    # Breakdown formas de pago
+    breakdown = await get_session_payment_breakdown(db, str(s.id))
+
+    # Cash drops
+    cd_res = await db.execute(
+        select(CashDropRequest).where(CashDropRequest.session_id == s.id).order_by(CashDropRequest.created_at.asc())
+    )
+    drops = list(cd_res.scalars().all())
+    drops_list = [
+        {
+            "created_at": d.created_at,
+            "solicitado_por_nombre": d.solicitado_por_nombre,
+            "monto_pyg": float(d.monto_pyg or 0),
+            "monto_usd": float(d.monto_usd or 0),
+            "monto_brl": float(d.monto_brl or 0),
+            "monto_confirmado_pyg": float(d.monto_confirmado_pyg) if d.monto_confirmado_pyg is not None else None,
+            "confirmado_por_nombre": d.confirmado_por_nombre,
+            "estado": d.estado,
+        }
+        for d in drops
+    ]
+
+    session_data = {
+        "id": str(s.id),
+        "register_nombre": reg.nombre if reg else "Caja",
+        "cajero_nombre": s.cajero_nombre or "—",
+        "fecha_apertura": s.fecha_apertura,
+        "fecha_cierre": s.fecha_cierre,
+        "monto_apertura": float(s.monto_apertura or 0),
+        "monto_cierre": float(s.monto_cierre or 0) if s.monto_cierre is not None else 0,
+        "monto_cierre_esperado": monto_cierre_esperado,
+        "efectivo_cobrado_pyg": float(efectivo_pyg),
+        "efectivo_usd_esperado": float(efectivo_usd),
+        "efectivo_brl_esperado": float(efectivo_brl),
+        "monto_efectivo_usd": float(count.monto_efectivo_usd or 0) if count else 0,
+        "monto_efectivo_brl": float(count.monto_efectivo_brl or 0) if count else 0,
+        "diferencia": float(count.diferencia or 0) if count else 0,
+        "diferencia_usd": float(count.diferencia_usd or 0) if count else 0,
+        "diferencia_brl": float(count.diferencia_brl or 0) if count else 0,
+        "requiere_revision": count.requiere_revision if count else False,
+        "observaciones": s.observaciones,
+        "estado": s.estado,
+    }
+
+    return {
+        "session_data": session_data,
+        "payments_breakdown": breakdown,
+        "cash_drops": drops_list,
+    }
+

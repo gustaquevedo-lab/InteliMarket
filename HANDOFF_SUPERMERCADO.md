@@ -47,7 +47,6 @@ configuracion (`users`, `pos_terminal_assignments`) que si conviene
 mantener espejadas.
 
 ---
-
 ## ⚠️ ANTES DE ASUMIR QUE UN FIX YA ESTÁ EN PRODUCCIÓN: VERIFICAR QUIÉN TIENE REALMENTE EL PUERTO 8000
 
 **Encontrado 31/8**: un `sudo systemctl restart intelimarket-api` que devuelve éxito **no garantiza que el proceso nuevo haya tomado el puerto**. Había un proceso uvicorn huérfano corriendo desde el 30/8 17:49 (arrancado a mano con `nohup .venv/bin/uvicorn ... --workers 2 &`, fuera de systemd — probablemente un `kill+restart` manual de una sesión anterior que nunca se limpió) que tenía el `0.0.0.0:8000` tomado. El proceso de systemd, al no poder bindear, quedaba reintentando en loop sin servir nada — pero seguía apareciendo "activo" en `ps`. Cualquier `git commit` + `systemctl restart` de esa noche (y posiblemente de noches anteriores) **no llegó a producción real**, aunque el flujo de deploy parecía exitoso.

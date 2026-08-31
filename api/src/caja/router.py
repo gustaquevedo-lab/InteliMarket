@@ -145,6 +145,37 @@ async def session_payment_breakdown(session_id: str, db: AsyncSession = Depends(
     return await service.get_session_payment_breakdown(db, session_id)
 
 
+@router.get("/cash-sessions/{session_id}/pre-close-summary")
+async def session_pre_close_summary(session_id: str, db: AsyncSession = Depends(get_db)):
+    result = await service.get_session_pre_close_summary(db, session_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    return result
+
+
+@router.get("/cash-sessions/{session_id}/export/cierre.pdf")
+async def export_cierre_sesion_pdf(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    report_data = await service.get_cierre_individual_report_data(db, session_id, user["company_id"])
+    if not report_data:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no pertenece a su empresa")
+
+    company = await _get_company_info(db, user["company_id"])
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_cierre_sesion_individual_pdf(
+        company,
+        report_data["session_data"],
+        report_data["payments_breakdown"],
+        report_data["cash_drops"],
+        generated_by,
+    )
+    return _pdf_response(pdf_bytes, f"cierre_caja_{session_id[:8]}.pdf")
+
+
+
 @router.post("/cash-sessions/{session_id}/cash-drop", status_code=status.HTTP_201_CREATED)
 async def cash_drop(session_id: str, body: CashDropCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     result = await service.register_cash_drop(

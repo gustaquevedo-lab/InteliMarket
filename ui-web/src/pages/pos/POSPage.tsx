@@ -253,6 +253,24 @@ function escposLogoFromDataUrl(dataUrl: string, maxWidthPx = 384): Promise<strin
   })
 }
 
+const triggerSuccessSound = () => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioCtx) return
+    const ctx = new AudioCtx()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime) // D5
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1) // A5
+    gain.gain.setValueAtTime(0.2, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(ctx.currentTime)
+    osc.stop(ctx.currentTime + 0.3)
+  } catch (e) {}
+}
+
 const FORMA_PAGO_LABEL: Record<string, string> = {
   EFECTIVO: "Efectivo",
   TARJETA_BANCARD: "Tarjeta Bancard",
@@ -394,6 +412,15 @@ export default function POSPage() {
   const [montoCierreBrl, setMontoCierreBrl] = useState<string>("")
   const [submittingCierre, setSubmittingCierre] = useState(false)
   const [cierreResult, setCierreResult] = useState<{ monto_cierre_esperado: number; diferencia: number; requiere_revision: boolean; diferencia_usd: number; diferencia_brl: number; desglose_formas_pago: { forma_pago: string; moneda: string; monto: number }[]; contado: number; contado_usd: number; contado_brl: number } | null>(null)
+  const [preCloseData, setPreCloseData] = useState<any>(null)
+  const [loadingPreClose, setLoadingPreClose] = useState(false)
+  const [cierreTab, setCierreTab] = useState<"conteo" | "conciliacion">("conteo")
+  const [lastClosedSessionId, setLastClosedSessionId] = useState<string | null>(null)
+  const [lastCierreTicketHtml, setLastCierreTicketHtml] = useState<string | null>(null)
+  const pendingDropIdsRef = useRef<Set<string>>(new Set())
+  const confirmedDropIdsRef = useRef<Set<string>>(new Set())
+  const pendingHandoffIdRef = useRef<string | null>(null)
+
   const [showCashDropModal, setShowCashDropModal] = useState(false)
   const [cashDropMonto, setCashDropMonto] = useState<string>("")
   const [cashDropMontoUsd, setCashDropMontoUsd] = useState<string>("")
@@ -1920,9 +1947,23 @@ export default function POSPage() {
     }
   }
 
-  // Cierre a ciegas: el cajero solo carga lo que contó físicamente. El
-  // sistema recién revela el esperado y la diferencia DESPUÉS de enviar --
-  // nunca antes, para que el conteo no esté sesgado por el número esperado.
+  const handleOpenCierreModal = async () => {
+    setShowCierreTurnoModal(true)
+    setCierreTab("conteo")
+    if (cashSessionId) {
+      setLoadingPreClose(true)
+      try {
+        const data = await api.caja.sessions.preCloseSummary(cashSessionId)
+        setPreCloseData(data)
+      } catch (e) {
+        console.error("Error cargando pre-cierre:", e)
+      } finally {
+        setLoadingPreClose(false)
+      }
+    }
+  }
+
+  // Cierre de caja: con vista previa de conciliación por formas de pago
   const handleConfirmCierreCaja = async () => {
     if (!cashSessionId) {
       toast.warning("No hay sesión de caja activa", "")
@@ -1931,13 +1972,18 @@ export default function POSPage() {
     const contado = parseInt(montoCierreReal.replace(/\D/g, "") || "0", 10)
     const contadoUsd = parseFloat(montoCierreUsd.replace(/,/g, ".") || "0") || 0
     const contadoBrl = parseFloat(montoCierreBrl.replace(/,/g, ".") || "0") || 0
+    const currentSessionId = cashSessionId
     setSubmittingCierre(true)
     try {
-      const result = await api.caja.sessions.close(cashSessionId, {
+      const result = await api.caja.sessions.close(currentSessionId, {
         monto_cierre_real: contado,
         monto_cierre_usd: contadoUsd,
         monto_cierre_brl: contadoBrl,
       })
+      setLastClosedSessionId(currentSessionId)
+      if ((result as any)?.handoff_id) {
+        pendingHandoffIdRef.current = String((result as any).handoff_id)
+      }
       setCierreResult({
         monto_cierre_esperado: result.monto_cierre_esperado,
         diferencia: result.diferencia,
@@ -1951,29 +1997,35 @@ export default function POSPage() {
       })
 
       const diferencia = result.diferencia || 0
-      const body = buildTicketPrelude("CIERRE DE CAJA") + `
+      const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+      const body = buildTicketPrelude("CIERRE DE CAJA / ARQUEO") + `
         <div style="padding: 4px 0; font-size: 10px;">
-          <div>Cajero: ${user?.nombre || "-"}</div>
-          <div>Caja: ${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}</div>
+          <div>Cajero/a: ${user?.nombre || "-"}</div>
+          <div>Caja: ${puntoNombre}</div>
           <div>Fecha/Hora: ${new Date().toLocaleString("es-PY")}</div>
+          <div>Turno ID: ${currentSessionId.slice(0, 8).toUpperCase()}</div>
         </div>
         <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
           <tr><td>Fondo de apertura:</td><td style="text-align:right;">${formatPYG(parseInt(montoAperturaPyg.replace(/\D/g,"")||"0",10))}</td></tr>
           <tr><td>Efectivo esperado (Gs.):</td><td style="text-align:right;">${formatPYG(result.monto_cierre_esperado)}</td></tr>
-          <tr><td>Efectivo contado (Gs.):</td><td style="text-align:right;">${formatPYG(contado)}</td></tr>
+          <tr><td>Efectivo contado (Gs.):</td><td style="text-align:right; font-weight:bold;">${formatPYG(contado)}</td></tr>
           <tr style="font-weight:900; border-top:1px dashed #000;"><td>Diferencia (Gs.):</td><td style="text-align:right;">${diferencia >= 0 ? "+" : ""}${formatPYG(diferencia)}</td></tr>
           ${(contadoUsd > 0 || result.diferencia_usd) ? `<tr><td>Diferencia US$:</td><td style="text-align:right;">${result.diferencia_usd >= 0 ? "+" : ""}${result.diferencia_usd.toFixed(2)}</td></tr>` : ""}
           ${(contadoBrl > 0 || result.diferencia_brl) ? `<tr><td>Diferencia R$:</td><td style="text-align:right;">${result.diferencia_brl >= 0 ? "+" : ""}${result.diferencia_brl.toFixed(2)}</td></tr>` : ""}
         </table>
         ${(result.desglose_formas_pago || []).length > 0 ? `
         <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
-          <tr><td colspan="2" style="font-weight:900;">Ventas del turno por forma de pago:</td></tr>
+          <tr><td colspan="2" style="font-weight:900; padding-bottom:2px;">Ventas del turno por forma de pago:</td></tr>
           ${result.desglose_formas_pago.map((p: any) => `<tr><td>${FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}${p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}:</td><td style="text-align:right;">${p.moneda === "PYG" ? formatPYG(p.monto) : Number(p.monto).toFixed(2)}</td></tr>`).join("")}
         </table>` : ""}
         ${result.requiere_revision ? `<div style="text-align:center; font-weight:900; margin-top:6px; border:1px dashed #000; padding:4px;">⚠ DIFERENCIA FUERA DE TOLERANCIA -- REQUIERE REVISIÓN</div>` : ""}
-        <div style="text-align:center; margin-top:10px; font-size:9px;">Firma cajero: ______________________</div>
+        <div style="margin-top:14px; font-size:9px;">
+          <div>Firma Cajero/a: ___________________________</div>
+          <div style="margin-top:10px;">Firma Supervisora: _________________________</div>
+        </div>
         <br/><br/>
       </div>`
+      setLastCierreTicketHtml(body)
       await printTicketHtml(body)
 
       localStorage.removeItem(userCajaKey)
@@ -1983,10 +2035,6 @@ export default function POSPage() {
       setMontoCierreUsd("")
       setMontoCierreBrl("")
       toast.info("Turno de Caja Cerrado", result.requiere_revision ? "Cierre registrado con diferencia fuera de tolerancia." : "Cierre registrado sin novedades.")
-      // El modal se queda abierto mostrando el resumen (esperado vs contado,
-      // desglose por forma de pago) -- antes se cerraba solo en este mismo
-      // instante, asi que la cajera nunca llegaba a ver esa pantalla. Ahora
-      // solo se cierra y se reabre la apertura cuando ella confirma "Cerrar".
     } catch (err) {
       toast.error("No se pudo cerrar la caja", "Verifique la conexión con el servidor e intente de nuevo.")
     } finally {
@@ -1994,16 +2042,13 @@ export default function POSPage() {
     }
   }
 
-  // ── Aviso de umbral de retiro -- antes esto solo se veia en el modulo
-  // administrativo de Caja, que la cajera nunca abre mientras vende. Sin
-  // esto, nadie se entera de que hay que hacer un retiro hasta que alguien
-  // lo nota por otro lado (o nunca). Se sondea cada 60s y avisa una sola vez
-  // por transicion de nivel (no en cada poll) para no ser repetitivo.
+  // ── Aviso de umbral de retiro y Monitoreo de confirmaciones en Bóveda ────────
   useEffect(() => {
     if (!cashSessionId || !cashRegisterId) { setCashDropStatus(null); return }
     let cancelled = false
     const check = async () => {
       try {
+        // 1. Monitoreo de umbral de caja
         const sessions = await api.caja.sessionsSummary({ register_id: cashRegisterId, estado: "abierta" } as any)
         const mine = (sessions || []).find((s: any) => s.id === cashSessionId)
         if (cancelled || !mine) return
@@ -2023,12 +2068,89 @@ export default function POSPage() {
           }
         }
         cashDropStatusNotifiedRef.current = level
-      } catch { /* silencioso -- no bloquea la venta si esto falla */ }
+
+        // 2. Monitoreo reactivo de confirmación de Cash Drop (Imprime Ticket 2)
+        if (pendingDropIdsRef.current.size > 0) {
+          const drops = await api.caja.cashDropRequests.list("confirmado")
+          if (Array.isArray(drops)) {
+            for (const d of drops) {
+              if (pendingDropIdsRef.current.has(d.id) && !confirmedDropIdsRef.current.has(d.id)) {
+                confirmedDropIdsRef.current.add(d.id)
+                pendingDropIdsRef.current.delete(d.id)
+                triggerSuccessSound()
+                const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+                const bodyConfirm = buildTicketPrelude("CONFIRMACIÓN DE SANGRÍA - BÓVEDA") + `
+                  <div style="padding: 4px 0; font-size: 10px;">
+                    <div style="font-weight:900; text-align:center; font-size:11px; border-bottom:1px dashed #000; padding-bottom:3px;">
+                      RETIRO INGRESADO A BÓVEDA
+                    </div>
+                    <div style="margin-top:4px;">Caja: ${puntoNombre}</div>
+                    <div>Cajero/a: ${d.solicitado_por_nombre || user?.nombre || "-"}</div>
+                    <div>Supervisora: ${d.confirmado_por_nombre || "Supervisor/a"}</div>
+                    <div>Fecha Confirmación: ${d.fecha_confirmacion ? new Date(d.fecha_confirmacion).toLocaleString("es-PY") : new Date().toLocaleString("es-PY")}</div>
+                    <div>Nro. Solicitud: CD-${String(d.id).slice(0, 8).toUpperCase()}</div>
+                  </div>
+                  <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; font-size:10px;">
+                    <tr><td>Monto Declarado:</td><td style="text-align:right; font-weight:bold;">${formatPYG(d.monto_pyg)}</td></tr>
+                    <tr><td>Recibido en Bóveda:</td><td style="text-align:right; font-weight:900;">${formatPYG(d.monto_confirmado_pyg || d.monto_pyg)}</td></tr>
+                    ${d.monto_usd ? `<tr><td>USD:</td><td style="text-align:right;">US$ ${(d.monto_confirmado_usd || d.monto_usd).toFixed(2)}</td></tr>` : ""}
+                    ${d.monto_brl ? `<tr><td>BRL:</td><td style="text-align:right;">R$ ${(d.monto_confirmado_brl || d.monto_brl).toFixed(2)}</td></tr>` : ""}
+                  </table>
+                  ${d.discrepancia_confirmacion ? `<div style="font-weight:900; text-align:center; border:1px dashed #000; margin-top:4px; padding:2px;">⚠ DISCREPANCIA EN RECUENTO DE BÓVEDA</div>` : `<div style="text-align:center; font-weight:bold; margin-top:4px;">✓ RECUENTO COINCIDENTE (EXACTO)</div>`}
+                  <div style="text-align:center; font-size:9px; margin-top:6px; border-top:1px dashed #000; padding-top:4px;">
+                    ✅ Efectivo transferido a Bóveda. Cajera liberada de custodia.
+                  </div>
+                  <br/><br/>
+                </div>`
+                await printTicketHtml(bodyConfirm)
+                toast.success("Sangría Confirmada en Bóveda", `Recibido por ${d.confirmado_por_nombre || 'Supervisora'}`)
+              }
+            }
+          }
+        }
+
+        // 3. Monitoreo reactivo de confirmación de Handoff (Entrega de Cierre)
+        if (pendingHandoffIdRef.current) {
+          const handoffs = await api.caja.handoffs.list({ estado: "confirmado" })
+          if (Array.isArray(handoffs)) {
+            const match = handoffs.find((h: any) => h.id === pendingHandoffIdRef.current)
+            if (match) {
+              pendingHandoffIdRef.current = null
+              triggerSuccessSound()
+              const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+              const bodyHandoff = buildTicketPrelude("RECEPCIÓN DE CIERRE EN BÓVEDA") + `
+                <div style="padding: 4px 0; font-size: 10px;">
+                  <div style="font-weight:900; text-align:center; font-size:11px; border-bottom:1px dashed #000; padding-bottom:3px;">
+                    ENTREGA DE TURNO RECIBIDA
+                  </div>
+                  <div style="margin-top:4px;">Caja: ${puntoNombre}</div>
+                  <div>Cajero/a: ${match.entregado_por_nombre || user?.nombre || "-"}</div>
+                  <div>Supervisora: ${match.recibido_por_nombre || "Supervisor/a"}</div>
+                  <div>Fecha Recepción: ${match.fecha_confirmacion ? new Date(match.fecha_confirmacion).toLocaleString("es-PY") : new Date().toLocaleString("es-PY")}</div>
+                </div>
+                <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; font-size:10px;">
+                  <tr><td>Monto Declarado:</td><td style="text-align:right; font-weight:bold;">${formatPYG(match.monto_pyg)}</td></tr>
+                  <tr><td>Recibido en Bóveda:</td><td style="text-align:right; font-weight:900;">${formatPYG(match.monto_confirmado_pyg || match.monto_pyg)}</td></tr>
+                  ${match.monto_usd ? `<tr><td>USD:</td><td style="text-align:right;">US$ ${(match.monto_confirmado_usd || match.monto_usd).toFixed(2)}</td></tr>` : ""}
+                  ${match.monto_brl ? `<tr><td>BRL:</td><td style="text-align:right;">R$ ${(match.monto_confirmado_brl || match.monto_brl).toFixed(2)}</td></tr>` : ""}
+                </table>
+                ${match.discrepancia_confirmacion ? `<div style="font-weight:900; text-align:center; border:1px dashed #000; margin-top:4px; padding:2px;">⚠ DISCREPANCIA REGISTRADA EN BÓVEDA</div>` : `<div style="text-align:center; font-weight:bold; margin-top:4px;">✓ RECUENTO DE ENTREGA CONFORME</div>`}
+                <div style="text-align:center; font-size:9px; margin-top:6px; border-top:1px dashed #000; padding-top:4px;">
+                  ✅ Cierre recibido formalmente en Bóveda Central.
+                </div>
+                <br/><br/>
+              </div>`
+              await printTicketHtml(bodyHandoff)
+              toast.success("Cierre Recibido en Bóveda", `Confirmado por ${match.recibido_por_nombre || 'Supervisora'}`)
+            }
+          }
+        }
+      } catch { /* silencioso */ }
     }
     check()
-    const interval = setInterval(check, 60000)
+    const interval = setInterval(check, 10000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [cashSessionId, cashRegisterId])
+  }, [cashSessionId, cashRegisterId, puntoEmision, user])
 
   const handleConfirmCashDrop = async () => {
     if (!cashSessionId) {
@@ -2044,25 +2166,40 @@ export default function POSPage() {
     }
     setSubmittingCashDrop(true)
     try {
-      await api.caja.cashDrop(cashSessionId, { monto, monto_usd: montoUsd, monto_brl: montoBrl, observaciones: cashDropObs.trim() || undefined })
+      const dropRes = await api.caja.cashDrop(cashSessionId, { monto, monto_usd: montoUsd, monto_brl: montoBrl, observaciones: cashDropObs.trim() || undefined })
+      if (dropRes?.id) {
+        pendingDropIdsRef.current.add(String(dropRes.id))
+      }
       const montosTexto = [
         monto > 0 ? formatPYG(monto) : null,
         montoUsd > 0 ? `US$ ${montoUsd.toFixed(2)}` : null,
         montoBrl > 0 ? `R$ ${montoBrl.toFixed(2)}` : null,
       ].filter(Boolean).join(" + ")
-      const body = buildTicketPrelude("RETIRO DE EFECTIVO (CASH DROP)") + `
+      const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+      const dropIdStr = dropRes?.id ? String(dropRes.id).slice(0, 8).toUpperCase() : "-"
+      const body = buildTicketPrelude("SOLICITUD DE RETIRO (CASH DROP)") + `
         <div style="padding: 4px 0; font-size: 10px;">
-          <div>Cajero: ${user?.nombre || "-"}</div>
+          <div>Cajero/a: ${user?.nombre || "-"}</div>
+          <div>Caja: ${puntoNombre}</div>
           <div>Fecha/Hora: ${new Date().toLocaleString("es-PY")}</div>
-          <div style="font-weight:900; font-size:13px; margin-top:6px;">Monto retirado: ${montosTexto}</div>
-          <div style="margin-top:4px;">Pendiente de confirmación por supervisora</div>
-          ${cashDropObs.trim() ? `<div style="margin-top:4px;">Obs: ${cashDropObs.trim()}</div>` : ""}
+          <div>Nro. Solicitud: CD-${dropIdStr}</div>
+          <div style="font-weight:900; font-size:12px; margin-top:6px; border-top:1px dashed #000; border-bottom:1px dashed #000; padding:3px 0;">
+            Monto Retirado: ${montosTexto}
+          </div>
+          <div style="margin-top:4px; font-weight:bold;">[ESTADO: PENDIENTE DE RECUENTO EN BÓVEDA]</div>
+          ${cashDropObs.trim() ? `<div style="margin-top:2px;">Obs: ${cashDropObs.trim()}</div>` : ""}
         </div>
-        <div style="text-align:center; margin-top:10px; font-size:9px;">Firma cajero: ______________________</div>
+        <div style="margin-top:12px; font-size:9px;">
+          <div>Firma Cajero/a: ___________________________</div>
+          <div style="margin-top:10px;">Firma Supervisora: _________________________</div>
+        </div>
+        <div style="text-align:center; font-size:8.5px; margin-top:8px; color:#555;">
+          Comprobante de custodia temporal hasta confirmación en Bóveda.
+        </div>
         <br/><br/>
       </div>`
       await printTicketHtml(body)
-      toast.success("Retiro registrado", `${montosTexto} -- pendiente de que la supervisora lo confirme.`)
+      toast.success("Retiro registrado", `${montosTexto} -- pendiente de confirmación por supervisora.`)
       setShowCashDropModal(false)
       setCashDropMonto("")
       setCashDropMontoUsd("")
@@ -4999,7 +5136,7 @@ export default function POSPage() {
           <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
 
           <button
-            onClick={() => setShowCierreTurnoModal(true)}
+            onClick={handleOpenCierreModal}
             title="Cierre de Turno y Arqueo"
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-600/10 text-amber-600 border border-amber-500/30 hover:bg-amber-600/20 cursor-pointer shrink-0"
           >
@@ -8406,83 +8543,190 @@ export default function POSPage() {
           </div>
         </div>
       )}
-      {/* ── CIERRE DE CAJA A CIEGAS ───────────────────────────────────────────── */}
+      {/* ── CIERRE DE CAJA Y ARQUEO CON PRE-CONCILIACIÓN ─────────────────────── */}
       {showCierreTurnoModal && (
         <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
+          <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-2xl max-w-lg w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 max-h-[92vh] flex flex-col">
+            <div className="flex items-center gap-3 mb-3 shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-black shadow-sm shadow-amber-500/30">
                 <Lock className="w-5 h-5" />
               </div>
-              <div>
-                <h2 className="text-lg font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Cierre de Caja (Arqueo a Ciegas)</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Cuente el efectivo físico e ingrese el total. El sistema muestra la diferencia recién después de confirmar.</p>
+              <div className="flex-1">
+                <h2 className="text-lg font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">Cierre de Caja y Arqueo de Turno</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Verifique los medios de pago no-efectivo y realice el conteo de gaveta.</p>
               </div>
             </div>
 
             {!cierreResult ? (
               <>
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Efectivo Contado (Gs.)</label>
-                  <input
-                    type="text"
-                    value={montoCierreReal}
-                    onChange={(e) => {
-                      const clean = e.target.value.replace(/\D/g, "")
-                      setMontoCierreReal(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
-                    }}
-                    placeholder="0"
-                    autoFocus
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-xl font-posMono tabular-nums font-black text-emerald-600 dark:text-emerald-400 outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado US$</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={montoCierreUsd}
-                      onChange={(e) => setMontoCierreUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
-                      placeholder="0.00"
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado R$</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={montoCierreBrl}
-                      onChange={(e) => setMontoCierreBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
-                      placeholder="0.00"
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
-                    />
-                  </div>
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">Solo se cuenta el efectivo físico. Tarjeta, QR y Extra Club ya quedaron registrados electrónicamente y se muestran en el resumen al confirmar.</p>
-                <div className="flex items-center gap-2 pt-4">
+                {/* Selector de pestañas */}
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-4 shrink-0">
                   <button
+                    type="button"
+                    onClick={() => setCierreTab("conteo")}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                      cierreTab === "conteo"
+                        ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                  >
+                    <Banknote className="w-4 h-4" />
+                    1. Arqueo Efectivo (Gaveta)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCierreTab("conciliacion")}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                      cierreTab === "conciliacion"
+                        ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                  >
+                    <Receipt className="w-4 h-4" />
+                    2. Resumen de Turno
+                  </button>
+                </div>
+
+                <div className="overflow-y-auto flex-1 pr-1 space-y-3">
+                  {cierreTab === "conteo" ? (
+                    <>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">
+                          Efectivo Físico en Gaveta (Gs.)
+                        </label>
+                        <input
+                          type="text"
+                          value={montoCierreReal}
+                          onChange={(e) => {
+                            const clean = e.target.value.replace(/\D/g, "")
+                            setMontoCierreReal(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
+                          }}
+                          placeholder="0"
+                          autoFocus
+                          className="w-full bg-slate-50 dark:bg-slate-950 border-2 border-slate-300 dark:border-slate-700 rounded-xl p-3 text-2xl font-posMono tabular-nums font-black text-emerald-600 dark:text-emerald-400 outline-none focus:border-amber-500 text-right"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado US$</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={montoCierreUsd}
+                            onChange={(e) => setMontoCierreUsd(e.target.value.replace(/[^0-9.,]/g, ""))}
+                            placeholder="0.00"
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500 text-right"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado R$</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={montoCierreBrl}
+                            onChange={(e) => setMontoCierreBrl(e.target.value.replace(/[^0-9.,]/g, ""))}
+                            placeholder="0.00"
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-sm font-posMono tabular-nums font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500 text-right"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-300">
+                        <p className="font-bold flex items-center gap-1.5 mb-1">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          Instrucciones de Arqueo Físico:
+                        </p>
+                        <ul className="list-disc list-inside space-y-0.5 text-[11px] opacity-90">
+                          <li>Cuente todos los billetes y monedas que están en la gaveta.</li>
+                          <li>No incluya cheques ni cupones de tarjeta en este campo.</li>
+                          <li>Revise la pestaña <strong>"2. Resumen de Turno"</strong> para validar sus comprobantes POS (Bancard, QR).</li>
+                        </ul>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      {loadingPreClose ? (
+                        <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-500">
+                          <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                          <span className="text-xs font-bold">Obteniendo totales del turno...</span>
+                        </div>
+                      ) : preCloseData ? (
+                        <>
+                          <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 space-y-2 text-xs">
+                            <div className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">
+                              Medios Electrónicos y Crédito (Comprobantes POS / Bancard)
+                            </div>
+                            <div className="space-y-1 font-posMono tabular-nums">
+                              {preCloseData.medios_no_efectivo?.length > 0 ? (
+                                preCloseData.medios_no_efectivo.map((m: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between items-center py-1 border-b border-slate-200/50 dark:border-slate-800/50 last:border-0">
+                                    <span className="font-medium text-slate-700 dark:text-slate-300">{FORMA_PAGO_LABEL[m.forma_pago] || m.forma_pago}</span>
+                                    <span className="font-bold text-slate-900 dark:text-white">
+                                      {m.moneda === "PYG" ? formatPYG(m.monto) : `${m.moneda} ${Number(m.monto).toFixed(2)}`}
+                                    </span>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="text-slate-400 py-1 text-center italic">Sin operaciones electrónicas en este turno</div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 space-y-1.5 text-xs font-posMono tabular-nums">
+                            <div className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] mb-1">
+                              Flujo Operativo de Caja
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-600 dark:text-slate-400">Fondo Inicial de Apertura:</span>
+                              <span className="font-bold">{formatPYG(preCloseData.monto_apertura_pyg || 0)}</span>
+                            </div>
+                            <div className="flex justify-between text-orange-600 dark:text-orange-400">
+                              <span>Sangrías Realizadas (Retiros):</span>
+                              <span className="font-bold">-{formatPYG(preCloseData.total_cash_drops_pyg || 0)}</span>
+                            </div>
+                            {preCloseData.total_donaciones_pyg > 0 && (
+                              <div className="flex justify-between text-pink-600 dark:text-pink-400">
+                                <span>Donaciones Recaudadas:</span>
+                                <span className="font-bold">+{formatPYG(preCloseData.total_donaciones_pyg)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between border-t border-slate-200 dark:border-slate-800 pt-1.5 font-black text-slate-900 dark:text-white">
+                              <span>Total Transacciones:</span>
+                              <span>{preCloseData.ventas_count || 0} tickets</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-center py-4 text-xs text-slate-400">No se pudieron cargar los datos de pre-conciliación.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 pt-4 shrink-0 border-t border-slate-200 dark:border-slate-800 mt-2">
+                  <button
+                    type="button"
                     onClick={() => setShowCierreTurnoModal(false)}
-                    className="w-1/3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300"
+                    className="w-1/3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     Cancelar
                   </button>
                   <button
+                    type="button"
                     onClick={handleConfirmCierreCaja}
                     disabled={submittingCierre || !montoCierreReal}
-                    className="w-2/3 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 disabled:opacity-60"
+                    className="w-2/3 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 disabled:opacity-60 shadow-lg shadow-amber-600/20"
                   >
                     {submittingCierre ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                    Confirmar Cierre
+                    Confirmar Cierre de Turno
                   </button>
                 </div>
               </>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 overflow-y-auto flex-1 pr-1">
                 <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-1 text-sm font-posMono tabular-nums">
-                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Esperado (Gs.):</span><span>{formatPYG(cierreResult.monto_cierre_esperado)}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Contado (Gs.):</span><span>{formatPYG(cierreResult.contado)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Efectivo Esperado:</span><span>{formatPYG(cierreResult.monto_cierre_esperado)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Efectivo Contado:</span><span className="font-bold">{formatPYG(cierreResult.contado)}</span></div>
                   <div className={`flex justify-between font-black pt-1 border-t border-slate-200 dark:border-slate-800 ${cierreResult.diferencia < 0 ? "text-red-600 dark:text-red-400" : cierreResult.diferencia > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                     <span>Diferencia Gs.:</span><span>{cierreResult.diferencia >= 0 ? "+" : ""}{formatPYG(cierreResult.diferencia)}</span>
                   </div>
@@ -8497,6 +8741,7 @@ export default function POSPage() {
                     </div>
                   )}
                 </div>
+
                 {cierreResult.desglose_formas_pago.length > 0 && (
                   <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-1 text-xs font-posMono tabular-nums">
                     <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas del turno por forma de pago</div>
@@ -8508,18 +8753,53 @@ export default function POSPage() {
                     ))}
                   </div>
                 )}
+
                 {cierreResult.requiere_revision && (
-                  <div className="text-center text-xs font-bold text-red-400 border border-red-500/40 rounded-xl p-2">
-                    ⚠ Diferencia fuera de tolerancia — quedó marcada para revisión de supervisor.
+                  <div className="text-center text-xs font-bold text-red-500 bg-red-500/10 border border-red-500/40 rounded-xl p-2.5">
+                    ⚠ Diferencia fuera de tolerancia — Turno marcado para auditoría de supervisora.
                   </div>
                 )}
-                <p className="text-center text-xs text-slate-500 dark:text-slate-400">Se imprimió el ticket de cierre. La caja fue cerrada.</p>
-                <button
-                  onClick={() => { setCierreResult(null); setShowCierreTurnoModal(false); setShowAperturaModal(true) }}
-                  className="w-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white py-2.5 rounded-xl font-bold text-xs"
-                >
-                  Cerrar
-                </button>
+
+                {/* Acciones de Comprobante / Reimpresión / Descarga PDF */}
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (lastCierreTicketHtml) {
+                        await printTicketHtml(lastCierreTicketHtml)
+                        toast.success("Ticket reimpreso", "Enviado a impresora térmica.")
+                      }
+                    }}
+                    className="py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center gap-1.5"
+                  >
+                    <Printer className="w-4 h-4 text-amber-500" />
+                    Reimprimir Ticket
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (lastClosedSessionId) {
+                        const token = localStorage.getItem("auth_token") || localStorage.getItem("token") || ""
+                        const url = `/api/caja/cash-sessions/${lastClosedSessionId}/export/cierre.pdf?token=${encodeURIComponent(token)}`
+                        window.open(url, "_blank")
+                      }
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold flex items-center justify-center gap-1.5"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Descargar PDF Oficial
+                  </button>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => { setCierreResult(null); setShowCierreTurnoModal(false); setShowAperturaModal(true) }}
+                    className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 py-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all"
+                  >
+                    Finalizar y Abrir Siguiente Turno
+                  </button>
+                </div>
               </div>
             )}
           </div>
