@@ -487,6 +487,14 @@ export default function POSPage() {
   // balanza real.
   const PESO_TOLERANCIA_KG = 0.020
   const [weightMismatch, setWeightMismatch] = useState<{ product: Product; etiquetaKg: number; balanzaKg: number } | null>(null)
+  // Cuando se escanea una etiqueta pesable y no hay lectura de balanza
+  // disponible en ese instante -- no se agrega a ciegas confiando solo en
+  // la etiqueta, se espera a que se coloque el producto (ver efecto de
+  // auto-resolucion mas abajo). Antes esto pasaba silenciosamente porque
+  // la verificacion solo corria si YA habia una lectura viva en pantalla,
+  // lo que hacia que a partir del segundo pesable la verificacion se
+  // saltara si nadie volvia a poner nada en la balanza.
+  const [weightPendingScale, setWeightPendingScale] = useState<{ product: Product; etiquetaKg: number } | null>(null)
   const [scaleUsbConnected, setScaleUsbConnected] = useState<boolean>(false)
   const [scalePortName, setScalePortName] = useState<string>("COM3")
   const [scaleBaudRate, setScaleBaudRate] = useState<number>(9600)
@@ -2628,6 +2636,45 @@ export default function POSPage() {
     return products.slice(0, 30)
   }, [search, selectedCategoryTab, products, searchResults, topProductSkus])
 
+  // ── AUTO-RESOLUCION DE VERIFICACION DE PESO PENDIENTE ──────────────────────
+  // Contraparte del "if (!balanzaDisponible)" de handleBarcodeSubmit: en
+  // cuanto llega una lectura estable de la balanza mientras el modal de
+  // "verificacion pendiente" esta abierto, se resuelve solo -- coincide con
+  // la etiqueta -> se agrega, no coincide -> pasa al modal de discrepancia
+  // (mismo camino de autorizacion de supervisor que el caso "en vivo").
+  useEffect(() => {
+    if (!weightPendingScale) return
+    if (!isScaleStable || currentScaleWeight <= 0.015) return
+    const { product, etiquetaKg } = weightPendingScale
+    const diffKg = Math.abs(currentScaleWeight - etiquetaKg)
+    const esRiesgo = diffKg > PESO_TOLERANCIA_KG
+    api.inteliaudit.recordEvent({
+      company_id: COMPANY_ID,
+      user_id: user?.id,
+      accion: esRiesgo ? "peso_discrepancia_detectada" : "peso_etiqueta_verificado",
+      entidad: "producto_pesable",
+      entidad_id: product.id,
+      datos_nuevos: {
+        producto_nombre: product.nombre,
+        etiqueta_kg: etiquetaKg,
+        balanza_kg: currentScaleWeight,
+        balanza_disponible: true,
+        diferencia_g: Math.round(diffKg * 1000),
+        caja: puntoEmision,
+        cajero: user?.nombre,
+      },
+    } as any).catch(() => {})
+    if (esRiesgo) {
+      setWeightMismatch({ product, etiquetaKg, balanzaKg: currentScaleWeight })
+      setWeightPendingScale(null)
+      return
+    }
+    addToCart(product, etiquetaKg, "etiqueta_plu")
+    setWeightPendingScale(null)
+    searchInputRef.current?.focus()
+    toast.success("Balanza de Sección", `${product.nombre}: ${etiquetaKg.toFixed(3)} KG -- coincide con la balanza.`)
+  }, [currentScaleWeight, isScaleStable, weightPendingScale])
+
   // ── ESCANEO DIRECTO Y DECODIFICACIÓN DE BALANZAS DE GÓNDOLA (EAN-13 PREFIJO 2) ─
   const handleBarcodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -2666,8 +2713,31 @@ export default function POSPage() {
           // discrepancia (posible cambio de contenido en una bolsa ya
           // etiquetada, o etiqueta de otro producto).
           const balanzaDisponible = isScaleStable && currentScaleWeight > 0.015
-          const diffKg = balanzaDisponible ? Math.abs(currentScaleWeight - weightKg) : 0
-          const esRiesgo = balanzaDisponible && diffKg > PESO_TOLERANCIA_KG
+          if (!balanzaDisponible) {
+            // No hay lectura estable de la balanza AHORA MISMO -- no se
+            // agrega a ciegas confiando solo en la etiqueta (eso era lo que
+            // pasaba antes a partir del segundo pesable escaneado seguido).
+            // Se deja pendiente: en cuanto se coloque el producto y la
+            // balanza estabilice, el efecto de auto-resolucion decide solo.
+            api.inteliaudit.recordEvent({
+              company_id: COMPANY_ID,
+              user_id: user?.id,
+              accion: "peso_verificacion_pendiente",
+              entidad: "producto_pesable",
+              entidad_id: matchPesable.id,
+              datos_nuevos: {
+                producto_nombre: matchPesable.nombre,
+                etiqueta_kg: weightKg,
+                caja: puntoEmision,
+                cajero: user?.nombre,
+              },
+            } as any).catch(() => {})
+            setWeightPendingScale({ product: matchPesable, etiquetaKg: weightKg })
+            setSearch("")
+            return
+          }
+          const diffKg = Math.abs(currentScaleWeight - weightKg)
+          const esRiesgo = diffKg > PESO_TOLERANCIA_KG
           // Log de auditoria de CADA escaneo de etiqueta pesable -- coincida
           // o no -- para que quede rastro completo, no solo de los casos
           // que generan riesgo. accion distinta para el caso de riesgo asi
@@ -2681,9 +2751,9 @@ export default function POSPage() {
             datos_nuevos: {
               producto_nombre: matchPesable.nombre,
               etiqueta_kg: weightKg,
-              balanza_kg: balanzaDisponible ? currentScaleWeight : null,
-              balanza_disponible: balanzaDisponible,
-              diferencia_g: balanzaDisponible ? Math.round(diffKg * 1000) : null,
+              balanza_kg: currentScaleWeight,
+              balanza_disponible: true,
+              diferencia_g: Math.round(diffKg * 1000),
               caja: puntoEmision,
               cajero: user?.nombre,
             },
@@ -2696,9 +2766,7 @@ export default function POSPage() {
           addToCart(matchPesable, weightKg, "etiqueta_plu")
           setSearch("")
           searchInputRef.current?.focus()
-          toast.success("Balanza de Sección", balanzaDisponible
-            ? `${matchPesable.nombre}: ${weightKg.toFixed(3)} KG -- coincide con la balanza.`
-            : `${matchPesable.nombre}: ${weightKg.toFixed(3)} KG leídos de etiqueta (balanza no disponible para verificar).`)
+          toast.success("Balanza de Sección", `${matchPesable.nombre}: ${weightKg.toFixed(3)} KG -- coincide con la balanza.`)
           return
         }
       }
@@ -2901,6 +2969,7 @@ export default function POSPage() {
       } as any).catch(() => {})
       addToCart(action.weightProduct, action.weightEtiquetaKg, "etiqueta_plu")
       setWeightMismatch(null)
+      setWeightPendingScale(null)
       searchInputRef.current?.focus()
       toast.warning("Peso de etiqueta autorizado", `${action.weightProduct.nombre}: se usó ${action.weightEtiquetaKg.toFixed(3)} KG de la etiqueta pese a la diferencia con la balanza.`)
     } else if (action.type === "remove_item" && action.itemId) {
@@ -5546,6 +5615,41 @@ export default function POSPage() {
       )}
 
       {/* ── 5. MODAL REACTIVO DE PESAJE DE BALANZA (CON AUTO-CONFIRMACIÓN) ──────── */}
+      {weightPendingScale && (
+        <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-amber-400 dark:border-amber-600">
+            <div className="flex items-center gap-3 mb-3">
+              <Scale className="w-6 h-6 text-amber-500 animate-pulse" />
+              <div>
+                <h3 className="font-black text-sm text-slate-900 dark:text-white">Verificación de peso pendiente</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{weightPendingScale.product.nombre}</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mb-4">
+              Etiqueta: <strong>{weightPendingScale.etiquetaKg.toFixed(3)} KG</strong>. Coloque el producto en la balanza de verificación -- se agrega solo en cuanto se estabilice.
+            </p>
+            <div className="text-center mb-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+              <div className="text-xl font-black font-posMono tabular-nums text-slate-900 dark:text-white">{currentScaleWeight.toFixed(3)} KG</div>
+              <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-1">{currentScaleWeight > 0.015 ? "ESTABILIZANDO..." : "ESPERANDO PRODUCTO EN LA BALANZA..."}</div>
+            </div>
+            <div className="space-y-2">
+              <button
+                onClick={() => requestSupervisorAuthorization({ type: "use_label_weight", weightProduct: weightPendingScale.product, weightEtiquetaKg: weightPendingScale.etiquetaKg })}
+                className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4" /> Balanza no disponible -- usar etiqueta (requiere supervisor)
+              </button>
+              <button
+                onClick={() => { setWeightPendingScale(null); searchInputRef.current?.focus() }}
+                className="w-full py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {weightMismatch && (
         <div className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
