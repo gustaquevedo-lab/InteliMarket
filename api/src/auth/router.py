@@ -526,7 +526,6 @@ async def admin_create_user(
         user_id=user.id,
         tenant_id=tenant_id,
         rol=body.rol,
-        is_owner=False,
     )
     db.add(user_tenant)
 
