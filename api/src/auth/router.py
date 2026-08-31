@@ -21,7 +21,8 @@ from api.src.auth.middleware import get_current_user
 from api.src.tenants.service import create_tenant_with_schema, get_user_tenants, get_tenant_by_id
 from api.src.tenants.models import UserTenant
 
-router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+router = APIRouter(prefix="/v1/auth", tags=["auth"])
+
 
 
 def _is_tenant_admin(token_data: dict) -> bool:

@@ -256,6 +256,8 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 app.include_router(auth_router)
+app.include_router(auth_router, prefix="/api")
+
 app.include_router(pos_terminals_router)
 app.include_router(supervisor_requests_router)
 app.include_router(kiosk_router)
