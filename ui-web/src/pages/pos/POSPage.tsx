@@ -4652,13 +4652,17 @@ export default function POSPage() {
         t += `Timbrado No: ${timbrado} - Valido hasta: ${timbradoVenc}\n`
         t += ESCPOS_ALIGN_LEFT
         t += escposDashes(W) + '\n'
-        t += ESCPOS_BOLD_ON + (tpl.mostrar_numero_comprobante !== false ? `${escposStripAccents(tipoComprobanteLabel)}: ${numeroComprobante}` : escposStripAccents(tipoComprobanteLabel)) + ESCPOS_BOLD_OFF + '\n'
-        if (numeroInterno) t += `No Venta: ${numeroInterno}\n`
+        t += ESCPOS_BOLD_ON + `${escposStripAccents(tipoComprobanteLabel)} No: ${numeroComprobante}` + ESCPOS_BOLD_OFF + '\n'
+        if (tpl.usar_numero_interno_venta !== false && numeroInterno) {
+          t += `No Venta: ${numeroInterno}\n`
+        }
         t += `Fecha/Hora: ${new Date().toLocaleString("es-PY")}\n`
         t += `Condicion: ${isClubMember ? "CREDITO" : "CONTADO"}\n`
         if (showCajero) t += `Cajero: ${escposStripAccents(user?.nombre || "Cajero 01")} (${puntoEmision})\n`
         if (showCliente) t += `Cliente: ${escposStripAccents(customer.nombre)}\n`
         if (showRucCliente) t += `RUC/CI: ${escposStripAccents(customer.ruc || customer.ci || "44444401-7")}\n`
+        t += escposDashes(W) + '\n'
+        t += escposTwoCol('DESCRIPCION / DETALLE', 'TOTAL (GS)', W) + '\n'
         t += escposDashes(W) + '\n'
 
         const itemsUnaLinea = tpl.formato_items === "una_linea"
@@ -4672,12 +4676,7 @@ export default function POSPage() {
             // Una sola linea: nombre (recortado si hace falta) + subtotal a la derecha
             t += escposTwoCol(escposStripAccents(item.nombre) + balanza, lineTotalStr) + '\n'
           } else {
-            // Maximo 2 lineas: nombre solo en la primera (el codigo de
-            // barras pegado ahi se estaba truncando junto con nombres
-            // largos y quedaba invisible). El codigo va en la segunda linea,
-            // junto a cantidad x precio, protegido por escposTwoCol -- si no
-            // entra todo, se recorta el texto de la izquierda pero el monto
-            // de la derecha nunca se solapa.
+            // Maximo 2 lineas: nombre solo en la primera
             let nombreLine = escposStripAccents(item.nombre) + balanza
             if (nombreLine.length > W) nombreLine = escposPadRight(nombreLine, W)
             t += nombreLine + '\n'
@@ -4701,7 +4700,24 @@ export default function POSPage() {
             t += ESCPOS_BOLD_ON + escposTwoCol('DONACION SOLIDARIA:', fmtGs(montoDonacionEfectiva)) + ESCPOS_BOLD_OFF + '\n'
             t += ' (Centro Amor y Esperanza)\n'
           }
-          t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', fmtGs(vueltoFinalPyg)) + ESCPOS_BOLD_OFF + '\n'
+          const vueltoTxt = tpl.mostrar_vuelto_extranjero && rates.BRL > 0 && vueltoFinalPyg > 0
+            ? `${fmtGs(vueltoFinalPyg)} (R$ ${(vueltoFinalPyg / rates.BRL).toFixed(2)})`
+            : fmtGs(vueltoFinalPyg)
+          t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', vueltoTxt) + ESCPOS_BOLD_OFF + '\n'
+        }
+
+        if (tpl.habilitar_recuadro_ahorro !== false) {
+          t += escposDashes(W) + '\n'
+          t += ESCPOS_ALIGN_CENTER
+          if (isClubMember) {
+            t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_ahorro_con_descuento || 'TU EXTRA AHORRO HOY:') + ESCPOS_BOLD_OFF + '\n'
+            t += escposWrapText(tpl.subtitulo_ahorro_promo || '• En Promociones y Extra Club', W, 'center')
+          } else {
+            t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_invitacion_ahorro || 'SUMATE AL EXTRA AHORRO DIARIO!') + ESCPOS_BOLD_OFF + '\n'
+            t += escposWrapText(tpl.linea1_invitacion_ahorro || '• Compra por fardo/caja a precio [M]', W, 'center')
+            t += escposWrapText(tpl.linea2_invitacion_ahorro || '• Aprovecha las Ofertas de la Semana', W, 'center')
+          }
+          t += ESCPOS_ALIGN_LEFT
         }
 
         if (isClubMember) {

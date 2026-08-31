@@ -1672,10 +1672,24 @@ export default function SettingsPage() {
 
                   {/* 2. DATOS DE LA TRANSACCIÓN */}
                   <div className="border-t border-b border-black border-dashed py-1.5 my-1.5 text-[10px] space-y-0.5">
+                    {/* Tipo comprobante y número - SIEMPRE se imprime, igual que en ESC/POS */}
                     <div className="flex justify-between font-bold">
-                      <span>FACTURA ELECTRÓNICA:</span>
+                      <span>
+                        {receiptConfig.facturacion_electronica
+                          ? "FACTURA ELECTRÓNICA"
+                          : previewCustomerType === "socio"
+                            ? "FACTURA CRÉDITO"
+                            : "FACTURA CONTADO"
+                        }:
+                      </span>
                       <span>001-012-0004829</span>
                     </div>
+                    {receiptConfig.usar_numero_interno_venta && (
+                      <div className="flex justify-between text-[9px] text-slate-600">
+                        <span>No Venta:</span>
+                        <span className="font-mono">VTA-0000289</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-[9.5px]">
                       <span>Fecha / Hora:</span>
                       <span>{new Date().toLocaleDateString("es-PY")} {new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}</span>
@@ -1708,6 +1722,7 @@ export default function SettingsPage() {
 
                   {/* 3. DETALLE DE PRODUCTOS (FORMATO DOS LÍNEAS SUPERMERCADO) */}
                   <div className="py-1">
+                    {/* Cabecera de columnas - igual que en ESC/POS */}
                     <div className="flex justify-between text-[9px] font-bold border-b border-black border-dashed pb-0.5 mb-1">
                       <span>DESCRIPCIÓN / DETALLE</span>
                       <span>TOTAL (GS)</span>
@@ -1715,49 +1730,70 @@ export default function SettingsPage() {
 
                     <div className="space-y-1.5 text-[9.5px]">
                       {/* Item 1: En Promo [P] */}
-                      <div>
-                        <div className="font-bold uppercase tracking-tight">
-                          COCA COLA ORIGINAL PET 250ML
+                      {receiptConfig.formato_items === "una_linea" ? (
+                        <div className="flex justify-between">
+                          <span className="font-bold uppercase truncate max-w-[160px]">COCA COLA PET 250ML</span>
+                          <span className="font-mono font-bold">Gs. 7.000</span>
                         </div>
-                        <div className="flex justify-between items-baseline text-[9px] pl-1 font-mono">
-                          <div className="flex items-center gap-1">
-                            <span>2 UN x Gs. 3.500</span>
-                            <span className="font-bold text-[8.5px] px-1 bg-black text-white rounded-sm">[P]</span>
-                            <span className="text-[8px] text-slate-700">7840058001234</span>
+                      ) : (
+                        <div>
+                          <div className="font-bold uppercase tracking-tight">
+                            COCA COLA ORIGINAL PET 250ML
                           </div>
-                          <span className="font-bold text-[9.5px]">Gs. 7.000</span>
+                          <div className="flex justify-between items-baseline text-[9px] pl-1 font-mono">
+                            <div className="flex items-center gap-1">
+                              <span>2 UN x Gs. 3.500</span>
+                              <span className="font-bold text-[8.5px] px-1 bg-black text-white rounded-sm">[P]</span>
+                              {receiptConfig.mostrar_sku && <span className="text-[8px] text-slate-700">7840058001234</span>}
+                            </div>
+                            <span className="font-bold text-[9.5px]">Gs. 7.000</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Item 2: Mayorista [M] */}
-                      <div>
-                        <div className="font-bold uppercase tracking-tight">
-                          ARROZ TIO LUCAS TIPO 1 5KG
+                      {receiptConfig.formato_items === "una_linea" ? (
+                        <div className="flex justify-between">
+                          <span className="font-bold uppercase truncate max-w-[160px]">ARROZ TIO LUCAS 5KG</span>
+                          <span className="font-mono font-bold">Gs. 85.500</span>
                         </div>
-                        <div className="flex justify-between items-baseline text-[9px] pl-1 font-mono">
-                          <div className="flex items-center gap-1">
-                            <span>3 UN x Gs. 28.500</span>
-                            <span className="font-bold text-[8.5px] px-1 bg-black text-white rounded-sm">[M]</span>
-                            <span className="text-[8px] text-slate-700">7891234567890</span>
+                      ) : (
+                        <div>
+                          <div className="font-bold uppercase tracking-tight">
+                            ARROZ TIO LUCAS TIPO 1 5KG
                           </div>
-                          <span className="font-bold text-[9.5px]">Gs. 85.500</span>
+                          <div className="flex justify-between items-baseline text-[9px] pl-1 font-mono">
+                            <div className="flex items-center gap-1">
+                              <span>3 UN x Gs. 28.500</span>
+                              <span className="font-bold text-[8.5px] px-1 bg-black text-white rounded-sm">[M]</span>
+                              {receiptConfig.mostrar_sku && <span className="text-[8px] text-slate-700">7891234567890</span>}
+                            </div>
+                            <span className="font-bold text-[9.5px]">Gs. 85.500</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Item 3: Balanza */}
-                      <div>
-                        <div className="font-bold uppercase tracking-tight">
-                          TOMATE SALSA NACIONAL SELECCIONADO
+                      {receiptConfig.formato_items === "una_linea" ? (
+                        <div className="flex justify-between">
+                          <span className="font-bold uppercase truncate max-w-[160px]">TOMATE SELECCIONADO {receiptConfig.mostrar_balanza_origen && "⚖"}</span>
+                          <span className="font-mono font-bold">Gs. 9.945</span>
                         </div>
-                        <div className="flex justify-between items-baseline text-[9px] pl-1 font-mono">
-                          <div className="flex items-center gap-1">
-                            <span>0.850 KG x Gs. 11.700</span>
-                            {receiptConfig.mostrar_balanza_origen && <span className="text-[8.5px]" title="Origen Balanza">⚖</span>}
-                            <span className="text-[8px] text-slate-700">2000012017855</span>
+                      ) : (
+                        <div>
+                          <div className="font-bold uppercase tracking-tight">
+                            TOMATE SALSA NACIONAL SELECCIONADO
                           </div>
-                          <span className="font-bold text-[9.5px]">Gs. 9.945</span>
+                          <div className="flex justify-between items-baseline text-[9px] pl-1 font-mono">
+                            <div className="flex items-center gap-1">
+                              <span>0.850 KG x Gs. 11.700</span>
+                              {receiptConfig.mostrar_balanza_origen && <span className="text-[8.5px]" title="Origen Balanza">⚖</span>}
+                              {receiptConfig.mostrar_sku && <span className="text-[8px] text-slate-700">2000012017855</span>}
+                            </div>
+                            <span className="font-bold text-[9.5px]">Gs. 9.945</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
 
