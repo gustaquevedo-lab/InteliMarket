@@ -81,22 +81,27 @@ export default function RbacPage() {
 
     setSubmitting(true)
     try {
-      let createdId = `u-${Date.now()}`
-      try {
-        const res = await api.auth.users.create({
-          nombre: form.nombre,
-          email: form.email,
-          password: form.password || undefined,
-          rol: form.rol,
-          telefono: form.telefono,
-        })
-        if (res && res.id) createdId = String(res.id)
-      } catch (err: any) {
-        console.warn("DB response:", err)
+      // Antes esto generaba un ID falso (u-${Date.now()}) ANTES de llamar
+      // al backend y, si la llamada real fallaba, el catch solo hacia
+      // console.warn (invisible) y seguia como si nada -- agregaba un
+      // usuario fantasma solo en el estado local y mostraba "Guardado en
+      // Base de Datos" aunque nunca se hubiera guardado nada. Asi se perdio
+      // silenciosamente la creacion de un supervisor real. Ahora, si la
+      // llamada real falla, se corta aca: no se agrega nada a la lista y
+      // se muestra el error real en vez de un exito falso.
+      const res = await api.auth.users.create({
+        nombre: form.nombre,
+        email: form.email,
+        password: form.password || undefined,
+        rol: form.rol,
+        telefono: form.telefono,
+      })
+      if (!res || !res.id) {
+        throw new Error("El servidor no confirmó la creación del usuario.")
       }
 
       const newUser: TenantUser = {
-        id: createdId,
+        id: String(res.id),
         email: form.email,
         nombre: form.nombre,
         rol: form.rol,
@@ -113,7 +118,7 @@ export default function RbacPage() {
       setForm({ nombre: "", email: "", password: "", rol: "cajera", telefono: "", sucursal: "001 - Central", pin_caja: "1234" })
       toast.success("¡Usuario Guardado en Base de Datos!", `Se ha registrado a ${form.nombre} con rol de ${form.rol.toUpperCase()} y credenciales activas.`)
     } catch (err: any) {
-      toast.error("Error al registrar usuario", err.message)
+      toast.error("No se pudo crear el usuario", err?.response?.data?.error?.message || err?.message || "Intente nuevamente.")
     } finally {
       setSubmitting(false)
     }
