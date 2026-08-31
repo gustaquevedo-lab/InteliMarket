@@ -9,6 +9,16 @@
 
 ---
 
+## ⚠️ ANTES DE ASUMIR QUE UN FIX YA ESTÁ EN PRODUCCIÓN: VERIFICAR QUIÉN TIENE REALMENTE EL PUERTO 8000
+
+**Encontrado 31/8**: un `sudo systemctl restart intelimarket-api` que devuelve éxito **no garantiza que el proceso nuevo haya tomado el puerto**. Había un proceso uvicorn huérfano corriendo desde el 30/8 17:49 (arrancado a mano con `nohup .venv/bin/uvicorn ... --workers 2 &`, fuera de systemd — probablemente un `kill+restart` manual de una sesión anterior que nunca se limpió) que tenía el `0.0.0.0:8000` tomado. El proceso de systemd, al no poder bindear, quedaba reintentando en loop sin servir nada — pero seguía apareciendo "activo" en `ps`. Cualquier `git commit` + `systemctl restart` de esa noche (y posiblemente de noches anteriores) **no llegó a producción real**, aunque el flujo de deploy parecía exitoso.
+
+**Regla dura de acá en adelante**: después de cualquier `systemctl restart intelimarket-api`, verificar con `ss -tlnp | grep :8000` que el PID que aparece en el `LISTEN` es efectivamente el mismo que acaba de arrancar systemd (comparar con `ps aux | grep uvicorn` — el proceso de systemd corre como `ExecStart=.../uvicorn api.src.main:app --host 100.83.91.76 --port 8000` sin `--workers`, sin ningún `nohup`/`bash -c` como padre). Si el PID que tiene el puerto no coincide, matar el proceso huérfano (`kill <pid>`, no `-9` salvo que no responda) y dejar que `Restart=always` de systemd lo levante solo unos segundos después.
+
+`sudo -n /usr/bin/systemctl status intelimarket-api` a veces falla con "interactive authentication is required" incluso estando en el NOPASSWD (parece un tema de coincidencia exacta de argv/pty por SSH no interactivo) — no usarlo como señal de que algo salió mal; confirmar con `ss -tlnp` + `ps` en su lugar. `restart` sí funciona limpio (`exit 0`) vía `sudo -n /usr/bin/systemctl restart intelimarket-api`.
+
+---
+
 ## 🔒 SESIÓN 2026-08-26 (tarde) — Verificador de Precios: blindaje definitivo contra volver a sandbox / pantalla sin logo
 
 Pedido explícito del cliente, textual: *"nunca mas van a apuntar a sandbox y no quiero volver a ver sin logo y cotizacion, esto debe ser infalible, granitico."* Esto NO es una preferencia estética, es una directiva dura. Cualquier sesión futura que toque los terminales físicos del Verificador debe leer esto ANTES de tocar nada.
