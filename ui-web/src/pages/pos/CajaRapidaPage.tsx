@@ -253,6 +253,24 @@ function escposLogoFromDataUrl(dataUrl: string, maxWidthPx = 384): Promise<strin
   })
 }
 
+const triggerSuccessSound = () => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioCtx) return
+    const ctx = new AudioCtx()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime) // D5
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1) // A5
+    gain.gain.setValueAtTime(0.2, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(ctx.currentTime)
+    osc.stop(ctx.currentTime + 0.3)
+  } catch (e) {}
+}
+
 const FORMA_PAGO_LABEL: Record<string, string> = {
   EFECTIVO: "Efectivo",
   TARJETA_BANCARD: "Tarjeta Bancard",
@@ -393,16 +411,16 @@ export default function POSPage() {
   const [montoCierreUsd, setMontoCierreUsd] = useState<string>("")
   const [montoCierreBrl, setMontoCierreBrl] = useState<string>("")
   const [submittingCierre, setSubmittingCierre] = useState(false)
-  const [cierreTab, setCierreTab] = useState<"conteo" | "conciliacion">("conteo")
+  const [cierreResult, setCierreResult] = useState<{ monto_cierre_esperado: number; diferencia: number; requiere_revision: boolean; diferencia_usd: number; diferencia_brl: number; desglose_formas_pago: { forma_pago: string; moneda: string; monto: number }[]; contado: number; contado_usd: number; contado_brl: number } | null>(null)
   const [preCloseData, setPreCloseData] = useState<any>(null)
   const [loadingPreClose, setLoadingPreClose] = useState(false)
+  const [cierreTab, setCierreTab] = useState<"conteo" | "conciliacion">("conteo")
   const [lastClosedSessionId, setLastClosedSessionId] = useState<string | null>(null)
   const [lastCierreTicketHtml, setLastCierreTicketHtml] = useState<string | null>(null)
   const pendingDropIdsRef = useRef<Set<string>>(new Set())
-  const printedDropConfirmationsRef = useRef<Set<string>>(new Set())
+  const confirmedDropIdsRef = useRef<Set<string>>(new Set())
   const pendingHandoffIdRef = useRef<string | null>(null)
-  const printedHandoffConfirmationsRef = useRef<Set<string>>(new Set())
-  const [cierreResult, setCierreResult] = useState<{ monto_cierre_esperado: number; diferencia: number; requiere_revision: boolean; diferencia_usd: number; diferencia_brl: number; desglose_formas_pago: { forma_pago: string; moneda: string; monto: number }[]; contado: number; contado_usd: number; contado_brl: number } | null>(null)
+
   const [showCashDropModal, setShowCashDropModal] = useState(false)
   const [cashDropMonto, setCashDropMonto] = useState<string>("")
   const [cashDropMontoUsd, setCashDropMontoUsd] = useState<string>("")
@@ -740,6 +758,14 @@ export default function POSPage() {
   const [payCashPyg, setPayCashPyg] = useState<string>("")
   const [payCashBrl, setPayCashBrl] = useState<string>("")
   const [payCashUsd, setPayCashUsd] = useState<string>("")
+  // El Enter en un campo de efectivo cerraba la venta apenas el monto
+  // cubria el total -- si hubo vuelto, no daba tiempo ni de verlo ni de
+  // ofrecer "Abre tu corazon". Ahora, la PRIMERA vez que el monto alcanza
+  // a cubrir el total, ese Enter solo "marca listo" (deja ver el vuelto
+  // tranquilo); recien el Enter SIGUIENTE cierra la venta de verdad. Si
+  // el cajero vuelve a tocar algun monto despues de eso, se reinicia (ver
+  // el useEffect mas abajo) para no saltarse la revision por accidente.
+  const [listoParaCerrar, setListoParaCerrar] = useState(false)
   const [hasClickedQuickCash, setHasClickedQuickCash] = useState<boolean>(false)
   const confirmCheckoutBtnRef = useRef<HTMLButtonElement>(null)
   const payCashPygInputRef = useRef<HTMLInputElement>(null)
@@ -1930,33 +1956,31 @@ export default function POSPage() {
   }
 
   const handleOpenCierreModal = async () => {
-    setCierreTab("conteo")
     setShowCierreTurnoModal(true)
+    setCierreTab("conteo")
     if (cashSessionId) {
       setLoadingPreClose(true)
       try {
-        const res = await api.caja.sessions.preCloseSummary(cashSessionId)
-        setPreCloseData(res)
+        const data = await api.caja.sessions.preCloseSummary(cashSessionId)
+        setPreCloseData(data)
       } catch (e) {
-        console.error("Error loading pre-close summary:", e)
+        console.error("Error cargando pre-cierre:", e)
       } finally {
         setLoadingPreClose(false)
       }
     }
   }
 
-  // Cierre a ciegas: el cajero solo carga lo que contó físicamente. El
-  // sistema recién revela el esperado y la diferencia DESPUÉS de enviar --
-  // nunca antes, para que el conteo no esté sesgado por el número esperado.
+  // Cierre de caja: con vista previa de conciliación por formas de pago
   const handleConfirmCierreCaja = async () => {
     if (!cashSessionId) {
       toast.warning("No hay sesión de caja activa", "")
       return
     }
-    const currentSessionId = cashSessionId
     const contado = parseInt(montoCierreReal.replace(/\D/g, "") || "0", 10)
     const contadoUsd = parseFloat(montoCierreUsd.replace(/,/g, ".") || "0") || 0
     const contadoBrl = parseFloat(montoCierreBrl.replace(/,/g, ".") || "0") || 0
+    const currentSessionId = cashSessionId
     setSubmittingCierre(true)
     try {
       const result = await api.caja.sessions.close(currentSessionId, {
@@ -1965,6 +1989,9 @@ export default function POSPage() {
         monto_cierre_brl: contadoBrl,
       })
       setLastClosedSessionId(currentSessionId)
+      if ((result as any)?.handoff_id) {
+        pendingHandoffIdRef.current = String((result as any).handoff_id)
+      }
       setCierreResult({
         monto_cierre_esperado: result.monto_cierre_esperado,
         diferencia: result.diferencia,
@@ -1978,46 +2005,36 @@ export default function POSPage() {
       })
 
       const diferencia = result.diferencia || 0
-      const body = buildTicketPrelude("CIERRE DE TURNO Y ARQUEO") + `
+      const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+      const body = buildTicketPrelude("CIERRE DE CAJA / ARQUEO") + `
         <div style="padding: 4px 0; font-size: 10px;">
-          <div><b>Cajero:</b> ${user?.nombre || "-"}</div>
-          <div><b>Caja:</b> ${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}</div>
-          <div><b>Sesión ID:</b> #${currentSessionId.slice(0, 8)}</div>
-          <div><b>Fecha/Hora Cierre:</b> ${new Date().toLocaleString("es-PY")}</div>
+          <div>Cajero/a: ${user?.nombre || "-"}</div>
+          <div>Caja: ${puntoNombre}</div>
+          <div>Fecha/Hora: ${new Date().toLocaleString("es-PY")}</div>
+          <div>Turno ID: ${currentSessionId.slice(0, 8).toUpperCase()}</div>
         </div>
         <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
           <tr><td>Fondo de apertura:</td><td style="text-align:right;">${formatPYG(parseInt(montoAperturaPyg.replace(/\D/g,"")||"0",10))}</td></tr>
           <tr><td>Efectivo esperado (Gs.):</td><td style="text-align:right;">${formatPYG(result.monto_cierre_esperado)}</td></tr>
-          <tr><td>Efectivo contado (Gs.):</td><td style="text-align:right;">${formatPYG(contado)}</td></tr>
+          <tr><td>Efectivo contado (Gs.):</td><td style="text-align:right; font-weight:bold;">${formatPYG(contado)}</td></tr>
           <tr style="font-weight:900; border-top:1px dashed #000;"><td>Diferencia (Gs.):</td><td style="text-align:right;">${diferencia >= 0 ? "+" : ""}${formatPYG(diferencia)}</td></tr>
-          ${(contadoUsd > 0 || result.diferencia_usd) ? `<tr><td>Diferencia US$:</td><td style="text-align:right;">${(result.diferencia_usd || 0) >= 0 ? "+" : ""}${(result.diferencia_usd || 0).toFixed(2)} (Contado: US$ ${contadoUsd.toFixed(2)})</td></tr>` : ""}
-          ${(contadoBrl > 0 || result.diferencia_brl) ? `<tr><td>Diferencia R$:</td><td style="text-align:right;">${(result.diferencia_brl || 0) >= 0 ? "+" : ""}${(result.diferencia_brl || 0).toFixed(2)} (Contado: R$ ${contadoBrl.toFixed(2)})</td></tr>` : ""}
+          ${(contadoUsd > 0 || result.diferencia_usd) ? `<tr><td>Diferencia US$:</td><td style="text-align:right;">${result.diferencia_usd >= 0 ? "+" : ""}${result.diferencia_usd.toFixed(2)}</td></tr>` : ""}
+          ${(contadoBrl > 0 || result.diferencia_brl) ? `<tr><td>Diferencia R$:</td><td style="text-align:right;">${result.diferencia_brl >= 0 ? "+" : ""}${result.diferencia_brl.toFixed(2)}</td></tr>` : ""}
         </table>
         ${(result.desglose_formas_pago || []).length > 0 ? `
         <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:10px;">
-          <tr><td colspan="2" style="font-weight:900; padding-bottom:2px;">Desglose de Cobros del Turno:</td></tr>
-          ${result.desglose_formas_pago.map((p: any) => `<tr><td>${FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}${p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}:</td><td style="text-align:right; font-weight:bold;">${p.moneda === "PYG" ? formatPYG(p.monto) : Number(p.monto).toFixed(2)}</td></tr>`).join("")}
+          <tr><td colspan="2" style="font-weight:900; padding-bottom:2px;">Ventas del turno por forma de pago:</td></tr>
+          ${result.desglose_formas_pago.map((p: any) => `<tr><td>${FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}${p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}:</td><td style="text-align:right;">${p.moneda === "PYG" ? formatPYG(p.monto) : Number(p.monto).toFixed(2)}</td></tr>`).join("")}
         </table>` : ""}
-        ${result.requiere_revision ? `<div style="text-align:center; font-weight:900; margin-top:6px; border:1px dashed #000; padding:4px; font-size:9px;">⚠ DIFERENCIA FUERA DE TOLERANCIA -- REQUIERE REVISIÓN DE SUPERVISOR</div>` : ""}
-        <div style="display:flex; justify-content:space-between; margin-top:18px; font-size:8.5px;">
-          <div style="text-align:center; width:48%; border-top:1px dashed #000; padding-top:3px;">Firma Cajera/o<br/>${user?.nombre || ""}</div>
-          <div style="text-align:center; width:48%; border-top:1px dashed #000; padding-top:3px;">Firma Supervisora<br/>Recepción Bóveda</div>
+        ${result.requiere_revision ? `<div style="text-align:center; font-weight:900; margin-top:6px; border:1px dashed #000; padding:4px;">⚠ DIFERENCIA FUERA DE TOLERANCIA -- REQUIERE REVISIÓN</div>` : ""}
+        <div style="margin-top:14px; font-size:9px;">
+          <div>Firma Cajero/a: ___________________________</div>
+          <div style="margin-top:10px;">Firma Supervisora: _________________________</div>
         </div>
         <br/><br/>
       </div>`
       setLastCierreTicketHtml(body)
       await printTicketHtml(body)
-
-      // Guardar tracking de handoff para impresión reactiva cuando supervisora reciba en bóveda
-      try {
-        const handoffs = await api.caja.handoffs.list()
-        const myHandoff = handoffs.find((h: any) => h.session_id === currentSessionId && h.estado === "pendiente")
-        if (myHandoff) {
-          pendingHandoffIdRef.current = myHandoff.id
-        }
-      } catch (e) {
-        console.error("Error checking handoff id:", e)
-      }
 
       localStorage.removeItem(userCajaKey)
       setCashSessionId(null)
@@ -2033,118 +2050,13 @@ export default function POSPage() {
     }
   }
 
-  const handleReimprimirCierre = async () => {
-    if (lastCierreTicketHtml) {
-      await printTicketHtml(lastCierreTicketHtml)
-      toast.success("Reimprimiendo Cierre", "Se envió el ticket de cierre nuevamente a la impresora térmica.")
-    } else {
-      toast.warning("No hay ticket en memoria", "El ticket de cierre actual no está disponible para reimpresión.")
-    }
-  }
-
-  const handleDescargarPdfCierre = () => {
-    if (!lastClosedSessionId && !cashSessionId) {
-      toast.warning("Sin sesión", "No hay ID de sesión cerrada disponible.")
-      return
-    }
-    const targetId = lastClosedSessionId || cashSessionId
-    const token = localStorage.getItem("token") || ""
-    const url = `${API_ORIGIN}/api/v1/cash-sessions/${targetId}/export/cierre.pdf?token=${encodeURIComponent(token)}`
-    window.open(url, "_blank")
-  }
-
-  // ── Listener en segundo plano: monitoreo de confirmación de Sangrías y Recepción de Cierre ──
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      // 1. Monitoreo de Sangrías (Drop Cash) pendientes
-      if (pendingDropIdsRef.current.size > 0) {
-        try {
-          const drops = await api.caja.cashDropRequests.list()
-          for (const drop of drops) {
-            if (pendingDropIdsRef.current.has(drop.id) && drop.estado === "confirmado" && !printedDropConfirmationsRef.current.has(drop.id)) {
-              printedDropConfirmationsRef.current.add(drop.id)
-              pendingDropIdsRef.current.delete(drop.id)
-              
-              const confBody = buildTicketPrelude("CONFIRMACIÓN DE SANGRÍA (BÓVEDA)") + `
-                <div style="padding: 4px 0; font-size: 10px;">
-                  <div><b>Caja:</b> ${drop.register_nombre || "Caja"}</div>
-                  <div><b>Cajero Emisor:</b> ${drop.solicitado_por_nombre || "-"}</div>
-                  <div><b>Supervisora Bóveda:</b> ${drop.confirmado_por_nombre || "Supervisor"}</div>
-                  <div><b>Fecha Confirmación:</b> ${drop.confirmed_at ? new Date(drop.confirmed_at).toLocaleString("es-PY") : new Date().toLocaleString("es-PY")}</div>
-                </div>
-                <div style="border-top:1px dashed #000; margin:6px 0; padding-top:4px; font-size:10.5px;">
-                  <div><b>Monto Declarado:</b> ${formatPYG(drop.monto_pyg)}</div>
-                  <div><b>Monto Confirmado Bóveda:</b> ${formatPYG(drop.monto_confirmado_pyg || drop.monto_pyg)}</div>
-                  ${(drop.monto_usd || drop.monto_confirmado_usd) ? `<div><b>USD:</b> $${drop.monto_confirmado_usd || drop.monto_usd}</div>` : ""}
-                  ${(drop.monto_brl || drop.monto_confirmado_brl) ? `<div><b>BRL:</b> R$${drop.monto_confirmado_brl || drop.monto_brl}</div>` : ""}
-                  ${drop.discrepancia_confirmacion ? `<div style="color:red; font-weight:bold; margin-top:3px;">⚠ DISCREPANCIA EN RECIBIMIENTO REGISTRADA</div>` : `<div style="color:green; font-weight:bold; margin-top:3px;">✓ RECIBIDO Y VERIFICADO CONFORME</div>`}
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-top:18px; font-size:8.5px;">
-                  <div style="text-align:center; width:48%; border-top:1px dashed #000; padding-top:3px;">Firma Supervisora<br/>Custodia Bóveda</div>
-                  <div style="text-align:center; width:48%; border-top:1px dashed #000; padding-top:3px;">Firma Cajero<br/>Entrega</div>
-                </div>
-                <br/><br/>
-              </div>`
-              await printTicketHtml(confBody)
-              toast.success("Sangría Recibida en Bóveda", `La supervisora ${drop.confirmado_por_nombre || ""} confirmó el retiro de ${formatPYG(drop.monto_confirmado_pyg || drop.monto_pyg)}. Se imprimió el comprobante.`)
-            }
-          }
-        } catch (e) {
-          // silencioso
-        }
-      }
-
-      // 2. Monitoreo de Recepción de Cierre Final (Handoff)
-      if (pendingHandoffIdRef.current && !printedHandoffConfirmationsRef.current.has(pendingHandoffIdRef.current)) {
-        try {
-          const handoffs = await api.caja.handoffs.list()
-          const handoff = handoffs.find((h: any) => h.id === pendingHandoffIdRef.current)
-          if (handoff && handoff.estado === "confirmado") {
-            printedHandoffConfirmationsRef.current.add(handoff.id)
-            pendingHandoffIdRef.current = null
-
-            const handoffBody = buildTicketPrelude("RECEPCIÓN DE CIERRE EN BÓVEDA") + `
-              <div style="padding: 4px 0; font-size: 10px;">
-                <div><b>Caja:</b> ${handoff.register_nombre || "Caja"}</div>
-                <div><b>Cajero:</b> ${handoff.entregado_por_nombre || "-"}</div>
-                <div><b>Supervisora Bóveda:</b> ${(handoff as any).recibido_por_nombre || "Supervisor"}</div>
-                <div><b>Fecha Recepción:</b> ${(handoff as any).confirmed_at ? new Date((handoff as any).confirmed_at).toLocaleString("es-PY") : new Date().toLocaleString("es-PY")}</div>
-              </div>
-              <div style="border-top:1px dashed #000; margin:6px 0; padding-top:4px; font-size:10.5px;">
-                <div><b>Total Declarado:</b> ${formatPYG(handoff.monto_pyg)}</div>
-                <div><b>Total Confirmado en Bóveda:</b> ${formatPYG((handoff as any).monto_confirmado_pyg || handoff.monto_pyg)}</div>
-                ${(handoff.monto_usd || (handoff as any).monto_confirmado_usd) ? `<div><b>USD Confirmado:</b> US$ ${(handoff as any).monto_confirmado_usd || handoff.monto_usd}</div>` : ""}
-                ${(handoff.monto_brl || (handoff as any).monto_confirmado_brl) ? `<div><b>BRL Confirmado:</b> R$ ${(handoff as any).monto_confirmado_brl || handoff.monto_brl}</div>` : ""}
-                ${(handoff as any).discrepancia ? `<div style="color:red; font-weight:bold; margin-top:3px;">⚠ DISCREPANCIA EN ENTREGA REGISTRADA</div>` : `<div style="color:green; font-weight:bold; margin-top:3px;">✓ CIERRE RECIBIDO CONFORME EN BÓVEDA</div>`}
-              </div>
-              <div style="display:flex; justify-content:space-between; margin-top:18px; font-size:8.5px;">
-                <div style="text-align:center; width:48%; border-top:1px dashed #000; padding-top:3px;">Firma Supervisora<br/>Custodia Bóveda</div>
-                <div style="text-align:center; width:48%; border-top:1px dashed #000; padding-top:3px;">Firma Cajero<br/>Entrega Conforme</div>
-              </div>
-              <br/><br/>
-            </div>`
-            await printTicketHtml(handoffBody)
-            toast.success("Cierre Recibido en Bóveda", `La supervisora confirmó la recepción del efectivo en Bóveda. Se imprimió el comprobante final.`)
-          }
-        } catch (e) {
-          // silencioso
-        }
-      }
-    }, 10000)
-
-    return () => clearInterval(interval)
-  }, [])
-
-  // ── Aviso de umbral de retiro -- antes esto solo se veia en el modulo
-  // administrativo de Caja, que la cajera nunca abre mientras vende. Sin
-  // esto, nadie se entera de que hay que hacer un retiro hasta que alguien
-  // lo nota por otro lado (o nunca). Se sondea cada 60s y avisa una sola vez
-  // por transicion de nivel (no en cada poll) para no ser repetitivo.
+  // ── Aviso de umbral de retiro y Monitoreo de confirmaciones en Bóveda ────────
   useEffect(() => {
     if (!cashSessionId || !cashRegisterId) { setCashDropStatus(null); return }
     let cancelled = false
     const check = async () => {
       try {
+        // 1. Monitoreo de umbral de caja
         const sessions = await api.caja.sessionsSummary({ register_id: cashRegisterId, estado: "abierta" } as any)
         const mine = (sessions || []).find((s: any) => s.id === cashSessionId)
         if (cancelled || !mine) return
@@ -2164,12 +2076,89 @@ export default function POSPage() {
           }
         }
         cashDropStatusNotifiedRef.current = level
-      } catch { /* silencioso -- no bloquea la venta si esto falla */ }
+
+        // 2. Monitoreo reactivo de confirmación de Cash Drop (Imprime Ticket 2)
+        if (pendingDropIdsRef.current.size > 0) {
+          const drops = await api.caja.cashDropRequests.list("confirmado")
+          if (Array.isArray(drops)) {
+            for (const d of drops) {
+              if (pendingDropIdsRef.current.has(d.id) && !confirmedDropIdsRef.current.has(d.id)) {
+                confirmedDropIdsRef.current.add(d.id)
+                pendingDropIdsRef.current.delete(d.id)
+                triggerSuccessSound()
+                const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+                const bodyConfirm = buildTicketPrelude("CONFIRMACIÓN DE SANGRÍA - BÓVEDA") + `
+                  <div style="padding: 4px 0; font-size: 10px;">
+                    <div style="font-weight:900; text-align:center; font-size:11px; border-bottom:1px dashed #000; padding-bottom:3px;">
+                      RETIRO INGRESADO A BÓVEDA
+                    </div>
+                    <div style="margin-top:4px;">Caja: ${puntoNombre}</div>
+                    <div>Cajero/a: ${d.solicitado_por_nombre || user?.nombre || "-"}</div>
+                    <div>Supervisora: ${d.confirmado_por_nombre || "Supervisor/a"}</div>
+                    <div>Fecha Confirmación: ${d.fecha_confirmacion ? new Date(d.fecha_confirmacion).toLocaleString("es-PY") : new Date().toLocaleString("es-PY")}</div>
+                    <div>Nro. Solicitud: CD-${String(d.id).slice(0, 8).toUpperCase()}</div>
+                  </div>
+                  <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; font-size:10px;">
+                    <tr><td>Monto Declarado:</td><td style="text-align:right; font-weight:bold;">${formatPYG(d.monto_pyg)}</td></tr>
+                    <tr><td>Recibido en Bóveda:</td><td style="text-align:right; font-weight:900;">${formatPYG(d.monto_confirmado_pyg || d.monto_pyg)}</td></tr>
+                    ${d.monto_usd ? `<tr><td>USD:</td><td style="text-align:right;">US$ ${(d.monto_confirmado_usd || d.monto_usd).toFixed(2)}</td></tr>` : ""}
+                    ${d.monto_brl ? `<tr><td>BRL:</td><td style="text-align:right;">R$ ${(d.monto_confirmado_brl || d.monto_brl).toFixed(2)}</td></tr>` : ""}
+                  </table>
+                  ${d.discrepancia_confirmacion ? `<div style="font-weight:900; text-align:center; border:1px dashed #000; margin-top:4px; padding:2px;">⚠ DISCREPANCIA EN RECUENTO DE BÓVEDA</div>` : `<div style="text-align:center; font-weight:bold; margin-top:4px;">✓ RECUENTO COINCIDENTE (EXACTO)</div>`}
+                  <div style="text-align:center; font-size:9px; margin-top:6px; border-top:1px dashed #000; padding-top:4px;">
+                    ✅ Efectivo transferido a Bóveda. Cajera liberada de custodia.
+                  </div>
+                  <br/><br/>
+                </div>`
+                await printTicketHtml(bodyConfirm)
+                toast.success("Sangría Confirmada en Bóveda", `Recibido por ${d.confirmado_por_nombre || 'Supervisora'}`)
+              }
+            }
+          }
+        }
+
+        // 3. Monitoreo reactivo de confirmación de Handoff (Entrega de Cierre)
+        if (pendingHandoffIdRef.current) {
+          const handoffs = await api.caja.handoffs.list({ estado: "confirmado" })
+          if (Array.isArray(handoffs)) {
+            const match = handoffs.find((h: any) => h.id === pendingHandoffIdRef.current)
+            if (match) {
+              pendingHandoffIdRef.current = null
+              triggerSuccessSound()
+              const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+              const bodyHandoff = buildTicketPrelude("RECEPCIÓN DE CIERRE EN BÓVEDA") + `
+                <div style="padding: 4px 0; font-size: 10px;">
+                  <div style="font-weight:900; text-align:center; font-size:11px; border-bottom:1px dashed #000; padding-bottom:3px;">
+                    ENTREGA DE TURNO RECIBIDA
+                  </div>
+                  <div style="margin-top:4px;">Caja: ${puntoNombre}</div>
+                  <div>Cajero/a: ${match.entregado_por_nombre || user?.nombre || "-"}</div>
+                  <div>Supervisora: ${match.recibido_por_nombre || "Supervisor/a"}</div>
+                  <div>Fecha Recepción: ${match.fecha_confirmacion ? new Date(match.fecha_confirmacion).toLocaleString("es-PY") : new Date().toLocaleString("es-PY")}</div>
+                </div>
+                <table style="width:100%; border-collapse:collapse; border-top:1px dashed #000; margin-top:4px; font-size:10px;">
+                  <tr><td>Monto Declarado:</td><td style="text-align:right; font-weight:bold;">${formatPYG(match.monto_pyg)}</td></tr>
+                  <tr><td>Recibido en Bóveda:</td><td style="text-align:right; font-weight:900;">${formatPYG(match.monto_confirmado_pyg || match.monto_pyg)}</td></tr>
+                  ${match.monto_usd ? `<tr><td>USD:</td><td style="text-align:right;">US$ ${(match.monto_confirmado_usd || match.monto_usd).toFixed(2)}</td></tr>` : ""}
+                  ${match.monto_brl ? `<tr><td>BRL:</td><td style="text-align:right;">R$ ${(match.monto_confirmado_brl || match.monto_brl).toFixed(2)}</td></tr>` : ""}
+                </table>
+                ${match.discrepancia_confirmacion ? `<div style="font-weight:900; text-align:center; border:1px dashed #000; margin-top:4px; padding:2px;">⚠ DISCREPANCIA REGISTRADA EN BÓVEDA</div>` : `<div style="text-align:center; font-weight:bold; margin-top:4px;">✓ RECUENTO DE ENTREGA CONFORME</div>`}
+                <div style="text-align:center; font-size:9px; margin-top:6px; border-top:1px dashed #000; padding-top:4px;">
+                  ✅ Cierre recibido formalmente en Bóveda Central.
+                </div>
+                <br/><br/>
+              </div>`
+              await printTicketHtml(bodyHandoff)
+              toast.success("Cierre Recibido en Bóveda", `Confirmado por ${match.recibido_por_nombre || 'Supervisora'}`)
+            }
+          }
+        }
+      } catch { /* silencioso */ }
     }
     check()
-    const interval = setInterval(check, 60000)
+    const interval = setInterval(check, 10000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [cashSessionId, cashRegisterId])
+  }, [cashSessionId, cashRegisterId, puntoEmision, user])
 
   const handleConfirmCashDrop = async () => {
     if (!cashSessionId) {
@@ -2185,32 +2174,40 @@ export default function POSPage() {
     }
     setSubmittingCashDrop(true)
     try {
-      const res: any = await api.caja.cashDrop(cashSessionId, { monto, monto_usd: montoUsd, monto_brl: montoBrl, observaciones: cashDropObs.trim() || undefined })
-      if (res?.id) {
-        pendingDropIdsRef.current.add(res.id)
+      const dropRes = await api.caja.cashDrop(cashSessionId, { monto, monto_usd: montoUsd, monto_brl: montoBrl, observaciones: cashDropObs.trim() || undefined })
+      if (dropRes?.id) {
+        pendingDropIdsRef.current.add(String(dropRes.id))
       }
       const montosTexto = [
         monto > 0 ? formatPYG(monto) : null,
         montoUsd > 0 ? `US$ ${montoUsd.toFixed(2)}` : null,
         montoBrl > 0 ? `R$ ${montoBrl.toFixed(2)}` : null,
       ].filter(Boolean).join(" + ")
-      const body = buildTicketPrelude("DECLARACIÓN DE SANGRÍA (CASH DROP)") + `
+      const puntoNombre = PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision || "Caja"
+      const dropIdStr = dropRes?.id ? String(dropRes.id).slice(0, 8).toUpperCase() : "-"
+      const body = buildTicketPrelude("SOLICITUD DE RETIRO (CASH DROP)") + `
         <div style="padding: 4px 0; font-size: 10px;">
-          <div><b>Cajero:</b> ${user?.nombre || "-"}</div>
-          <div><b>Caja:</b> ${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}</div>
-          <div><b>Fecha/Hora:</b> ${new Date().toLocaleString("es-PY")}</div>
-          <div style="font-weight:900; font-size:13px; margin-top:6px;">Monto declarado: ${montosTexto}</div>
-          <div style="margin-top:4px; font-style:italic; font-size:9.5px;">* Comprobante 1: Entrega física a Supervisora para Bóveda</div>
-          ${cashDropObs.trim() ? `<div style="margin-top:4px;">Obs: ${cashDropObs.trim()}</div>` : ""}
+          <div>Cajero/a: ${user?.nombre || "-"}</div>
+          <div>Caja: ${puntoNombre}</div>
+          <div>Fecha/Hora: ${new Date().toLocaleString("es-PY")}</div>
+          <div>Nro. Solicitud: CD-${dropIdStr}</div>
+          <div style="font-weight:900; font-size:12px; margin-top:6px; border-top:1px dashed #000; border-bottom:1px dashed #000; padding:3px 0;">
+            Monto Retirado: ${montosTexto}
+          </div>
+          <div style="margin-top:4px; font-weight:bold;">[ESTADO: PENDIENTE DE RECUENTO EN BÓVEDA]</div>
+          ${cashDropObs.trim() ? `<div style="margin-top:2px;">Obs: ${cashDropObs.trim()}</div>` : ""}
         </div>
-        <div style="display:flex; justify-content:space-between; margin-top:20px; font-size:8.5px;">
-          <div style="text-align:center; width:48%; border-top:1px dashed #000; padding-top:3px;">Firma Cajera/o<br/>Entrega</div>
-          <div style="text-align:center; width:48%; border-top:1px dashed #000; padding-top:3px;">Firma Supervisora<br/>Recibí Conforme</div>
+        <div style="margin-top:12px; font-size:9px;">
+          <div>Firma Cajero/a: ___________________________</div>
+          <div style="margin-top:10px;">Firma Supervisora: _________________________</div>
+        </div>
+        <div style="text-align:center; font-size:8.5px; margin-top:8px; color:#555;">
+          Comprobante de custodia temporal hasta confirmación en Bóveda.
         </div>
         <br/><br/>
       </div>`
       await printTicketHtml(body)
-      toast.success("Retiro declarado", `${montosTexto} -- Comprobante emitido. Esperando confirmación de Bóveda.`)
+      toast.success("Retiro registrado", `${montosTexto} -- pendiente de confirmación por supervisora.`)
       setShowCashDropModal(false)
       setCashDropMonto("")
       setCashDropMontoUsd("")
@@ -3972,7 +3969,11 @@ export default function POSPage() {
     if (e.key === "Enter") {
       e.preventDefault()
       if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
-        handleProcessCheckout()
+        if (listoParaCerrar) {
+          handleProcessCheckout()
+        } else {
+          setListoParaCerrar(true)
+        }
       } else {
         const faltante = Math.max(0, totalPyg - totalRecibidoPyg)
         if (faltante > 0) {
@@ -4014,6 +4015,10 @@ export default function POSPage() {
   }
 
   // ── MANEJO DEL SECTOR RÁPIDO DE BILLETES (SOBREESCRIBE EN EL 1ER CLIC, INCREMENTA DESPUÉS) ──
+  useEffect(() => {
+    setListoParaCerrar(false)
+  }, [payCashPyg, payCashBrl, payCashUsd])
+
   const handleQuickCashClick = (amount: number) => {
     if (!hasClickedQuickCash) {
       setPayCashPyg(amount.toLocaleString("es-PY"))

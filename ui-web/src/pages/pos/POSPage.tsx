@@ -758,6 +758,14 @@ export default function POSPage() {
   const [payCashPyg, setPayCashPyg] = useState<string>("")
   const [payCashBrl, setPayCashBrl] = useState<string>("")
   const [payCashUsd, setPayCashUsd] = useState<string>("")
+  // El Enter en un campo de efectivo cerraba la venta apenas el monto
+  // cubria el total -- si hubo vuelto, no daba tiempo ni de verlo ni de
+  // ofrecer "Abre tu corazon". Ahora, la PRIMERA vez que el monto alcanza
+  // a cubrir el total, ese Enter solo "marca listo" (deja ver el vuelto
+  // tranquilo); recien el Enter SIGUIENTE cierra la venta de verdad. Si
+  // el cajero vuelve a tocar algun monto despues de eso, se reinicia (ver
+  // el useEffect mas abajo) para no saltarse la revision por accidente.
+  const [listoParaCerrar, setListoParaCerrar] = useState(false)
   const [hasClickedQuickCash, setHasClickedQuickCash] = useState<boolean>(false)
   const confirmCheckoutBtnRef = useRef<HTMLButtonElement>(null)
   const payCashPygInputRef = useRef<HTMLInputElement>(null)
@@ -3961,7 +3969,11 @@ export default function POSPage() {
     if (e.key === "Enter") {
       e.preventDefault()
       if (totalRecibidoPyg >= totalPyg && totalPyg > 0 && !submitting) {
-        handleProcessCheckout()
+        if (listoParaCerrar) {
+          handleProcessCheckout()
+        } else {
+          setListoParaCerrar(true)
+        }
       } else {
         const faltante = Math.max(0, totalPyg - totalRecibidoPyg)
         if (faltante > 0) {
@@ -4003,6 +4015,10 @@ export default function POSPage() {
   }
 
   // ── MANEJO DEL SECTOR RÁPIDO DE BILLETES (SOBREESCRIBE EN EL 1ER CLIC, INCREMENTA DESPUÉS) ──
+  useEffect(() => {
+    setListoParaCerrar(false)
+  }, [payCashPyg, payCashBrl, payCashUsd])
+
   const handleQuickCashClick = (amount: number) => {
     if (!hasClickedQuickCash) {
       setPayCashPyg(amount.toLocaleString("es-PY"))
