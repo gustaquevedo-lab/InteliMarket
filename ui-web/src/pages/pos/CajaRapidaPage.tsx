@@ -2675,6 +2675,27 @@ export default function POSPage() {
     toast.success("Balanza de Sección", `${product.nombre}: ${etiquetaKg.toFixed(3)} KG -- coincide con la balanza.`)
   }, [currentScaleWeight, isScaleStable, weightPendingScale])
 
+  // ── FOCO SIEMPRE EN "ESCANEAR PRODUCTO" AL CERRAR CUALQUIER MODAL ──────────
+  // Esto es una caja -- escanear productos es lo critico, el cursor nunca
+  // puede quedar perdido dentro de un modal ya cerrado. En vez de agregar
+  // un focus() manual en cada uno de los ~20 modales del POS (fragil, se
+  // olvida en el proximo que se agregue), se centraliza: apenas el ULTIMO
+  // modal abierto se cierra, se devuelve el foco al campo de escaneo.
+  const anyModalOpen =
+    showAssignTerminalModal || showAperturaModal || showCierreTurnoModal || showCashDropModal ||
+    showScaleModal || showManualWeightModal || showPosConfigModal || showSupervisorModal ||
+    showRemoteAuthModal || showDevolucionModal || showCustomerModal || showCreateCustomerForm ||
+    showPausedModal || showPriceCheckModal || showRatesModal || showPaymentModal ||
+    showBancardManualFallback || showExtraClubBalanceModal || showLostDemandModal ||
+    showLostDemandRegisterForm || showReimprimirModal || showCuponModal ||
+    !!weightMismatch || !!weightPendingScale
+
+  useEffect(() => {
+    if (!anyModalOpen) {
+      searchInputRef.current?.focus()
+    }
+  }, [anyModalOpen])
+
   // ── ESCANEO DIRECTO Y DECODIFICACIÓN DE BALANZAS DE GÓNDOLA (EAN-13 PREFIJO 2) ─
   const handleBarcodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
