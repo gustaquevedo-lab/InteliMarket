@@ -1,6 +1,6 @@
 """Customer service"""
 
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.customers.models import Customer
