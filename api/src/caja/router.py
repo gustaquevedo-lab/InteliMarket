@@ -14,6 +14,8 @@ from api.src.caja.schemas import (
     CashSessionCreate, CashSessionClose, CashSessionResponse, CashDropCreate,
     ConfirmHandoffRequest, DepositVaultEntriesRequest, RejectVaultDepositRequest,
     ConfirmCashDropRequest, RejectCashDropRequest, VoidCashDropRequest,
+    CreateTreasuryRemittanceRequest, ReceiveTreasuryRemittanceRequest,
+    DepositVaultToBankRequest,
 )
 from api.src.caja import service
 from api.src.caja import pdf_reports
@@ -326,3 +328,116 @@ async def reject_vault_deposit(request_id: str, body: RejectVaultDepositRequest,
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+# ── Remitos de Supervisión a Tesorería ─────────────────────────────────
+
+@router.get("/caja/supervisor/pending-sobres")
+async def supervisor_pending_sobres(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_supervisor_pending_sobres(db, user["company_id"], user.get("id"))
+
+
+@router.post("/caja/treasury-remittances")
+async def create_treasury_remittance(
+    body: CreateTreasuryRemittanceRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        sup_nombre = user.get("user_nombre") or user.get("user_email") or "Supervisora"
+        return await service.create_treasury_remittance(
+            db,
+            user["company_id"],
+            user["id"],
+            sup_nombre,
+            [str(i) for i in body.item_ids],
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/caja/treasury-remittances")
+async def list_treasury_remittances(
+    estado: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_treasury_remittances(db, user["company_id"], estado)
+
+
+@router.get("/caja/treasury-remittances/{remittance_id}")
+async def get_treasury_remittance(
+    remittance_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    res = await service.get_treasury_remittance(db, user["company_id"], remittance_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Remito no encontrado")
+    return res
+
+
+@router.post("/caja/treasury-remittances/{remittance_id}/receive")
+async def receive_treasury_remittance(
+    remittance_id: str,
+    body: ReceiveTreasuryRemittanceRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        tes_nombre = user.get("user_nombre") or user.get("user_email") or "Tesorería / Bóveda"
+        return await service.receive_treasury_remittance(
+            db,
+            user["company_id"],
+            remittance_id,
+            user["id"],
+            tes_nombre,
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/caja/treasury-remittances/{remittance_id}/export/remito.pdf")
+async def export_remito_pdf(
+    remittance_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user["company_id"]
+    rem = await service.get_treasury_remittance(db, company_id, remittance_id)
+    if not rem:
+        raise HTTPException(status_code=404, detail="Remito no encontrado")
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_remito_tesoreria_pdf(company, rem, rem.get("items", []), generated_by)
+    return _pdf_response(pdf_bytes, f"remito_{rem.get('numero', remittance_id)}.pdf")
+
+
+# ── Depósito Directo de Bóveda a Banco ─────────────────────────────────
+
+@router.post("/vault/deposit-to-bank")
+async def deposit_vault_to_bank(
+    body: DepositVaultToBankRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.deposit_vault_to_bank(
+            db,
+            user["company_id"],
+            user.get("id"),
+            str(body.bank_account_id),
+            [str(i) for i in body.entry_ids],
+            body.numero_boleta,
+            body.transportadora,
+            body.fecha_deposito,
+            body.observaciones,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+

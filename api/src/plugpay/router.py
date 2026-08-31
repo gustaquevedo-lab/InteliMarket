@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
+from typing import Optional
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
@@ -8,6 +10,7 @@ from api.src.plugpay.service import PlugpayNotConfigured, PlugpayApiError
 from api.src.plugpay.schemas import (
     PixCreateRequest, PixQuoteRequest, CalcularParceladoRequest, StartParceladoRequest,
     PlugpayTransactionResponse, ComplianceCheckResponse,
+    PlugpayTransactionListResponse, PlugpaySummaryResponse,
 )
 
 router = APIRouter(prefix="/api/v1/plugpay", tags=["plugpay"])
@@ -140,3 +143,50 @@ async def link_sale(txn_id: str, sale_id: str, db: AsyncSession = Depends(get_db
     if not row:
         raise HTTPException(status_code=404)
     return {"message": "OK"}
+
+
+@router.get("/transactions", response_model=PlugpayTransactionListResponse)
+async def list_transactions(
+    fecha_desde: Optional[datetime] = None,
+    fecha_hasta: Optional[datetime] = None,
+    tipo_operacion: Optional[str] = None,
+    exitosa: Optional[bool] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    items, total = await transactions_service.list_transactions(
+        db,
+        user["company_id"],
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        tipo_operacion=tipo_operacion,
+        exitosa=exitosa,
+        limit=limit,
+        offset=offset,
+    )
+    return PlugpayTransactionListResponse(
+        ok=True,
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/summary", response_model=PlugpaySummaryResponse)
+async def get_summary(
+    fecha_desde: Optional[datetime] = None,
+    fecha_hasta: Optional[datetime] = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    data = await transactions_service.get_summary(
+        db,
+        user["company_id"],
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+    )
+    return PlugpaySummaryResponse(**data)
+

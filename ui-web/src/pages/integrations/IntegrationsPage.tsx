@@ -4,11 +4,17 @@ import {
   RefreshCcw, Search, Plus, ExternalLink, ShieldCheck, DollarSign,
   ArrowUpRight, ArrowDownRight, Layers, FileSpreadsheet, Lock, Zap,
   Terminal, Store, ChevronRight, Eye, Smartphone, Wifi, Radio, Filter,
-  TrendingUp, Activity, CheckCircle, Flame, ShieldAlert, Settings, Save, EyeOff
+  TrendingUp, Activity, CheckCircle, Flame, ShieldAlert, Settings, Save, EyeOff,
+  Globe, Check, XCircle, Clock, Hash, Link as LinkIcon
 } from "lucide-react"
 import { api } from "../../api"
 import { formatPYG } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
+
+function formatBRL(val?: number | null) {
+  if (val === undefined || val === null || isNaN(val)) return "R$ 0,00"
+  return `R$ ${val.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
 
 type Tab = "bancard" | "dinelco" | "cierres_lote" | "qr_pix" | "hardware" | "config"
 
@@ -120,6 +126,66 @@ export default function IntegrationsPage() {
       setLoadingConfig(false)
     }
   }, [])
+
+  // ── PLUGPAY TRANSACCIONES & CONCILIACIÓN ─────────────────────────────────
+  const [plugpayTxs, setPlugpayTxs] = useState<any[]>([])
+  const [plugpayTotal, setPlugpayTotal] = useState(0)
+  const [plugpaySummary, setPlugpaySummary] = useState<any>({
+    total_transacciones: 0,
+    total_exitosas: 0,
+    total_fallidas: 0,
+    tasa_exito_pct: 0,
+    volumen_pix_brl: 0,
+    volumen_pix_pyg: 0,
+    volumen_parcelado_brl: 0,
+    volumen_parcelado_pyg: 0,
+    total_volumen_brl: 0,
+    total_volumen_pyg: 0,
+    transacciones_con_venta: 0,
+  })
+  const [loadingPlugpay, setLoadingPlugpay] = useState(false)
+  const [plugpayFilterTipo, setPlugpayFilterTipo] = useState<"all" | "pix" | "credito_parcelado">("all")
+  const [plugpayFilterStatus, setPlugpayFilterStatus] = useState<"all" | "exitosas" | "fallidas">("all")
+  const [plugpaySearch, setPlugpaySearch] = useState("")
+
+  const loadPlugpayData = useCallback(async () => {
+    setLoadingPlugpay(true)
+    try {
+      const exitosaParam = plugpayFilterStatus === "all" ? undefined : plugpayFilterStatus === "exitosas"
+      const [sumRes, listRes] = await Promise.all([
+        api.plugpay.getSummary().catch(() => null),
+        api.plugpay.getTransactions({
+          tipo_operacion: plugpayFilterTipo === "all" ? undefined : plugpayFilterTipo,
+          exitosa: exitosaParam,
+          limit: 100,
+        }).catch(() => null),
+      ])
+      if (sumRes) setPlugpaySummary(sumRes)
+      if (listRes?.items) {
+        setPlugpayTxs(listRes.items)
+        setPlugpayTotal(listRes.total)
+      }
+    } finally {
+      setLoadingPlugpay(false)
+    }
+  }, [plugpayFilterTipo, plugpayFilterStatus])
+
+  useEffect(() => {
+    if (tab === "qr_pix") {
+      loadPlugpayData()
+    }
+  }, [tab, loadPlugpayData])
+
+  const filteredPlugpayTxs = useMemo(() => {
+    if (!plugpaySearch.trim()) return plugpayTxs
+    const q = plugpaySearch.toLowerCase()
+    return plugpayTxs.filter((t: any) =>
+      (t.referencia_interna || "").toLowerCase().includes(q) ||
+      (t.id_transacao || "").toLowerCase().includes(q) ||
+      (t.sale_id || "").toLowerCase().includes(q) ||
+      (t.error_message || "").toLowerCase().includes(q)
+    )
+  }, [plugpayTxs, plugpaySearch])
 
   useEffect(() => {
     if (tab === "config") loadConfig()
@@ -487,17 +553,248 @@ export default function IntegrationsPage() {
 
       {/* ── TAB: QR & PIX ── */}
       {tab === "qr_pix" && (
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
-          <h2 className="text-base font-black text-gray-900 dark:text-white">Cobros Dinámicos QR (Zimple)</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 rounded-xl bg-gray-50/50 dark:bg-slate-750/50 border border-slate-200/60 dark:border-slate-700/60 space-y-2">
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">QR Zimple / Bancard</p>
-              <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(kpis.qr_total_gs)}</p>
-              <p className="text-xs text-gray-400 font-mono">{kpis.qr_total_txs.toLocaleString()} pagos móviles procesados (dato real)</p>
+        <div className="space-y-6">
+          {/* Header con botón de refresco */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm">
+            <div>
+              <div className="flex items-center gap-2">
+                <Globe className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                <h2 className="text-base font-black text-gray-900 dark:text-white">
+                  Cobros Dinámicos QR & Pasarelas Brasil (PIX / Parcelado PlugPay)
+                </h2>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Monitoreo, conciliación y auditoría de transacciones móviles multimoneda (Guaraníes & Reales)
+              </p>
+            </div>
+            <button
+              onClick={loadPlugpayData}
+              disabled={loadingPlugpay}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-200 transition cursor-pointer self-start sm:self-auto disabled:opacity-50"
+            >
+              <RefreshCcw className={`w-3.5 h-3.5 ${loadingPlugpay ? "animate-spin" : ""}`} />
+              Actualizar PlugPay
+            </button>
+          </div>
+
+          {/* KPIs Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* KPI 1: QR Zimple */}
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">QR Zimple / Bancard</span>
+                <div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-600">
+                  <QrCode className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-xl font-black font-mono text-blue-600 dark:text-blue-400">{formatPYG(kpis.qr_total_gs)}</p>
+              <div className="flex items-center justify-between text-[11px] text-gray-400 border-t border-slate-100 dark:border-slate-700/60 pt-2">
+                <span>Transacciones</span>
+                <span className="font-bold text-gray-700 dark:text-gray-300 font-mono">{kpis.qr_total_txs}</span>
+              </div>
+            </div>
+
+            {/* KPI 2: PIX Brasil */}
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">PIX Brasil (PlugPay)</span>
+                <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600">
+                  <Smartphone className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">{formatBRL(plugpaySummary.volumen_pix_brl)}</p>
+              <div className="flex items-center justify-between text-[11px] text-gray-400 border-t border-slate-100 dark:border-slate-700/60 pt-2">
+                <span>Equivalente en Gs.</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">{formatPYG(plugpaySummary.volumen_pix_pyg)}</span>
+              </div>
+            </div>
+
+            {/* KPI 3: Crédito Parcelado */}
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Crédito Brasil (PlugPay)</span>
+                <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-950/50 text-purple-600">
+                  <CreditCard className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-xl font-black font-mono text-purple-600 dark:text-purple-400">{formatBRL(plugpaySummary.volumen_parcelado_brl)}</p>
+              <div className="flex items-center justify-between text-[11px] text-gray-400 border-t border-slate-100 dark:border-slate-700/60 pt-2">
+                <span>Equivalente en Gs.</span>
+                <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">{formatPYG(plugpaySummary.volumen_parcelado_pyg)}</span>
+              </div>
+            </div>
+
+            {/* KPI 4: Tasa de Aprobación */}
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Efectividad PlugPay</span>
+                <div className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-600">
+                  <Activity className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-xl font-black font-mono text-amber-600 dark:text-amber-400">{plugpaySummary.tasa_exito_pct}%</p>
+              <div className="flex items-center justify-between text-[11px] text-gray-400 border-t border-slate-100 dark:border-slate-700/60 pt-2">
+                <span>Exitosas / Total</span>
+                <span className="font-bold text-gray-700 dark:text-gray-300 font-mono">
+                  {plugpaySummary.total_exitosas} / {plugpaySummary.total_transacciones}
+                </span>
+              </div>
             </div>
           </div>
-          <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300">
-            PIX Brasil (PlugPay) ya está integrado -- configuralo en la pestaña "Configuración". Los KPIs reales de PIX/crédito parcelado Brasil se agregan acá una vez que haya transacciones de verdad. QR Pagopar sigue sin una fuente real conectada.
+
+          {/* Tabla de Conciliación & Auditoría PlugPay */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-gray-900 dark:text-white">
+                  Auditoría de Transacciones PlugPay en Vivo
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Registro de intentos, aprobaciones y cupones generados desde las cajas de Extra Supermercado
+                </p>
+              </div>
+
+              {/* Filtros */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Search */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar ref, id, venta..."
+                    value={plugpaySearch}
+                    onChange={(e) => setPlugpaySearch(e.target.value)}
+                    className="pl-8 pr-3 py-1.5 rounded-xl text-xs bg-gray-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 w-44"
+                  />
+                </div>
+
+                {/* Filtro Tipo */}
+                <select
+                  value={plugpayFilterTipo}
+                  onChange={(e) => setPlugpayFilterTipo(e.target.value as any)}
+                  className="px-2.5 py-1.5 rounded-xl text-xs bg-gray-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 font-medium focus:outline-none"
+                >
+                  <option value="all">Todas las operaciones</option>
+                  <option value="pix">Solo PIX</option>
+                  <option value="credito_parcelado">Solo Crédito Parcelado</option>
+                </select>
+
+                {/* Filtro Estado */}
+                <select
+                  value={plugpayFilterStatus}
+                  onChange={(e) => setPlugpayFilterStatus(e.target.value as any)}
+                  className="px-2.5 py-1.5 rounded-xl text-xs bg-gray-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 font-medium focus:outline-none"
+                >
+                  <option value="all">Todos los estados</option>
+                  <option value="exitosas">Solo Aprobadas</option>
+                  <option value="fallidas">Solo Fallidas / Errores</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Tabla */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 dark:bg-slate-900/70 border-b border-slate-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 font-bold uppercase text-[10px]">
+                    <th className="p-3">Fecha & Hora</th>
+                    <th className="p-3">Tipo Operación</th>
+                    <th className="p-3">Referencia / ID</th>
+                    <th className="p-3 text-right">Monto BRL</th>
+                    <th className="p-3 text-right">Monto Origen (PYG)</th>
+                    <th className="p-3 text-center">Cuotas</th>
+                    <th className="p-3 text-center">Estado</th>
+                    <th className="p-3">Venta Vinculada</th>
+                    <th className="p-3">Detalle / Error</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-750">
+                  {loadingPlugpay && (
+                    <tr>
+                      <td colSpan={9} className="text-center py-8 text-gray-400">
+                        <RefreshCcw className="w-5 h-5 animate-spin mx-auto mb-2" />
+                        Cargando transacciones de PlugPay...
+                      </td>
+                    </tr>
+                  )}
+
+                  {!loadingPlugpay && filteredPlugpayTxs.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="text-center py-10 text-gray-400">
+                        <Smartphone className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
+                        <p className="font-bold text-gray-600 dark:text-gray-300">No hay transacciones registradas</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          Las operaciones cobradas con PIX o Crédito Parcelado desde el POS aparecerán acá automáticamente.
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+
+                  {!loadingPlugpay && filteredPlugpayTxs.map((t: any) => (
+                    <tr key={t.id} className="hover:bg-gray-50/60 dark:hover:bg-slate-750/50 transition">
+                      <td className="p-3 text-gray-600 dark:text-gray-300 font-mono text-[11px]">
+                        {t.created_at ? new Date(t.created_at).toLocaleString("es-PY") : "—"}
+                      </td>
+                      <td className="p-3">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                          t.tipo_operacion === "pix"
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
+                            : "bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300"
+                        }`}>
+                          {t.tipo_operacion === "pix" ? "📱 PIX" : "💳 Crédito"}
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono text-[11px] text-gray-700 dark:text-gray-300">
+                        <div className="font-semibold">{t.referencia_interna || t.id_transacao || "—"}</div>
+                        {t.qr_code_id && <div className="text-[10px] text-gray-400">QR: {t.qr_code_id}</div>}
+                      </td>
+                      <td className="p-3 text-right font-black font-mono text-emerald-600 dark:text-emerald-400">
+                        {t.value_brl ? formatBRL(t.value_brl) : "—"}
+                      </td>
+                      <td className="p-3 text-right font-mono text-gray-700 dark:text-gray-300">
+                        {t.monto_origen ? formatPYG(t.monto_origen) : "—"}
+                      </td>
+                      <td className="p-3 text-center font-mono font-bold text-gray-600 dark:text-gray-400">
+                        {t.numero_cuotas ? `${t.numero_cuotas}x` : "1x"}
+                      </td>
+                      <td className="p-3 text-center">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          t.exitosa
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                        }`}>
+                          {t.exitosa ? <Check className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                          {t.exitosa ? "APROBADO" : "ERROR / PENDIENTE"}
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono text-[11px]">
+                        {t.sale_id ? (
+                          <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold">
+                            <LinkIcon className="w-3 h-3" />
+                            {t.sale_id.slice(0, 8)}...
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[10px]">No asignada</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-gray-500 dark:text-gray-400 text-[11px] max-w-[200px] truncate" title={t.error_message || "Transacción procesada"}>
+                        {t.error_message ? (
+                          <span className="text-rose-600 dark:text-rose-400 font-medium">{t.error_message}</span>
+                        ) : (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-medium">OK</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer resumen */}
+            <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-2">
+              <span>Total registros: <strong className="font-mono text-gray-800 dark:text-gray-200">{filteredPlugpayTxs.length}</strong></span>
+              <span className="text-[11px]">Empresa: <strong className="font-mono text-gray-700 dark:text-gray-300">GRUPO SANTA TERESA E.A.S. (80150377-9)</strong></span>
+            </div>
           </div>
         </div>
       )}

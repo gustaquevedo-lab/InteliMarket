@@ -107,3 +107,64 @@ class DepositVaultEntriesRequest(BaseModel):
 
 class RejectVaultDepositRequest(BaseModel):
     motivo: str
+
+
+class CreateTreasuryRemittanceRequest(BaseModel):
+    item_ids: list[UUID]  # IDs de los VaultEntry o drops/handoffs a incluir
+    observaciones: Optional[str] = None
+
+
+class ReceiveTreasuryRemittanceRequest(BaseModel):
+    observaciones: Optional[str] = None
+
+
+class DepositVaultToBankRequest(BaseModel):
+    entry_ids: list[UUID]
+    bank_account_id: UUID
+    numero_boleta: str
+    transportadora: Optional[str] = None
+    fecha_deposito: Optional[str] = None
+    observaciones: Optional[str] = None
+
+
+class TreasuryRemittanceItemResponse(BaseModel):
+    id: UUID
+    remittance_id: UUID
+    tipo_sobre: str
+    referencia_id: Optional[UUID] = None
+    vault_entry_id: Optional[UUID] = None
+    caja_codigo: Optional[str] = None
+    caja_nombre: Optional[str] = None
+    cajero_nombre: Optional[str] = None
+    monto_pyg: Decimal
+    monto_usd: Decimal
+    monto_brl: Decimal
+    ticket_numero: Optional[str] = None
+    verificado_tesoreria: bool
+    observaciones: Optional[str] = None
+    created_at: datetime
+
+
+class TreasuryRemittanceResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    numero: str
+    supervisor_id: UUID
+    supervisor_nombre: str
+    tesorero_id: Optional[UUID] = None
+    tesorero_nombre: Optional[str] = None
+    estado: str
+    total_sobres: int
+    total_pyg: Decimal
+    total_usd: Decimal
+    total_brl: Decimal
+    fecha_envio: datetime
+    fecha_recepcion: Optional[datetime] = None
+    observaciones: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TreasuryRemittanceDetailResponse(TreasuryRemittanceResponse):
+    items: list[TreasuryRemittanceItemResponse]
+

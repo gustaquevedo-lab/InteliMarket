@@ -4,7 +4,7 @@ import {
   CheckCircle2, ChevronRight, X, Banknote, ShieldAlert, Check, Eye, EyeOff,
   Sun, Moon, Home, Users, Landmark, TrendingDown, Inbox, ArrowDownToLine,
   User as UserIcon, ArrowLeft, Volume2, VolumeX, Sparkles, Send,
-  DollarSign, Smartphone, ArrowUpRight, Flame
+  DollarSign, Smartphone, ArrowUpRight, Flame, FileText, Printer, BarChart3, Download
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -229,7 +229,7 @@ export default function SupervisorPage() {
   const [resolvingId, setResolvingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [retiros, setRetiros] = useState<RetiroPendiente[]>([])
-  const [confirmingItem, setConfirmingItem] = useState<{ kind: "handoff" | "retiro"; id: string } | null>(null)
+  const [confirmingItem, setConfirmingItem] = useState<{ kind: "handoff" | "retiro"; id: string; data?: Handoff | RetiroPendiente } | null>(null)
   const [confirmAmount, setConfirmAmount] = useState("")
   const [confirmAmountUsd, setConfirmAmountUsd] = useState("")
   const [confirmAmountBrl, setConfirmAmountBrl] = useState("")
@@ -431,14 +431,14 @@ export default function SupervisorPage() {
   }
 
   const openConfirmHandoff = (h: Handoff) => {
-    setConfirmingItem({ kind: "handoff", id: h.id })
+    setConfirmingItem({ kind: "handoff", id: h.id, data: h })
     setConfirmAmount(String(Math.round(h.monto_pyg)))
     setConfirmAmountUsd(h.monto_usd ? String(h.monto_usd) : "")
     setConfirmAmountBrl(h.monto_brl ? String(h.monto_brl) : "")
   }
 
   const openConfirmRetiro = (r: RetiroPendiente) => {
-    setConfirmingItem({ kind: "retiro", id: r.id })
+    setConfirmingItem({ kind: "retiro", id: r.id, data: r })
     setConfirmAmount(r.monto_pyg ? String(Math.round(r.monto_pyg)) : "")
     setConfirmAmountUsd(r.monto_usd ? String(r.monto_usd) : "")
     setConfirmAmountBrl(r.monto_brl ? String(r.monto_brl) : "")
@@ -1576,12 +1576,52 @@ export default function SupervisorPage() {
               </button>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-              Cuente físicamente el efectivo antes de confirmar. Este recuento ingresará a la bóveda.
+              Cuente físicamente el efectivo antes de confirmar. Este recuento ingresará a la bóveda y se emitirá el comprobante oficial en la caja.
             </p>
+
+            {confirmingItem.data && (
+              <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-3.5 mb-3 border border-slate-200 dark:border-slate-700/60">
+                <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1.5 flex items-center justify-between">
+                  <span>Monto Declarado por Cajera</span>
+                  <span className="text-amber-500 font-bold">
+                    {"caja_id" in confirmingItem.data ? `Caja ${confirmingItem.data.caja_id}` : ""}
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-base font-black text-slate-900 dark:text-white" style={monoFont}>
+                    ₲ {Number("monto_pyg" in confirmingItem.data ? confirmingItem.data.monto_pyg : 0).toLocaleString("es-PY")}
+                  </span>
+                  <div className="text-[11px] font-bold text-slate-500 flex gap-2">
+                    {Number(confirmingItem.data.monto_usd || 0) > 0 && <span>US$ {confirmingItem.data.monto_usd}</span>}
+                    {Number(confirmingItem.data.monto_brl || 0) > 0 && <span>R$ {confirmingItem.data.monto_brl}</span>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Discrepancy indicator in real-time */}
+            {(() => {
+              const declaredPyg = Number(confirmingItem.data?.monto_pyg || 0)
+              const countedPyg = Number(confirmAmount || 0)
+              const diffPyg = countedPyg - declaredPyg
+              if (diffPyg !== 0 && confirmAmount !== "") {
+                return (
+                  <div className={`text-xs font-bold p-2.5 rounded-xl mb-3 flex items-center justify-between border ${
+                    diffPyg > 0 
+                      ? "bg-amber-500/10 border-amber-500/30 text-amber-500" 
+                      : "bg-rose-500/10 border-rose-500/30 text-rose-400"
+                  }`}>
+                    <span>Diferencia con lo declarado:</span>
+                    <span style={monoFont}>{diffPyg > 0 ? `+₲ ${diffPyg.toLocaleString("es-PY")}` : `-₲ ${Math.abs(diffPyg).toLocaleString("es-PY")}`}</span>
+                  </div>
+                )
+              }
+              return null
+            })()}
 
             <div className="space-y-3 mb-4">
               <div>
-                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">Monto Contado en Guaraníes (₲):</label>
+                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">Monto Físico Contado por Supervisor (₲):</label>
                 <input
                   type="text"
                   autoFocus
@@ -1594,7 +1634,7 @@ export default function SupervisorPage() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">R$:</label>
+                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">R$ Contado:</label>
                   <input
                     type="text"
                     value={confirmAmountBrl}
@@ -1604,7 +1644,7 @@ export default function SupervisorPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">US$:</label>
+                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">US$ Contado:</label>
                   <input
                     type="text"
                     value={confirmAmountUsd}

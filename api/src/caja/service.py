@@ -3,12 +3,17 @@
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from decimal import Decimal
 import uuid
 
-from api.src.caja.models import CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff, VaultEntry, VaultDepositApprovalRequest, CashDropRequest
+from api.src.caja.models import (
+    CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff,
+    VaultEntry, VaultDepositApprovalRequest, CashDropRequest,
+    TreasuryRemittance, TreasuryRemittanceItem,
+)
 from api.src.sales.models import Sale, SalePayment
+from api.src.financial.models import BankAccount, BankTransaction
 from api.src.auth.models import User
 
 
@@ -561,6 +566,10 @@ async def list_cash_drop_requests(db: AsyncSession, company_id: str, estado: str
             "observaciones": r.observaciones,
             "estado": r.estado,
             "confirmado_por_nombre": r.confirmado_por_nombre,
+            "monto_confirmado_pyg": float(r.monto_confirmado_pyg) if r.monto_confirmado_pyg is not None else None,
+            "monto_confirmado_usd": float(r.monto_confirmado_usd) if r.monto_confirmado_usd is not None else None,
+            "monto_confirmado_brl": float(r.monto_confirmado_brl) if r.monto_confirmado_brl is not None else None,
+            "discrepancia_confirmacion": r.discrepancia_confirmacion,
             "created_at": r.created_at.isoformat(),
             "fecha_confirmacion": r.fecha_confirmacion.isoformat() if r.fecha_confirmacion else None,
         }
@@ -841,8 +850,42 @@ async def get_vault_dashboard(db: AsyncSession, company_id: str) -> dict:
     )
     pyg, usd, brl, cantidad = en_boveda.first()
 
+    # Custodia y Tránsito
+    en_custodia = await db.execute(
+        select(func.coalesce(func.sum(VaultEntry.monto_pyg), 0))
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "custodia_supervisor")
+    )
+    saldo_custodia = en_custodia.scalar() or 0
+
+    en_transito = await db.execute(
+        select(func.coalesce(func.sum(VaultEntry.monto_pyg), 0))
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_transito")
+    )
+    saldo_transito = en_transito.scalar() or 0
+
     pendientes = await list_pending_handoffs(db, company_id, estado="pendiente")
     retiros_pendientes = await list_cash_drop_requests(db, company_id, estado="pendiente")
+
+    # Remitos en tránsito
+    remitos_res = await db.execute(
+        select(TreasuryRemittance)
+        .where(TreasuryRemittance.company_id == cid, TreasuryRemittance.estado == "en_transito")
+        .order_by(TreasuryRemittance.created_at.desc())
+    )
+    remitos_transito = [
+        {
+            "id": str(r.id),
+            "numero": r.numero,
+            "supervisor_nombre": r.supervisor_nombre,
+            "total_sobres": r.total_sobres,
+            "total_pyg": float(r.total_pyg),
+            "total_usd": float(r.total_usd or 0),
+            "total_brl": float(r.total_brl or 0),
+            "fecha_envio": r.fecha_envio.isoformat() if r.fecha_envio else None,
+            "observaciones": r.observaciones,
+        }
+        for r in remitos_res.scalars().all()
+    ]
 
     ultimos_result = await db.execute(
         select(VaultEntry).where(VaultEntry.company_id == cid).order_by(VaultEntry.created_at.desc()).limit(20)
@@ -859,13 +902,18 @@ async def get_vault_dashboard(db: AsyncSession, company_id: str) -> dict:
 
     return {
         "saldo_en_boveda_pyg": float(pyg), "saldo_en_boveda_usd": float(usd), "saldo_en_boveda_brl": float(brl),
+        "saldo_en_custodia_supervisor_pyg": float(saldo_custodia),
+        "saldo_en_transito_pyg": float(saldo_transito),
         "entradas_en_boveda": int(cantidad),
         "entregas_pendientes": len(pendientes),
         "entregas_pendientes_detalle": pendientes,
         "retiros_pendientes": len(retiros_pendientes),
         "retiros_pendientes_detalle": retiros_pendientes,
+        "remitos_pendientes": len(remitos_transito),
+        "remitos_pendientes_detalle": remitos_transito,
         "movimientos_recientes": ultimos,
     }
+
 
 
 async def list_vault_entries(db: AsyncSession, company_id: str, estado: str | None = None) -> list[dict]:
@@ -1045,6 +1093,383 @@ async def reject_vault_deposit(db: AsyncSession, request_id: str, company_id: st
     await db.flush()
     await db.refresh(request)
     return {"success": True}
+
+
+# ── Remitos de Supervisión a Tesorería / Bóveda Central ─────────────────
+
+async def list_supervisor_pending_sobres(db: AsyncSession, company_id: str, supervisor_id: str | None = None) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    # Buscamos VaultEntry en estado "custodia_supervisor" o "en_boveda" (no asignadas a remitos)
+    query = select(VaultEntry).where(
+        VaultEntry.company_id == cid,
+        VaultEntry.estado.in_(["custodia_supervisor", "en_boveda"]),
+    ).order_by(VaultEntry.created_at.desc())
+
+    res = await db.execute(query)
+    entries = list(res.scalars().all())
+
+    # Excluir entradas que ya pertenecen a un remito
+    rem_items_res = await db.execute(
+        select(TreasuryRemittanceItem.vault_entry_id).where(TreasuryRemittanceItem.vault_entry_id.isnot(None))
+    )
+    used_entry_ids = set(rem_items_res.scalars().all())
+
+    available = [e for e in entries if e.id not in used_entry_ids]
+
+    results = []
+    for e in available:
+        caja_nombre = "Caja Principal"
+        caja_codigo = "—"
+        cajero_nombre = "—"
+        tipo_lbl = "sangria" if e.origen == "cash_drop" else ("cierre_turno" if e.origen == "entrega_cajero" else e.origen)
+
+        if e.handoff_id:
+            h_res = await db.execute(select(CashHandoff).where(CashHandoff.id == e.handoff_id))
+            h = h_res.scalar_one_or_none()
+            if h and h.session_id:
+                s_res = await db.execute(select(CashSession).where(CashSession.id == h.session_id))
+                s = s_res.scalar_one_or_none()
+                if s:
+                    cajero_nombre = s.cajero_nombre or "—"
+                    reg_res = await db.execute(select(CashRegister).where(CashRegister.id == s.register_id))
+                    reg = reg_res.scalar_one_or_none()
+                    if reg:
+                        caja_nombre = reg.nombre
+                        caja_codigo = reg.codigo
+
+        results.append({
+            "id": str(e.id),
+            "tipo_sobre": tipo_lbl,
+            "origen": e.origen,
+            "monto_pyg": float(e.monto_pyg),
+            "monto_usd": float(e.monto_usd or 0),
+            "monto_brl": float(e.monto_brl or 0),
+            "caja_nombre": caja_nombre,
+            "caja_codigo": caja_codigo,
+            "cajero_nombre": cajero_nombre,
+            "observaciones": e.observaciones,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        })
+    return results
+
+
+async def create_treasury_remittance(
+    db: AsyncSession,
+    company_id: str,
+    supervisor_id: str,
+    supervisor_nombre: str,
+    item_ids: list[str],
+    observaciones: str | None = None,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(supervisor_id)
+    e_uuids = [uuid.UUID(i) for i in item_ids]
+
+    entries_res = await db.execute(
+        select(VaultEntry).where(VaultEntry.id.in_(e_uuids), VaultEntry.company_id == cid)
+    )
+    entries = list(entries_res.scalars().all())
+    if not entries:
+        raise ValueError("No se encontraron sobres válidos para incluir en el remito")
+
+    # Generar correlativo REM-YYYYMMDD-XXXX
+    today_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    prefix = f"REM-{today_str}-"
+    count_res = await db.execute(
+        select(func.count()).select_from(TreasuryRemittance).where(
+            TreasuryRemittance.company_id == cid,
+            TreasuryRemittance.numero.like(f"{prefix}%"),
+        )
+    )
+    count_today = count_res.scalar() or 0
+    numero = f"{prefix}{count_today + 1:04d}"
+
+    tot_pyg = sum((e.monto_pyg for e in entries), Decimal("0"))
+    tot_usd = sum((e.monto_usd or 0 for e in entries), Decimal("0"))
+    tot_brl = sum((e.monto_brl or 0 for e in entries), Decimal("0"))
+
+    remittance = TreasuryRemittance(
+        company_id=cid,
+        numero=numero,
+        supervisor_id=sid,
+        supervisor_nombre=supervisor_nombre,
+        estado="en_transito",
+        total_sobres=len(entries),
+        total_pyg=tot_pyg,
+        total_usd=tot_usd,
+        total_brl=tot_brl,
+        fecha_envio=datetime.now(timezone.utc),
+        observaciones=observaciones,
+    )
+    db.add(remittance)
+    await db.flush()
+    await db.refresh(remittance)
+
+    for e in entries:
+        caja_nombre = "Caja Principal"
+        caja_codigo = "—"
+        cajero_nombre = "—"
+        tipo_lbl = "sangria" if e.origen == "cash_drop" else ("cierre_turno" if e.origen == "entrega_cajero" else e.origen)
+
+        if e.handoff_id:
+            h_res = await db.execute(select(CashHandoff).where(CashHandoff.id == e.handoff_id))
+            h = h_res.scalar_one_or_none()
+            if h and h.session_id:
+                s_res = await db.execute(select(CashSession).where(CashSession.id == h.session_id))
+                s = s_res.scalar_one_or_none()
+                if s:
+                    cajero_nombre = s.cajero_nombre or "—"
+                    reg_res = await db.execute(select(CashRegister).where(CashRegister.id == s.register_id))
+                    reg = reg_res.scalar_one_or_none()
+                    if reg:
+                        caja_nombre = reg.nombre
+                        caja_codigo = reg.codigo
+
+        it = TreasuryRemittanceItem(
+            remittance_id=remittance.id,
+            tipo_sobre=tipo_lbl,
+            referencia_id=e.handoff_id,
+            vault_entry_id=e.id,
+            caja_codigo=caja_codigo,
+            caja_nombre=caja_nombre,
+            cajero_nombre=cajero_nombre,
+            monto_pyg=e.monto_pyg,
+            monto_usd=e.monto_usd or 0,
+            monto_brl=e.monto_brl or 0,
+            verificado_tesoreria=False,
+            observaciones=e.observaciones,
+        )
+        db.add(it)
+        e.estado = "en_transito"
+
+    await db.flush()
+    await db.refresh(remittance)
+    return await get_treasury_remittance(db, company_id, str(remittance.id))
+
+
+async def list_treasury_remittances(db: AsyncSession, company_id: str, estado: str | None = None) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    query = select(TreasuryRemittance).where(TreasuryRemittance.company_id == cid)
+    if estado:
+        query = query.where(TreasuryRemittance.estado == estado)
+    query = query.order_by(TreasuryRemittance.created_at.desc())
+
+    res = await db.execute(query)
+    remittances = list(res.scalars().all())
+
+    return [
+        {
+            "id": str(r.id),
+            "company_id": str(r.company_id),
+            "numero": r.numero,
+            "supervisor_id": str(r.supervisor_id),
+            "supervisor_nombre": r.supervisor_nombre,
+            "tesorero_id": str(r.tesorero_id) if r.tesorero_id else None,
+            "tesorero_nombre": r.tesorero_nombre,
+            "estado": r.estado,
+            "total_sobres": r.total_sobres,
+            "total_pyg": float(r.total_pyg),
+            "total_usd": float(r.total_usd or 0),
+            "total_brl": float(r.total_brl or 0),
+            "fecha_envio": r.fecha_envio.isoformat() if r.fecha_envio else None,
+            "fecha_recepcion": r.fecha_recepcion.isoformat() if r.fecha_recepcion else None,
+            "observaciones": r.observaciones,
+            "created_at": r.created_at.isoformat(),
+            "updated_at": r.updated_at.isoformat(),
+        }
+        for r in remittances
+    ]
+
+
+async def get_treasury_remittance(db: AsyncSession, company_id: str, remittance_id: str) -> dict | None:
+    cid = uuid.UUID(company_id)
+    rid = uuid.UUID(remittance_id)
+
+    r_res = await db.execute(
+        select(TreasuryRemittance).where(TreasuryRemittance.id == rid, TreasuryRemittance.company_id == cid)
+    )
+    r = r_res.scalar_one_or_none()
+    if not r:
+        return None
+
+    items_res = await db.execute(
+        select(TreasuryRemittanceItem).where(TreasuryRemittanceItem.remittance_id == rid).order_by(TreasuryRemittanceItem.created_at.asc())
+    )
+    items = list(items_res.scalars().all())
+
+    return {
+        "id": str(r.id),
+        "company_id": str(r.company_id),
+        "numero": r.numero,
+        "supervisor_id": str(r.supervisor_id),
+        "supervisor_nombre": r.supervisor_nombre,
+        "tesorero_id": str(r.tesorero_id) if r.tesorero_id else None,
+        "tesorero_nombre": r.tesorero_nombre,
+        "estado": r.estado,
+        "total_sobres": r.total_sobres,
+        "total_pyg": float(r.total_pyg),
+        "total_usd": float(r.total_usd or 0),
+        "total_brl": float(r.total_brl or 0),
+        "fecha_envio": r.fecha_envio.isoformat() if r.fecha_envio else None,
+        "fecha_recepcion": r.fecha_recepcion.isoformat() if r.fecha_recepcion else None,
+        "observaciones": r.observaciones,
+        "created_at": r.created_at.isoformat(),
+        "updated_at": r.updated_at.isoformat(),
+        "items": [
+            {
+                "id": str(it.id),
+                "remittance_id": str(it.remittance_id),
+                "tipo_sobre": it.tipo_sobre,
+                "referencia_id": str(it.referencia_id) if it.referencia_id else None,
+                "vault_entry_id": str(it.vault_entry_id) if it.vault_entry_id else None,
+                "caja_codigo": it.caja_codigo,
+                "caja_nombre": it.caja_nombre,
+                "cajero_nombre": it.cajero_nombre,
+                "monto_pyg": float(it.monto_pyg),
+                "monto_usd": float(it.monto_usd or 0),
+                "monto_brl": float(it.monto_brl or 0),
+                "ticket_numero": it.ticket_numero,
+                "verificado_tesoreria": it.verificado_tesoreria,
+                "observaciones": it.observaciones,
+                "created_at": it.created_at.isoformat(),
+            }
+            for it in items
+        ],
+    }
+
+
+async def receive_treasury_remittance(
+    db: AsyncSession,
+    company_id: str,
+    remittance_id: str,
+    tesorero_id: str,
+    tesorero_nombre: str,
+    observaciones: str | None = None,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    rid = uuid.UUID(remittance_id)
+
+    r_res = await db.execute(
+        select(TreasuryRemittance).where(TreasuryRemittance.id == rid, TreasuryRemittance.company_id == cid)
+    )
+    rem = r_res.scalar_one_or_none()
+    if not rem:
+        raise ValueError("Remito no encontrado")
+
+    if rem.estado == "recibido_en_boveda":
+        return await get_treasury_remittance(db, company_id, remittance_id)
+
+    rem.estado = "recibido_en_boveda"
+    rem.tesorero_id = uuid.UUID(tesorero_id)
+    rem.tesorero_nombre = tesorero_nombre
+    rem.fecha_recepcion = datetime.now(timezone.utc)
+    if observaciones:
+        rem.observaciones = f"{rem.observaciones + ' -- ' if rem.observaciones else ''}{observaciones}"
+
+    # Marcar items verificados y pasar VaultEntry a "en_boveda" (Consolidación definitiva)
+    items_res = await db.execute(
+        select(TreasuryRemittanceItem).where(TreasuryRemittanceItem.remittance_id == rid)
+    )
+    items = list(items_res.scalars().all())
+    for it in items:
+        it.verificado_tesoreria = True
+        if it.vault_entry_id:
+            ve_res = await db.execute(select(VaultEntry).where(VaultEntry.id == it.vault_entry_id))
+            ve = ve_res.scalar_one_or_none()
+            if ve:
+                ve.estado = "en_boveda"
+
+    await db.flush()
+    await db.refresh(rem)
+    return await get_treasury_remittance(db, company_id, remittance_id)
+
+
+async def deposit_vault_to_bank(
+    db: AsyncSession,
+    company_id: str,
+    user_id: str | None,
+    bank_account_id: str,
+    entry_ids: list[str],
+    numero_boleta: str,
+    transportadora: str | None = None,
+    fecha_deposito_str: str | None = None,
+    observaciones: str | None = None,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    bid = uuid.UUID(bank_account_id)
+    e_uuids = [uuid.UUID(i) for i in entry_ids]
+
+    # 1. Verificar cuenta bancaria destino
+    acc_res = await db.execute(select(BankAccount).where(BankAccount.id == bid, BankAccount.company_id == cid))
+    acc = acc_res.scalar_one_or_none()
+    if not acc:
+        raise ValueError("Cuenta bancaria destino no encontrada")
+
+    # 2. Verificar entradas en bóveda
+    entries_res = await db.execute(
+        select(VaultEntry).where(
+            VaultEntry.id.in_(e_uuids),
+            VaultEntry.company_id == cid,
+            VaultEntry.estado == "en_boveda",
+        )
+    )
+    entries = list(entries_res.scalars().all())
+    if not entries:
+        raise ValueError("Ninguna de las entradas seleccionadas está disponible en bóveda")
+
+    tot_pyg = sum((e.monto_pyg for e in entries), Decimal("0"))
+
+    # Fecha del depósito
+    f_dep = date.today()
+    if fecha_deposito_str:
+        try:
+            f_dep = date.fromisoformat(fecha_deposito_str.split("T")[0])
+        except Exception:
+            f_dep = date.today()
+
+    # 3. Crear BankTransaction
+    desc = f"Depósito Recaudación Bóveda - Boleta #{numero_boleta}" + (f" ({transportadora})" if transportadora else "")
+    if observaciones:
+        desc += f" - {observaciones}"
+
+    bank_tx = BankTransaction(
+        company_id=cid,
+        bank_account_id=acc.id,
+        fecha=f_dep,
+        tipo="deposito",
+        monto=tot_pyg,
+        moneda="PYG",
+        categoria="deposito_recaudacion_caja",
+        descripcion=desc,
+        referencia=numero_boleta,
+        conciliado=False,
+    )
+    db.add(bank_tx)
+    await db.flush()
+    await db.refresh(bank_tx)
+
+    # 4. Acreditar saldo en la cuenta bancaria
+    acc.saldo_actual = (acc.saldo_actual or Decimal("0")) + tot_pyg
+
+    # 5. Marcar VaultEntry como depositado
+    now_dt = datetime.now(timezone.utc)
+    for e in entries:
+        e.estado = "depositado"
+        e.fecha_deposito = now_dt
+        e.bank_transaction_id = bank_tx.id
+        if user_id:
+            e.registrado_por = uuid.UUID(user_id)
+
+    await db.flush()
+    return {
+        "success": True,
+        "monto_total_pyg": float(tot_pyg),
+        "entradas_depositadas": len(entries),
+        "bank_transaction_id": str(bank_tx.id),
+        "banco_nombre": acc.banco,
+        "numero_cuenta": acc.numero_cuenta,
+        "numero_boleta": numero_boleta,
+    }
 
 
 # ── Datos para reportes PDF ────────────────────────────────────────────

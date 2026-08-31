@@ -192,3 +192,49 @@ class CashRegisterMovement(Base):
     usuario = Column(String(60))
     observaciones = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class TreasuryRemittance(Base):
+    """Remito de Envío de Valores: Agrupa los sobres individuales (sangrías y cierres)
+    verificados por la supervisora para su traslado y entrega formal a Tesorería / Bóveda Central."""
+    __tablename__ = "treasury_remittances"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    numero = Column(String(50), nullable=False, index=True)  # ej: REM-20260831-0001
+    supervisor_id = Column(UUID(as_uuid=True), nullable=False)
+    supervisor_nombre = Column(String(100), nullable=False)
+    tesorero_id = Column(UUID(as_uuid=True))
+    tesorero_nombre = Column(String(100))
+    estado = Column(String(30), nullable=False, default="en_transito")  # en_transito | recibido_en_boveda | observado | anulado
+    total_sobres = Column(Integer, nullable=False, default=0)
+    total_pyg = Column(Numeric(15, 0), nullable=False, default=0)
+    total_usd = Column(Numeric(12, 2), default=0)
+    total_brl = Column(Numeric(12, 2), default=0)
+    fecha_envio = Column(DateTime(timezone=True), server_default=func.now())
+    fecha_recepcion = Column(DateTime(timezone=True))
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TreasuryRemittanceItem(Base):
+    """Detalle de cada sobre individual incluido en el remito de supervisión."""
+    __tablename__ = "treasury_remittance_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    remittance_id = Column(UUID(as_uuid=True), ForeignKey("treasury_remittances.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo_sobre = Column(String(30), nullable=False)  # sangria | cierre_turno | otro
+    referencia_id = Column(UUID(as_uuid=True), nullable=True)  # cash_drop_request_id o handoff_id
+    vault_entry_id = Column(UUID(as_uuid=True), ForeignKey("vault_entries.id"), nullable=True)
+    caja_codigo = Column(String(50))
+    caja_nombre = Column(String(100))
+    cajero_nombre = Column(String(100))
+    monto_pyg = Column(Numeric(15, 0), nullable=False, default=0)
+    monto_usd = Column(Numeric(12, 2), default=0)
+    monto_brl = Column(Numeric(12, 2), default=0)
+    ticket_numero = Column(String(50))
+    verificado_tesoreria = Column(Boolean, default=False)
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+

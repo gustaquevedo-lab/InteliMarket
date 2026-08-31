@@ -878,11 +878,19 @@ export const api = {
     cajeros: {
       performance: () => client.get<{ cajero_nombre: string; total_cierres: number; monto_total_manejado: number; diferencia_acumulada: number; diferencia_promedio: number; cierres_con_revision: number; pct_con_revision: number; ultimo_cierre: string | null }[]>("/v1/caja/cajeros/performance"),
     },
+    treasuryRemittances: {
+      pendingSobres: () => client.get<{ id: string; tipo_sobre: string; referencia_id: string; caja_codigo?: string; caja_nombre?: string; cajero_nombre?: string; monto_pyg: number; monto_usd: number; monto_brl: number; ticket_numero?: string; fecha: string }[]>("/v1/caja/supervisor/pending-sobres"),
+      create: (data: { item_ids: string[]; observaciones?: string }) => client.post<any>("/v1/caja/treasury-remittances", data),
+      list: (estado?: string) => client.get<any[]>("/v1/caja/treasury-remittances", estado ? { estado } : undefined),
+      get: (id: string) => client.get<any>(`/v1/caja/treasury-remittances/${id}`),
+      receive: (id: string, data?: { observaciones?: string }) => client.post<any>(`/v1/caja/treasury-remittances/${id}/receive`, data || {}),
+    },
   },
   vault: {
     dashboard: () => client.get<VaultDashboard>("/v1/vault/dashboard"),
     entries: (params?: { estado?: string }) => client.get<VaultEntry[]>("/v1/vault/entries", params as any),
     deposit: (data: { entry_ids: string[]; bank_transaction_id?: string }) => client.post<{ deposited?: boolean; depositadas?: number; pending_approval?: boolean; request_id?: string; monto_total_pyg?: number }>("/v1/vault/deposit", data),
+    depositToBank: (data: { entry_ids: string[]; bank_account_id: string; numero_boleta: string; transportadora?: string; fecha_deposito?: string; observaciones?: string }) => client.post<any>("/v1/vault/deposit-to-bank", data),
     depositApprovals: {
       list: (estado?: string) => client.get<{ id: string; entry_ids: string[]; monto_total_pyg: number; estado: string; aprobado_supervisor_id: string | null; aprobado_gerente_id: string | null; created_at: string }[]>("/v1/vault/deposit-approvals", estado ? { estado } : undefined),
       approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/vault/deposit-approvals/${id}/approve`, {}),
@@ -1394,6 +1402,23 @@ export const api = {
     cancelParcelado: (referenciaInterna: string) =>
       client.post<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/credito-parcelado/cancel/${referenciaInterna}`, {}),
     linkSale: (txnId: string, saleId: string) => client.patch<{ message: string }>(`/v1/plugpay/transactions/${txnId}/link-sale/${saleId}`, {}),
+    getTransactions: (params?: { fecha_desde?: string; fecha_hasta?: string; tipo_operacion?: string; exitosa?: boolean; limit?: number; offset?: number }) =>
+      client.get<{ ok: boolean; items: any[]; total: number; limit: number; offset: number }>("/v1/plugpay/transactions", params),
+    getSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>
+      client.get<{
+        ok: boolean;
+        total_transacciones: number;
+        total_exitosas: number;
+        total_fallidas: number;
+        tasa_exito_pct: number;
+        volumen_pix_brl: number;
+        volumen_pix_pyg: number;
+        volumen_parcelado_brl: number;
+        volumen_parcelado_pyg: number;
+        total_volumen_brl: number;
+        total_volumen_pyg: number;
+        transacciones_con_venta: number;
+      }>("/v1/plugpay/summary", params),
   },
   integrations: {
     configs: () => client.get<IntegrationConfig[]>("/api/integrations/configs"),

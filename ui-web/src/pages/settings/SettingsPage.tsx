@@ -1130,12 +1130,13 @@ export default function SettingsPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
+                  { key: "mostrar_numero_comprobante", label: "Mostrar Nº de Factura / Comprobante Fiscal" },
+                  { key: "usar_numero_interno_venta", label: "Imprimir Nº Interno de Venta" },
                   { key: "mostrar_cajero", label: "Mostrar Nombre del Cajero y Boca" },
                   { key: "mostrar_caja", label: "Mostrar Punto de Expedición" },
                   { key: "mostrar_cliente", label: "Mostrar Nombre del Cliente" },
                   { key: "mostrar_ruc_cliente", label: "Mostrar RUC / C.I. del Cliente" },
                   { key: "mostrar_sku", label: "Mostrar Código SKU / Barra en ítems" },
-                  { key: "usar_numero_interno_venta", label: "Imprimir Nº Interno de Venta" },
                 ].map(opt => (
                   <div key={opt.key} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-900 dark:text-white">{opt.label}</span>

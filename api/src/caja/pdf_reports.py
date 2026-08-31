@@ -364,3 +364,129 @@ def generate_cierre_sesion_individual_pdf(
     _build(doc, elements)
     return buffer.getvalue()
 
+
+def generate_treasury_remittance_pdf(
+    company: dict,
+    remittance: dict,
+    items: list[dict],
+    generated_by: str = "",
+) -> bytes:
+    """Genera el remito oficial de entrega de valores de Supervisión a Tesorería."""
+    buffer = io.BytesIO()
+    doc, styles = _base_doc(buffer, f"Remito de Valores #{remittance.get('numero', '')}", company, generated_by)
+    
+    fecha_envio_str = ""
+    if remittance.get("fecha_envio"):
+        fe = remittance["fecha_envio"]
+        fecha_envio_str = fe.strftime("%d/%m/%Y %H:%M") if hasattr(fe, "strftime") else str(fe)[:16]
+
+    elements = _company_header(
+        company,
+        styles,
+        f"REMITO DE ENTREGA DE VALORES #{remittance.get('numero', '')}",
+        f"Fecha y Hora de Envío: {fecha_envio_str} | Estado: {(remittance.get('estado') or '').upper()}",
+        generated_by,
+    )
+
+    # 1. METADATOS DEL REMITO
+    info_data = [
+        [
+            Paragraph(f"<b>Supervisora Responsable:</b> {remittance.get('supervisor_nombre') or '—'}", styles["Small"]),
+            Paragraph(f"<b>Receptor Tesorería:</b> {remittance.get('tesorero_nombre') or 'Pendiente de Recepción'}", styles["Small"]),
+        ],
+        [
+            Paragraph(f"<b>Total Sobres Rendidos:</b> {remittance.get('total_sobres') or len(items)} sobres", styles["Small"]),
+            Paragraph(f"<b>Estado Actual:</b> {(remittance.get('estado') or 'en_transito').upper()}", styles["Small"]),
+        ],
+    ]
+    t_info = Table(info_data, colWidths=[90 * mm, 90 * mm])
+    t_info.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), GRAY_LIGHT),
+        ("PADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(t_info)
+    elements.append(Spacer(1, 8))
+
+    # 2. TOTALES RESUMEN
+    resumen_rows = [
+        ("Total Sobres Declarados", str(len(items)), False),
+        ("Total Efectivo Guaraníes (PYG)", _fmt_gs(remittance.get("total_pyg") or 0), True),
+    ]
+    if remittance.get("total_usd") and float(remittance["total_usd"]) > 0:
+        resumen_rows.append(("Total Efectivo Dólares (USD)", f"US$ {float(remittance['total_usd']):.2f}", False))
+    if remittance.get("total_brl") and float(remittance["total_brl"]) > 0:
+        resumen_rows.append(("Total Efectivo Reales (BRL)", f"R$ {float(remittance['total_brl']):.2f}", False))
+    
+    elements.append(_totals_table(resumen_rows))
+    elements.append(Spacer(1, 10))
+
+    # 3. DETALLE SOBRE POR SOBRE (CAJAS RENDIDAS)
+    elements.append(Paragraph("<b>DETALLE DE SOBRES Y CAJAS RENDIDAS</b>", styles["Normal"]))
+    elements.append(Spacer(1, 4))
+
+    table_data = [["Nº", "Caja", "Cajero/a Emisor/a", "Tipo Sobre", "Guaraníes (PYG)", "USD / BRL", "Revisión Tesorería"]]
+    for i, it in enumerate(items, start=1):
+        tipo_lbl = "SANGRÍA (DROP)" if it.get("tipo_sobre") == "sangria" else "CIERRE DE TURNO"
+        m_pyg = _fmt_gs(it.get("monto_pyg") or 0)
+        
+        divisas = []
+        if it.get("monto_usd") and float(it["monto_usd"]) > 0:
+            divisas.append(f"US$ {float(it['monto_usd']):.2f}")
+        if it.get("monto_brl") and float(it["monto_brl"]) > 0:
+            divisas.append(f"R$ {float(it['monto_brl']):.2f}")
+        divisas_str = " + ".join(divisas) if divisas else "—"
+
+        verif_str = "[ CONFORME ]" if it.get("verificado_tesoreria") else "[ PENDIENTE ]"
+
+        table_data.append([
+            str(i),
+            it.get("caja_nombre") or it.get("caja_codigo") or "Caja",
+            it.get("cajero_nombre") or "—",
+            tipo_lbl,
+            m_pyg,
+            divisas_str,
+            verif_str,
+        ])
+
+    t_items = Table(table_data, colWidths=[8 * mm, 32 * mm, 40 * mm, 30 * mm, 28 * mm, 22 * mm, 20 * mm], repeatRows=1)
+    t_items.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (4, 0), (5, -1), "RIGHT"),
+        ("ALIGN", (6, 0), (6, -1), "CENTER"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(t_items)
+    elements.append(Spacer(1, 14))
+
+    # 4. OBSERVACIONES
+    if remittance.get("observaciones"):
+        elements.append(Paragraph(f"<b>Observaciones:</b> {remittance['observaciones']}", styles["Small"]))
+        elements.append(Spacer(1, 12))
+
+    # 5. DOBLE FIRMA DE CUSTODIA Y RECEPCIÓN
+    firmas_data = [
+        ["_________________________________________", "_________________________________________"],
+        ["ENTREGADO POR (SUPERVISIÓN)", "RECIBIDO Y CONSOLIDADO EN BÓVEDA"],
+        [f"Supervisora: {remittance.get('supervisor_nombre') or '—'}", f"Tesorería: {remittance.get('tesorero_nombre') or '____________________'}"],
+        ["Fecha: ____/____/________   Hora: ____:____", "Fecha: ____/____/________   Hora: ____:____"],
+    ]
+    t_firmas = Table(firmas_data, colWidths=[90 * mm, 90 * mm])
+    t_firmas.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("FONTNAME", (0, 1), (-1, 1), FONT_BOLD),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    elements.append(t_firmas)
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
+
