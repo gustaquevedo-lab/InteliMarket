@@ -4709,13 +4709,16 @@ export default function POSPage() {
         if (tpl.habilitar_recuadro_ahorro !== false) {
           t += escposDashes(W) + '\n'
           t += ESCPOS_ALIGN_CENTER
+          // 'left' aqui es intencional: la impresora ya esta en modo ALIGN_CENTER;
+          // si ademas se agregan espacios manuales de centrado (escposCenter) el
+          // texto queda desplazado hacia la derecha en el papel.
           if (isClubMember) {
             t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_ahorro_con_descuento || 'TU EXTRA AHORRO HOY:') + ESCPOS_BOLD_OFF + '\n'
-            t += escposWrapText(tpl.subtitulo_ahorro_promo || '• En Promociones y Extra Club', W, 'center')
+            t += escposWrapText(tpl.subtitulo_ahorro_promo || '• En Promociones y Extra Club', W)
           } else {
             t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_invitacion_ahorro || 'SUMATE AL EXTRA AHORRO DIARIO!') + ESCPOS_BOLD_OFF + '\n'
-            t += escposWrapText(tpl.linea1_invitacion_ahorro || '• Compra por fardo/caja a precio [M]', W, 'center')
-            t += escposWrapText(tpl.linea2_invitacion_ahorro || '• Aprovecha las Ofertas de la Semana', W, 'center')
+            t += escposWrapText(tpl.linea1_invitacion_ahorro || '• Compra por fardo/caja a precio [M]', W)
+            t += escposWrapText(tpl.linea2_invitacion_ahorro || '• Aprovecha las Ofertas de la Semana', W)
           }
           t += ESCPOS_ALIGN_LEFT
         }
@@ -4754,10 +4757,10 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_CENTER
           if (isClubMember) {
             t += ESCPOS_BOLD_ON + '* CLUB FIDELIDAD EXTRA *' + ESCPOS_BOLD_OFF + '\n'
-            t += escposWrapText(msgSocio, W, 'center')
+            t += escposWrapText(msgSocio, W)  // sin 'center': impresora ya centra
           } else {
             t += ESCPOS_BOLD_ON + '* UNITE AL EXTRA CLUB *' + ESCPOS_BOLD_OFF + '\n'
-            t += escposWrapText(msgInvitacion, W, 'center')
+            t += escposWrapText(msgInvitacion, W)  // sin 'center'
             if (tpl.mostrar_qr_club && tpl.qr_url_club) {
               t += escposQr(tpl.qr_url_club) + '\n'
             }
@@ -4766,7 +4769,7 @@ export default function POSPage() {
         }
 
         if (showMarketing && tpl.mensaje_marketing) {
-          t += ESCPOS_ALIGN_CENTER + ESCPOS_BOLD_ON + escposWrapText(tpl.mensaje_marketing, W, 'center') + ESCPOS_BOLD_OFF + ESCPOS_ALIGN_LEFT
+          t += ESCPOS_ALIGN_CENTER + ESCPOS_BOLD_ON + escposWrapText(tpl.mensaje_marketing, W) + ESCPOS_BOLD_OFF + ESCPOS_ALIGN_LEFT
         }
 
         if (donacionActiva && montoDonacionEfectiva > 0) {
@@ -4774,7 +4777,7 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_CENTER
           t += ESCPOS_BOLD_ON + escposStripAccents(tpl.donacion_titulo || '* ABRE TU CORAZON *') + ESCPOS_BOLD_OFF + '\n'
           const donMsg = tpl.donacion_mensaje || `Gracias por colaborar con ${fmtGs(montoDonacionEfectiva)} para el Centro Amor y Esperanza.`
-          t += escposWrapText(donMsg, W, 'center')
+          t += escposWrapText(donMsg, W)  // sin 'center': impresora ya centra
           t += 'Conoce mas en:\n'
           t += ESCPOS_BOLD_ON + escposStripAccents(tpl.donacion_web || 'www.centroamoresperanza.org') + ESCPOS_BOLD_OFF + '\n'
           t += ESCPOS_ALIGN_LEFT
@@ -4784,14 +4787,14 @@ export default function POSPage() {
           t += ESCPOS_ALIGN_CENTER
           t += 'CUPON DE RECOMPRA\n'
           t += ESCPOS_BOLD_ON + ESCPOS_DOUBLE_ON + cuponCod + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
-          t += escposWrapText(cuponDesc, W, 'center')
+          t += escposWrapText(cuponDesc, W)  // sin 'center'
           t += `Valido por ${cuponDias} dias\n`
           t += ESCPOS_ALIGN_LEFT
         }
 
         t += ESCPOS_ALIGN_CENTER
         if (showQrSifen) t += `Consulte en: ${sifenUrl}\n`
-        t += ESCPOS_BOLD_ON + escposWrapText(msgDespedida, W, 'center') + ESCPOS_BOLD_OFF
+        t += ESCPOS_BOLD_ON + escposWrapText(msgDespedida, W) + ESCPOS_BOLD_OFF  // sin 'center'
         t += '\n'.repeat(Math.max(8, feedLinesCount))
         // Corte automatico (GS V 1 = corte parcial).
         if (tpl.corte_automatico !== false) t += GS + 'V' + '\x01'
