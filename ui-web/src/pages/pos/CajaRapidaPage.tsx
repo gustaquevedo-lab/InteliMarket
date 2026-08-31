@@ -4717,22 +4717,25 @@ export default function POSPage() {
           t += ESCPOS_BOLD_ON + escposTwoCol('VUELTO:', vueltoTxt) + ESCPOS_BOLD_OFF + '\n'
         }
 
-        if (tpl.habilitar_recuadro_ahorro !== false) {
-          t += escposDashes(W) + '\n'
-          t += ESCPOS_ALIGN_CENTER
-          // 'left' aqui es intencional: la impresora ya esta en modo ALIGN_CENTER;
-          // si ademas se agregan espacios manuales de centrado (escposCenter) el
-          // texto queda desplazado hacia la derecha en el papel.
-          if (isClubMember) {
-            t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_ahorro_con_descuento || 'TU EXTRA AHORRO HOY:') + ESCPOS_BOLD_OFF + '\n'
-            t += escposWrapText(tpl.subtitulo_ahorro_promo || '• En Promociones y Extra Club', W)
-          } else {
-            t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_invitacion_ahorro || 'SUMATE AL EXTRA AHORRO DIARIO!') + ESCPOS_BOLD_OFF + '\n'
-            t += escposWrapText(tpl.linea1_invitacion_ahorro || '• Compra por fardo/caja a precio [M]', W)
-            t += escposWrapText(tpl.linea2_invitacion_ahorro || '• Aprovecha las Ofertas de la Semana', W)
+          if (tpl.habilitar_recuadro_ahorro !== false) {
+            t += escposDashes(W) + '\n'
+            t += ESCPOS_ALIGN_CENTER
+            // 'left' aqui es intencional: la impresora ya esta en modo ALIGN_CENTER;
+            // si ademas se agregan espacios manuales de centrado (escposCenter) el
+            // texto queda desplazado hacia la derecha en el papel.
+            if (isClubMember) {
+              t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_ahorro_con_descuento || 'TU EXTRA AHORRO HOY:') + ESCPOS_BOLD_OFF + '\n'
+              if (tpl.subtitulo_ahorro_promo) t += escposWrapText(tpl.subtitulo_ahorro_promo, W)
+              if (tpl.subtitulo_ahorro_mayorista) t += escposWrapText(tpl.subtitulo_ahorro_mayorista, W)
+            } else {
+              t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_invitacion_ahorro || 'SUMATE AL EXTRA AHORRO DIARIO!') + ESCPOS_BOLD_OFF + '\n'
+              // Las 3 lineas configurables -- se imprimen si tienen contenido
+              if (tpl.linea1_invitacion_ahorro) t += escposWrapText(tpl.linea1_invitacion_ahorro, W)
+              if (tpl.linea2_invitacion_ahorro) t += escposWrapText(tpl.linea2_invitacion_ahorro, W)
+              if (tpl.linea3_invitacion_ahorro) t += ESCPOS_BOLD_ON + escposStripAccents(tpl.linea3_invitacion_ahorro) + ESCPOS_BOLD_OFF + '\n'
+            }
+            t += ESCPOS_ALIGN_LEFT
           }
-          t += ESCPOS_ALIGN_LEFT
-        }
 
         if (isClubMember) {
           t += escposDashes(W) + '\n'
