@@ -60,11 +60,27 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == body.email))
+    clean_input = (body.email or "").strip().lower()
+    auto_email = f"{clean_input}@intelimarket.com.py" if "@" not in clean_input else clean_input
+
+    from sqlalchemy import or_
+    result = await db.execute(
+        select(User).where(
+            or_(
+                func.lower(User.email) == clean_input,
+                func.lower(User.email) == auto_email,
+                func.lower(User.nombre) == clean_input,
+                # Soportar variantes con y/i (ej: evelyn vs evelin)
+                func.lower(User.email) == clean_input.replace("evelyn", "evelin"),
+                func.lower(User.email) == auto_email.replace("evelyn", "evelin"),
+            )
+        )
+    )
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Credenciales invalidas")
+
 
     if not user.activo:
         raise HTTPException(status_code=403, detail="Usuario desactivado")
