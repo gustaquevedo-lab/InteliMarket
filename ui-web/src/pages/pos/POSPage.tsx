@@ -1515,7 +1515,11 @@ export default function POSPage() {
     return () => clearTimeout(timer)
   }, [search])
 
-  // Búsqueda remota de productos para Consulta de Precios, con debounce
+  // Búsqueda LOCAL de productos para Consulta de Precios.
+  // Usa el array `products` que ya está en memoria (cargado al abrir el POS)
+  // para dar resultados instantáneos y funcionar 100% offline.
+  // Solo cae al servidor como fallback si el catálogo local todavía está vacío
+  // (p.ej. primera carga antes de que termine la descarga inicial).
   useEffect(() => {
     if (!showPriceCheckModal) return
     const query = priceCheckSearch.trim()
@@ -1525,17 +1529,31 @@ export default function POSPage() {
       return
     }
 
+    // --- Búsqueda local instantánea ---
+    if (products.length > 0) {
+      const q = query.toLowerCase()
+      const matched = products.filter(
+        (p) =>
+          p.nombre?.toLowerCase().includes(q) ||
+          p.sku?.toLowerCase().includes(q) ||
+          (p.codigo_barra && p.codigo_barra.toLowerCase().includes(q))
+      ).slice(0, 30)
+      setPriceCheckResults(matched)
+      setPriceCheckHighlight(0)
+      // Codigo de barras escaneado: 1 sola coincidencia → abre detalle directo
+      if (matched.length === 1) {
+        handlePriceCheckSelect(matched[0])
+      }
+      return
+    }
+
+    // --- Fallback remoto (catálogo local aún vacío) ---
     const timer = setTimeout(async () => {
       setPriceCheckSearching(true)
       try {
         const res = await api.products.list({ search: query, limit: 30 })
         setPriceCheckResults(res || [])
         setPriceCheckHighlight(0)
-        // Consulta directa: un codigo de barras escaneado siempre da una
-        // sola coincidencia exacta -- antes había que ademas tocar la fila
-        // o apretar Enter para recien ver el detalle (foto/escala/monedas),
-        // un paso de mas que generaba exactamente la confusion de "no
-        // aparece nada" cuando lo unico visible todavia era la lista.
         if (res && res.length === 1) {
           handlePriceCheckSelect(res[0])
         }
@@ -1546,7 +1564,7 @@ export default function POSPage() {
     }, 200)
 
     return () => clearTimeout(timer)
-  }, [priceCheckSearch, showPriceCheckModal])
+  }, [priceCheckSearch, showPriceCheckModal, products])
 
   // Búsqueda remota y en vivo de Clientes (F9) con debounce y consulta RUC
   useEffect(() => {
