@@ -1921,6 +1921,11 @@ export default function POSPage() {
 
     const unitPrice = Number(product.precio_venta) || 0
     const ivaTasa = Number(product.iva_tasa) || 10
+    // Promo baked-in desde el catálogo (1 query en background, 0 llamadas al escanear)
+    const promoPrice = (product as any).en_promocion && (product as any).precio_promo
+      ? Number((product as any).precio_promo)
+      : null
+    const effectivePrice = promoPrice !== null ? promoPrice : unitPrice
 
     if (isPesable) {
       // Cada pesaje es una pieza física distinta (ej. dos cortes de carne del
@@ -1931,7 +1936,7 @@ export default function POSPage() {
           id: `${product.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           product_id: product.id,
           nombre: product.nombre,
-          precio: unitPrice,
+          precio: effectivePrice,
           precio_base: unitPrice,
           sku: product.sku || "",
           codigo_barra: product.codigo_barra,
@@ -1939,7 +1944,12 @@ export default function POSPage() {
           quantity: finalQty,
           iva_tasa: ivaTasa,
           es_pesable: true,
-          origen_balanza: origenBalanza || "balmak_bck30"
+          origen_balanza: origenBalanza || "balmak_bck30",
+          ...(promoPrice !== null ? {
+            en_promocion: true,
+            promocion_id: (product as any).promocion_id || null,
+            promocion_nombre: (product as any).promocion_nombre || null,
+          } : {})
         },
         ...prev,
       ])
@@ -1966,7 +1976,7 @@ export default function POSPage() {
           id: product.id,
           product_id: product.id,
           nombre: product.nombre,
-          precio: unitPrice,
+          precio: effectivePrice,
           precio_base: unitPrice,
           sku: product.sku || "",
           codigo_barra: product.codigo_barra,
@@ -1974,7 +1984,12 @@ export default function POSPage() {
           quantity: newQty,
           iva_tasa: ivaTasa,
           es_pesable: false,
-          origen_balanza: null
+          origen_balanza: null,
+          ...(promoPrice !== null ? {
+            en_promocion: true,
+            promocion_id: (product as any).promocion_id || null,
+            promocion_nombre: (product as any).promocion_nombre || null,
+          } : {})
         },
         ...prev,
       ]
@@ -1982,7 +1997,10 @@ export default function POSPage() {
 
     setSearch("")
     searchInputRef.current?.focus()
-    applyTieredPrice(product.id, newQty, customer.id)
+    // Saltar tiered price si el producto ya tiene promo activa (precio ya correcto)
+    if (promoPrice === null) {
+      applyTieredPrice(product.id, newQty, customer.id)
+    }
   }, [currentScaleWeight, cart, customer.id])
 
   // ── ESCALA DE PRECIOS POR CANTIDAD (sp_tiered_prices) ──────────────────────

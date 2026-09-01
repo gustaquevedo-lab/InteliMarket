@@ -1865,7 +1865,7 @@ export default function POSPage() {
           id: `${product.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           product_id: product.id,
           nombre: product.nombre,
-          precio: unitPrice,
+          precio: effectivePrice,
           precio_base: unitPrice,
           sku: product.sku || "",
           codigo_barra: product.codigo_barra,
@@ -1873,7 +1873,12 @@ export default function POSPage() {
           quantity: finalQty,
           iva_tasa: ivaTasa,
           es_pesable: true,
-          origen_balanza: origenBalanza || "balmak_bck30"
+          origen_balanza: origenBalanza || "balmak_bck30",
+          ...(promoPrice !== null ? {
+            en_promocion: true,
+            promocion_id: (product as any).promocion_id || null,
+            promocion_nombre: (product as any).promocion_nombre || null,
+          } : {})
         },
         ...prev,
       ])
