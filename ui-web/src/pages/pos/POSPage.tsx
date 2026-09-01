@@ -8583,23 +8583,63 @@ export default function POSPage() {
                             )}
 
                             {plugpayState === "esperando" && (
-                              <div className="flex items-center justify-between p-2.5 bg-orange-50 dark:bg-orange-950/40 rounded-xl border border-orange-200 dark:border-orange-800">
-                                {plugpayResult?.qrCodeStringImage && (
-                                  <img src={`data:image/png;base64,${plugpayResult.qrCodeStringImage}`} className="w-14 h-14 rounded-lg bg-white p-1 border shrink-0" alt="PIX QR" />
-                                )}
-                                <div className="flex-1 px-2.5 text-left">
-                                  <div className="flex items-center gap-1 text-xs font-bold text-orange-700 dark:text-orange-300">
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    <span>Esperando confirmación de PlugPay...</span>
+                              <div className="p-4 bg-orange-50/80 dark:bg-orange-950/40 rounded-2xl border border-orange-200 dark:border-orange-800 text-center space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5 text-xs font-black text-orange-700 dark:text-orange-300">
+                                    <Loader2 className="w-4 h-4 animate-spin text-orange-600" />
+                                    <span>Esperando pago PIX en tiempo real...</span>
                                   </div>
+                                  <button
+                                    type="button"
+                                    onClick={resetBancardFlow}
+                                    className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
+                                  >
+                                    Cancelar
+                                  </button>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={resetBancardFlow}
-                                  className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer shrink-0"
-                                >
-                                  Cancelar
-                                </button>
+
+                                {plugpayResult?.qrCodeStringImage && (
+                                  <div className="flex flex-col items-center justify-center py-2">
+                                    <div className="p-3 bg-white rounded-2xl shadow-md border-2 border-orange-500/30 ring-4 ring-orange-500/10">
+                                      <img
+                                        src={`data:image/png;base64,${plugpayResult.qrCodeStringImage}`}
+                                        className="w-56 h-56 sm:w-60 sm:h-60 object-contain rounded-lg"
+                                        alt="PIX QR Code Brasil"
+                                      />
+                                    </div>
+                                    <div className="mt-2.5 flex items-center gap-2">
+                                      <span className="text-xs font-bold text-slate-600 dark:text-slate-300">Total a pagar:</span>
+                                      <span className="text-sm font-black font-posMono text-orange-600 dark:text-orange-400 bg-orange-500/15 px-2.5 py-0.5 rounded-lg border border-orange-500/30">
+                                        R$ {plugpayResult?.valueBRL || (plugpayBrlValue ? plugpayBrlValue.toFixed(2) : "0.00")}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {plugpayResult?.qrCodeCopiaCola && (
+                                  <div className="flex items-center gap-1.5 max-w-sm mx-auto">
+                                    <input
+                                      type="text"
+                                      readOnly
+                                      value={plugpayResult.qrCodeCopiaCola}
+                                      className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-[10px] font-mono truncate text-slate-600 dark:text-slate-300"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(plugpayResult.qrCodeCopiaCola)
+                                        toast.success("Copiado", "Código PIX Copia y Cola copiado al portapapeles.")
+                                      }}
+                                      className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold shrink-0 transition cursor-pointer shadow-xs"
+                                    >
+                                      Copiar PIX
+                                    </button>
+                                  </div>
+                                )}
+
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  El cliente debe escanear el código desde su app bancaria en Brasil (Nubank, Itaú, Bradesco, Mercado Pago, Inter, etc.).
+                                </p>
                               </div>
                             )}
 
