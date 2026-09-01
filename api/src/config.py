@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret_key: str = "dev-jwt-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
+    jwt_access_token_expire_minutes: int = 720  # 12 horas para turnos de POS y PWA de supervisión
     jwt_refresh_token_expire_days: int = 7
 
     # SIFEN
