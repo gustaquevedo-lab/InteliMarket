@@ -81,6 +81,10 @@ class SaleResponse(BaseModel):
     sifen_estado: Optional[str] = None
     observaciones: Optional[str] = None
     puntos_ganados: Optional[int] = None
+    forma_pago: Optional[str] = None
+    customer_nombre: Optional[str] = None
+    customer_doc: Optional[str] = None
+    customer_extra_club: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

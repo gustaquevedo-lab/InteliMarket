@@ -2632,11 +2632,42 @@ export default function POSPage() {
   // ── REIMPRESIÓN DE VENTAS YA EMITIDAS ──────────────────────────────────────
   const [showReimprimirModal, setShowReimprimirModal] = useState(false)
   const [reimprimirTab, setReimprimirTab] = useState<"ventas" | "devoluciones" | "cierres">("ventas")
+  const [reimprimirSearch, setReimprimirSearch] = useState("")
   const [reimprimirSales, setReimprimirSales] = useState<Sale[]>([])
   const [reimprimirReturns, setReimprimirReturns] = useState<any[]>([])
   const [reimprimirSessions, setReimprimirSessions] = useState<any[]>([])
   const [reimprimirLoading, setReimprimirLoading] = useState(false)
   const [reimprimirError, setReimprimirError] = useState("")
+
+  const filteredReimprimirSales = useMemo(() => {
+    const q = reimprimirSearch.trim().toLowerCase()
+    if (!q) return reimprimirSales
+    const qNum = q.replace(/\D/g, "")
+    return reimprimirSales.filter(s => {
+      const num = (s.numero || "").toLowerCase()
+      const numInt = (s.numero_interno || "").toLowerCase()
+      const cNom = (s.customer_nombre || s.customer?.nombre || s.customer?.razon_social || "").toLowerCase()
+      const cDoc = (s.customer_doc || s.customer?.ruc || s.customer?.ci || s.customer?.telefono || "").toLowerCase()
+      const cDocClean = cDoc.replace(/\D/g, "")
+      const cEc = (s.customer_extra_club || s.customer?.extra_club_numero || "").toLowerCase()
+      const totalStr = String(s.total || 0)
+      const totalFormatted = (s.total || 0).toLocaleString("es-PY").toLowerCase()
+      const fp = (s.forma_pago || (s.condicion === "credito" ? "EXTRA_CLUB" : "EFECTIVO")).toLowerCase()
+
+      return (
+        num.includes(q) ||
+        numInt.includes(q) ||
+        cNom.includes(q) ||
+        cDoc.includes(q) ||
+        (qNum && cDocClean.includes(qNum)) ||
+        cEc.includes(q) ||
+        fp.includes(q) ||
+        totalStr.includes(q) ||
+        totalFormatted.includes(q) ||
+        (qNum && totalStr.includes(qNum))
+      )
+    })
+  }, [reimprimirSales, reimprimirSearch])
 
   // Reabrir factura -- agregar identificacion de cliente a una venta que
   // salio como Consumidor Final. Pedido real: el cliente se va, la caja
@@ -2929,7 +2960,7 @@ export default function POSPage() {
     const timer = setTimeout(async () => {
       try {
         const res = await api.customers.list({ search: reabrirPagoCustomerSearch.trim(), limit: 10 } as any)
-        setReabrirPagoCustomerResults(Array.isArray(res) ? res : [])
+        setReabrirPagoCustomerResults((res || []).map(normalizeCustomer))
       } catch (e) {
         setReabrirPagoCustomerResults([])
       } finally {
@@ -9488,6 +9519,30 @@ export default function POSPage() {
               </button>
             </div>
 
+            {/* Buscador Rápido con Fallback a Nombre, CI/RUC y Monto */}
+            {reimprimirTab === "ventas" && (
+              <div className="px-2 pt-2">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={reimprimirSearch}
+                    onChange={(e) => setReimprimirSearch(e.target.value)}
+                    placeholder="🔍 Buscar factura, nombre de cliente, CI, RUC o monto..."
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 font-medium placeholder:text-slate-400"
+                  />
+                  {reimprimirSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setReimprimirSearch("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-0.5"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="overflow-y-auto flex-1 p-2">
               {reimprimirLoading && (
@@ -9503,96 +9558,137 @@ export default function POSPage() {
 
               {reimprimirTab === "ventas" && !reimprimirLoading && !reimprimirError && (
                 <>
-                  {reimprimirSales.length === 0 && (
-                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">No hay ventas recientes para mostrar.</div>
+                  {filteredReimprimirSales.length === 0 && (
+                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">
+                      {reimprimirSearch ? `No se encontraron ventas para "${reimprimirSearch}".` : "No hay ventas recientes para mostrar."}
+                    </div>
                   )}
-                  {reimprimirSales.map((sale) => {
-                    const sinIdentificar = !sale.customer_id || sale.customer_id === DEFAULT_CUSTOMER.id
-                    const fpActual = (sale.forma_pago || "EFECTIVO").toUpperCase()
+                  {filteredReimprimirSales.map((sale) => {
+                    const fpActual = (sale.forma_pago || (sale.condicion === "credito" ? "EXTRA_CLUB" : "EFECTIVO")).toUpperCase()
+                    const clienteNombre = sale.customer_nombre || sale.customer?.nombre || sale.customer?.razon_social || "Consumidor Final"
+                    const esConsumidorFinal = !sale.customer_id || sale.customer_id === DEFAULT_CUSTOMER.id || clienteNombre === "Consumidor Final"
+                    const clienteDoc = sale.customer_doc || sale.customer?.ruc || sale.customer?.ci || sale.customer?.telefono || ""
+                    const extraClubNum = sale.customer_extra_club || sale.customer?.extra_club_numero || ""
+
                     return (
                     <div
                       key={sale.id}
-                      className="p-3 mx-1 my-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent hover:border-slate-300 dark:hover:border-slate-700 transition-all"
+                      className="p-3 mx-1 my-2 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all space-y-2"
                     >
-                      <div className="flex items-center justify-between gap-3">
+                      {/* Cabecera: Factura Nº, Hora y Forma de Pago */}
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black font-posMono text-slate-900 dark:text-white tracking-tight">
+                            Nº {sale.numero || sale.numero_interno || sale.id.slice(0, 8)}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {sale.fecha ? new Date(sale.fecha).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }) : "—"}
+                          </span>
+                        </div>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md border ${
+                          fpActual === "EXTRA_CLUB"
+                            ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30"
+                            : fpActual === "TARJETA"
+                            ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                            : fpActual === "TRANSFERENCIA" || fpActual === "QR"
+                            ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                            : fpActual === "CREDITO"
+                            ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                            : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                        }`}>
+                          {fpActual === "EXTRA_CLUB" ? "★ Extra Club" : fpActual}
+                        </span>
+                      </div>
+
+                      {/* Fila Central: Datos del Cliente y Monto Total */}
+                      <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-slate-900 dark:text-white truncate">Nº {sale.numero || sale.id.slice(0, 8)}</span>
-                            <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md border ${
-                              fpActual === "EXTRA_CLUB"
-                                ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30"
-                                : fpActual === "TARJETA"
-                                ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
-                                : fpActual === "TRANSFERENCIA" || fpActual === "QR"
-                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
-                                : fpActual === "CREDITO"
-                                ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
-                                : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                            }`}>
-                              {fpActual === "EXTRA_CLUB" ? "★ Extra Club" : fpActual}
-                            </span>
+                          <div className="flex items-center gap-1 text-xs font-bold text-slate-800 dark:text-slate-200">
+                            <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate">{clienteNombre}</span>
+                            {extraClubNum && (
+                              <span className="px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-black shrink-0">
+                                ★ #{extraClubNum}
+                              </span>
+                            )}
                           </div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                            {sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY") : "—"} · <strong className="text-slate-800 dark:text-slate-200">{formatPYG(sale.total || 0)}</strong>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            {clienteDoc ? `Doc: ${clienteDoc}` : "Sin documento"} · {sale.condicion ? sale.condicion.toUpperCase() : "CONTADO"}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {sinIdentificar && (
-                            <button
-                              onClick={() => {
-                                setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
-                                setReabrirFacturaSearch("")
-                                setReabrirFacturaResults([])
-                                setReabrirPagoSaleId(null)
-                              }}
-                              title="Agregar identificación de cliente a esta factura (requiere autorización de supervisor)"
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white cursor-pointer shadow-xs"
-                            >
-                              <User className="w-3.5 h-3.5" />
-                              Reabrir Titular
-                            </button>
-                          )}
+
+                        <div className="text-right shrink-0">
+                          <div className="text-sm font-black font-posMono text-slate-900 dark:text-white">
+                            {formatPYG(sale.total || 0)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Barra de Acciones */}
+                      <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+                        {esConsumidorFinal && (
                           <button
                             onClick={() => {
-                              if (reabrirPagoSaleId === sale.id) {
-                                setReabrirPagoSaleId(null)
-                                setReabrirPagoFormaPago("")
-                                setReabrirPagoMotivo("")
-                                setReabrirPagoCustomer(null)
-                                setReabrirPagoCustomerSearch("")
-                                setReabrirPagoCustomerResults([])
-                              } else {
-                                setReabrirPagoSaleId(sale.id)
-                                setReabrirPagoFormaPago(fpActual)
-                                setReabrirPagoMotivo("")
-                                setReabrirFacturaSaleId(null)
-                                if (sale.customer && String(sale.customer.id) !== DEFAULT_CUSTOMER.id) {
-                                  setReabrirPagoCustomer(sale.customer)
-                                } else {
-                                  setReabrirPagoCustomer(null)
-                                }
-                                setReabrirPagoCustomerSearch("")
-                                setReabrirPagoCustomerResults([])
-                              }
+                              setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
+                              setReabrirFacturaSearch("")
+                              setReabrirFacturaResults([])
+                              setReabrirPagoSaleId(null)
                             }}
-                            title="Cambiar forma de pago (solo turno actual, requiere supervisor y motivo)"
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs ${
-                              reabrirPagoSaleId === sale.id
-                                ? "bg-amber-700 text-white"
-                                : "bg-amber-600 hover:bg-amber-700 text-white"
-                            }`}
+                            title="Agregar identificación de cliente a esta factura (requiere autorización de supervisor)"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600/10 hover:bg-purple-600/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 cursor-pointer"
                           >
-                            <CreditCard className="w-3.5 h-3.5" />
-                            Cambiar Pago
+                            <User className="w-3.5 h-3.5" />
+                            Reabrir Titular
                           </button>
-                          <button
-                            onClick={() => handleReimprimirSale(sale)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                            Reimprimir
-                          </button>
-                        </div>
+                        )}
+                        <button
+                          onClick={() => {
+                            if (reabrirPagoSaleId === sale.id) {
+                              setReabrirPagoSaleId(null)
+                              setReabrirPagoFormaPago("")
+                              setReabrirPagoMotivo("")
+                              setReabrirPagoCustomer(null)
+                              setReabrirPagoCustomerSearch("")
+                              setReabrirPagoCustomerResults([])
+                            } else {
+                              setReabrirPagoSaleId(sale.id)
+                              setReabrirPagoFormaPago(fpActual)
+                              setReabrirPagoMotivo("")
+                              setReabrirFacturaSaleId(null)
+                              if (sale.customer && String(sale.customer.id) !== DEFAULT_CUSTOMER.id) {
+                                setReabrirPagoCustomer(normalizeCustomer(sale.customer))
+                              } else if (sale.customer_id && sale.customer_id !== DEFAULT_CUSTOMER.id && sale.customer_nombre) {
+                                setReabrirPagoCustomer(normalizeCustomer({
+                                  id: sale.customer_id,
+                                  razon_social: sale.customer_nombre,
+                                  nombre: sale.customer_nombre,
+                                  ruc: sale.customer_doc,
+                                  extra_club_numero: sale.customer_extra_club,
+                                }))
+                              } else {
+                                setReabrirPagoCustomer(null)
+                              }
+                              setReabrirPagoCustomerSearch("")
+                              setReabrirPagoCustomerResults([])
+                            }
+                          }}
+                          title="Cambiar forma de pago (solo turno actual, requiere supervisor y motivo)"
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                            reabrirPagoSaleId === sale.id
+                              ? "bg-amber-600 text-white"
+                              : "bg-amber-600/10 hover:bg-amber-600/20 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                          }`}
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          Cambiar Pago
+                        </button>
+                        <button
+                          onClick={() => handleReimprimirSale(sale)}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs active:scale-95 transition-all"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          Reimprimir
+                        </button>
                       </div>
 
                       {/* Panel de Reabrir Titular */}

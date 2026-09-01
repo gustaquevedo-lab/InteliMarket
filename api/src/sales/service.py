@@ -462,8 +462,26 @@ async def finalize_approved_credit_sale(db: AsyncSession, request) -> Sale:
 
 
 async def get_sale(db: AsyncSession, sale_id: str) -> Sale | None:
-    result = await db.execute(select(Sale).where(Sale.id == uuid.UUID(sale_id)))
-    return result.scalar_one_or_none()
+    from api.src.customers.models import Customer
+    result = await db.execute(
+        select(Sale, Customer, SalePayment)
+        .outerjoin(Customer, Customer.id == Sale.customer_id)
+        .outerjoin(SalePayment, SalePayment.sale_id == Sale.id)
+        .where(Sale.id == uuid.UUID(sale_id))
+    )
+    row = result.first()
+    if not row:
+        return None
+    sale, cust, payment = row
+    fp = payment.forma_pago if payment else ("EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO")
+    c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
+    c_doc = cust.ruc or cust.ci or cust.telefono if cust else None
+    c_ec = cust.extra_club_numero if cust else None
+    setattr(sale, "forma_pago", fp)
+    setattr(sale, "customer_nombre", c_name)
+    setattr(sale, "customer_doc", c_doc)
+    setattr(sale, "customer_extra_club", c_ec)
+    return sale
 
 
 async def attach_escpos_ticket(db: AsyncSession, sale_id: str, recibo_escpos_b64: str) -> bool:
@@ -512,7 +530,7 @@ async def reopen_sale_payment(
     - Solo debe ejecutarse en ventas del turno activo (validado en frontend).
     - Requiere autorización de supervisor y motivo descriptivo.
     - Deja trazabilidad completa en `observaciones` (no borra el dato anterior).
-    - Actualiza `forma_pago`, `customer_id` (si se provee), `condicion` y los registros en `sale_payments`.
+    - Actualiza `customer_id` (si se provee), `condicion` y los registros en `sale_payments`.
     """
     from .schemas import FORMAS_PAGO_VALIDAS
     if nueva_forma_pago.upper() not in FORMAS_PAGO_VALIDAS:
@@ -523,31 +541,52 @@ async def reopen_sale_payment(
     if not sale:
         return None
 
-    forma_pago_anterior = sale.forma_pago or "DESCONOCIDA"
+    # Obtener forma de pago anterior desde sale_payments
+    pm_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
+    existing_payments = list(pm_res.scalars().all())
+    forma_pago_anterior = existing_payments[0].forma_pago if existing_payments else (
+        "EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"
+    )
+
+    socio_nombre = ""
     if customer_id:
         sale.customer_id = uuid.UUID(customer_id)
+        from api.src.customers.models import Customer
+        cust_res = await db.execute(select(Customer).where(Customer.id == uuid.UUID(customer_id)))
+        cust_obj = cust_res.scalar_one_or_none()
+        if cust_obj:
+            socio_nombre = cust_obj.razon_social or cust_obj.nombre_fantasia or ""
 
     if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO"):
         sale.condicion = "credito"
     elif nueva_forma_pago.upper() in ("EFECTIVO", "TARJETA", "TRANSFERENCIA", "QR"):
         sale.condicion = "contado"
 
-    # Actualizar desglose en sale_payments si existen
-    await db.execute(
-        update(SalePayment)
-        .where(SalePayment.sale_id == sale.id)
-        .values(forma_pago=nueva_forma_pago.upper())
-    )
+    # Actualizar o insertar en sale_payments
+    if existing_payments:
+        await db.execute(
+            update(SalePayment)
+            .where(SalePayment.sale_id == sale.id)
+            .values(forma_pago=nueva_forma_pago.upper())
+        )
+    else:
+        db.add(SalePayment(
+            company_id=sale.company_id,
+            sale_id=sale.id,
+            forma_pago=nueva_forma_pago.upper(),
+            monto=sale.total,
+            moneda=sale.moneda or "PYG",
+            fecha=sale.fecha or datetime.now(timezone.utc),
+        ))
 
     ts = datetime.now(timezone.utc).isoformat()
-    socio_txt = f" | Socio/Cliente ID: {customer_id}" if customer_id else ""
+    socio_txt = f" | Socio: {socio_nombre} (ID: {customer_id})" if customer_id else ""
     nota_auditoria = (
         f"[{ts}] ⚠️ CAMBIO DE FORMA DE PAGO — Autorizado por: {autorizado_por_nombre} "
         f"(ID: {autorizado_por_id}) | "
         f"Anterior: {forma_pago_anterior} → Nueva: {nueva_forma_pago.upper()}{socio_txt} | "
         f"Motivo: {motivo.strip()}"
     )
-    sale.forma_pago = nueva_forma_pago.upper()
     sale.observaciones = (
         f"{sale.observaciones}\n{nota_auditoria}"
         if sale.observaciones
@@ -555,6 +594,9 @@ async def reopen_sale_payment(
     )
     await db.commit()
     await db.refresh(sale)
+    setattr(sale, "forma_pago", nueva_forma_pago.upper())
+    if socio_nombre:
+        setattr(sale, "customer_nombre", socio_nombre)
     return sale
 
 
@@ -570,7 +612,13 @@ async def list_sales(
     limit: int = 50,
     offset: int = 0,
 ) -> list[Sale]:
-    query = select(Sale).where(Sale.company_id == company_id)
+    from api.src.customers.models import Customer
+    query = (
+        select(Sale, Customer, SalePayment)
+        .outerjoin(Customer, Customer.id == Sale.customer_id)
+        .outerjoin(SalePayment, SalePayment.sale_id == Sale.id)
+        .where(Sale.company_id == company_id)
+    )
     if customer_id:
         query = query.where(Sale.customer_id == customer_id)
     if estado:
@@ -583,9 +631,26 @@ async def list_sales(
         query = query.where(Sale.user_id == user_id)
     if session_id:
         query = query.where(Sale.session_id == session_id)
-    query = query.order_by(Sale.fecha.desc()).limit(limit).offset(offset)
+    query = query.order_by(Sale.fecha.desc()).limit(limit * 2).offset(offset)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    rows = result.all()
+    sales_dict = {}
+    for sale, cust, payment in rows:
+        if sale.id not in sales_dict:
+            fp = payment.forma_pago if payment else (
+                "EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"
+            )
+            c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
+            c_doc = cust.ruc or cust.ci or cust.telefono if cust else None
+            c_ec = cust.extra_club_numero if cust else None
+            setattr(sale, "forma_pago", fp)
+            setattr(sale, "customer_nombre", c_name)
+            setattr(sale, "customer_doc", c_doc)
+            setattr(sale, "customer_extra_club", c_ec)
+            sales_dict[sale.id] = sale
+            if len(sales_dict) >= limit:
+                break
+    return list(sales_dict.values())
 
 
 async def get_sales_today(db: AsyncSession, company_id: str) -> dict:
