@@ -907,7 +907,9 @@ export default function POSPage() {
     resetBancardFlow()
   }
   
-  const [qrSubMethod, setQrSubMethod] = useState<"zimple" | "pix">("zimple")
+  const [qrSubMethod, setQrSubMethod] = useState<"zimple" | "pix" | "dinelco">("zimple")
+  const [dinelcoQrState, setDinelcoQrState] = useState<"idle" | "esperando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
+  const [dinelcoQrError, setDinelcoQrError] = useState<string>("")
   // Efectivo Multimoneda simultáneo (Guaraníes NUNCA tiene decimales)
   const [payCashPyg, setPayCashPyg] = useState<string>("")
   const [payCashBrl, setPayCashBrl] = useState<string>("")
@@ -1209,6 +1211,7 @@ export default function POSPage() {
     setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null); setShowBancardQrManualFallback(false); setPosQrCupon(""); setPosQrAuth("")
     setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); clearPlugpayPoll()
     setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
+    setDinelcoQrState("idle"); setDinelcoQrError("")
   }
 
   // El terminal Bancard no tiene forma via API de forzar la limpieza de una
@@ -1424,6 +1427,45 @@ export default function POSPage() {
     setDinelcoTxnLogId((logged as any)?.id || null)
     setDinelcoSessionId(null)
     setDinelcoCupon(result.nroBoleta || "")
+  }
+
+  const handleDinelcoQR = async () => {
+    const ip = activePosConfig.dinelcoIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoQrDinelco = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    if (montoQrDinelco <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.dinelcoCall) {
+      setDinelcoQrState("error_conexion")
+      setDinelcoQrError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
+      return
+    }
+    setDinelcoQrState("esperando")
+    setDinelcoQrError("")
+
+    const res = await electronAPI.dinelcoCall(ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+
+    if (!res.ok) {
+      setDinelcoQrState(res.error ? "error_conexion" : "error_rechazo")
+      setDinelcoQrError(res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."))
+      await logDinelcoTxn({
+        tipo_operacion: "dinelco_qr", exitosa: false, verificado_automaticamente: true,
+        error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
+      })
+      return
+    }
+
+    setDinelcoQrState("aprobada")
+    await logDinelcoTxn({
+      tipo_operacion: "dinelco_qr", exitosa: true, verificado_automaticamente: true,
+      monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
+    })
   }
 
   const handleBancardQR = async () => {
@@ -8691,6 +8733,17 @@ export default function POSPage() {
                           >
                             <FlagBR /> <span>PIX Brasil</span>
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => setQrSubMethod("dinelco")}
+                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              qrSubMethod === "dinelco"
+                                ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-300 shadow-xs"
+                                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                            }`}
+                          >
+                            <QrCode className="w-3.5 h-3.5" /> <span>QR Dinelco</span>
+                          </button>
                         </div>
 
                         {isMultiPayment && (
@@ -8937,6 +8990,62 @@ export default function POSPage() {
                               <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
                                 <div className="font-black">✓ Transacción PIX Aprobada</div>
                                 <div>ID: {plugpayResult?.IdTransacao}</div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* SUB-PANEL 3: QR DINELCO */}
+                        {qrSubMethod === "dinelco" && (
+                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
+                            <div className="flex items-center gap-2">
+                              <QrCode className="w-7 h-7 text-purple-600" />
+                              <div className="text-left">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Dinelco (Ingenico AXIUM)</div>
+                                {!isMultiPayment && (
+                                  <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
+                                    {formatPYG(totalPyg)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {!activePosConfig.dinelcoIp && (
+                              <div className="w-full max-w-sm p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
+                                No hay IP de terminal Dinelco configurada para esta caja.{" "}
+                                <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                              </div>
+                            )}
+
+                            {dinelcoQrState !== "aprobada" && (
+                              <button
+                                type="button"
+                                onClick={handleDinelcoQR}
+                                disabled={!activePosConfig.dinelcoIp || dinelcoQrState === "esperando"}
+                                className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
+                              >
+                                {dinelcoQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+                                <span>{dinelcoQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR en Terminal Dinelco"}</span>
+                              </button>
+                            )}
+
+                            {dinelcoQrState === "aprobada" && (
+                              <div className="w-full max-w-sm p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
+                                <div className="font-black">✓ Transacción QR Dinelco Aprobada</div>
+                              </div>
+                            )}
+
+                            {dinelcoQrState === "error_rechazo" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                                <div className="font-black">✕ {dinelcoQrError}</div>
+                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                              </div>
+                            )}
+
+                            {dinelcoQrState === "error_conexion" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
+                                <div className="font-black">⚠ {dinelcoQrError}</div>
+                                <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
                               </div>
                             )}
                           </div>
@@ -9221,9 +9330,15 @@ export default function POSPage() {
                       toast.warning("Dinelco sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
                       return
                     }
-                    if (activeMethods.has("qr") && bancardQrState !== "aprobada" && !bancardQrManualConfirm) {
-                      toast.warning("QR sin confirmar", "Generá el QR y esperá el pago, o marcá que ya cobraste por fuera del sistema.")
-                      return
+                    if (activeMethods.has("qr") && !bancardQrManualConfirm) {
+                      const qrConfirmado =
+                        (qrSubMethod === "zimple" && bancardQrState === "aprobada") ||
+                        (qrSubMethod === "pix" && plugpayState === "aprobada") ||
+                        (qrSubMethod === "dinelco" && dinelcoQrState === "aprobada")
+                      if (!qrConfirmado) {
+                        toast.warning("QR sin confirmar", "Generá el QR y esperá el pago, o marcá que ya cobraste por fuera del sistema.")
+                        return
+                      }
                     }
                     const montoExtraClub = activeMethods.has("extra_club") ? (isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg) : 0
                     if (montoExtraClub > 0) {
