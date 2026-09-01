@@ -8583,11 +8583,11 @@ export default function POSPage() {
                             )}
 
                             {plugpayState === "esperando" && (
-                              <div className="p-3 bg-orange-50/80 dark:bg-orange-950/40 rounded-2xl border border-orange-200 dark:border-orange-800 space-y-2">
+                              <div className="p-3 bg-orange-50/80 dark:bg-orange-950/40 rounded-2xl border border-orange-200 dark:border-orange-800 space-y-2.5">
                                 <div className="flex items-center justify-between border-b border-orange-200/60 dark:border-orange-800/60 pb-1.5">
                                   <div className="flex items-center gap-1.5 text-xs font-black text-orange-700 dark:text-orange-300">
                                     <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-600" />
-                                    <span>Esperando pago PIX...</span>
+                                    <span>Esperando pago PIX en tiempo real...</span>
                                   </div>
                                   <button
                                     type="button"
@@ -8598,40 +8598,42 @@ export default function POSPage() {
                                   </button>
                                 </div>
 
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-3.5">
                                   {plugpayResult?.qrCodeStringImage && (
-                                    <div className="p-1.5 bg-white rounded-xl shadow-xs border border-orange-300 shrink-0">
+                                    <div className="p-2 bg-white rounded-xl shadow-xs border border-orange-300 shrink-0">
                                       <img
                                         src={`data:image/png;base64,${plugpayResult.qrCodeStringImage}`}
-                                        className="w-36 h-36 object-contain rounded-md"
+                                        className="w-48 h-48 sm:w-52 sm:h-52 object-contain rounded-md"
                                         alt="PIX QR Code Brasil"
                                       />
                                     </div>
                                   )}
-                                  <div className="flex-1 space-y-2 text-left">
+                                  <div className="flex-1 space-y-2.5 text-left">
                                     <div>
-                                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block">Total a pagar:</span>
-                                      <span className="text-base font-black font-posMono text-orange-600 dark:text-orange-400">
+                                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Total a pagar:</span>
+                                      <span className="text-xl font-black font-posMono text-orange-600 dark:text-orange-400">
                                         R$ {plugpayResult?.valueBRL || (plugpayBrlValue ? plugpayBrlValue.toFixed(2) : "0.00")}
                                       </span>
                                     </div>
 
                                     {plugpayResult?.qrCodeCopiaCola && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(plugpayResult.qrCodeCopiaCola)
-                                          toast.success("Copiado", "Código PIX Copia y Cola copiado al portapapeles.")
-                                        }}
-                                        className="w-full py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-xs flex items-center justify-center gap-1.5"
-                                      >
-                                        <Copy className="w-3.5 h-3.5" />
-                                        <span>Copiar Código PIX</span>
-                                      </button>
+                                      <div>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(plugpayResult.qrCodeCopiaCola)
+                                            toast.success("Copiado", "Código PIX Copia y Cola copiado.")
+                                          }}
+                                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-orange-600/15 hover:bg-orange-600/25 text-orange-700 dark:text-orange-400 border border-orange-500/30 rounded-lg text-[11px] font-bold transition cursor-pointer shadow-xs"
+                                        >
+                                          <Copy className="w-3 h-3" />
+                                          <span>Copiar código</span>
+                                        </button>
+                                      </div>
                                     )}
 
-                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                                      Escanear desde app de banco (Nubank, Itaú, Bradesco, Mercado Pago).
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                                      Escanear desde app de banco (Nubank, Itaú, Bradesco, Mercado Pago, Inter).
                                     </p>
                                   </div>
                                 </div>
