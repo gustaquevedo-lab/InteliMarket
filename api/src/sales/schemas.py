@@ -121,3 +121,21 @@ class SaleReopenCustomer(BaseModel):
     customer_id: UUID
     autorizado_por_id: UUID
     autorizado_por_nombre: str
+
+
+FORMAS_PAGO_VALIDAS = {
+    "EFECTIVO", "TARJETA", "EXTRA_CLUB", "TRANSFERENCIA", "QR", "CREDITO",
+    "CHEQUE", "MIXTO",
+}
+
+
+class SaleReopenPayment(BaseModel):
+    """Cambio de forma de pago en una venta ya cerrada.
+    Requiere autorización de supervisor y motivo descriptivo.
+    Solo aplicable a ventas del turno activo de caja.
+    """
+    forma_pago: str
+    motivo: str = Field(..., min_length=10, max_length=500,
+                        description="Motivo descriptivo obligatorio (mín. 10 caracteres)")
+    autorizado_por_id: UUID
+    autorizado_por_nombre: str

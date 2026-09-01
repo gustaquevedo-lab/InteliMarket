@@ -687,11 +687,13 @@ export default function POSPage() {
   const [verifyingSupervisor, setVerifyingSupervisor] = useState(false)
   const [supervisorReason, setSupervisorReason] = useState("Error de escaneo / digitación")
   const [pendingSupervisorAction, setPendingSupervisorAction] = useState<{
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight" | "direct_discount"
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount"
     itemId?: string
     delta?: number
     sale?: Sale
     customer?: Customer
+    formaPago?: string
+    motivo?: string
     weightProduct?: Product
     weightEtiquetaKg?: number
     weightBalanzaKg?: number
@@ -2552,6 +2554,12 @@ export default function POSPage() {
   const [reabrirFacturaSearching, setReabrirFacturaSearching] = useState(false)
   const [submittingReabrirFactura, setSubmittingReabrirFactura] = useState(false)
 
+  // Cambio de forma de pago en venta ya cerrada (solo turno activo)
+  const [reabrirPagoSaleId, setReabrirPagoSaleId] = useState<string | null>(null)
+  const [reabrirPagoFormaPago, setReabrirPagoFormaPago] = useState("")
+  const [reabrirPagoMotivo, setReabrirPagoMotivo] = useState("")
+  const [submittingReabrirPago, setSubmittingReabrirPago] = useState(false)
+
   // ── CUPONES DE SORTEO EN CAJA (ELECTRON / POS MULTI-CAMPAÑA) ────────────────
   const [showCuponModal, setShowCuponModal] = useState(false)
   const [cuponModalStep, setCuponModalStep] = useState<"pregunta" | "formulario">("pregunta")
@@ -2830,6 +2838,35 @@ export default function POSPage() {
       toast.error("No se pudo reabrir la factura", e?.message || "Intente nuevamente.")
     } finally {
       setSubmittingReabrirFactura(false)
+    }
+  }
+
+  const submitReabrirPago = async (sale: Sale, formaPago: string, motivo: string, resolverId: string, resolverNombre: string) => {
+    setSubmittingReabrirPago(true)
+    try {
+      const updated = await api.sales.reopenPayment(sale.id, {
+        forma_pago: formaPago,
+        motivo,
+        autorizado_por_id: resolverId,
+        autorizado_por_nombre: resolverNombre,
+      })
+      // Actualizar el objeto en memoria con la nueva forma de pago para que
+      // la reimpresión inmediata use el dato correcto.
+      const saleActualizada = { ...sale, forma_pago: updated.forma_pago ?? formaPago, observaciones: updated.observaciones } as Sale
+      setReimprimirSales(prev => prev.map(s => s.id === sale.id ? saleActualizada : s))
+      setReabrirPagoSaleId(null)
+      setReabrirPagoFormaPago("")
+      setReabrirPagoMotivo("")
+      toast.success(
+        "Forma de pago actualizada",
+        `Venta Nº ${sale.numero}: ${sale.forma_pago} → ${formaPago}. Reimprimiendo con el dato correcto...`
+      )
+      // Reimprimir automáticamente con la venta ya actualizada
+      await handleReimprimirSale(saleActualizada)
+    } catch (e: any) {
+      toast.error("No se pudo cambiar la forma de pago", e?.message || "Intente nuevamente.")
+    } finally {
+      setSubmittingReabrirPago(false)
     }
   }
 
@@ -3526,6 +3563,12 @@ export default function POSPage() {
         const nombre = (action as any).customer?.nombre || "cliente"
         return `Agregar identificación a factura Nº ${(action as any).sale?.numero || ""}: ${nombre}`
       }
+      case "reopen_payment": {
+        const s = (action as any).sale
+        const fp = (action as any).formaPago || "—"
+        const motTxt = (action as any).motivo || ""
+        return `⚠️ CAMBIO DE FORMA DE PAGO — Venta Nº ${s?.numero || ""}: ${s?.forma_pago || ""} → ${fp} | Motivo: ${motTxt}`
+      }
       case "use_label_weight": {
         const wp = (action as any).weightProduct
         const etiquetaKg = (action as any).weightEtiquetaKg
@@ -3549,13 +3592,15 @@ export default function POSPage() {
       await handleProcessCheckout()
     } else if (action.type === "reopen_invoice") {
       await submitReabrirFactura(action.sale, action.customer, resolverId, resolverNombre)
+    } else if (action.type === "reopen_payment") {
+      await submitReabrirPago(action.sale, action.formaPago, action.motivo, resolverId, resolverNombre)
     } else {
       executeSupervisorAction(action, resolverId, resolverNombre)
     }
   }
 
   const requestSupervisorAuthorization = async (action: {
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight" | "direct_discount",
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
     itemId?: string,
     delta?: number,
     sale?: Sale,
@@ -3574,6 +3619,8 @@ export default function POSPage() {
         await submitAssignTerminal()
       } else if (action.type === "reopen_invoice") {
         await submitReabrirFactura(action.sale!, action.customer!, user!.id, user?.nombre || "Supervisor")
+      } else if (action.type === "reopen_payment") {
+        await submitReabrirPago(action.sale!, (action as any).formaPago!, (action as any).motivo!, user!.id, user?.nombre || "Supervisor")
       } else {
         executeSupervisorAction(action, user!.id, user?.nombre || "Supervisor")
       }
@@ -3633,11 +3680,13 @@ export default function POSPage() {
   }, [showRemoteAuthModal, remoteAuthRequestId, pendingSupervisorAction])
 
   const executeSupervisorAction = (action: {
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight" | "direct_discount",
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
     itemId?: string,
     delta?: number,
     sale?: Sale,
     customer?: Customer,
+    formaPago?: string,
+    motivo?: string,
     weightProduct?: Product,
     weightEtiquetaKg?: number,
     weightBalanzaKg?: number,
@@ -3781,6 +3830,10 @@ export default function POSPage() {
           await submitAssignTerminal()
         } else if (pendingSupervisorAction.type === "extra_club_payment") {
           await handleProcessCheckout()
+        } else if (pendingSupervisorAction.type === "reopen_invoice") {
+          await submitReabrirFactura(pendingSupervisorAction.sale!, pendingSupervisorAction.customer!, res.id!, res.nombre || "Supervisor")
+        } else if (pendingSupervisorAction.type === "reopen_payment") {
+          await submitReabrirPago(pendingSupervisorAction.sale!, pendingSupervisorAction.formaPago!, pendingSupervisorAction.motivo!, res.id!, res.nombre || "Supervisor")
         } else {
           executeSupervisorAction(pendingSupervisorAction, res.id!, res.nombre || "Supervisor")
         }
@@ -9308,38 +9361,84 @@ export default function POSPage() {
                   )}
                   {reimprimirSales.map((sale) => {
                     const sinIdentificar = !sale.customer_id || sale.customer_id === DEFAULT_CUSTOMER.id
+                    const fpActual = (sale.forma_pago || "EFECTIVO").toUpperCase()
                     return (
                     <div
                       key={sale.id}
-                      className="p-3 mx-1 my-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent hover:border-slate-300 dark:hover:border-slate-700"
+                      className="p-3 mx-1 my-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent hover:border-slate-300 dark:hover:border-slate-700 transition-all"
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-sm font-bold text-slate-900 dark:text-white truncate">Nº {sale.numero || sale.id.slice(0, 8)}</div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
-                            {sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY") : "—"} · {formatPYG(sale.total || 0)}
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-slate-900 dark:text-white truncate">Nº {sale.numero || sale.id.slice(0, 8)}</span>
+                            <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md border ${
+                              fpActual === "EXTRA_CLUB"
+                                ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30"
+                                : fpActual === "TARJETA"
+                                ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                                : fpActual === "TRANSFERENCIA" || fpActual === "QR"
+                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                : fpActual === "CREDITO"
+                                ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                                : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                            }`}>
+                              {fpActual === "EXTRA_CLUB" ? "★ Extra Club" : fpActual}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            {sale.fecha ? new Date(sale.fecha).toLocaleString("es-PY") : "—"} · <strong className="text-slate-800 dark:text-slate-200">{formatPYG(sale.total || 0)}</strong>
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {sinIdentificar && (
                             <button
-                              onClick={() => { setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id); setReabrirFacturaSearch(""); setReabrirFacturaResults([]) }}
+                              onClick={() => {
+                                setReabrirFacturaSaleId(reabrirFacturaSaleId === sale.id ? null : sale.id)
+                                setReabrirFacturaSearch("")
+                                setReabrirFacturaResults([])
+                                setReabrirPagoSaleId(null)
+                              }}
                               title="Agregar identificación de cliente a esta factura (requiere autorización de supervisor)"
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white"
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white cursor-pointer shadow-xs"
                             >
                               <User className="w-3.5 h-3.5" />
-                              Reabrir
+                              Reabrir Titular
                             </button>
                           )}
                           <button
+                            onClick={() => {
+                              if (reabrirPagoSaleId === sale.id) {
+                                setReabrirPagoSaleId(null)
+                                setReabrirPagoFormaPago("")
+                                setReabrirPagoMotivo("")
+                              } else {
+                                setReabrirPagoSaleId(sale.id)
+                                setReabrirPagoFormaPago(fpActual)
+                                setReabrirPagoMotivo("")
+                                setReabrirFacturaSaleId(null)
+                              }
+                            }}
+                            title="Cambiar forma de pago (solo turno actual, requiere supervisor y motivo)"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs ${
+                              reabrirPagoSaleId === sale.id
+                                ? "bg-amber-700 text-white"
+                                : "bg-amber-600 hover:bg-amber-700 text-white"
+                            }`}
+                          >
+                            <CreditCard className="w-3.5 h-3.5" />
+                            Cambiar Pago
+                          </button>
+                          <button
                             onClick={() => handleReimprimirSale(sale)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs"
                           >
                             <Printer className="w-3.5 h-3.5" />
                             Reimprimir
                           </button>
                         </div>
                       </div>
+
+                      {/* Panel de Reabrir Titular */}
                       {reabrirFacturaSaleId === sale.id && (
                         <div className="mt-2 border-t border-slate-200 dark:border-slate-800 pt-2">
                           <input
@@ -9376,6 +9475,125 @@ export default function POSPage() {
                               )}
                             </div>
                           )}
+                        </div>
+                      )}
+
+                      {/* Panel de Cambiar Forma de Pago con Auditoría y Control de Riesgos */}
+                      {reabrirPagoSaleId === sale.id && (
+                        <div className="mt-3 border-t border-amber-500/30 pt-3 bg-amber-500/5 dark:bg-amber-500/10 -mx-3 -mb-3 p-3 rounded-b-xl space-y-3">
+                          {/* Banner de Auditoría y Control de Riesgo */}
+                          <div className="flex items-start gap-2 bg-amber-500/20 border border-amber-500/40 rounded-xl p-2.5 text-xs text-amber-900 dark:text-amber-200">
+                            <span className="text-base leading-none">⚠️</span>
+                            <div>
+                              <div className="font-black uppercase tracking-wide text-[11px]">Auditoría y Control de Riesgos</div>
+                              <div className="text-[11px] opacity-90 leading-relaxed mt-0.5">
+                                Esta acción modifica la forma de pago de la venta cerrada (Turno Actual). Quedará registrada la traza completa (anterior: <strong>{fpActual}</strong>), motivo y supervisor autorizante. Se reimprimirá la factura automáticamente con el dato correcto.
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Selector de Nueva Forma de Pago */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                              Seleccionar Nueva Forma de Pago:
+                            </label>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {[
+                                { id: "EXTRA_CLUB", label: "★ Extra Club", color: "border-purple-500 text-purple-600 bg-purple-500/10" },
+                                { id: "EFECTIVO", label: "💵 Efectivo", color: "border-emerald-500 text-emerald-600 bg-emerald-500/10" },
+                                { id: "TARJETA", label: "💳 Tarjeta", color: "border-blue-500 text-blue-600 bg-blue-500/10" },
+                                { id: "TRANSFERENCIA", label: "🏦 Transfer.", color: "border-sky-500 text-sky-600 bg-sky-500/10" },
+                                { id: "QR", label: "📱 QR Pix", color: "border-amber-500 text-amber-600 bg-amber-500/10" },
+                                { id: "CREDITO", label: "📋 Crédito Casa", color: "border-rose-500 text-rose-600 bg-rose-500/10" },
+                              ].map((opt) => {
+                                const isSelected = reabrirPagoFormaPago === opt.id
+                                const isSameAsCurrent = fpActual === opt.id
+                                return (
+                                  <button
+                                    key={opt.id}
+                                    type="button"
+                                    onClick={() => setReabrirPagoFormaPago(opt.id)}
+                                    className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center relative ${
+                                      isSelected
+                                        ? `${opt.color} border-2 ring-2 ring-amber-500/50 shadow-xs scale-102`
+                                        : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-400"
+                                    }`}
+                                  >
+                                    {opt.label}
+                                    {isSameAsCurrent && (
+                                      <span className="block text-[9px] text-slate-400 font-normal mt-0.5">(Actual)</span>
+                                    )}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Campo de Motivo Obligatorio */}
+                          <div>
+                            <div className="flex justify-between items-baseline mb-1">
+                              <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                Motivo del Cambio (Obligatorio):
+                              </label>
+                              <span className={`text-[10px] font-bold ${
+                                reabrirPagoMotivo.trim().length >= 10 ? "text-emerald-500" : "text-rose-500"
+                              }`}>
+                                {reabrirPagoMotivo.trim().length}/10 caracteres mín.
+                              </span>
+                            </div>
+                            <textarea
+                              rows={2}
+                              value={reabrirPagoMotivo}
+                              onChange={(e) => setReabrirPagoMotivo(e.target.value)}
+                              placeholder="Ej: Cajera cobró en efectivo por error, cliente es socio Extra Club y solicitó crédito..."
+                              className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 resize-none"
+                            />
+                          </div>
+
+                          {/* Botones de Acción */}
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReabrirPagoSaleId(null)
+                                setReabrirPagoFormaPago("")
+                                setReabrirPagoMotivo("")
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                submittingReabrirPago ||
+                                !reabrirPagoFormaPago ||
+                                reabrirPagoFormaPago === fpActual ||
+                                reabrirPagoMotivo.trim().length < 10
+                              }
+                              onClick={() => {
+                                requestSupervisorAuthorization({
+                                  type: "reopen_payment",
+                                  sale,
+                                  formaPago: reabrirPagoFormaPago,
+                                  motivo: reabrirPagoMotivo.trim(),
+                                } as any)
+                              }}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
+                            >
+                              {submittingReabrirPago ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  Guardando...
+                                </>
+                              ) : (
+                                <>
+                                  <Printer className="w-3.5 h-3.5" />
+                                  Confirmar y Reimprimir Correcto
+                                </>
+                              )}
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>

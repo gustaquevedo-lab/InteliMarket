@@ -497,6 +497,57 @@ async def reopen_sale_customer(
     return sale
 
 
+async def reopen_sale_payment(
+    db: AsyncSession,
+    sale_id: str,
+    nueva_forma_pago: str,
+    motivo: str,
+    autorizado_por_id: str,
+    autorizado_por_nombre: str,
+) -> Sale | None:
+    """Cambia la forma de pago de una venta ya cerrada.
+
+    Esta es una operacion de alto riesgo contable:
+    - Solo debe ejecutarse en ventas del turno activo (validado en frontend).
+    - Requiere autorizacion de supervisor y motivo descriptivo.
+    - Deja trazabilidad completa en `observaciones` (no borra el dato anterior).
+    - No recalcula montos, IVA ni saldos -- solo actualiza el campo `forma_pago`
+      y el registro de auditoría.
+
+    Riesgos a considerar:
+    - Si la venta original usó Extra Club (crédito fiado), el saldo del cliente
+      NO se revierte automáticamente aquí. Eso requiere intervención manual.
+    - Si hay reportes de cierre ya generados para este turno, el cambio afecta
+      el desglose por forma de pago en ese reporte histórico.
+    """
+    from .schemas import FORMAS_PAGO_VALIDAS
+    if nueva_forma_pago.upper() not in FORMAS_PAGO_VALIDAS:
+        raise ValueError(f"Forma de pago inválida: {nueva_forma_pago}. Valores permitidos: {FORMAS_PAGO_VALIDAS}")
+
+    result = await db.execute(select(Sale).where(Sale.id == uuid.UUID(sale_id)))
+    sale = result.scalar_one_or_none()
+    if not sale:
+        return None
+
+    forma_pago_anterior = sale.forma_pago or "DESCONOCIDA"
+    ts = datetime.now(timezone.utc).isoformat()
+    nota_auditoria = (
+        f"[{ts}] ⚠️ CAMBIO DE FORMA DE PAGO — Autorizado por: {autorizado_por_nombre} "
+        f"(ID: {autorizado_por_id}) | "
+        f"Anterior: {forma_pago_anterior} → Nueva: {nueva_forma_pago.upper()} | "
+        f"Motivo: {motivo.strip()}"
+    )
+    sale.forma_pago = nueva_forma_pago.upper()
+    sale.observaciones = (
+        f"{sale.observaciones}\n{nota_auditoria}"
+        if sale.observaciones
+        else nota_auditoria
+    )
+    await db.commit()
+    await db.refresh(sale)
+    return sale
+
+
 async def list_sales(
     db: AsyncSession,
     company_id: str,

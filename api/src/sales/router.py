@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.sales.schemas import (
     SaleCreate, SaleUpdate, SaleResponse, SaleWithItems,
-    SaleAddPayment, SaleLinkQuote, SaleLinkOrder, SaleAttachTicket, SaleReopenCustomer,
+    SaleAddPayment, SaleLinkQuote, SaleLinkOrder, SaleAttachTicket, SaleReopenCustomer, SaleReopenPayment,
 )
 from api.src.sales import service
 from api.src.events.emitters import emit_sale_completed
@@ -179,6 +179,28 @@ async def reopen_sale_customer(sale_id: str, body: SaleReopenCustomer, db: Async
     result = await service.reopen_sale_customer(
         db, sale_id, str(body.customer_id), str(body.autorizado_por_id), body.autorizado_por_nombre,
     )
+    if not result:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return result
+
+
+@router.patch("/sales/{sale_id}/payment-method", response_model=SaleResponse)
+async def reopen_sale_payment(sale_id: str, body: SaleReopenPayment, db: AsyncSession = Depends(get_db)):
+    """Cambia la forma de pago de una venta ya cerrada.
+    ⚠️ Operación de alto riesgo — requiere autorización de supervisor y motivo descriptivo.
+    Deja trazabilidad completa en el campo `observaciones` de la venta.
+    """
+    try:
+        result = await service.reopen_sale_payment(
+            db,
+            sale_id,
+            body.forma_pago,
+            body.motivo,
+            str(body.autorizado_por_id),
+            body.autorizado_por_nombre,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not result:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
     return result
