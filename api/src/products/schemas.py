@@ -106,6 +106,12 @@ class ProductResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     categoria: Optional[CategoryResponse] = None
+    # Campos de promoción vigente (si aplica hoy)
+    precio_promo: Optional[Decimal] = None
+    en_promocion: bool = False
+    promocion_id: Optional[str] = None
+    promocion_nombre: Optional[str] = None
+    promo_dias_semana: Optional[list[int]] = None
 
     class Config:
         from_attributes = True

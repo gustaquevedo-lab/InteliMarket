@@ -1,6 +1,7 @@
 """Product and category service with rich 360 view, stats and full data integration"""
 
 import uuid
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -13,6 +14,7 @@ from api.src.products.models import Product, ProductCategory
 from api.src.products.schemas import ProductCreate, ProductUpdate, CategoryCreate
 from api.src.inventory.models import Stock, Warehouse, InventoryMovement
 from api.src.purchases.models import PurchaseOrder, PurchaseOrderItem, Supplier
+from api.src.promotions.models import Promotion
 from api.src.sales.models import Sale, SaleItem
 from api.src.customers.models import Customer
 
@@ -180,6 +182,60 @@ async def list_products(
             if p.id in supp_map:
                 setattr(p, "supplier_id", supp_map[p.id][0])
                 setattr(p, "supplier_nombre", supp_map[p.id][1])
+
+    # Anotar promos vigentes HOY en lote (1 query para todos los productos)
+    if products:
+        today = date.today()
+        # weekday() -> 0=Lun..6=Dom; convertir a convencion 0=Dom..6=Sab del legacy
+        sunday_dow = (today.weekday() + 1) % 7
+        p_ids = [p.id for p in products]
+        promo_rows = await db.execute(
+            select(
+                Promotion.producto_ids,
+                Promotion.id,
+                Promotion.nombre,
+                Promotion.precio_fijo_promocional,
+                Promotion.dias_semana,
+            ).where(
+                Promotion.company_id == c_uuid,
+                Promotion.activo == True,
+                Promotion.estado == "activa",
+                Promotion.valido_desde <= today,
+                Promotion.valido_hasta >= today,
+                Promotion.precio_fijo_promocional != None,
+            ).order_by(Promotion.valido_hasta.asc())
+        )
+        # Construir mapa product_id -> mejor promo vigente hoy
+        promo_map: dict[UUID, dict] = {}
+        for pr in promo_rows.all():
+            prod_ids_promo = pr.producto_ids or []
+            dias = pr.dias_semana or []
+            # Filtrar por dia de semana si la promo tiene restriccion
+            if dias and sunday_dow not in dias:
+                continue
+            for pid in prod_ids_promo:
+                if pid not in promo_map:  # primer match = promo mas proxima a vencer
+                    promo_map[pid] = {
+                        "id": str(pr.id),
+                        "nombre": pr.nombre,
+                        "precio": pr.precio_fijo_promocional,
+                        "dias": dias,
+                    }
+        # Anotar en cada producto
+        for p in products:
+            info = promo_map.get(p.id)
+            if info and info["precio"] and info["precio"] < (p.precio_venta or Decimal("0")):
+                setattr(p, "precio_promo", info["precio"])
+                setattr(p, "en_promocion", True)
+                setattr(p, "promocion_id", info["id"])
+                setattr(p, "promocion_nombre", info["nombre"])
+                setattr(p, "promo_dias_semana", info["dias"])
+            else:
+                setattr(p, "precio_promo", None)
+                setattr(p, "en_promocion", False)
+                setattr(p, "promocion_id", None)
+                setattr(p, "promocion_nombre", None)
+                setattr(p, "promo_dias_semana", None)
 
     return products
 
