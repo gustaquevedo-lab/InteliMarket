@@ -4360,43 +4360,78 @@ export default function POSPage() {
       // efectivo acumulado de la alerta de retiro.
       const salePaymentsForCreate: { forma_pago: string; monto: number; moneda?: string }[] = (() => {
         const out: { forma_pago: string; monto: number; moneda?: string }[] = []
-        if (activeMethods.has("cash")) {
-          const pyg = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10)
-          const brl = parseFloat(payCashBrl.replace(/,/g, ".") || "0")
-          const usd = parseFloat(payCashUsd.replace(/,/g, ".") || "0")
-          if (pyg > 0) out.push({ forma_pago: "EFECTIVO", monto: pyg, moneda: "PYG" })
-          if (brl > 0) out.push({ forma_pago: "EFECTIVO", monto: brl, moneda: "BRL" })
-          if (usd > 0) out.push({ forma_pago: "EFECTIVO", monto: usd, moneda: "USD" })
-        }
+        
+        let cardMonto = 0
+        let dinelcoMonto = 0
+        let qrMonto = 0
+        let parceladoMonto = 0
+        let extraClubMonto = 0
+
         if (activeMethods.has("bancard")) {
-          const monto = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) out.push({ forma_pago: "TARJETA_BANCARD", monto, moneda: "PYG" })
+          cardMonto = isMultiPayment ? parseInt(mixedCardPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (cardMonto > 0) out.push({ forma_pago: "TARJETA_BANCARD", monto: cardMonto, moneda: "PYG" })
         }
         if (activeMethods.has("dinelco")) {
-          const monto = isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) out.push({ forma_pago: "TARJETA_DINELCO", monto, moneda: "PYG" })
+          dinelcoMonto = isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (dinelcoMonto > 0) out.push({ forma_pago: "TARJETA_DINELCO", monto: dinelcoMonto, moneda: "PYG" })
         }
         if (activeMethods.has("qr")) {
-          const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) {
+          qrMonto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (qrMonto > 0) {
             if (qrSubMethod === "pix" || plugpayState === "aprobada") {
-              out.push({ forma_pago: "PLUGPAY_PIX", monto, moneda: "PYG" })
+              out.push({ forma_pago: "PLUGPAY_PIX", monto: qrMonto, moneda: "PYG" })
             } else {
-              out.push({ forma_pago: "QR", monto, moneda: "PYG" })
+              out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG" })
             }
           }
         }
         if (activeMethods.has("plugpay_credito")) {
-          const monto = isMultiPayment ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) out.push({ forma_pago: "PLUGPAY_CREDITO", monto, moneda: "PYG" })
+          parceladoMonto = isMultiPayment ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (parceladoMonto > 0) out.push({ forma_pago: "PLUGPAY_CREDITO", monto: parceladoMonto, moneda: "PYG" })
         }
         if (activeMethods.has("extra_club")) {
-          const monto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (monto > 0) out.push({ forma_pago: "EXTRA_CLUB", monto, moneda: "PYG" })
+          extraClubMonto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+          if (extraClubMonto > 0) out.push({ forma_pago: "EXTRA_CLUB", monto: extraClubMonto, moneda: "PYG" })
         }
+
+        const otrosNonCash = cardMonto + dinelcoMonto + qrMonto + parceladoMonto + extraClubMonto
+        let remainingPyg = Math.max(0, totalPyg - otrosNonCash)
+
+        if (activeMethods.has("cash")) {
+          const brlInput = parseFloat(payCashBrl.replace(/,/g, ".") || "0")
+          const usdInput = parseFloat(payCashUsd.replace(/,/g, ".") || "0")
+
+          if (brlInput > 0 && remainingPyg > 0) {
+            const brlRate = rates.BRL > 0 ? rates.BRL : 1380
+            const brlValueInPyg = brlInput * brlRate
+            const netPygCoveredByBrl = Math.min(brlValueInPyg, remainingPyg)
+            const netBrl = Math.round((netPygCoveredByBrl / brlRate) * 100) / 100
+            if (netBrl > 0) {
+              out.push({ forma_pago: "EFECTIVO", monto: netBrl, moneda: "BRL" })
+              remainingPyg = Math.max(0, remainingPyg - netPygCoveredByBrl)
+            }
+          }
+
+          if (usdInput > 0 && remainingPyg > 0) {
+            const usdRate = rates.USD > 0 ? rates.USD : 7550
+            const usdValueInPyg = usdInput * usdRate
+            const netPygCoveredByUsd = Math.min(usdValueInPyg, remainingPyg)
+            const netUsd = Math.round((netPygCoveredByUsd / usdRate) * 100) / 100
+            if (netUsd > 0) {
+              out.push({ forma_pago: "EFECTIVO", monto: netUsd, moneda: "USD" })
+              remainingPyg = Math.max(0, remainingPyg - netPygCoveredByUsd)
+            }
+          }
+
+          if (remainingPyg > 0) {
+            out.push({ forma_pago: "EFECTIVO", monto: remainingPyg, moneda: "PYG" })
+          }
+        }
+
         if (out.length === 0) out.push({ forma_pago: "EFECTIVO", monto: totalPyg, moneda: "PYG" })
         return out
       })()
+
       const saleBasePayload = {
         company_id: COMPANY_ID,
         customer_id: customer.id,
