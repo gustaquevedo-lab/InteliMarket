@@ -90,6 +90,7 @@ from api.src.petty_cash.models import Expense, ExpenseCategory
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
 from api.src.smart_pricing.models import TieredPrice
+from api.src.promotions.models import Promotion
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.returns.models import Return, ReturnItem
 from api.src.currency.models import ExchangeRate
@@ -2241,6 +2242,111 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
     return count
 
 
+async def sync_promotions(db: AsyncSession, company_id: str, since: date | None = None) -> int:
+    """Sincroniza promociones y precios de oferta desde ven_promocao de MySQL Ñemuha.
+    Permite que cualquier oferta o promoción cargada en el legacy impacte de inmediato.
+    """
+    cid = UUID(company_id) if isinstance(company_id, str) else company_id
+
+    # 1. Leer promociones vigentes o de los últimos 60 días
+    sql = """
+        SELECT p.ID_PROMOCAO, p.ID_PRODUTO, p.DT_INICIO_PROMOCAO, p.DT_FIM_PROMOCAO,
+               p.VL_PRECO_VAREJO, p.VL_PRECO_VAREJO_PRODUTO, p.TIPO_PROMOCAO,
+               p.BO_DOMINGO, p.BO_SEGUNDA, p.BO_TERCA, p.BO_QUARTA, p.BO_QUINTA, p.BO_SEXTA, p.BO_SABADO,
+               p.OBSERVACAO, p.DT_PROMOCAO
+        FROM ven_promocao p
+        WHERE p.DT_FIM_PROMOCAO >= CURDATE() - INTERVAL 60 DAY
+        ORDER BY p.ID_PROMOCAO DESC;
+    """
+    rows = await _fetch(sql)
+
+    # 2. Mapear productos por SKU
+    res_p = await db.execute(select(Product.id, Product.sku, Product.nombre).where(Product.company_id == cid))
+    sku_to_prod = {str(p[1]).strip(): (p[0], p[2]) for p in res_p.fetchall() if p[1]}
+
+    # 3. Mapear promociones existentes por legacy_id
+    res_exist = await db.execute(select(Promotion).where(Promotion.company_id == cid, Promotion.legacy_id != None))
+    existing_map = {p.legacy_id: p for p in res_exist.scalars().all()}
+
+    count = 0
+    today = date.today()
+
+    for r in rows:
+        legacy_id = r["ID_PROMOCAO"]
+        prod_sku = str(r["ID_PRODUTO"]).strip()
+        matched = sku_to_prod.get(prod_sku)
+        prod_id = matched[0] if matched else None
+        prod_nombre = matched[1] if matched else f"Ítem #{prod_sku}"
+
+        dias_semana = []
+        if r.get("BO_DOMINGO"): dias_semana.append(0)
+        if r.get("BO_SEGUNDA"): dias_semana.append(1)
+        if r.get("BO_TERCA"): dias_semana.append(2)
+        if r.get("BO_QUARTA"): dias_semana.append(3)
+        if r.get("BO_QUINTA"): dias_semana.append(4)
+        if r.get("BO_SEXTA"): dias_semana.append(5)
+        if r.get("BO_SABADO"): dias_semana.append(6)
+
+        dt_inicio = r.get("DT_INICIO_PROMOCAO") or today
+        dt_fim = r.get("DT_FIM_PROMOCAO")
+        if isinstance(dt_fim, datetime):
+            valido_hasta = dt_fim.date()
+        elif isinstance(dt_fim, date):
+            valido_hasta = dt_fim
+        else:
+            valido_hasta = date(2026, 12, 31)
+
+        precio_promo = Decimal(str(r.get("VL_PRECO_VAREJO") or 0))
+        is_active = (valido_hasta >= today)
+
+        if legacy_id in existing_map:
+            promo = existing_map[legacy_id]
+            changed = False
+            if promo.precio_fijo_promocional != precio_promo:
+                promo.precio_fijo_promocional = precio_promo
+                changed = True
+            if promo.valido_desde != dt_inicio:
+                promo.valido_desde = dt_inicio
+                changed = True
+            if promo.valido_hasta != valido_hasta:
+                promo.valido_hasta = valido_hasta
+                changed = True
+            if promo.activo != is_active:
+                promo.activo = is_active
+                promo.estado = "activa" if is_active else "finalizada_por_fecha"
+                changed = True
+            if prod_id and (not promo.producto_ids or promo.producto_ids != [prod_id]):
+                promo.producto_ids = [prod_id]
+                changed = True
+            if changed:
+                promo.updated_at = func.now()
+                count += 1
+        else:
+            new_promo = Promotion(
+                company_id=cid,
+                nombre=f"Promo {prod_nombre}",
+                descripcion=r.get("OBSERVACAO") or f"Sincronizado de Ñemuha legacy ID {legacy_id}",
+                tipo="precio_fijo_oferta",
+                precio_fijo_promocional=precio_promo,
+                aplica_a="producto" if prod_id else "carrito",
+                producto_ids=[prod_id] if prod_id else None,
+                origen="accion_proveedor" if r.get("TIPO_PROMOCAO") == "ESTOQUE_LIMITADO" else "iniciativa_propia",
+                financiamiento="propio_supermercado",
+                valido_desde=dt_inicio,
+                valido_hasta=valido_hasta,
+                dias_semana=dias_semana if dias_semana else None,
+                activo=is_active,
+                estado="activa" if is_active else "finalizada_por_fecha",
+                origen_fuente="nemuha_sync",
+                legacy_id=legacy_id,
+            )
+            db.add(new_promo)
+            existing_map[legacy_id] = new_promo
+            count += 1
+
+    return count
+
+
 # ── Orquestador ──────────────────────────────────────────────────────────────
 
 async def run_sync(db: AsyncSession, company_id: str, since: date | None = None) -> NemuhaSyncRun:
@@ -2266,6 +2372,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("cash_deposit_gaps", sync_cash_deposit_gaps),
         ("cash_sessions", sync_cash_sessions),
         ("catalog_prices_and_scales", sync_catalog_prices_and_scales),
+        ("promotions", sync_promotions),
         ("sales", sync_sales),
         ("sale_payments", sync_sale_payments),
         ("customer_returns", sync_customer_returns),

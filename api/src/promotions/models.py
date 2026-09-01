@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, Date, Time, Integer, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Text, Date, Time, Integer, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 from api.src.db import Base
@@ -31,7 +31,7 @@ class Promotion(Base):
     # proveedor_sell_out | proveedor_sell_in | propio_supermercado | co_financiado
     financiamiento = Column(String(50), default="propio_supermercado")
     supplier_id = Column(UUID(as_uuid=True), nullable=True)
-    purchases_invoices_ids = Column(ARRAY(UUID), nullable=True)
+    purchases_invoices_ids = Column(JSON, nullable=True)
     porcentaje_aporte_proveedor = Column(Numeric(5, 2), default=0)
     porcentaje_aporte_tienda = Column(Numeric(5, 2), default=0)
     monto_aporte_proveedor_pyg = Column(Numeric(15, 2), default=0)
