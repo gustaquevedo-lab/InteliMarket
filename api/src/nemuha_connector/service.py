@@ -2168,6 +2168,12 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
                 changed = True
             if prod.activo != activo:
                 prod.activo = activo
+                # Si el producto se inactiva, desasociar codigo de barra para no colisionar en POS
+                if not activo:
+                    prod.codigo_barra = None
+                changed = True
+            if not activo and prod.codigo_barra is not None:
+                prod.codigo_barra = None
                 changed = True
             if p_costo > 0 and prod.costo_promedio != p_costo:
                 prod.costo_promedio = p_costo
@@ -2179,7 +2185,7 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
             if changed:
                 prod.updated_at = func.now()
                 count += 1
-        else:
+        elif activo:  # Solo crear productos NUEVOS si estan activos en el legacy
             new_prod = Product(
                 company_id=cid,
                 sku=sku,
@@ -2188,7 +2194,7 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
                 costo_promedio=p_costo,
                 ultimo_costo=p_costo,
                 stock_minimo=stock_min,
-                activo=activo,
+                activo=True,
                 unidad_medida=r["UNIDADE_MEDIDA"] or "UN",
             )
             db.add(new_prod)

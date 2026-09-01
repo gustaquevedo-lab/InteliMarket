@@ -87,9 +87,9 @@ async def get_product_by_sku(db: AsyncSession, company_id: str, sku: str) -> Pro
     except ValueError:
         return None
     result = await db.execute(
-        select(Product).where(Product.company_id == c_uuid, Product.sku == sku)
+        select(Product).where(Product.company_id == c_uuid, Product.sku == sku).order_by(Product.activo.desc())
     )
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def get_product_by_barcode(db: AsyncSession, company_id: str, barcode: str) -> Product | None:
@@ -98,9 +98,9 @@ async def get_product_by_barcode(db: AsyncSession, company_id: str, barcode: str
     except ValueError:
         return None
     result = await db.execute(
-        select(Product).where(Product.company_id == c_uuid, Product.codigo_barra == barcode)
+        select(Product).where(Product.company_id == c_uuid, Product.codigo_barra == barcode).order_by(Product.activo.desc())
     )
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def list_products(
@@ -145,6 +145,9 @@ async def list_products(
 
     if activo is not None:
         query = query.where(Product.activo == activo)
+    else:
+        # Por defecto, servir únicamente productos activos para POS, catálogo y ventas
+        query = query.where(Product.activo == True)
 
     if search:
         query = query.where(
