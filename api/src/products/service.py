@@ -153,8 +153,8 @@ async def list_products(
             (Product.codigo_barra.ilike(f"%{search}%"))
         )
 
-    # Filtrar productos con nombres válidos primero
-    query = query.order_by(Product.nombre.asc()).limit(limit).offset(offset)
+    # Filtrar productos con nombres válidos primero y activos con máxima prioridad
+    query = query.order_by(Product.activo.desc(), Product.nombre.asc()).limit(limit).offset(offset)
     result = await db.execute(query)
     products = list(result.scalars().all())
 
