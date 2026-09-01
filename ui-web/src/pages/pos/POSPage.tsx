@@ -18,6 +18,8 @@ import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
 import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
+import { offlineDB } from "../../utils/offlineDB"
+import { syncPendingSales } from "../../utils/syncManager"
 
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
@@ -1423,11 +1425,13 @@ export default function POSPage() {
 
     // Carga inicial
     syncCatalog(true)
+    syncPendingSales().catch(() => {})
 
-    // Sincronización silenciosa en background cada 5 minutos (300.000 ms)
+    // Sincronización silenciosa en background cada 2 minutos
     const syncInterval = setInterval(() => {
       syncCatalog(false)
-    }, 5 * 60 * 1000)
+      syncPendingSales().catch(() => {})
+    }, 2 * 60 * 1000)
 
     return () => {
       isMounted = false
@@ -5046,9 +5050,24 @@ export default function POSPage() {
       // ticket -- antes se esperaba esta llamada antes de imprimir, lo que
       // sumaba al delay entre cobrar y que salga el ticket.
       if (!ventaYaCreadaSinRecibo) {
-        saleCreatePromise = api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any).catch((apiErr: any) => {
-          console.error("No se pudo guardar la venta:", apiErr)
-          toast.error("Venta no guardada en el sistema", apiErr?.message || "El ticket se imprimió igual, pero avisá a soporte -- esta venta puede no quedar registrada.")
+        saleCreatePromise = api.sales.create({ ...saleBasePayload, recibo_html: receiptHtml } as any).catch(async (apiErr: any) => {
+          console.warn("[POS] API central no disponible, encolando venta offline en IndexedDB...", apiErr)
+          try {
+            const offlineId = `off-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+            await offlineDB.pendingSales.add({
+              id: offlineId,
+              data: { ...saleBasePayload, recibo_html: receiptHtml },
+              created_at: new Date().toISOString(),
+              status: "pending",
+              retry_count: 0,
+              last_retry: new Date().toISOString(),
+              next_retry: new Date().toISOString(),
+            })
+            toast.warning("Venta guardada en modo offline", "El ticket se imprimió y la venta se sincronizará automáticamente cuando vuelva la conexión.")
+          } catch (dbErr) {
+            console.error("Error guardando en pendingSales:", dbErr)
+            toast.error("Venta no guardada en el sistema", apiErr?.message || "Avisá a soporte.")
+          }
           return null
         })
       }
