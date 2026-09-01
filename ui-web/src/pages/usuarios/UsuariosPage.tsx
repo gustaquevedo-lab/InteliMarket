@@ -62,10 +62,11 @@ export default function UsuariosPage() {
         !search ||
         u.nombre.toLowerCase().includes(search.toLowerCase()) ||
         u.email.toLowerCase().includes(search.toLowerCase())
+      const userRole = (u.rol || u.tenant_rol || "").toLowerCase()
       const matchesRole =
         roleFilter === "ALL" ||
-        u.rol?.toLowerCase() === roleFilter.toLowerCase() ||
-        u.tenant_rol?.toLowerCase() === roleFilter.toLowerCase()
+        userRole === roleFilter.toLowerCase() ||
+        ((roleFilter === "cajero" || roleFilter === "cajera") && (userRole === "cajero" || userRole === "cajera"))
       return matchesSearch && matchesRole
     })
   }, [users, search, roleFilter])
@@ -96,7 +97,7 @@ export default function UsuariosPage() {
           email: form.email,
           nombre: form.nombre,
           telefono: form.telefono || undefined,
-          rol: form.rol || "cajera",
+          rol: form.rol || "cajero",
           role_id: form.role_id || undefined,
           password: form.password || undefined,
         })
@@ -161,8 +162,24 @@ export default function UsuariosPage() {
   // KPIs
   const totalUsers = users.length
   const totalActivos = users.filter((u) => u.activo).length
-  const totalCajeras = users.filter((u) => u.rol?.toLowerCase() === "cajera" || u.tenant_rol?.toLowerCase() === "cajera").length
-  const totalAdmins = users.filter((u) => u.is_superadmin || u.rol?.toLowerCase() === "admin" || u.tenant_rol?.toLowerCase() === "admin").length
+  const totalCajeros = users.filter((u) => {
+    const r = (u.rol || u.tenant_rol || "").toLowerCase()
+    return r === "cajero" || r === "cajera"
+  }).length
+  const totalAdmins = users.filter((u) => {
+    const r = (u.rol || u.tenant_rol || "").toLowerCase()
+    return u.is_superadmin || r === "admin"
+  }).length
+
+  const formatRoleLabel = (rolName?: string) => {
+    const r = (rolName || "operador").toLowerCase()
+    if (r === "cajero" || r === "cajera") return "Cajero de Salón"
+    if (r === "supervisor") return "Supervisor"
+    if (r === "compras") return "Compras"
+    if (r === "contador") return "Contador"
+    if (r === "admin") return "Administrador"
+    return rolName || "Operador"
+  }
 
   const getRoleBadge = (rolName?: string) => {
     const r = (rolName || "operador").toLowerCase()
@@ -221,7 +238,7 @@ export default function UsuariosPage() {
                 👥 {totalActivos} Cuentas Habilitadas
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-blue-300">
-                🛒 {totalCajeras} Cajeras en POS
+                🛒 {totalCajeros} Cajeros de Salón en POS
               </span>
             </div>
           </div>
@@ -284,13 +301,13 @@ export default function UsuariosPage() {
         <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
           <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-orange-500 absolute top-0 left-0" />
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Cajeras de Salón</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Cajeros de Salón</span>
             <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600">
               <ShoppingCart className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">{totalCajeras}</span>
+            <span className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">{totalCajeros}</span>
             <span className="text-xs font-mono text-slate-400">en POS</span>
           </div>
           <p className="text-[11px] text-slate-400 mt-1">Puntos de cobro y terminales</p>
@@ -332,7 +349,7 @@ export default function UsuariosPage() {
             className="px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-white outline-none focus:border-blue-500"
           >
             <option value="ALL">Todos los Roles</option>
-            <option value="cajera">Cajeras</option>
+            <option value="cajero">Cajeros de Salón (POS)</option>
             <option value="supervisor">Supervisores</option>
             <option value="compras">Compras</option>
             <option value="contador">Contabilidad</option>
@@ -412,7 +429,7 @@ export default function UsuariosPage() {
                       </td>
                       <td className="p-3.5">
                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase font-mono border ${getRoleBadge(roleStr)}`}>
-                          {roleStr}
+                          {formatRoleLabel(roleStr)}
                         </span>
                       </td>
                       <td className="p-3.5 font-mono text-slate-500 text-[11px]">
@@ -561,8 +578,8 @@ interface UserModalProps {
 }
 
 const ROL_OPTIONS = [
-  { id: "cajera", label: "Cajera de Salón (POS)" },
-  { id: "supervisor", label: "Supervisor de Cajas" },
+  { id: "cajero", label: "Cajero de Salón (POS)" },
+  { id: "supervisor", label: "Supervisor de Cajas / Salón" },
   { id: "compras", label: "Encargado de Compras & Depósito" },
   { id: "contador", label: "Contador / Auditor Fiscal" },
   { id: "admin", label: "Administrador General" },
@@ -572,7 +589,7 @@ function UserModal({ user, roles, onClose, onSubmit, submitting }: UserModalProp
   const [email, setEmail] = useState(user?.email || "")
   const [nombre, setNombre] = useState(user?.nombre || "")
   const [telefono, setTelefono] = useState(user?.telefono || "")
-  const [rol, setRol] = useState(user?.tenant_rol || user?.rol || "cajera")
+  const [rol, setRol] = useState(user?.tenant_rol || user?.rol || "cajero")
   const [roleId, setRoleId] = useState("")
   const [password, setPassword] = useState("")
 

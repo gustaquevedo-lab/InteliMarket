@@ -207,7 +207,7 @@ async def list_pos_staff(db: AsyncSession = Depends(get_db)):
     ni nada sensible); el login real sigue exigiendo contraseña."""
     result = await db.execute(
         select(User)
-        .where(User.rol.in_(["cajero", "supervisor"]), User.activo == True)
+        .where(User.rol.in_(["cajero", "cajera", "supervisor"]), User.activo == True)
         .order_by(User.nombre)
     )
     users = result.scalars().all()
