@@ -614,7 +614,7 @@ export default function POSPage() {
   const [verifyingSupervisor, setVerifyingSupervisor] = useState(false)
   const [supervisorReason, setSupervisorReason] = useState("Error de escaneo / digitación")
   const [pendingSupervisorAction, setPendingSupervisorAction] = useState<{
-    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight"
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight" | "direct_discount"
     itemId?: string
     delta?: number
     sale?: Sale
@@ -622,7 +622,11 @@ export default function POSPage() {
     weightProduct?: Product
     weightEtiquetaKg?: number
     weightBalanzaKg?: number
+    discountType?: "percentage" | "fixed"
+    discountValue?: number
+    discountReason?: string
   } | null>(null)
+
   const [showRemoteAuthModal, setShowRemoteAuthModal] = useState(false)
   const [remoteAuthRequestId, setRemoteAuthRequestId] = useState<string | null>(null)
   const [remoteAuthStatus, setRemoteAuthStatus] = useState<"pendiente" | "aprobado" | "rechazado">("pendiente")
@@ -751,12 +755,26 @@ export default function POSPage() {
     precio: number
   } | null>(null)
 
+  // ── DESCUENTO DIRECTO AUTORIZADO POR SUPERVISOR (AUDITABLE) ────────────────
+  const [appliedDiscount, setAppliedDiscount] = useState<{
+    type: "percentage" | "fixed"
+    value: number
+    montoPyg: number
+    reason: string
+    supervisorId: string
+    supervisorNombre: string
+  } | null>(null)
+  const [showDiscountModal, setShowDiscountModal] = useState(false)
+  const [discountInputType, setDiscountInputType] = useState<"percentage" | "fixed">("percentage")
+  const [discountInputValue, setDiscountInputValue] = useState<string>("10")
+
   // ── MODALES DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO ─────────
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   // Redondeo Solidario & Donación ("Abre tu corazón" - Centro Amor y Esperanza)
   const [donacionActiva, setDonacionActiva] = useState(false)
   const [montoDonacionManual, setMontoDonacionManual] = useState<number | null>(null)
   const [campanaActivaDonacion, setCampanaActivaDonacion] = useState<any>(null)
+
   // Metodos de cobro activos -- reemplaza el viejo "paymentTab" de
   // seleccion unica (+ una pestana "Pago Mixto" que duplicaba cada campo).
   // Ahora cada metodo es un boton que se prende/apaga: con uno solo activo
@@ -3304,6 +3322,10 @@ export default function POSPage() {
         const etiquetaKg = (action as any).weightEtiquetaKg
         return `Usar peso de etiqueta pese a diferencia con la balanza: ${wp?.nombre || "producto"} · Etiqueta ${Number(etiquetaKg || 0).toFixed(3)} KG`
       }
+      case "direct_discount": {
+        const dType = (action as any).discountType === "percentage" ? `${(action as any).discountValue}%` : `₲ ${Number((action as any).discountValue || 0).toLocaleString("es-PY")}`
+        return `Autorizar Descuento Directo: ${dType} sobre total de ${formatPYG(totalBrutoPyg)}`
+      }
       default:
         return "Autorización de supervisor"
     }
@@ -3323,7 +3345,19 @@ export default function POSPage() {
     }
   }
 
-  const requestSupervisorAuthorization = async (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number, weightBalanzaKg?: number }) => {
+  const requestSupervisorAuthorization = async (action: {
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight" | "direct_discount",
+    itemId?: string,
+    delta?: number,
+    sale?: Sale,
+    customer?: Customer,
+    weightProduct?: Product,
+    weightEtiquetaKg?: number,
+    weightBalanzaKg?: number,
+    discountType?: "percentage" | "fixed",
+    discountValue?: number,
+    discountReason?: string
+  }) => {
     if (isSupervisorUser) {
       if (action.type === "process_return") {
         await submitDevolucion(user!.id, user?.nombre || "Supervisor")
@@ -3337,13 +3371,6 @@ export default function POSPage() {
       return
     }
 
-    // "Turno activo" ya no significa "hay alguien parado en esta caja" --
-    // desde que existe la PWA, un supervisor puede tener turno activo
-    // logueada solo en su celular. Antes ESO hacía que se saltee la alerta
-    // remota y se pidiera clave local (que nunca nadie tipeaba, porque el
-    // supervisor no estaba ahí). Ahora la solicitud remota SIEMPRE se manda
-    // -- si además hay alguien con turno activo, se ofrece el atajo de
-    // clave local como alternativa más rápida, no como el único camino.
     let localSupervisorAvailable = false
     try {
       const res = await api.auth.activeSupervisor()
@@ -3396,10 +3423,73 @@ export default function POSPage() {
     return () => clearInterval(interval)
   }, [showRemoteAuthModal, remoteAuthRequestId, pendingSupervisorAction])
 
-  const executeSupervisorAction = (action: { type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight", itemId?: string, delta?: number, sale?: Sale, customer?: Customer, weightProduct?: Product, weightEtiquetaKg?: number, weightBalanzaKg?: number }, resolverId?: string, resolverNombre?: string) => {
+  const executeSupervisorAction = (action: {
+    type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "use_label_weight" | "direct_discount",
+    itemId?: string,
+    delta?: number,
+    sale?: Sale,
+    customer?: Customer,
+    weightProduct?: Product,
+    weightEtiquetaKg?: number,
+    weightBalanzaKg?: number,
+    discountType?: "percentage" | "fixed",
+    discountValue?: number,
+    discountReason?: string
+  }, resolverId?: string, resolverNombre?: string) => {
     if (action.type === "extra_club_payment") {
       handleProcessCheckout()
+    } else if (action.type === "direct_discount") {
+      const dType = action.discountType || "percentage"
+      const dVal = Number(action.discountValue) || 0
+      const reason = (supervisorReason || action.discountReason || "Descuento autorizado por supervisor").trim()
+
+      let discountAmountPyg = 0
+      if (dType === "percentage") {
+        discountAmountPyg = Math.round(totalBrutoPyg * (dVal / 100))
+      } else {
+        discountAmountPyg = Math.min(totalBrutoPyg, Math.round(dVal))
+      }
+
+      setAppliedDiscount({
+        type: dType,
+        value: dVal,
+        montoPyg: discountAmountPyg,
+        reason: reason,
+        supervisorId: resolverId || user?.id || "",
+        supervisorNombre: resolverNombre || user?.nombre || "Supervisor",
+      })
+      setShowDiscountModal(false)
+
+      // REGISTRO DE EVENTO DE AUDITORÍA Y RIESGO EN INTELIAUDIT
+      api.inteliaudit.recordEvent({
+        company_id: COMPANY_ID,
+        user_id: resolverId || user?.id,
+        accion: "descuento_directo_autorizado",
+        entidad: "venta_pos",
+        entidad_id: null,
+        datos_anteriores: {
+          total_bruto_pyg: totalBrutoPyg,
+          items_count: cart.length,
+        },
+        datos_nuevos: {
+          tipo_descuento: dType,
+          valor_descuento: dVal,
+          monto_descuento_pyg: discountAmountPyg,
+          total_con_descuento_pyg: Math.max(0, totalBrutoPyg - discountAmountPyg),
+          motivo: reason,
+          autorizado_por_id: resolverId || user?.id,
+          autorizado_por_nombre: resolverNombre || user?.nombre,
+          cajero_id: user?.id,
+          cajero_nombre: user?.nombre,
+          caja: terminalAssignment?.caja_nombre || machineHostname || "Caja POS",
+          nivel_riesgo: "ALTO_RIESGO_FINANCIERO",
+          timestamp: new Date().toISOString(),
+        },
+      } as any).catch((err) => console.warn("Error grabando auditoria de descuento:", err))
+
+      toast.success("Descuento Aplicado", `Descuento de ${dType === "percentage" ? `${dVal}%` : formatPYG(discountAmountPyg)} autorizado por ${resolverNombre || "Supervisor"}.`)
     } else if (action.type === "use_label_weight" && action.weightProduct && action.weightEtiquetaKg) {
+
       api.inteliaudit.recordEvent({
         company_id: COMPANY_ID,
         user_id: resolverId || user?.id,
@@ -3461,6 +3551,12 @@ export default function POSPage() {
       toast.warning("Datos incompletos", "Seleccione el supervisor e ingrese su contraseña.")
       return
     }
+    if (pendingSupervisorAction?.type === "direct_discount") {
+      if (!supervisorReason || supervisorReason.trim().length < 5) {
+        toast.warning("Motivo Obligatorio", "El supervisor debe ingresar obligatoriamente el motivo del descuento (mín. 5 caracteres).")
+        return
+      }
+    }
     setVerifyingSupervisor(true)
     try {
       const res = await api.auth.verifySupervisor({ email: supervisorEmail, password: supervisorPin })
@@ -3477,7 +3573,7 @@ export default function POSPage() {
         } else if (pendingSupervisorAction.type === "extra_club_payment") {
           await handleProcessCheckout()
         } else {
-          executeSupervisorAction(pendingSupervisorAction)
+          executeSupervisorAction(pendingSupervisorAction, res.id!, res.nombre || "Supervisor")
         }
       }
       toast.success("Autorización Exitosa", `Acción aprobada por ${res.nombre} (${supervisorReason}).`)
@@ -3490,6 +3586,7 @@ export default function POSPage() {
       setVerifyingSupervisor(false)
     }
   }
+
 
   // ── DEVOLUCIONES DE CLIENTES ────────────────────────────────────────────
   // Flujo completo contra el backend real (misma tabla `returns` que usa
@@ -4019,15 +4116,15 @@ export default function POSPage() {
   }
 
   // ── CÁLCULOS DE TOTALES Y MULTIMONEDA ──────────────────────────────────────
-  const { totalPyg, totalBrl, totalUsd, gravada10Pyg, gravada5Pyg, exentaPyg, iva10Pyg, iva5Pyg } = useMemo(() => {
-    let totPyg = 0
+  const { totalBrutoPyg, descuentoTotalPyg, totalPyg, totalBrl, totalUsd, gravada10Pyg, gravada5Pyg, exentaPyg, iva10Pyg, iva5Pyg } = useMemo(() => {
+    let totBruto = 0
     let g10 = 0
     let g5 = 0
     let ex = 0
 
     for (const item of cart) {
       const lineTotal = item.precio * item.quantity
-      totPyg += lineTotal
+      totBruto += lineTotal
 
       if (item.iva_tasa === 10) {
         g10 += lineTotal
@@ -4038,23 +4135,38 @@ export default function POSPage() {
       }
     }
 
-    const iv10 = Math.round(g10 / 11)
-    const iv5 = Math.round(g5 / 21)
+    let descMonto = 0
+    if (appliedDiscount) {
+      if (appliedDiscount.type === "percentage") {
+        descMonto = Math.round(totBruto * (appliedDiscount.value / 100))
+      } else {
+        descMonto = Math.min(totBruto, Math.round(appliedDiscount.value))
+      }
+    }
 
-    const totBrl = rates.BRL > 0 ? (totPyg / rates.BRL).toFixed(2) : "0.00"
-    const totUsd = rates.USD > 0 ? (totPyg / rates.USD).toFixed(2) : "0.00"
+    const netTot = Math.max(0, totBruto - descMonto)
+    const factorDesc = totBruto > 0 ? netTot / totBruto : 1
+
+    const iv10 = Math.round((g10 * factorDesc) / 11)
+    const iv5 = Math.round((g5 * factorDesc) / 21)
+
+    const totBrl = rates.BRL > 0 ? (netTot / rates.BRL).toFixed(2) : "0.00"
+    const totUsd = rates.USD > 0 ? (netTot / rates.USD).toFixed(2) : "0.00"
 
     return {
-      totalPyg: Math.round(totPyg),
+      totalBrutoPyg: Math.round(totBruto),
+      descuentoTotalPyg: Math.round(descMonto),
+      totalPyg: Math.round(netTot),
       totalBrl: totBrl,
       totalUsd: totUsd,
-      gravada10Pyg: Math.round(g10),
-      gravada5Pyg: Math.round(g5),
-      exentaPyg: Math.round(ex),
+      gravada10Pyg: Math.round(g10 * factorDesc),
+      gravada5Pyg: Math.round(g5 * factorDesc),
+      exentaPyg: Math.round(ex * factorDesc),
       iva10Pyg: Math.round(iv10),
       iva5Pyg: Math.round(iv5),
     }
-  }, [cart, rates])
+  }, [cart, rates, appliedDiscount])
+
 
   // Cálculos dinámicos de vuelto multimoneda en el modal de cobro (SIN CÉNTIMOS EN PYG)
   const { totalRecibidoPyg, saldoRestantePyg, vueltoPyg } = useMemo(() => {
@@ -4467,6 +4579,21 @@ export default function POSPage() {
         return n.toLocaleString("es-PY", { minimumFractionDigits: 0, maximumFractionDigits: 0 })
       }
 
+      const saleItemsForCreate = cart.map(i => {
+        const itemTotalBruto = i.precio * i.quantity
+        const pctDesc = totalBrutoPyg > 0 && descuentoTotalPyg > 0 ? (descuentoTotalPyg / totalBrutoPyg) * 100 : (i.descuento_pct || 0)
+        return {
+          product_id: i.product_id || i.id,
+          cantidad: i.quantity,
+          precio_unitario: i.precio,
+          iva_tasa: i.iva_tasa,
+          descuento_pct: Number(pctDesc.toFixed(2)),
+          descuento_monto: Math.round(itemTotalBruto * (pctDesc / 100)),
+          subtotal: itemTotalBruto,
+          origen_balanza: i.origen_balanza || undefined,
+        }
+      })
+
       const anchoImprimibleMm = tpl.ancho_imprimible_mm || 68
       const margenIzqMm = tpl.margen_izq_mm || 0
       const margenDerMm = tpl.margen_der_mm || 0
@@ -4496,14 +4623,7 @@ export default function POSPage() {
       // el total quedaba en 0 aunque el ticket impreso mostrara los
       // productos reales). Si un product_id es inválido, que lo rechace el
       // servidor con un error visible, nunca perder el dato en silencio.
-      const saleItemsForCreate = cart
-        .map(i => ({
-          product_id: i.product_id || i.id,
-          cantidad: i.quantity,
-          precio_unitario: i.precio,
-          iva_tasa: i.iva_tasa,
-          subtotal: i.precio * i.quantity
-        }))
+      
       // Desglose real de medios de pago -- antes era una sola linea fija
       // por pestaña (ni "mixed" ni "extra_club" quedaban bien representados)
       // y ademas se descartaba en silencio del lado del backend (ver fix en
@@ -4529,32 +4649,21 @@ export default function POSPage() {
         }
         if (activeMethods.has("qr")) {
           qrMonto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (qrMonto > 0) {
-            if (qrSubMethod === "pix" || plugpayState === "aprobada") {
-              out.push({ forma_pago: "PLUGPAY_PIX", monto: qrMonto, moneda: "PYG" })
-            } else {
-              out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG" })
-            }
-          }
-        }
-        if (activeMethods.has("plugpay_credito")) {
-          parceladoMonto = isMultiPayment ? parseInt(mixedParceladoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
-          if (parceladoMonto > 0) out.push({ forma_pago: "PLUGPAY_CREDITO", monto: parceladoMonto, moneda: "PYG" })
+          if (qrMonto > 0) out.push({ forma_pago: "QR", monto: qrMonto, moneda: "PYG" })
         }
         if (activeMethods.has("extra_club")) {
           extraClubMonto = isMultiPayment ? parseInt(mixedExtraClubPyg.replace(/\D/g, "") || "0", 10) : totalPyg
           if (extraClubMonto > 0) out.push({ forma_pago: "EXTRA_CLUB", monto: extraClubMonto, moneda: "PYG" })
         }
-
-        const otrosNonCash = cardMonto + dinelcoMonto + qrMonto + parceladoMonto + extraClubMonto
-        let remainingPyg = Math.max(0, totalPyg - otrosNonCash)
-
         if (activeMethods.has("cash")) {
-          const brlInput = parseFloat(payCashBrl.replace(/,/g, ".") || "0")
-          const usdInput = parseFloat(payCashUsd.replace(/,/g, ".") || "0")
+          const otrosNonCash = cardMonto + dinelcoMonto + qrMonto + parceladoMonto + extraClubMonto
+          let remainingPyg = Math.max(0, totalPyg - otrosNonCash)
+
+          const brlInput = parseFloat(payCashBrl.replace(",", ".")) || 0
+          const usdInput = parseFloat(payCashUsd.replace(",", ".")) || 0
 
           if (brlInput > 0 && remainingPyg > 0) {
-            const brlRate = rates.BRL > 0 ? rates.BRL : 1380
+            const brlRate = rates.BRL > 0 ? rates.BRL : 1480
             const brlValueInPyg = brlInput * brlRate
             const netPygCoveredByBrl = Math.min(brlValueInPyg, remainingPyg)
             const netBrl = Math.round((netPygCoveredByBrl / brlRate) * 100) / 100
@@ -4593,10 +4702,11 @@ export default function POSPage() {
         // administrador) -- sin esto, el backend cae al único punto de
         // emisión por defecto de toda la empresa, sin importar en qué caja
         // real se hizo la venta.
-        punto_emision: terminalAssignment?.punto_emision || undefined,
-        subtotal: totalPyg,
+        subtotal: totalBrutoPyg,
+        descuento_total: descuentoTotalPyg,
         total: totalPyg,
-        condicion: isClubMember ? "credito" : "contado",
+        observaciones: appliedDiscount ? `Descuento directo autorizado por ${appliedDiscount.supervisorNombre} (${appliedDiscount.reason})` : undefined,
+
         estado: "completada",
         items: saleItemsForCreate,
         payments: salePaymentsForCreate,
@@ -4971,7 +5081,18 @@ export default function POSPage() {
           }
         }
         t += escposDashes(W) + '\n'
+        if (descuentoTotalPyg > 0) {
+          t += escposTwoCol('SUBTOTAL:', fmtGs(totalBrutoPyg), W) + '\n'
+          t += escposTwoCol('DESC. AUTORIZADO:', `-${fmtGs(descuentoTotalPyg)}`, W) + '\n'
+          if (appliedDiscount?.reason) {
+            t += `  Motivo: ${escposStripAccents(appliedDiscount.reason.slice(0, 30))}\n`
+          }
+          if (appliedDiscount?.supervisorNombre) {
+            t += `  Aut: ${escposStripAccents(appliedDiscount.supervisorNombre.slice(0, 20))}\n`
+          }
+        }
         t += ESCPOS_BOLD_ON + ESCPOS_DOUBLE_ON + escposTwoCol('TOTAL:', fmtGs(totalPyg), 24) + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
+
         if (showMulti && showBrl) t += escposTwoCol('Equiv. Reales:', `R$ ${totalBrl}`) + '\n'
         if (showMulti && showUsd) t += escposTwoCol('Equiv. Dolares:', `US$ ${totalUsd}`) + '\n'
 
@@ -6609,6 +6730,8 @@ export default function POSPage() {
                 <div className="font-bold text-xs text-rose-600 dark:text-rose-400">
                   {pendingSupervisorAction?.type === "clear_cart"
                     ? "❌ Cancelación / Anulación de Toda la Venta"
+                    : pendingSupervisorAction?.type === "direct_discount"
+                    ? `🏷️ Descuento Directo: ${pendingSupervisorAction.discountType === "percentage" ? `${pendingSupervisorAction.discountValue}%` : `₲ ${Number(pendingSupervisorAction.discountValue || 0).toLocaleString("es-PY")}`}`
                     : pendingSupervisorAction?.type === "open_pos_config"
                     ? "⚙️ Configuración y Asignación de Terminales POS"
                     : pendingSupervisorAction?.type === "process_return"
@@ -6618,20 +6741,47 @@ export default function POSPage() {
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Motivo:</label>
-                <select
-                  value={supervisorReason}
-                  onChange={(e) => setSupervisorReason(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
-                >
-                  <option value="Error de escaneo / digitación">Error de escaneo / digitación</option>
-                  <option value="Cliente desistió de comprar el producto">Cliente desistió de comprar el producto</option>
-                  <option value="Configuración de Terminales POS">Configuración de Terminales POS</option>
-                  <option value="Producto dañado / fecha de vencimiento">Producto dañado / fecha de vencimiento</option>
-                  <option value="Precio incorrecto en góndola">Precio incorrecto en góndola</option>
-                  <option value="Devolución de cliente">Devolución de cliente</option>
-                </select>
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
+                  Motivo de Autorización {pendingSupervisorAction?.type === "direct_discount" ? <span className="text-rose-500 font-black">*(OBLIGATORIO)</span> : ":"}:
+                </label>
+                {pendingSupervisorAction?.type === "direct_discount" ? (
+                  <div>
+                    <input
+                      type="text"
+                      value={supervisorReason}
+                      onChange={(e) => setSupervisorReason(e.target.value)}
+                      placeholder="Escriba el motivo del descuento (mín. 5 letras)..."
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
+                    />
+                    <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                      {["Atención al cliente", "Mercadería con detalle", "Convenio especial", "Aprobación de gerencia"].map((sug) => (
+                        <button
+                          key={sug}
+                          type="button"
+                          onClick={() => setSupervisorReason(sug)}
+                          className="text-[9px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                        >
+                          {sug}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <select
+                    value={supervisorReason}
+                    onChange={(e) => setSupervisorReason(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white font-bold outline-none focus:border-rose-500"
+                  >
+                    <option value="Error de escaneo / digitación">Error de escaneo / digitación</option>
+                    <option value="Cliente desistió de comprar el producto">Cliente desistió de comprar el producto</option>
+                    <option value="Configuración de Terminales POS">Configuración de Terminales POS</option>
+                    <option value="Producto dañado / fecha de vencimiento">Producto dañado / fecha de vencimiento</option>
+                    <option value="Precio incorrecto en góndola">Precio incorrecto en góndola</option>
+                    <option value="Devolución de cliente">Devolución de cliente</option>
+                  </select>
+                )}
               </div>
+
 
               <div>
                 <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">Supervisor que autoriza:</label>
@@ -7019,7 +7169,45 @@ export default function POSPage() {
                   </div>
                 </div>
 
+                {/* Descuento Directo Autorizado */}
+                {appliedDiscount ? (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between text-xs animate-fade-in">
+                    <div className="min-w-0 pr-2">
+                      <div className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400 text-[11px]">
+                        <Percent className="w-3.5 h-3.5 shrink-0" />
+                        <span>Descuento Directo: -{formatPYG(descuentoTotalPyg)} ({appliedDiscount.type === "percentage" ? `${appliedDiscount.value}%` : "Fijo"})</span>
+                      </div>
+                      <div className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5 truncate">
+                        Motivo: <strong className="font-semibold">{appliedDiscount.reason}</strong> · Aut: {appliedDiscount.supervisorNombre}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAppliedDiscount(null)}
+                      className="p-1 rounded-lg text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-950/50 cursor-pointer shrink-0"
+                      title="Quitar Descuento"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowDiscountModal(true)}
+                    className="w-full py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center justify-between transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Percent className="w-3.5 h-3.5 text-amber-500" />
+                      Aplicar Descuento Especial
+                    </span>
+                    <span className="text-[10px] font-mono bg-amber-500/20 px-2 py-0.5 rounded-md font-semibold">
+                      Requiere Supervisor
+                    </span>
+                  </button>
+                )}
+
                 {/* Recibido Parcial si hay múltiples pagos */}
+
                 {totalRecibidoPyg > 0 && totalRecibidoPyg < totalPyg && (
                   <div className="p-2.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 flex items-center justify-between text-xs font-bold">
                     <span className="text-blue-700 dark:text-blue-300 uppercase text-[10px]">Total Recibido:</span>
@@ -8345,8 +8533,170 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* ── MODAL DE DESCUENTO DIRECTO EN PAGO (AUTORIZACIÓN OBLIGATORIA) ──── */}
+      {showDiscountModal && (
+
+        <div className="fixed inset-0 z-[150] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center text-[#1C1710] font-black shadow-md shadow-amber-500/30">
+                  <Percent className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-slate-900 dark:text-white font-posDisplay tracking-tight">
+                    Descuento Directo en Venta
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Requiere autorización y motivo obligatorio del supervisor.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDiscountModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500">Total Venta Actual:</span>
+                <span className="text-sm font-black font-posMono text-slate-900 dark:text-white">{formatPYG(totalBrutoPyg)}</span>
+              </div>
+
+              {/* Selector de Tipo de Descuento */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setDiscountInputType("percentage"); setDiscountInputValue("10") }}
+                  className={`py-2 px-3 rounded-xl text-xs font-black cursor-pointer transition ${
+                    discountInputType === "percentage"
+                      ? "bg-amber-500 text-[#1C1710] shadow-md shadow-amber-500/20"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  Por Porcentaje (%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setDiscountInputType("fixed"); setDiscountInputValue("") }}
+                  className={`py-2 px-3 rounded-xl text-xs font-black cursor-pointer transition ${
+                    discountInputType === "fixed"
+                      ? "bg-amber-500 text-[#1C1710] shadow-md shadow-amber-500/20"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  Por Monto Fijo (₲)
+                </button>
+              </div>
+
+              {discountInputType === "percentage" ? (
+                <div>
+                  <div className="flex gap-2 mb-2">
+                    {[5, 10, 15, 20].map((pct) => (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => setDiscountInputValue(String(pct))}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold font-posMono cursor-pointer border ${
+                          discountInputValue === String(pct)
+                            ? "bg-amber-500/20 border-amber-500 text-amber-700 dark:text-amber-300"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Porcentaje de Descuento (%):</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={discountInputValue}
+                    onChange={(e) => setDiscountInputValue(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-lg font-posMono font-black text-amber-600 dark:text-amber-400 outline-none focus:border-amber-500"
+                    placeholder="10"
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Monto de Descuento (₲):</label>
+                  <input
+                    type="text"
+                    value={discountInputValue}
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(/\D/g, "")
+                      setDiscountInputValue(clean ? parseInt(clean, 10).toLocaleString("es-PY") : "")
+                    }}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-lg font-posMono font-black text-amber-600 dark:text-amber-400 outline-none focus:border-amber-500"
+                    placeholder="0"
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              {/* Resumen Calculado */}
+              {(() => {
+                const numVal = discountInputType === "percentage"
+                  ? parseFloat(discountInputValue) || 0
+                  : parseInt(discountInputValue.replace(/\D/g, "") || "0", 10)
+                let calcMonto = 0
+                if (discountInputType === "percentage") {
+                  calcMonto = Math.round(totalBrutoPyg * (numVal / 100))
+                } else {
+                  calcMonto = Math.min(totalBrutoPyg, numVal)
+                }
+                const newNet = Math.max(0, totalBrutoPyg - calcMonto)
+
+                return (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-1">
+                    <div className="flex justify-between font-bold text-amber-800 dark:text-amber-200">
+                      <span>Monto a Descontar:</span>
+                      <span className="font-posMono text-sm font-black">-{formatPYG(calcMonto)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-slate-700 dark:text-slate-300 pt-1 border-t border-amber-500/20">
+                      <span>Nuevo Total a Cobrar:</span>
+                      <span className="font-posMono text-sm font-black text-emerald-600 dark:text-emerald-400">{formatPYG(newNet)}</span>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              <button
+                type="button"
+                onClick={() => {
+                  const numVal = discountInputType === "percentage"
+                    ? parseFloat(discountInputValue) || 0
+                    : parseInt(discountInputValue.replace(/\D/g, "") || "0", 10)
+                  if (numVal <= 0) {
+                    toast.warning("Monto Inválido", "Ingrese un porcentaje o monto mayor a cero.")
+                    return
+                  }
+                  setShowDiscountModal(false)
+                  requestSupervisorAuthorization({
+                    type: "direct_discount",
+                    discountType: discountInputType,
+                    discountValue: numVal,
+                    discountReason: "",
+                  })
+                }}
+                className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-[#1C1710] font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-amber-500/30 cursor-pointer"
+              >
+                <ShieldAlert className="w-4 h-4" /> Solicitar Autorización de Supervisor
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── CONSULTA DE PRECIOS (solo lectura, con escala por cantidad) ──────── */}
       {showPriceCheckModal && (
+
         <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-fade-in text-slate-900 dark:text-slate-100 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between mb-4 shrink-0">
