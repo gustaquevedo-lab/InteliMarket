@@ -125,9 +125,54 @@ const ESCPOS_HEIGHT_ON = GS + '!' + '\x10'
 const ESCPOS_DOUBLE_OFF = GS + '!' + '\x00'
 const ESCPOS_LINE_WIDTH = 48
 
+function escposFormatDateTime(val?: string | number | Date | null): string {
+  if (!val) return '-'
+  const d = typeof val === 'string' || typeof val === 'number' ? new Date(val) : val
+  if (!d || isNaN(d.getTime())) return String(val || '-')
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const dd = pad(d.getDate())
+  const mm = pad(d.getMonth() + 1)
+  const yyyy = d.getFullYear()
+  const hh = pad(d.getHours())
+  const min = pad(d.getMinutes())
+  const ss = pad(d.getSeconds())
+  return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`
+}
+
+function escposFormatDate(val?: string | number | Date | null): string {
+  if (!val) return '-'
+  const d = typeof val === 'string' || typeof val === 'number' ? new Date(val) : val
+  if (!d || isNaN(d.getTime())) return String(val || '-')
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const dd = pad(d.getDate())
+  const mm = pad(d.getMonth() + 1)
+  const yyyy = d.getFullYear()
+  return `${dd}/${mm}/${yyyy}`
+}
+
+function escposFormatTime(val?: string | number | Date | null): string {
+  if (!val) return '-'
+  const d = typeof val === 'string' || typeof val === 'number' ? new Date(val) : val
+  if (!d || isNaN(d.getTime())) return String(val || '-')
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const hh = pad(d.getHours())
+  const min = pad(d.getMinutes())
+  const ss = pad(d.getSeconds())
+  return `${hh}:${min}:${ss}`
+}
+
 function escposStripAccents(s: string): string {
   return String(s ?? '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u202F\u00A0\u2000-\u200B\u2060]/g, ' ')
+    .replace(/₲/g, 'Gs.')
+    .replace(/ñ/g, 'n')
+    .replace(/Ñ/g, 'N')
+    .replace(/[–—]/g, '-')
+    .replace(/[“”""]/g, '"')
+    .replace(/[‘’'']/g, "'")
+    .replace(/·/g, '-')
     .replace(/[^\x20-\x7E\n]/g, '')
 }
 function escposPadRight(s: string, n: number): string {
@@ -182,11 +227,19 @@ function escposWrapText(text: string, width = ESCPOS_LINE_WIDTH, align: 'left' |
 function escposDashes(width = ESCPOS_LINE_WIDTH): string {
   return '-'.repeat(width)
 }
-// btoa espera char codes 0-255 -- ya garantizado por escposStripAccents +
-// los propios bytes de control ESC/GS (todos < 256).
 function escposToBase64(escposText: string): string {
-  return btoa(escposText)
+  let sanitized = ''
+  for (let i = 0; i < escposText.length; i++) {
+    const code = escposText.charCodeAt(i)
+    if (code <= 255) {
+      sanitized += escposText[i]
+    } else {
+      sanitized += ' '
+    }
+  }
+  return btoa(sanitized)
 }
+
 
 // Codigo QR nativo del propio firmware de la impresora (comando GS ( k,
 // familia de codigos 2D estandar ESC/POS) -- no es una imagen, es la
@@ -2151,8 +2204,8 @@ export default function POSPage() {
         t += escposDashes(W) + "\n"
         t += ESCPOS_ALIGN_LEFT
         t += `Cajero/a:    ${escposStripAccents(user?.nombre || "Cajero")}\n`
-        t += `Caja / Boca: ${puntoNombre} (${puntoEmision || "012"})\n`
-        t += `Fecha/Hora:  ${new Date().toLocaleString("es-PY")}\n`
+        t += `Caja / Boca: ${escposStripAccents(puntoNombre)} (${escposStripAccents(puntoEmision || "012")})\n`
+        t += `Fecha/Hora:  ${escposFormatDateTime(new Date())}\n`
         t += `Turno ID:    ${currentSessionId.slice(0, 8).toUpperCase()}\n`
         t += escposDashes(W) + "\n"
         t += ESCPOS_BOLD_ON + "FONDOS DE APERTURA INICIAL:\n" + ESCPOS_BOLD_OFF
@@ -2211,7 +2264,7 @@ export default function POSPage() {
         t += "Firma Supervisora: ______________________\n\n\n\n\n\n"
         t += GS + 'V' + '\x01'
 
-        const b64 = btoa(unescape(encodeURIComponent(t)))
+        const b64 = escposToBase64(t)
         const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
         try {
           await (window as any).electronAPI.printEscPos(b64, tpl.nombre_impresora_windows || "ZKP8008")
@@ -2594,7 +2647,7 @@ export default function POSPage() {
         // 1. Encabezado configurable
         const encabezado = camp.ticket_encabezado?.trim() || tpl.nombre_fantasia || "EXTRA SUPERMERCADO MAYORISTA"
         t += ESCPOS_BOLD_ON + escposStripAccents(encabezado) + ESCPOS_BOLD_OFF + '\n'
-        t += "Pedro Juan Caballero · Paraguay\n"
+        t += "Pedro Juan Caballero - Paraguay\n"
         t += escposDashes(W) + '\n'
 
         // 2. Subtítulo del Sorteo y Premio
@@ -2615,7 +2668,7 @@ export default function POSPage() {
 
         // 4. Datos del Ticket
         t += escposTwoCol(`Ticket: #${cuponData.saleNumero}`, `Gs. ${formatPYG(cuponData.montoCompra)}`, W) + '\n'
-        t += escposTwoCol(`Fecha: ${new Date().toLocaleDateString("es-PY")} ${new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}`, `Boca: ${puntoEmision || "012"}`, W) + '\n'
+        t += escposTwoCol(`Fecha: ${escposFormatDate(new Date())} ${escposFormatTime(new Date())}`, `Boca: ${escposStripAccents(puntoEmision || "012")}`, W) + '\n'
         t += escposDashes(W) + '\n'
 
         // 5. Datos del Participante
@@ -2879,16 +2932,16 @@ export default function POSPage() {
 
       let t = ESCPOS_INIT
       t += ESCPOS_ALIGN_CENTER
-      t += ESCPOS_BOLD_ON + (comp?.nombre_fantasia || comp?.razon_social || "EXTRA SUPERMERCADO MAYORISTA") + "\n" + ESCPOS_BOLD_OFF
-      if (comp?.ruc) t += `RUC: ${comp.ruc}\n`
+      t += ESCPOS_BOLD_ON + escposStripAccents(comp?.nombre_fantasia || comp?.razon_social || "EXTRA SUPERMERCADO MAYORISTA") + "\n" + ESCPOS_BOLD_OFF
+      if (comp?.ruc) t += `RUC: ${escposStripAccents(comp.ruc)}\n`
       t += "REIMPRESION DE ARQUEO / CIERRE\n"
       t += escposDashes(W) + "\n"
       t += ESCPOS_ALIGN_LEFT
-      t += `Cajero/a: ${sessionSummary.cajero_nombre || "-"}\n`
-      t += `Caja: ${sessionSummary.register_nombre || "Caja"}\n`
+      t += `Cajero/a: ${escposStripAccents(sessionSummary.cajero_nombre || "-")}\n`
+      t += `Caja: ${escposStripAccents(sessionSummary.register_nombre || "Caja")}\n`
       t += `Turno ID: ${sessionSummary.id.slice(0, 8).toUpperCase()}\n`
-      t += `Fecha Apertura: ${sessionSummary.fecha_apertura ? new Date(sessionSummary.fecha_apertura).toLocaleString("es-PY") : "-"}\n`
-      t += `Fecha Cierre:   ${sessionSummary.fecha_cierre ? new Date(sessionSummary.fecha_cierre).toLocaleString("es-PY") : "-"}\n`
+      t += `Fecha Apertura: ${escposFormatDateTime(sessionSummary.fecha_apertura)}\n`
+      t += `Fecha Cierre:   ${escposFormatDateTime(sessionSummary.fecha_cierre)}\n`
       t += escposDashes(W) + "\n"
 
       t += ESCPOS_BOLD_ON + "[RESUMEN POR FORMA DE PAGO]\n" + ESCPOS_BOLD_OFF
@@ -2922,7 +2975,7 @@ export default function POSPage() {
       t += "Firma Supervisora: ______________________\n\n\n\n\n\n"
       t += GS + 'V' + '\x01'
 
-      const b64 = btoa(unescape(encodeURIComponent(t)))
+      const b64 = escposToBase64(t)
       if ((window as any).electronAPI?.printEscPos) {
         const res = await (window as any).electronAPI.printEscPos(b64, tpl.nombre_impresora_windows || "ZKP8008")
         if (!res?.success) {
@@ -3870,7 +3923,7 @@ export default function POSPage() {
     t += ESCPOS_ALIGN_LEFT
     t += ESCPOS_BOLD_ON + `NC No: ${approved.nota_credito_numero}` + ESCPOS_BOLD_OFF + '\n'
     t += `Devolucion No: ${approved.numero || ''}\n`
-    t += `Fecha/Hora: ${new Date().toLocaleString("es-PY")}\n`
+    t += `Fecha/Hora: ${escposFormatDateTime(new Date())}\n`
     // Referencia a la factura que se devuelve -- destacada en su propio
     // recuadro, no una línea más entre las demás, porque es el dato que
     // vincula legalmente la NC a la factura original.
@@ -5156,7 +5209,7 @@ export default function POSPage() {
         if (tpl.usar_numero_interno_venta !== false && numeroInterno) {
           t += `No Venta: ${numeroInterno}\n`
         }
-        t += `Fecha/Hora: ${new Date().toLocaleString("es-PY")}\n`
+        t += `Fecha/Hora: ${escposFormatDateTime(new Date())}\n`
         t += `Condicion: ${isClubMember ? "CREDITO" : "CONTADO"}\n`
         if (showCajero) t += `Cajero: ${escposStripAccents(user?.nombre || "Cajero 01")} (${puntoEmision})\n`
         if (showCliente) t += `Cliente: ${escposStripAccents(customer.nombre)}\n`
