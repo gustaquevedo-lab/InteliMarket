@@ -8,7 +8,7 @@ from uuid import UUID
 
 class LoginRequest(BaseModel):
     email: str
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=1)
 
 
 class VerifySupervisorRequest(BaseModel):
@@ -26,7 +26,7 @@ class VerifySupervisorResponse(BaseModel):
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=3)
     nombre: str = Field(min_length=2, max_length=100)
     tenant_nombre: str = Field(min_length=2, max_length=100)
 
@@ -55,11 +55,11 @@ class UserResponse(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=6)
+    new_password: str = Field(min_length=1)
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: Optional[str] = Field(default=None, min_length=6)
+    new_password: Optional[str] = Field(default=None, min_length=1)
 
 
 class ResetPasswordResponse(BaseModel):
@@ -69,7 +69,7 @@ class ResetPasswordResponse(BaseModel):
 
 class AdminCreateUserRequest(BaseModel):
     email: EmailStr
-    password: Optional[str] = Field(default=None, min_length=6)
+    password: Optional[str] = Field(default=None, min_length=1)
     nombre: str = Field(min_length=2, max_length=100)
     telefono: Optional[str] = None
     rol: str = "operador"
