@@ -912,6 +912,27 @@ export default function POSPage() {
   const [bancardQrError, setBancardQrError] = useState<string>("")
   const [bancardQrManualConfirm, setBancardQrManualConfirm] = useState(false)
   const [bancardQrLogId, setBancardQrLogId] = useState<string | null>(null)
+  const [showBancardQrManualFallback, setShowBancardQrManualFallback] = useState(false)
+  const [posQrCupon, setPosQrCupon] = useState("")
+  const [posQrAuth, setPosQrAuth] = useState("")
+
+  const handleManualConfirmQr = () => {
+    if (!posQrCupon.trim()) {
+      toast.warning("Falta Nº de Boleta / Ticket", "Ingresá el número de boleta o cupón impreso en el voucher del terminal.")
+      return
+    }
+    const result: BancardTxnResult = {
+      codigoAutorizacion: posQrAuth.trim() || "MANUAL",
+      nroBoleta: posQrCupon.trim(),
+      mensajeDisplay: "APROBADA MANUAL",
+      nombreTarjeta: "QR ZIMPLE / BANCARD",
+      nombreCliente: customer?.nombre || "CLIENTE",
+    }
+    setBancardQrResult(result)
+    setBancardQrState("aprobada")
+    setBancardQrManualConfirm(true)
+    toast.success("Pago QR Confirmado", `Voucher Nº ${posQrCupon.trim()} registrado manualmente.`)
+  }
 
   // ── FLUJO DE COBRO PLUGPAY (PIX & CRÉDITO PARCELADO BRASIL) ────────────────
   const [plugpayMethod, setPlugpayMethod] = useState<"zimple" | "pix" | "parcelado">("zimple")
@@ -1112,7 +1133,7 @@ export default function POSPage() {
 
   const resetBancardFlow = () => {
     setBancardTxnState("idle"); setBancardTxnResult(null); setBancardTxnError(""); setShowBancardManualFallback(false); setBancardTxnLogId(null); setPosCardCuotas(1)
-    setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null)
+    setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null); setShowBancardQrManualFallback(false); setPosQrCupon(""); setPosQrAuth("")
     setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); clearPlugpayPoll()
   }
 
@@ -8491,9 +8512,9 @@ export default function POSPage() {
 
                         {/* SUB-PANEL 1: QR ZIMPLE */}
                         {qrSubMethod === "zimple" && (
-                          <div className="flex flex-col items-center text-center space-y-2">
+                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
                             <div className="flex items-center gap-2">
-                              <QrCode className="w-8 h-8 text-purple-600" />
+                              <QrCode className="w-7 h-7 text-purple-600" />
                               <div className="text-left">
                                 <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Bancard Zimple</div>
                                 {!isMultiPayment && (
@@ -8512,13 +8533,91 @@ export default function POSPage() {
                                 className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
                               >
                                 {bancardQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
-                                <span>{bancardQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR Zimple"}</span>
+                                <span>{bancardQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR Zimple en Terminal"}</span>
                               </button>
+                            )}
+
+                            {bancardQrState === "error_rechazo" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                                <div className="font-black">✕ {bancardQrError || "Transacción QR rechazada"}</div>
+                                <button type="button" onClick={handleBancardQR} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                              </div>
+                            )}
+
+                            {bancardQrState === "error_conexion" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
+                                <div className="font-black">⚠ {bancardQrError || "Error de conexión con el terminal"}</div>
+                                <button type="button" onClick={handleBancardQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
+
+                            {/* Respaldo manual de voucher para QR */}
+                            {bancardQrState !== "aprobada" && (
+                              <div className="w-full max-w-sm pt-1 border-t border-slate-200 dark:border-slate-800 text-left">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowBancardQrManualFallback((v) => !v)}
+                                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer flex items-center gap-1"
+                                >
+                                  <span>{showBancardQrManualFallback ? "▾ Ocultar carga manual de voucher QR" : "▸ Cargar voucher QR manualmente"}</span>
+                                </button>
+
+                                {showBancardQrManualFallback && (
+                                  <div className="mt-2 p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                                      Si el terminal ya cobró y emitió el ticket impreso, cargá los datos para validar la venta:
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-0.5">Nº Boleta / Ticket:</label>
+                                        <input
+                                          type="text"
+                                          value={posQrCupon}
+                                          onChange={(e) => setPosQrCupon(e.target.value)}
+                                          placeholder="123456"
+                                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-0.5">Cod. Autorización:</label>
+                                        <input
+                                          type="text"
+                                          value={posQrAuth}
+                                          onChange={(e) => setPosQrAuth(e.target.value)}
+                                          placeholder="000123"
+                                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-xs outline-none"
+                                        />
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={handleManualConfirmQr}
+                                      className="w-full py-2 px-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                                    >
+                                      <CheckCircle className="w-3.5 h-3.5" />
+                                      <span>Confirmar Pago QR con Voucher</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             )}
 
                             {bancardQrState === "aprobada" && bancardQrResult && (
                               <div className="w-full max-w-sm p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5 text-left">
-                                <div className="font-black">✓ {bancardQrResult.mensajeDisplay || "Pago Exitoso"}</div>
+                                <div className="font-black flex items-center justify-between">
+                                  <span>✓ {bancardQrResult.mensajeDisplay || "Pago Exitoso"}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setBancardQrState("idle")
+                                      setBancardQrResult(null)
+                                      setBancardQrManualConfirm(false)
+                                    }}
+                                    className="text-[10px] text-rose-500 hover:underline cursor-pointer font-bold"
+                                  >
+                                    Cambiar
+                                  </button>
+                                </div>
                                 <div className="font-posMono tabular-nums">Autorización {bancardQrResult.codigoAutorizacion} · Boleta {bancardQrResult.nroBoleta}</div>
                               </div>
                             )}
