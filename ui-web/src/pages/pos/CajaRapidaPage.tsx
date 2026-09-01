@@ -2208,7 +2208,8 @@ export default function POSPage() {
 
         t += escposDashes(W) + "\n\n"
         t += "Firma Cajero/a: _________________________\n\n"
-        t += "Firma Supervisora: ______________________\n\n\n\n\n"
+        t += "Firma Supervisora: ______________________\n\n\n\n\n\n"
+        t += GS + 'V' + '\x01'
 
         const b64 = btoa(unescape(encodeURIComponent(t)))
         const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
@@ -2918,7 +2919,8 @@ export default function POSPage() {
 
       t += escposDashes(W) + "\n\n"
       t += "Firma Cajero/a: _________________________\n\n"
-      t += "Firma Supervisora: ______________________\n\n\n\n\n"
+      t += "Firma Supervisora: ______________________\n\n\n\n\n\n"
+      t += GS + 'V' + '\x01'
 
       const b64 = btoa(unescape(encodeURIComponent(t)))
       if ((window as any).electronAPI?.printEscPos) {
