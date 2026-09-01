@@ -74,11 +74,13 @@ async def list_movements(
     product_id: str | None = Query(None),
     warehouse_id: str | None = Query(None),
     tipo: str | None = Query(None),
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
     limit: int = Query(100, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_movements(db, company_id, product_id, warehouse_id, tipo, limit, offset)
+    return await service.list_movements(db, company_id, product_id, warehouse_id, tipo, fecha_desde, fecha_hasta, limit, offset)
 
 
 @router.post("/inventory/transfers", response_model=TransferResponse, status_code=status.HTTP_201_CREATED)

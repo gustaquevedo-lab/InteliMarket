@@ -419,6 +419,8 @@ export interface InventoryMovementRecord {
   product_sku?: string
   warehouse_nombre?: string
   warehouse_codigo?: string
+  user_nombre?: string
+  saldo_acumulado?: number
 }
 
 export interface InventoryAdjustmentRecord {
@@ -770,7 +772,7 @@ export const api = {
     getStats: () => client.get<InventoryStatsResponse>(`/v1/companies/${COMPANY_ID}/inventory/stats`),
     getLotsExpiries: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
       client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/lots/expiries`, params),
-    listMovements: (params?: { product_id?: string; warehouse_id?: string; tipo?: string; limit?: number; offset?: number }) =>
+    listMovements: (params?: { product_id?: string; warehouse_id?: string; tipo?: string; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
       client.get<InventoryMovementRecord[]>(`/v1/inventory/movements`, { company_id: COMPANY_ID, ...params } as any),
     listAdjustments: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
       client.get<InventoryAdjustmentRecord[]>(`/v1/companies/${COMPANY_ID}/adjustments`, params as any),

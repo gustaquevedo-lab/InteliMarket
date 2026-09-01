@@ -46,6 +46,8 @@ export default function InventoryPage() {
   // Filtros Kardex
   const [kardexTipo, setKardexTipo] = useState<string>("")
   const [kardexSearch, setKardexSearch] = useState("")
+  const [kardexFechaDesde, setKardexFechaDesde] = useState("")
+  const [kardexFechaHasta, setKardexFechaHasta] = useState("")
 
   // Paginación Stock
   const [pageStock, setPageStock] = useState(1)
@@ -101,14 +103,18 @@ export default function InventoryPage() {
   const loadMovementsData = useCallback(async () => {
     setLoadingMovements(true)
     try {
-      const m = await api.inventory.listMovements({ limit: 100 })
+      const m = await api.inventory.listMovements({
+        limit: 100,
+        fecha_desde: kardexFechaDesde || undefined,
+        fecha_hasta: kardexFechaHasta || undefined,
+      })
       setMovements(m as any)
     } catch (e: any) {
       toast.error("Error al cargar kardex", e.message)
     } finally {
       setLoadingMovements(false)
     }
-  }, [])
+  }, [kardexFechaDesde, kardexFechaHasta])
 
   const loadExpiriesData = useCallback(async () => {
     setLoadingExpiries(true)
@@ -144,7 +150,7 @@ export default function InventoryPage() {
     if (activeTab === "stock") loadStockData()
     if (activeTab === "vencimientos") loadExpiriesData()
     if (activeTab === "kardex") loadMovementsData()
-  }, [activeTab, loadStockData, loadExpiriesData, loadMovementsData])
+  }, [activeTab, loadStockData, loadExpiriesData, loadMovementsData, kardexFechaDesde, kardexFechaHasta])
 
   // Filtrado de stock
   const filteredStock = useMemo(() => {
@@ -820,6 +826,31 @@ export default function InventoryPage() {
                 <option value="MERMA">Baja por Merma / Rotura</option>
                 <option value="TRANSFERENCIA">Transferencia entre Depósitos</option>
               </select>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  value={kardexFechaDesde}
+                  onChange={(e) => setKardexFechaDesde(e.target.value)}
+                  className="input-field py-2 text-xs font-bold"
+                  title="Desde"
+                />
+                <span className="text-gray-400 text-xs">–</span>
+                <input
+                  type="date"
+                  value={kardexFechaHasta}
+                  onChange={(e) => setKardexFechaHasta(e.target.value)}
+                  className="input-field py-2 text-xs font-bold"
+                  title="Hasta"
+                />
+                {(kardexFechaDesde || kardexFechaHasta) && (
+                  <button
+                    onClick={() => { setKardexFechaDesde(""); setKardexFechaHasta("") }}
+                    className="text-[10px] font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 underline"
+                  >
+                    Limpiar
+                  </button>
+                )}
+              </div>
             </div>
             <span className="text-xs text-gray-400 font-mono">Últimos {filteredMovements.length} movimientos</span>
           </div>
@@ -844,7 +875,9 @@ export default function InventoryPage() {
                     <th className="p-3.5">Producto</th>
                     <th className="p-3.5">Depósito</th>
                     <th className="p-3.5 text-right">Cantidad</th>
+                    <th className="p-3.5 text-right">Saldo</th>
                     <th className="p-3.5 text-right">Costo Unit.</th>
+                    <th className="p-3.5">Usuario</th>
                     <th className="p-3.5">Motivo / Documento</th>
                   </tr>
                 </thead>
@@ -877,8 +910,14 @@ export default function InventoryPage() {
                         <td className={`p-3.5 text-right font-mono font-black ${isPositive ? "text-emerald-600" : "text-red-600"}`}>
                           {isPositive ? `+${Math.abs(m.cantidad ?? 0)}` : `-${Math.abs(m.cantidad ?? 0)}`}
                         </td>
+                        <td className="p-3.5 text-right font-mono font-black text-gray-900 dark:text-white">
+                          {(m as any).saldo_acumulado ?? "—"}
+                        </td>
                         <td className="p-3.5 text-right font-mono text-gray-600 dark:text-gray-300">
                           {formatPYG(m.costo_unitario || 0)}
+                        </td>
+                        <td className="p-3.5 text-gray-500 text-[11px]">
+                          {(m as any).user_nombre || "—"}
                         </td>
                         <td className="p-3.5 text-gray-500 text-[11px]">
                           {m.motivo || "Movimiento operativo"}

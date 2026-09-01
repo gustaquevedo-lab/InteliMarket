@@ -307,38 +307,64 @@ async def list_movements(
     product_id: str | None = None,
     warehouse_id: str | None = None,
     tipo: str | None = None,
+    fecha_desde: str | None = None,
+    fecha_hasta: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict]:
     from sqlalchemy import text
     import uuid
+    from datetime import date as date_type
 
     comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
-    where = "im.company_id = :comp_id"
+    # product_id/warehouse_id SI van en el filtro interno -- solo acotan que
+    # particion calcular, no alteran el saldo en si. tipo y el rango de
+    # fecha van SOLO en el filtro externo: si fueran internos, dejar afuera
+    # una ENTRADA o los movimientos previos a fecha_desde arruinaria el
+    # saldo acumulado (mostraria un "saldo" que arranca de cero en la
+    # fecha filtrada, no el stock real que habia en ese momento).
+    inner_where = "im.company_id = :comp_id"
     params: dict = {"comp_id": comp_uuid, "limit": limit, "offset": offset}
 
     if product_id:
-        where += " AND im.product_id = :prod_id"
+        inner_where += " AND im.product_id = :prod_id"
         params["prod_id"] = uuid.UUID(product_id) if isinstance(product_id, str) else product_id
     if warehouse_id:
-        where += " AND im.warehouse_id = :wh_id"
+        inner_where += " AND im.warehouse_id = :wh_id"
         params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+
+    outer_where = "1=1"
     if tipo:
-        where += " AND im.tipo = :tipo"
+        outer_where += " AND sub.tipo = :tipo"
         params["tipo"] = tipo
+    if fecha_desde:
+        outer_where += " AND sub.created_at >= CAST(:fecha_desde AS date)"
+        params["fecha_desde"] = date_type.fromisoformat(fecha_desde)
+    if fecha_hasta:
+        outer_where += " AND sub.created_at < (CAST(:fecha_hasta AS date) + interval '1 day')"
+        params["fecha_hasta"] = date_type.fromisoformat(fecha_hasta)
 
     query = f"""
-        SELECT 
-            im.id, im.company_id, im.warehouse_id, im.product_id, im.variant_id,
-            im.tipo, im.cantidad, im.costo_unitario, im.referencia_type, im.referencia_id,
-            im.motivo, im.user_id, im.created_at,
-            p.nombre as product_nombre, p.sku as product_sku,
-            w.nombre as warehouse_nombre, w.codigo as warehouse_codigo
-        FROM inventory_movements im
-        LEFT JOIN products p ON p.id = im.product_id
-        LEFT JOIN warehouses w ON w.id = im.warehouse_id
-        WHERE {where}
-        ORDER BY im.created_at DESC
+        SELECT * FROM (
+            SELECT
+                im.id, im.company_id, im.warehouse_id, im.product_id, im.variant_id,
+                im.tipo, im.cantidad, im.costo_unitario, im.referencia_type, im.referencia_id,
+                im.motivo, im.user_id, im.created_at,
+                p.nombre as product_nombre, p.sku as product_sku,
+                w.nombre as warehouse_nombre, w.codigo as warehouse_codigo,
+                u.nombre as user_nombre,
+                SUM(im.cantidad) OVER (
+                    PARTITION BY im.product_id, im.warehouse_id
+                    ORDER BY im.created_at, im.id
+                ) AS saldo_acumulado
+            FROM inventory_movements im
+            LEFT JOIN products p ON p.id = im.product_id
+            LEFT JOIN warehouses w ON w.id = im.warehouse_id
+            LEFT JOIN users u ON u.id = im.user_id
+            WHERE {inner_where}
+        ) sub
+        WHERE {outer_where}
+        ORDER BY sub.created_at DESC
         LIMIT :limit OFFSET :offset
     """
     result = await db.execute(text(query), params)
