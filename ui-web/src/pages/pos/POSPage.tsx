@@ -17,6 +17,8 @@ import { useTheme } from "../../context/ThemeContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
 import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
+import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
+
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
 const FlagPY = () => (
@@ -1316,18 +1318,28 @@ export default function POSPage() {
   const [submitting, setSubmitting] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // ── CARGA INICIAL DE CATÁLOGO Y CLIENTES ──────────────────────────────────
+  // ── CARGA OFFLINE INSTANTÁNEA (INDEXEDDB) Y SINCRONIZACIÓN PERIÓDICA EN SEGUNDO PLANO ──
   useEffect(() => {
-    async function loadData() {
-      setLoading(true)
+    let isMounted = true
+
+    async function syncCatalog(isInitial: boolean) {
+      if (isInitial) {
+        // 1. Cargar inmediatamente de IndexedDB / localStorage (0ms, 100% offline)
+        try {
+          const cached = await loadCachedPOSData()
+          if (isMounted) {
+            if (cached.cachedProducts.length > 0) setProducts(cached.cachedProducts)
+            if (cached.cachedCustomers.length > 0) setCustomers(cached.cachedCustomers)
+            if (cached.cachedStaff.length > 0) setSupervisorStaffOptions(cached.cachedStaff)
+          }
+        } catch (e) {
+          console.warn("[POS] Error leyendo cache offline:", e)
+        }
+      }
+
+      // 2. Consulta en segundo plano al servidor central
       try {
         const [prodData, custData, whData, staffData, topData, stockData] = await Promise.allSettled([
-          // limit=1500 se quedaba corto -- esta empresa tiene 11.370
-          // productos reales y el recorte no garantiza ningun orden de
-          // popularidad, asi que productos comunes (ej. gaseosas) quedaban
-          // afuera del catalogo cargado y el POS caia al respaldo con IDs
-          // falsos (seed-N) para esos casos, rompiendo el guardado de la
-          // venta. Se pide el catalogo completo con margen.
           api.products.list({ limit: 15000 }),
           api.customers.list({ limit: 10000 }),
           api.warehouses.list(),
@@ -1335,6 +1347,10 @@ export default function POSPage() {
           api.reports.salesByProduct({ limit: 100 }),
           api.inventory.getStockMap(),
         ])
+
+        let freshProds: Product[] = []
+        let freshCusts: Customer[] = []
+        let freshStaff: any[] = []
 
         if (prodData.status === "fulfilled") {
           const validProds = (prodData.value || []).filter(
@@ -1347,41 +1363,59 @@ export default function POSPage() {
               map.set(item.sku, item)
             }
           }
-          setProducts(Array.from(map.values()))
+          freshProds = Array.from(map.values())
+          if (isMounted) setProducts(freshProds)
         }
 
         if (custData.status === "fulfilled") {
-          const normalizedCusts = (custData.value || []).map(normalizeCustomer)
-          setCustomers(normalizedCusts)
-          try {
-            localStorage.setItem("pos_cached_customers", JSON.stringify(normalizedCusts.slice(0, 3000)))
-          } catch {}
+          freshCusts = (custData.value || []).map(normalizeCustomer)
+          if (isMounted) setCustomers(freshCusts)
         }
 
-
-        if (whData.status === "fulfilled") {
+        if (whData.status === "fulfilled" && isMounted) {
           setWarehouses((whData.value || []).filter((w: any) => w.activo !== false))
         }
 
         if (staffData.status === "fulfilled") {
-          setSupervisorStaffOptions(staffData.value?.staff || [])
+          freshStaff = staffData.value?.staff || []
+          if (isMounted) setSupervisorStaffOptions(freshStaff)
         }
 
-        if (topData.status === "fulfilled") {
+        if (topData.status === "fulfilled" && isMounted) {
           setTopProductSkus((topData.value || []).map((r: any) => r.sku).filter(Boolean))
         }
 
-        if (stockData.status === "fulfilled") {
+        if (stockData.status === "fulfilled" && isMounted) {
           setStockMap(stockData.value || {})
         }
+
+        // 3. Persistir catálogo completo indexado en IndexedDB
+        if (freshProds.length > 0 || freshCusts.length > 0) {
+          persistPOSCatalog(freshProds, freshCusts, freshStaff)
+        }
       } catch (err: any) {
-        toast.error("Error al sincronizar datos", err.message)
+        if (isInitial) {
+          console.warn("[POS] Trabajando en modo offline con datos locales indexados.")
+        }
       } finally {
-        setLoading(false)
+        if (isInitial && isMounted) setLoading(false)
       }
     }
-    loadData()
+
+    // Carga inicial
+    syncCatalog(true)
+
+    // Sincronización silenciosa en background cada 5 minutos (300.000 ms)
+    const syncInterval = setInterval(() => {
+      syncCatalog(false)
+    }, 5 * 60 * 1000)
+
+    return () => {
+      isMounted = false
+      clearInterval(syncInterval)
+    }
   }, [])
+
 
   // Búsqueda remota de productos con debounce
   useEffect(() => {

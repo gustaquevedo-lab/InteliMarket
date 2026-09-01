@@ -1,5 +1,5 @@
 const DB_NAME = "intelimarket_offline"
-const DB_VERSION = 3
+const DB_VERSION = 4
 const STORE_CART = "cart"
 const STORE_PENDING_SALES = "pending_sales"
 const STORE_PRODUCTS = "products"
@@ -10,6 +10,8 @@ const STORE_TIMBRADOS = "timbrados"
 const STORE_PAYMENT_METHODS = "payment_methods"
 const STORE_COMPANY_CONFIG = "company_config"
 const STORE_INVOICES = "invoices"
+const STORE_STAFF = "staff_authorizers"
+const STORE_RATES = "currency_rates"
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -27,11 +29,21 @@ function openDB(): Promise<IDBDatabase> {
         store.createIndex("sku", "sku", { unique: false })
         store.createIndex("nombre", "nombre", { unique: false })
         store.createIndex("codigo_barra", "codigo_barra", { unique: false })
+      } else {
+        const store = request.transaction?.objectStore(STORE_PRODUCTS)
+        if (store && !store.indexNames.contains("sku")) store.createIndex("sku", "sku", { unique: false })
+        if (store && !store.indexNames.contains("codigo_barra")) store.createIndex("codigo_barra", "codigo_barra", { unique: false })
       }
       if (!db.objectStoreNames.contains(STORE_CUSTOMERS)) {
         const store = db.createObjectStore(STORE_CUSTOMERS, { keyPath: "id" })
         store.createIndex("ruc", "ruc", { unique: false })
         store.createIndex("ci", "ci", { unique: false })
+        store.createIndex("extra_club_numero", "extra_club_numero", { unique: false })
+      } else {
+        const store = request.transaction?.objectStore(STORE_CUSTOMERS)
+        if (store && !store.indexNames.contains("extra_club_numero")) {
+          store.createIndex("extra_club_numero", "extra_club_numero", { unique: false })
+        }
       }
       if (!db.objectStoreNames.contains(STORE_SYNC_STATE)) db.createObjectStore(STORE_SYNC_STATE, { keyPath: "id" })
       if (!db.objectStoreNames.contains(STORE_RECEIPTS)) {
@@ -45,6 +57,8 @@ function openDB(): Promise<IDBDatabase> {
         const store = db.createObjectStore(STORE_INVOICES, { keyPath: "id" })
         store.createIndex("estado", "estado", { unique: false })
       }
+      if (!db.objectStoreNames.contains(STORE_STAFF)) db.createObjectStore(STORE_STAFF, { keyPath: "id" })
+      if (!db.objectStoreNames.contains(STORE_RATES)) db.createObjectStore(STORE_RATES, { keyPath: "id" })
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
@@ -60,70 +74,101 @@ async function openDBOnce(): Promise<IDBDatabase> {
 }
 
 async function getStore<T>(storeName: string): Promise<T[]> {
-  const db = await openDBOnce()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readonly")
-    const store = tx.objectStore(storeName)
-    const request = store.getAll()
-    request.onsuccess = () => resolve(request.result as T[])
-    request.onerror = () => reject(request.error)
-  })
+  try {
+    const db = await openDBOnce()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readonly")
+      const store = tx.objectStore(storeName)
+      const request = store.getAll()
+      request.onsuccess = () => resolve((request.result as T[]) || [])
+      request.onerror = () => reject(request.error)
+    })
+  } catch (e) {
+    console.warn(`[offlineDB] Error getting store ${storeName}:`, e)
+    return []
+  }
 }
 
 async function getByIndex<T>(storeName: string, indexName: string, value: string): Promise<T[]> {
-  const db = await openDBOnce()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readonly")
-    const store = tx.objectStore(storeName)
-    const index = store.index(indexName)
-    const request = index.getAll(value)
-    request.onsuccess = () => resolve(request.result as T[])
-    request.onerror = () => reject(request.error)
-  })
+  try {
+    const db = await openDBOnce()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readonly")
+      const store = tx.objectStore(storeName)
+      const index = store.index(indexName)
+      const request = index.getAll(value)
+      request.onsuccess = () => resolve((request.result as T[]) || [])
+      request.onerror = () => reject(request.error)
+    })
+  } catch (e) {
+    console.warn(`[offlineDB] Error getByIndex ${storeName}.${indexName}:`, e)
+    return []
+  }
 }
 
 async function putItem<T extends { id: string }>(storeName: string, item: T): Promise<void> {
-  const db = await openDBOnce()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite")
-    const store = tx.objectStore(storeName)
-    store.put(item)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
+  try {
+    const db = await openDBOnce()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite")
+      const store = tx.objectStore(storeName)
+      store.put(item)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (e) {
+    console.warn(`[offlineDB] Error putItem in ${storeName}:`, e)
+  }
 }
 
 async function putMany<T extends { id: string }>(storeName: string, items: T[]): Promise<void> {
-  const db = await openDBOnce()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite")
-    const store = tx.objectStore(storeName)
-    for (const item of items) store.put(item)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
+  if (!items || items.length === 0) return
+  try {
+    const db = await openDBOnce()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite")
+      const store = tx.objectStore(storeName)
+      for (const item of items) {
+        if (item && item.id) {
+          store.put(item)
+        }
+      }
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (e) {
+    console.warn(`[offlineDB] Error putMany in ${storeName}:`, e)
+  }
 }
 
 async function deleteItem(storeName: string, id: string): Promise<void> {
-  const db = await openDBOnce()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite")
-    const store = tx.objectStore(storeName)
-    store.delete(id)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
+  try {
+    const db = await openDBOnce()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite")
+      const store = tx.objectStore(storeName)
+      store.delete(id)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (e) {
+    console.warn(`[offlineDB] Error deleteItem in ${storeName}:`, e)
+  }
 }
 
 async function clearStore(storeName: string): Promise<void> {
-  const db = await openDBOnce()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite")
-    const store = tx.objectStore(storeName)
-    store.clear()
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
+  try {
+    const db = await openDBOnce()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite")
+      const store = tx.objectStore(storeName)
+      store.clear()
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (e) {
+    console.warn(`[offlineDB] Error clearStore in ${storeName}:`, e)
+  }
 }
 
 export interface OfflineCartItem {
@@ -150,29 +195,37 @@ export interface PendingSale {
 export interface CachedProduct {
   id: string
   sku: string
-  codigo_barra: string | null
+  codigo_barra?: string | null
   nombre: string
-  category_id: string | null
-  iva_tasa: number
-  activo: boolean
-  precio: number
-  stock: number
-  categoria_nombre: string | null
-  data: unknown
-  cached_at: string
+  category_id?: string | null
+  iva_tasa?: number
+  activo?: boolean
+  precio?: number
+  precio_venta?: number
+  stock?: number
+  categoria_nombre?: string | null
+  data?: unknown
+  cached_at?: string
+  [key: string]: any
 }
 
 export interface CachedCustomer {
   id: string
-  razon_social: string
-  ruc: string | null
-  ci: string | null
-  tipo_persona: string
-  telefono: string | null
-  email: string | null
-  credito_limite: number
-  activo: boolean
-  cached_at: string
+  razon_social?: string
+  nombre?: string
+  ruc?: string | null
+  ruc_sin_dv?: string | null
+  ci?: string | null
+  extra_club_numero?: string | null
+  tipo_persona?: string
+  telefono?: string | null
+  email?: string | null
+  credito_limite?: number
+  limite_credito?: number
+  saldo_cuenta_corriente?: number
+  activo?: boolean
+  cached_at?: string
+  [key: string]: any
 }
 
 export interface SyncState {
@@ -181,6 +234,7 @@ export interface SyncState {
   last_sale_sync: string
   pending_count: number
 }
+
 
 export interface CachedReceipt {
   id: string
@@ -234,18 +288,29 @@ export const offlineDB = {
     clear: () => clearStore(STORE_PENDING_SALES),
   },
   products: {
-    getAll: () => getStore<CachedProduct>(STORE_PRODUCTS),
-    getBySku: (sku: string) => getByIndex<CachedProduct>(STORE_PRODUCTS, "sku", sku),
-    getByBarcode: (code: string) => getByIndex<CachedProduct>(STORE_PRODUCTS, "codigo_barra", code),
-    setAll: (products: CachedProduct[]) => putMany(STORE_PRODUCTS, products),
+    getAll: () => getStore<any>(STORE_PRODUCTS),
+    getBySku: (sku: string) => getByIndex<any>(STORE_PRODUCTS, "sku", sku),
+    getByBarcode: (code: string) => getByIndex<any>(STORE_PRODUCTS, "codigo_barra", code),
+    setAll: (products: any[]) => clearStore(STORE_PRODUCTS).then(() => putMany(STORE_PRODUCTS, products)),
     clear: () => clearStore(STORE_PRODUCTS),
   },
   customers: {
-    getAll: () => getStore<CachedCustomer>(STORE_CUSTOMERS),
-    getByRuc: (ruc: string) => getByIndex<CachedCustomer>(STORE_CUSTOMERS, "ruc", ruc),
-    getByCI: (ci: string) => getByIndex<CachedCustomer>(STORE_CUSTOMERS, "ci", ci),
-    setAll: (customers: CachedCustomer[]) => putMany(STORE_CUSTOMERS, customers),
+    getAll: () => getStore<any>(STORE_CUSTOMERS),
+    getByRuc: (ruc: string) => getByIndex<any>(STORE_CUSTOMERS, "ruc", ruc),
+    getByCI: (ci: string) => getByIndex<any>(STORE_CUSTOMERS, "ci", ci),
+    getByExtraClub: (num: string) => getByIndex<any>(STORE_CUSTOMERS, "extra_club_numero", num),
+    setAll: (customers: any[]) => clearStore(STORE_CUSTOMERS).then(() => putMany(STORE_CUSTOMERS, customers)),
     clear: () => clearStore(STORE_CUSTOMERS),
+  },
+  staff: {
+    getAll: () => getStore<any>(STORE_STAFF),
+    setAll: (staff: any[]) => clearStore(STORE_STAFF).then(() => putMany(STORE_STAFF, staff)),
+    clear: () => clearStore(STORE_STAFF),
+  },
+  rates: {
+    getAll: () => getStore<any>(STORE_RATES),
+    setAll: (rates: any[]) => clearStore(STORE_RATES).then(() => putMany(STORE_RATES, rates)),
+    clear: () => clearStore(STORE_RATES),
   },
   syncState: {
     get: async (): Promise<SyncState | null> => {
@@ -262,7 +327,7 @@ export const offlineDB = {
     clear: () => clearStore(STORE_RECEIPTS),
   },
   clearAll: async () => {
-    const stores = [STORE_CART, STORE_PENDING_SALES, STORE_PRODUCTS, STORE_CUSTOMERS, STORE_SYNC_STATE, STORE_RECEIPTS, STORE_TIMBRADOS, STORE_PAYMENT_METHODS, STORE_COMPANY_CONFIG, STORE_INVOICES]
+    const stores = [STORE_CART, STORE_PENDING_SALES, STORE_PRODUCTS, STORE_CUSTOMERS, STORE_SYNC_STATE, STORE_RECEIPTS, STORE_TIMBRADOS, STORE_PAYMENT_METHODS, STORE_COMPANY_CONFIG, STORE_INVOICES, STORE_STAFF, STORE_RATES]
     for (const s of stores) await clearStore(s)
   },
   timbrados: {
