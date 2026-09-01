@@ -304,15 +304,16 @@ function normalizeCustomer(c: any): Customer {
 }
 
 const PUNTOS_EMISION = [
-  { id: "001-012", nombre: "Caja 01 · Salón Central (Boca 012)" },
-  { id: "001-013", nombre: "Caja 02 · Salón Central (Boca 013)" },
-  { id: "001-014", nombre: "Caja 03 · Salón Central (Boca 014)" },
-  { id: "001-015", nombre: "Caja 04 · Salón Central (Boca 015)" },
-  { id: "001-016", nombre: "Caja 05 · Salón Central (Boca 016)" },
-  { id: "001-017", nombre: "Caja 06 · Salón Central (Boca 017)" },
-  { id: "001-018", nombre: "Caja 07 · Línea de Caja (Boca 018)" },
-  { id: "001-019", nombre: "Caja Especial Mayorista / Administración (Boca 019)" },
-  { id: "001-020", nombre: "Caja Auxiliar / Refuerzo (Boca 020)" },
+  { id: "001-011", nombre: "Caja 01 · Salón Central (Boca 011)" },
+  { id: "001-012", nombre: "Caja 02 · Salón Central (Boca 012)" },
+  { id: "001-013", nombre: "Caja 03 · Salón Central (Boca 013)" },
+  { id: "001-014", nombre: "Caja 04 · Salón Central (Boca 014)" },
+  { id: "001-015", nombre: "Caja 05 · Salón Central (Boca 015)" },
+  { id: "001-016", nombre: "Caja 06 · Salón Central (Boca 016)" },
+  { id: "001-017", nombre: "Caja 07 · Línea de Caja (Boca 017)" },
+  { id: "001-018", nombre: "Caja 08 · Mayorista (Boca 018)" },
+  { id: "001-019", nombre: "Caja 09 · Esquina / Administración (Boca 019)" },
+  { id: "001-020", nombre: "Caja 10 · Esquina / Refuerzo (Boca 020)" },
 ]
 
 // Padrón de Top Productos Verificados de Supermercado Extra
@@ -479,11 +480,25 @@ export default function POSPage() {
       try {
         const status = await (window as any).electronAPI?.getStatus?.()
         const hostname = status?.hostname
-        if (!hostname) return
-        setMachineHostname(hostname)
-        const assignment = await api.posTerminals.getByHostname(hostname)
-        setTerminalAssignment(assignment)
-        setPuntoEmision(`001-${assignment.punto_emision}`)
+        let assignment: any = null
+        if (hostname) {
+          setMachineHostname(hostname)
+          try {
+            assignment = await api.posTerminals.getByHostname(hostname)
+          } catch (e) {}
+        }
+        if (!assignment) {
+          try {
+            assignment = await api.posTerminals.detect({ hostname: hostname || undefined })
+          } catch (e) {}
+        }
+        if (assignment && assignment.punto_emision) {
+          const pe = assignment.punto_emision.startsWith("001-")
+            ? assignment.punto_emision
+            : `001-${assignment.punto_emision.padStart(3, "0")}`
+          setTerminalAssignment(assignment)
+          setPuntoEmision(pe)
+        }
       } catch (e) {
         // sin asignación todavía -- se maneja en la UI de Apertura de Caja
       } finally {
