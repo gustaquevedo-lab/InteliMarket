@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Terminal POS Bancard (POS Android, API REST oficial via el main process
   // para evitar CORS -- ver pos:bancard-call en main.cjs)
   bancardCall: (ip, path, body, timeoutMs) => ipcRenderer.invoke('pos:bancard-call', { ip, path, body, timeoutMs }),
+  dinelcoCall: (ip, tipo, params, sessionId, timeoutMs) => ipcRenderer.invoke('pos:dinelco-call', { ip, tipo, params, sessionId, timeoutMs }),
+  dinelcoCancel: (sessionId) => ipcRenderer.invoke('pos:dinelco-cancel', { sessionId }),
 
   // Calculadora de Windows
   openCalculator: () => ipcRenderer.invoke('app:open-calculator'),

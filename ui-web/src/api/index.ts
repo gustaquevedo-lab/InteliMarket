@@ -1391,8 +1391,8 @@ export const api = {
     update: (id: string, data: Partial<PosTerminalTransaction>) => client.patch<PosTerminalTransaction>(`/v1/pos-terminal-transactions/${id}`, data),
   },
   paymentIntegrations: {
-    get: (provider: "bancard" | "plugpay") => client.get<PaymentIntegrationConfig | null>(`/v1/payment-integrations/${provider}`),
-    update: (provider: "bancard" | "plugpay", data: { environment?: string; enabled?: boolean; config?: Record<string, any> }) =>
+    get: (provider: "bancard" | "plugpay" | "dinelco") => client.get<PaymentIntegrationConfig | null>(`/v1/payment-integrations/${provider}`),
+    update: (provider: "bancard" | "plugpay" | "dinelco", data: { environment?: string; enabled?: boolean; config?: Record<string, any> }) =>
       client.put<PaymentIntegrationConfig>(`/v1/payment-integrations/${provider}`, data),
   },
   plugpay: {

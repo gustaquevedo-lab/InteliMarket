@@ -95,6 +95,10 @@ export default function IntegrationsPage() {
   const [savingBancard, setSavingBancard] = useState(false)
   const [loadingConfig, setLoadingConfig] = useState(false)
 
+  const [dinelcoIps, setDinelcoIps] = useState<Record<string, string>>({})
+  const [dinelcoEnabled, setDinelcoEnabled] = useState(true)
+  const [savingDinelco, setSavingDinelco] = useState(false)
+
   const [plugpayClientId, setPlugpayClientId] = useState("")
   const [plugpayPassword, setPlugpayPassword] = useState("")
   const [plugpayHasSavedPassword, setPlugpayHasSavedPassword] = useState(false)
@@ -107,13 +111,18 @@ export default function IntegrationsPage() {
   const loadConfig = useCallback(async () => {
     setLoadingConfig(true)
     try {
-      const [bancardCfg, plugpayCfg] = await Promise.all([
+      const [bancardCfg, plugpayCfg, dinelcoCfg] = await Promise.all([
         api.paymentIntegrations.get("bancard").catch(() => null),
         api.paymentIntegrations.get("plugpay").catch(() => null),
+        api.paymentIntegrations.get("dinelco").catch(() => null),
       ])
       if (bancardCfg) {
         setBancardIps(bancardCfg.config?.ips_por_punto_emision || {})
         setBancardEnabled(bancardCfg.enabled)
+      }
+      if (dinelcoCfg) {
+        setDinelcoIps(dinelcoCfg.config?.ips_por_punto_emision || {})
+        setDinelcoEnabled(dinelcoCfg.enabled)
       }
       if (plugpayCfg) {
         setPlugpayClientId(plugpayCfg.config?.client_id || "")
@@ -204,6 +213,22 @@ export default function IntegrationsPage() {
       toast.error("Error", "No se pudo guardar la configuración de Bancard.")
     } finally {
       setSavingBancard(false)
+    }
+  }
+
+  async function handleSaveDinelco() {
+    setSavingDinelco(true)
+    try {
+      await api.paymentIntegrations.update("dinelco", {
+        environment: "production",
+        enabled: dinelcoEnabled,
+        config: { ips_por_punto_emision: dinelcoIps },
+      })
+      toast.success("Guardado", "IPs de terminales Dinelco actualizadas -- el POS las toma la próxima vez que abra la venta.")
+    } catch {
+      toast.error("Error", "No se pudo guardar la configuración de Dinelco.")
+    } finally {
+      setSavingDinelco(false)
     }
   }
 
@@ -856,6 +881,57 @@ export default function IntegrationsPage() {
                 >
                   {savingBancard ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   Guardar IPs de Bancard
+                </button>
+              </div>
+
+              {/* DINELCO: IP por caja */}
+              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                    <h2 className="text-base font-black text-gray-900 dark:text-white">Dinelco -- IP de Terminal por Caja</h2>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300 cursor-pointer">
+                    <input type="checkbox" checked={dinelcoEnabled} onChange={(e) => setDinelcoEnabled(e.target.checked)} className="w-4 h-4" />
+                    Habilitado
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Terminal Ingenico AXIUM DX8000 conectado por WiFi a la red de la caja (protocolo TCP directo, puerto 9600). Se carga acá la IP asignada por caja -- sin IP configurada, el POS sigue usando el cupón manual como respaldo.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-gray-50/50 dark:bg-slate-750/50 text-gray-500 dark:text-gray-400 uppercase text-[10px] font-bold border-b border-gray-100 dark:border-slate-700">
+                      <tr>
+                        <th className="p-3">Punto de Emisión</th>
+                        <th className="p-3">IP del Terminal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-slate-700/60">
+                      {PUNTOS_EMISION.map((pe) => (
+                        <tr key={pe.id}>
+                          <td className="p-3 font-bold text-gray-900 dark:text-white">{pe.nombre}</td>
+                          <td className="p-3">
+                            <input
+                              type="text"
+                              value={dinelcoIps[pe.id] || ""}
+                              onChange={(e) => setDinelcoIps((prev) => ({ ...prev, [pe.id]: e.target.value }))}
+                              placeholder="Ej: 192.168.0.4x"
+                              className="w-48 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-gray-900 dark:text-white font-mono text-xs outline-none focus:border-purple-500"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={handleSaveDinelco}
+                  disabled={savingDinelco}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold disabled:opacity-60 cursor-pointer"
+                >
+                  {savingDinelco ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Guardar IPs de Dinelco
                 </button>
               </div>
 

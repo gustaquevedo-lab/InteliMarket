@@ -646,12 +646,21 @@ export default function POSPage() {
   // nada cargado, se cae al valor de posAssignments (localStorage) como
   // respaldo, para no romper cajas que ya tenian la IP puesta a mano.
   const [bancardIpsPorCaja, setBancardIpsPorCaja] = useState<Record<string, string>>({})
+  const [dinelcoIpsPorCaja, setDinelcoIpsPorCaja] = useState<Record<string, string>>({})
   const [plugpayEnabled, setPlugpayEnabled] = useState(false)
   useEffect(() => {
     api.paymentIntegrations.get("bancard")
       .then((cfg) => {
         if (cfg?.config?.ips_por_punto_emision) {
           setBancardIpsPorCaja(cfg.config.ips_por_punto_emision)
+        }
+      })
+      .catch(() => {})
+
+    api.paymentIntegrations.get("dinelco")
+      .then((cfg) => {
+        if (cfg?.config?.ips_por_punto_emision) {
+          setDinelcoIpsPorCaja(cfg.config.ips_por_punto_emision)
         }
       })
       .catch(() => {})
@@ -678,8 +687,12 @@ export default function POSPage() {
       dinelcoLote: "001",
       dinelcoPort: "COM7",
     }
-    return { ...base, bancardIp: bancardIpsPorCaja[puntoEmision] || base.bancardIp }
-  }, [posAssignments, puntoEmision, bancardIpsPorCaja])
+    return {
+      ...base,
+      bancardIp: bancardIpsPorCaja[puntoEmision] || base.bancardIp,
+      dinelcoIp: dinelcoIpsPorCaja[puntoEmision] || "",
+    }
+  }, [posAssignments, puntoEmision, bancardIpsPorCaja, dinelcoIpsPorCaja])
 
   // ── SEGURIDAD Y CONTROL DE SUPERVISOR (PIN) ──────────────────────────────
   const isSupervisorUser = useMemo(() => {
@@ -958,6 +971,13 @@ export default function POSPage() {
   const [bancardTxnResult, setBancardTxnResult] = useState<BancardTxnResult | null>(null)
   const [bancardTxnError, setBancardTxnError] = useState<string>("")
   const [showBancardManualFallback, setShowBancardManualFallback] = useState(false)
+  const [dinelcoTxnState, setDinelcoTxnState] = useState<"idle" | "esperando_tarjeta" | "confirmando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
+  const [dinelcoTxnResult, setDinelcoTxnResult] = useState<any>(null)
+  const [dinelcoTxnError, setDinelcoTxnError] = useState<string>("")
+  const [dinelcoTxnLogId, setDinelcoTxnLogId] = useState<string | null>(null)
+  const [dinelcoSessionId, setDinelcoSessionId] = useState<string | null>(null)
+  const [dinelcoCuotas, setDinelcoCuotas] = useState(1)
+  const [showDinelcoManualFallback, setShowDinelcoManualFallback] = useState(false)
   const [bancardTxnLogId, setBancardTxnLogId] = useState<string | null>(null)
 
   const [bancardQrState, setBancardQrState] = useState<"idle" | "esperando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
@@ -1188,6 +1208,7 @@ export default function POSPage() {
     setBancardTxnState("idle"); setBancardTxnResult(null); setBancardTxnError(""); setShowBancardManualFallback(false); setBancardTxnLogId(null); setPosCardCuotas(1)
     setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null); setShowBancardQrManualFallback(false); setPosQrCupon(""); setPosQrAuth("")
     setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); clearPlugpayPoll()
+    setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
   }
 
   // El terminal Bancard no tiene forma via API de forzar la limpieza de una
@@ -1309,6 +1330,100 @@ export default function POSPage() {
     })
     setBancardTxnLogId((logged as any)?.id || null)
     setPosCardCupon(result.nroBoleta || "")
+  }
+
+  const logDinelcoTxn = async (data: Record<string, any>) => {
+    try {
+      return await api.posTerminalTransactions.create({
+        ...data,
+        punto_emision: puntoEmision,
+        customer_id: customer && customer.id !== DEFAULT_CUSTOMER.id ? customer.id : null,
+      } as any)
+    } catch (e) {
+      console.error("No se pudo registrar la transacción del terminal Dinelco:", e)
+      return null
+    }
+  }
+
+  // Protocolo Dinelco real (manual "Integracion Caja - POS WIFI/LAN/USB v2.6"):
+  // TCP crudo puerto 9600, pipe-delimited. Secuencia: RBIN (pide monto+OP, el
+  // terminal solicita la tarjeta) -> ENDOP (confirma monto/cuotas, dispara la
+  // autorizacion). El bridge vive en Electron main (net.Socket), no en el
+  // backend Python, porque el terminal esta en la LAN de la caja, igual que
+  // Bancard -- ver electron/dinelco-client.cjs.
+  const handleDinelcoCharge = async () => {
+    const ip = activePosConfig.dinelcoIp
+    if (!ip) {
+      toast.warning("Falta configurar el terminal", "Cargá la IP del terminal Dinelco para esta caja en \"Configurar Terminales POS\".")
+      return
+    }
+    const montoDinelco = isMultiPayment ? parseInt(mixedDinelcoPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    if (montoDinelco <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por Dinelco antes de continuar.")
+      return
+    }
+    const electronAPI = (window as any).electronAPI
+    if (!electronAPI?.dinelcoCall) {
+      setDinelcoTxnState("error_conexion")
+      setDinelcoTxnError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
+      setShowDinelcoManualFallback(true)
+      return
+    }
+    setDinelcoTxnState("esperando_tarjeta")
+    setDinelcoTxnError("")
+    setDinelcoTxnResult(null)
+    setShowDinelcoManualFallback(false)
+
+    const res1 = await electronAPI.dinelcoCall(ip, "venta_inicio", { op: "01", monto: montoDinelco }, null, 90000)
+
+    if (!res1.ok) {
+      setDinelcoTxnState(res1.error ? "error_conexion" : "error_rechazo")
+      setDinelcoTxnError(res1.error ? `No se pudo conectar con el terminal (${res1.error}) -- verificá la red o cargá el cupón manualmente si ya cobraste en el terminal.` : (res1.desc || "El terminal rechazó la operación."))
+      if (res1.error) setShowDinelcoManualFallback(true)
+      await logDinelcoTxn({
+        tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
+        exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
+        monto: montoDinelco, terminal_ip: ip, raw_response: res1,
+      })
+      return
+    }
+
+    setDinelcoSessionId(res1.sessionId)
+    setDinelcoTxnState("confirmando")
+    const cuotasParam = dinelcoCardType === "credito" && dinelcoCuotas > 1 ? dinelcoCuotas : 0
+    const res2 = await electronAPI.dinelcoCall(ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 30000)
+
+    if (!res2.ok) {
+      setDinelcoTxnState(res2.error ? "error_conexion" : "error_rechazo")
+      setDinelcoTxnError(res2.error ? `Se inició el cobro en el terminal pero no se pudo confirmar la respuesta (${res2.error}) -- revisá el terminal y cargá el cupón manualmente.` : (res2.desc || "El terminal rechazó la operación."))
+      if (res2.error) setShowDinelcoManualFallback(true)
+      await logDinelcoTxn({
+        tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
+        exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
+        monto: montoDinelco, terminal_ip: ip, raw_response: res2,
+      })
+      setDinelcoSessionId(null)
+      return
+    }
+
+    // Orden de CAMPOSOK del manual: AUTHCODE|AUTHORIZER|OPTYPE|BOLETA|TERMINAL|COMERCIO|ULTIMOS4|PUNTOS
+    const c = res2.campos || []
+    const result = {
+      codigoAutorizacion: c[0] || "", authorizer: c[1] || "", opType: c[2] || "",
+      nroBoleta: c[3] || "", terminal: c[4] || "", comercio: c[5] || "", ultimos4: c[6] || "", puntos: c[7] || "",
+    }
+    setDinelcoTxnResult(result)
+    setDinelcoTxnState("aprobada")
+    const logged = await logDinelcoTxn({
+      tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
+      exitosa: true, verificado_automaticamente: true,
+      monto: montoDinelco, terminal_ip: ip,
+      codigo_autorizacion: result.codigoAutorizacion, codigo_comercio: result.comercio,
+      mensaje_display: "APROBADA", raw_response: result,
+    })
+    setDinelcoTxnLogId((logged as any)?.id || null)
+    setDinelcoSessionId(null)
+    setDinelcoCupon(result.nroBoleta || "")
   }
 
   const handleBancardQR = async () => {
@@ -8382,7 +8497,7 @@ export default function POSPage() {
                         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
                           <div className="flex items-center gap-2">
                             <CreditCard className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                            <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Dinelco BEPSA</span>
+                            <span className="font-black text-xs text-slate-900 dark:text-white">Terminal POS Dinelco (Ingenico AXIUM)</span>
                           </div>
                           <div className="flex gap-1">
                             {(["debito", "credito", "social"] as const).map(t => (
@@ -8390,6 +8505,7 @@ export default function POSPage() {
                                 key={t}
                                 type="button"
                                 onClick={() => setDinelcoCardType(t)}
+                                disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
                                 className={`px-2.5 py-1 rounded-xl text-xs font-bold uppercase transition-all ${dinelcoCardType === t ? "bg-purple-600 text-white shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}
                               >
                                 {t}
@@ -8398,37 +8514,24 @@ export default function POSPage() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
-                            <input
-                              type="text"
-                              value={dinelcoTerminalId}
-                              onChange={(e) => setDinelcoTerminalId(e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
-                            />
+                        {dinelcoCardType === "credito" && (
+                          <div className="flex items-center gap-1.5 p-2 bg-purple-50/60 dark:bg-purple-950/30 rounded-xl border border-purple-200 dark:border-purple-800/60">
+                            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase shrink-0">Cuotas:</span>
+                            <div className="flex gap-1 flex-wrap">
+                              {[1, 2, 3, 6, 12, 18, 24].map((c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => setDinelcoCuotas(c)}
+                                  disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
+                                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${dinelcoCuotas === c ? "bg-purple-600 text-white shadow-xs" : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700"}`}
+                                >
+                                  {c === 1 ? "1 (Directo)" : `${c}x`}
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
-                            <input
-                              type="text"
-                              value={dinelcoLote}
-                              onChange={(e) => setDinelcoLote(e.target.value)}
-                              placeholder="001"
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
-                            <input
-                              type="text"
-                              value={dinelcoCupon}
-                              onChange={(e) => setDinelcoCupon(e.target.value)}
-                              placeholder="654321"
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
-                            />
-                          </div>
-                        </div>
+                        )}
 
                         {isMultiPayment && (
                           <div>
@@ -8456,17 +8559,108 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        <div className="mt-2">
+                        {!activePosConfig.dinelcoIp && (
+                          <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
+                            No hay IP de terminal Dinelco configurada para esta caja.{" "}
+                            <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                          </div>
+                        )}
+
+                        {activePosConfig.dinelcoIp && dinelcoTxnState !== "aprobada" && (
                           <button
                             type="button"
-                            onClick={() => handleVerifyPosTerminal("dinelco")}
-                            disabled={posVerifyStatus === "searching"}
-                            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-purple-600/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 disabled:opacity-60 cursor-pointer"
+                            onClick={handleDinelcoCharge}
+                            disabled={dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando"}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-md shadow-purple-600/20"
                           >
-                            {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                            <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
+                            {(dinelcoTxnState === "esperando_tarjeta" || dinelcoTxnState === "confirmando") ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                            <span>
+                              {dinelcoTxnState === "esperando_tarjeta" ? "Presente la tarjeta en el terminal..."
+                                : dinelcoTxnState === "confirmando" ? "Confirmando con el terminal..."
+                                : "Cobrar con Dinelco"}
+                            </span>
                           </button>
-                        </div>
+                        )}
+
+                        {dinelcoTxnState === "aprobada" && dinelcoTxnResult && (
+                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 space-y-0.5">
+                            <div className="font-black">✓ Aprobada</div>
+                            {dinelcoTxnResult.ultimos4 && <div>**** {dinelcoTxnResult.ultimos4}</div>}
+                            <div className="font-posMono tabular-nums">Autorización {dinelcoTxnResult.codigoAutorizacion} · Boleta {dinelcoTxnResult.nroBoleta}</div>
+                          </div>
+                        )}
+
+                        {dinelcoTxnState === "error_rechazo" && (
+                          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5">
+                            <div className="font-black">✕ {dinelcoTxnError}</div>
+                            <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
+                          </div>
+                        )}
+
+                        {dinelcoTxnState === "error_conexion" && (
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5">
+                            <div className="font-black">⚠ {dinelcoTxnError}</div>
+                            <button type="button" onClick={handleDinelcoCharge} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                          </div>
+                        )}
+
+                        {/* Respaldo manual -- cupon a mano + match contra la base legacy, igual que antes de tener el terminal en vivo */}
+                        {dinelcoTxnState !== "aprobada" && (
+                          <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => setShowDinelcoManualFallback((v) => !v)}
+                              className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                            >
+                              {showDinelcoManualFallback ? "▾ Ocultar carga manual" : "▸ Cargar voucher manualmente"}
+                            </button>
+
+                            {showDinelcoManualFallback && (
+                              <div className="mt-2 space-y-2">
+                                <div className="grid grid-cols-3 gap-2">
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Terminal:</label>
+                                    <input
+                                      type="text"
+                                      value={dinelcoTerminalId}
+                                      onChange={(e) => setDinelcoTerminalId(e.target.value)}
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Lote:</label>
+                                    <input
+                                      type="text"
+                                      value={dinelcoLote}
+                                      onChange={(e) => setDinelcoLote(e.target.value)}
+                                      placeholder="001"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Nº Voucher:</label>
+                                    <input
+                                      type="text"
+                                      value={dinelcoCupon}
+                                      onChange={(e) => setDinelcoCupon(e.target.value)}
+                                      placeholder="654321"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                    />
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerifyPosTerminal("dinelco")}
+                                  disabled={posVerifyStatus === "searching"}
+                                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-purple-600/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 hover:bg-purple-600/20 disabled:opacity-60 cursor-pointer"
+                                >
+                                  {posVerifyStatus === "searching" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                                  <span>{posVerifyStatus === "searching" ? "Buscando en terminal..." : "Verificar Transacción en Terminal"}</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -9021,6 +9215,10 @@ export default function POSPage() {
                   onClick={() => {
                     if (activeMethods.has("bancard") && bancardTxnState !== "aprobada" && !posCardCupon.trim()) {
                       toast.warning("Bancard sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
+                      return
+                    }
+                    if (activeMethods.has("dinelco") && dinelcoTxnState !== "aprobada" && !dinelcoCupon.trim()) {
+                      toast.warning("Dinelco sin confirmar", "Cobrá con el terminal o cargá el cupón manualmente antes de continuar.")
                       return
                     }
                     if (activeMethods.has("qr") && bancardQrState !== "aprobada" && !bancardQrManualConfirm) {

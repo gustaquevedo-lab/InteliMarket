@@ -13,6 +13,7 @@ const {
   PRINT_BRIDGE_SHA256,
   PRINT_BRIDGE_B64
 } = require('./bridges-b64.cjs')
+const { dinelcoCall: dinelcoTcpCall, cancelarSesion: dinelcoCancelarSesion } = require('./dinelco-client.cjs')
 
 let mainWindow = null
 let currentScalePort = null
@@ -720,6 +721,24 @@ ipcMain.handle('pos:bancard-call', async (_event, { ip, path: reqPath, body, tim
     req.write(payload)
     req.end()
   })
+})
+
+// -- PUENTE TCP CRUDO HACIA TERMINAL DINELCO (protocolo pipe-delimited, puerto 9600) --
+ipcMain.handle('pos:dinelco-call', async (_event, { ip, tipo, params, sessionId, timeoutMs }) => {
+  try {
+    const resultado = await dinelcoTcpCall({ ip, tipo, params, sessionId, timeoutMs })
+    return resultado
+  } catch (err) {
+    return { ok: false, error: err.message || 'error_desconocido' }
+  }
+})
+
+ipcMain.handle('pos:dinelco-cancel', async (_event, { sessionId }) => {
+  try {
+    return await dinelcoCancelarSesion(sessionId)
+  } catch (err) {
+    return { ok: false, error: err.message || 'error_desconocido' }
+  }
 })
 
 ipcMain.handle('pos:get-status', async () => {

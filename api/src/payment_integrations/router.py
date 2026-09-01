@@ -8,7 +8,7 @@ from api.src.payment_integrations.schemas import PaymentIntegrationConfigUpsert,
 
 router = APIRouter(prefix="/api/v1/payment-integrations", tags=["payment-integrations"])
 
-ALLOWED_PROVIDERS = {"bancard", "plugpay"}
+ALLOWED_PROVIDERS = {"bancard", "plugpay", "dinelco"}
 
 
 @router.get("/{provider}", response_model=PaymentIntegrationConfigResponse | None)
