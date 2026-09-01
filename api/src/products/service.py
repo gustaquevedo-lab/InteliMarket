@@ -183,61 +183,74 @@ async def list_products(
                 setattr(p, "supplier_id", supp_map[p.id][0])
                 setattr(p, "supplier_nombre", supp_map[p.id][1])
 
-    # Anotar promos vigentes HOY en lote (1 query para todos los productos)
-    if products:
-        today = date.today()
-        # weekday() -> 0=Lun..6=Dom; convertir a convencion 0=Dom..6=Sab del legacy
-        sunday_dow = (today.weekday() + 1) % 7
-        p_ids = [p.id for p in products]
-        promo_rows = await db.execute(
-            select(
-                Promotion.producto_ids,
-                Promotion.id,
-                Promotion.nombre,
-                Promotion.precio_fijo_promocional,
-                Promotion.dias_semana,
-            ).where(
-                Promotion.company_id == c_uuid,
-                Promotion.activo == True,
-                Promotion.estado == "activa",
-                Promotion.valido_desde <= today,
-                Promotion.valido_hasta >= today,
-                Promotion.precio_fijo_promocional != None,
-            ).order_by(Promotion.valido_hasta.asc())
-        )
-        # Construir mapa product_id -> mejor promo vigente hoy
-        promo_map: dict[UUID, dict] = {}
-        for pr in promo_rows.all():
-            prod_ids_promo = pr.producto_ids or []
-            dias = pr.dias_semana or []
-            # Filtrar por dia de semana si la promo tiene restriccion
-            if dias and sunday_dow not in dias:
-                continue
-            for pid in prod_ids_promo:
-                if pid not in promo_map:  # primer match = promo mas proxima a vencer
-                    promo_map[pid] = {
-                        "id": str(pr.id),
-                        "nombre": pr.nombre,
-                        "precio": pr.precio_fijo_promocional,
-                        "dias": dias,
-                    }
-        # Anotar en cada producto
-        for p in products:
-            info = promo_map.get(p.id)
-            if info and info["precio"] and info["precio"] < (p.precio_venta or Decimal("0")):
-                setattr(p, "precio_promo", info["precio"])
-                setattr(p, "en_promocion", True)
-                setattr(p, "promocion_id", info["id"])
-                setattr(p, "promocion_nombre", info["nombre"])
-                setattr(p, "promo_dias_semana", info["dias"])
-            else:
-                setattr(p, "precio_promo", None)
-                setattr(p, "en_promocion", False)
-                setattr(p, "promocion_id", None)
-                setattr(p, "promocion_nombre", None)
-                setattr(p, "promo_dias_semana", None)
-
     return products
+
+
+async def annotate_products_with_promos(db: AsyncSession, company_id: str, products: list) -> None:
+    """Anota en lote los productos con la promo vigente HOY (si la hay).
+    Muta los objetos directamente -- Pydantic los lee via getattr (from_attributes=True).
+    """
+    if not products:
+        return
+    if products and hasattr(products[0], "company_id") and products[0].company_id:
+        c_uuid = products[0].company_id
+    else:
+        try:
+            c_uuid = UUID(str(company_id))
+        except (ValueError, TypeError):
+            c_uuid = UUID("00000000-0000-0000-0000-000000000010")
+
+    today = date.today()
+    # Python weekday(): 0=Lun..6=Dom -> convertir a 0=Dom..6=Sab del legacy
+    sunday_dow = (today.weekday() + 1) % 7
+
+    promo_rows = await db.execute(
+        select(
+            Promotion.producto_ids,
+            Promotion.id,
+            Promotion.nombre,
+            Promotion.precio_fijo_promocional,
+            Promotion.dias_semana,
+        ).where(
+            Promotion.company_id == c_uuid,
+            Promotion.activo == True,
+            Promotion.estado == "activa",
+            Promotion.valido_desde <= today,
+            Promotion.valido_hasta >= today,
+            Promotion.precio_fijo_promocional != None,
+        ).order_by(Promotion.valido_hasta.asc())
+    )
+
+    promo_map: dict[UUID, dict] = {}
+    for pr in promo_rows.all():
+        prod_ids_promo = pr.producto_ids or []
+        dias = pr.dias_semana or []
+        # Saltar si la promo no aplica hoy por dia de semana
+        if dias and sunday_dow not in dias:
+            continue
+        for pid in prod_ids_promo:
+            if pid not in promo_map:  # primer match = promo mas proxima a vencer
+                promo_map[pid] = {
+                    "id": str(pr.id),
+                    "nombre": pr.nombre,
+                    "precio": pr.precio_fijo_promocional,
+                    "dias": dias,
+                }
+
+    for p in products:
+        info = promo_map.get(p.id)
+        if info and info["precio"] and info["precio"] < (p.precio_venta or Decimal("0")):
+            p.precio_promo = info["precio"]
+            p.en_promocion = True
+            p.promocion_id = info["id"]
+            p.promocion_nombre = info["nombre"]
+            p.promo_dias_semana = info["dias"]
+        else:
+            p.precio_promo = None
+            p.en_promocion = False
+            p.promocion_id = None
+            p.promocion_nombre = None
+            p.promo_dias_semana = None
 
 
 async def get_products_stats(db: AsyncSession, company_id: str) -> dict:

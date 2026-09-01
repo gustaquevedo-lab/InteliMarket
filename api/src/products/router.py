@@ -12,6 +12,7 @@ from api.src.products.schemas import (
     CategoryCreate, CategoryResponse,
 )
 from api.src.products import service
+from api.src.products.service import annotate_products_with_promos
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,9 @@ async def list_products_direct(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_products(db, company_id, categoria_id, search, activo, limit, offset, supplier_id=supplier_id)
+    products = await service.list_products(db, company_id, categoria_id, search, activo, limit, offset, supplier_id=supplier_id)
+    await annotate_products_with_promos(db, company_id, products)
+    return products
 
 
 @router.get("/companies/{company_id}/products", response_model=list[ProductResponse])
@@ -63,7 +66,9 @@ async def list_products(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_products(db, company_id, categoria_id, search, activo, limit, offset, supplier_id=supplier_id)
+    products = await service.list_products(db, company_id, categoria_id, search, activo, limit, offset, supplier_id=supplier_id)
+    await annotate_products_with_promos(db, company_id, products)
+    return products
 
 
 @router.get("/companies/{company_id}/products/stats")
@@ -84,6 +89,7 @@ async def get_product(product_id: str, db: AsyncSession = Depends(get_db)):
     product = await service.get_product(db, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
+    await annotate_products_with_promos(db, str(product.company_id), [product])
     return product
 
 
