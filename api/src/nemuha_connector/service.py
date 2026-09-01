@@ -2163,7 +2163,9 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
         if sku in sku_to_prod:
             prod = sku_to_prod[sku]
             changed = False
-            if prod.precio_venta != p_venta:
+            # Protección: Si el precio en el legacy viene en 0 pero ya tenemos un precio
+            # positivo válido en InteliMarket, no pisarlo con 0.
+            if p_venta > 0 and prod.precio_venta != p_venta:
                 prod.precio_venta = p_venta
                 changed = True
             if prod.activo != activo:
