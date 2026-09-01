@@ -443,7 +443,9 @@ async def list_sessions_with_totals(
                 diferencia = float(count.diferencia) if count.diferencia is not None else None
                 diferencia_usd = float(count.diferencia_usd) if count.diferencia_usd is not None else None
                 diferencia_brl = float(count.diferencia_brl) if count.diferencia_brl is not None else None
-            monto_cierre_esperado = float(s.monto_apertura) + monto_cobrado
+                monto_cierre_esperado = float(count.monto_total) - float(count.diferencia or 0)
+            else:
+                monto_cierre_esperado = float(s.monto_apertura) + float(efectivo_acumulado)
 
         out.append({
             "id": str(s.id),
@@ -1738,7 +1740,13 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
     efectivo_usd = await _efectivo_esperado_por_moneda(db, s.id, "USD")
     efectivo_brl = await _efectivo_esperado_por_moneda(db, s.id, "BRL")
 
-    monto_cierre_esperado = float(s.monto_apertura) + float(efectivo_pyg)
+    monto_apertura_pyg = float(s.monto_apertura or 0)
+    monto_apertura_usd = float(s.monto_apertura_usd or 0)
+    monto_apertura_brl = float(s.monto_apertura_brl or 0)
+
+    monto_cierre_esperado = monto_apertura_pyg + float(efectivo_pyg)
+    monto_cierre_esperado_usd = monto_apertura_usd + float(efectivo_usd)
+    monto_cierre_esperado_brl = monto_apertura_brl + float(efectivo_brl)
 
     # Breakdown formas de pago
     breakdown = await get_session_payment_breakdown(db, str(s.id))
@@ -1768,9 +1776,13 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         "cajero_nombre": s.cajero_nombre or "—",
         "fecha_apertura": s.fecha_apertura,
         "fecha_cierre": s.fecha_cierre,
-        "monto_apertura": float(s.monto_apertura or 0),
+        "monto_apertura": monto_apertura_pyg,
+        "monto_apertura_usd": monto_apertura_usd,
+        "monto_apertura_brl": monto_apertura_brl,
         "monto_cierre": float(s.monto_cierre or 0) if s.monto_cierre is not None else 0,
         "monto_cierre_esperado": monto_cierre_esperado,
+        "monto_cierre_esperado_usd": monto_cierre_esperado_usd,
+        "monto_cierre_esperado_brl": monto_cierre_esperado_brl,
         "efectivo_cobrado_pyg": float(efectivo_pyg),
         "efectivo_usd_esperado": float(efectivo_usd),
         "efectivo_brl_esperado": float(efectivo_brl),

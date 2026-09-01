@@ -198,26 +198,31 @@ def generate_cierre_sesion_individual_pdf(
     ])
 
     # USD (si hubo movimiento o conteo)
-    if contado_usd > 0 or s.get("efectivo_usd_esperado") or diferencia_usd != 0:
+    monto_apertura_usd = s.get("monto_apertura_usd") or 0
+    monto_apertura_brl = s.get("monto_apertura_brl") or 0
+    monto_cierre_esperado_usd = s.get("monto_cierre_esperado_usd") or 0
+    monto_cierre_esperado_brl = s.get("monto_cierre_esperado_brl") or 0
+
+    if contado_usd > 0 or s.get("efectivo_usd_esperado") or monto_apertura_usd > 0 or diferencia_usd != 0:
         dif_usd_str = f"{'+' if diferencia_usd >= 0 else ''}{diferencia_usd:.2f}"
         arqueo_rows.append([
             "USD (US$)",
-            "0.00",
+            f"{monto_apertura_usd:.2f}",
             f"{s.get('efectivo_usd_esperado', 0):.2f}",
-            f"{s.get('efectivo_usd_esperado', 0):.2f}",
+            f"{monto_cierre_esperado_usd:.2f}",
             f"{contado_usd:.2f}",
             dif_usd_str,
             "EXACTO" if diferencia_usd == 0 else "DESCUADRE",
         ])
 
     # BRL (si hubo movimiento o conteo)
-    if contado_brl > 0 or s.get("efectivo_brl_esperado") or diferencia_brl != 0:
+    if contado_brl > 0 or s.get("efectivo_brl_esperado") or monto_apertura_brl > 0 or diferencia_brl != 0:
         dif_brl_str = f"{'+' if diferencia_brl >= 0 else ''}{diferencia_brl:.2f}"
         arqueo_rows.append([
             "BRL (R$)",
-            "0.00",
+            f"{monto_apertura_brl:.2f}",
             f"{s.get('efectivo_brl_esperado', 0):.2f}",
-            f"{s.get('efectivo_brl_esperado', 0):.2f}",
+            f"{monto_cierre_esperado_brl:.2f}",
             f"{contado_brl:.2f}",
             dif_brl_str,
             "EXACTO" if diferencia_brl == 0 else "DESCUADRE",
