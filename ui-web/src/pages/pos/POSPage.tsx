@@ -2331,11 +2331,13 @@ export default function POSPage() {
 
   // ── REIMPRESIÓN DE VENTAS YA EMITIDAS ──────────────────────────────────────
   const [showReimprimirModal, setShowReimprimirModal] = useState(false)
-  const [reimprimirTab, setReimprimirTab] = useState<"ventas" | "devoluciones">("ventas")
+  const [reimprimirTab, setReimprimirTab] = useState<"ventas" | "devoluciones" | "cierres">("ventas")
   const [reimprimirSales, setReimprimirSales] = useState<Sale[]>([])
   const [reimprimirReturns, setReimprimirReturns] = useState<any[]>([])
+  const [reimprimirSessions, setReimprimirSessions] = useState<any[]>([])
   const [reimprimirLoading, setReimprimirLoading] = useState(false)
   const [reimprimirError, setReimprimirError] = useState("")
+
   // Reabrir factura -- agregar identificacion de cliente a una venta que
   // salio como Consumidor Final. Pedido real: el cliente se va, la caja
   // sigue, y despues vuelve pidiendo que la factura lleve su nombre.
@@ -2715,6 +2717,109 @@ export default function POSPage() {
       toast.warning("No se pudo reimprimir", e?.message || "Verifique la impresora.")
     }
   }
+
+  const fetchReimprimirSessions = async () => {
+    setReimprimirLoading(true)
+    setReimprimirError("")
+    try {
+      const sessions = await api.caja.sessionsSummary({ estado: "cerrada", limit: 20 })
+      setReimprimirSessions(Array.isArray(sessions) ? sessions : [])
+    } catch (e) {
+      setReimprimirError("No se pudo cargar el historial de cierres de caja.")
+    } finally {
+      setReimprimirLoading(false)
+    }
+  }
+
+  const handleDownloadCierrePdf = async (sessionId: string) => {
+    try {
+      const token = localStorage.getItem("access_token") || localStorage.getItem("auth_token") || ""
+      const res = await fetch(`/api/v1/cash-sessions/${sessionId}/export/cierre.pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        throw new Error("No se pudo generar el PDF del cierre.")
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `cierre_caja_${sessionId.slice(0, 8)}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+      toast.success("PDF Descargado", `Cierre oficial ${sessionId.slice(0, 8)} descargado correctamente.`)
+    } catch (e: any) {
+      toast.error("Error al descargar PDF", e?.message || "Verifique la conexión.")
+    }
+  }
+
+  const handleReimprimirCierreEscPos = async (sessionSummary: any) => {
+    try {
+      const summary = await api.caja.sessions.preCloseSummary(sessionSummary.id)
+      const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+      const comp = JSON.parse(localStorage.getItem("pos_company_data") || "{}")
+      const W = 42
+
+      let t = ESCPOS_INIT
+      t += ESCPOS_ALIGN_CENTER
+      t += ESCPOS_BOLD_ON + (comp?.nombre_fantasia || comp?.razon_social || "EXTRA SUPERMERCADO MAYORISTA") + "\n" + ESCPOS_BOLD_OFF
+      if (comp?.ruc) t += `RUC: ${comp.ruc}\n`
+      t += "REIMPRESION DE ARQUEO / CIERRE\n"
+      t += escposDashes(W) + "\n"
+      t += ESCPOS_ALIGN_LEFT
+      t += `Cajero/a: ${sessionSummary.cajero_nombre || "-"}\n`
+      t += `Caja: ${sessionSummary.register_nombre || "Caja"}\n`
+      t += `Turno ID: ${sessionSummary.id.slice(0, 8).toUpperCase()}\n`
+      t += `Fecha Apertura: ${sessionSummary.fecha_apertura ? new Date(sessionSummary.fecha_apertura).toLocaleString("es-PY") : "-"}\n`
+      t += `Fecha Cierre:   ${sessionSummary.fecha_cierre ? new Date(sessionSummary.fecha_cierre).toLocaleString("es-PY") : "-"}\n`
+      t += escposDashes(W) + "\n"
+
+      t += ESCPOS_BOLD_ON + "[RESUMEN POR FORMA DE PAGO]\n" + ESCPOS_BOLD_OFF
+      if (summary?.desglose_formas_pago && summary.desglose_formas_pago.length > 0) {
+        for (const dp of summary.desglose_formas_pago) {
+          const lbl = (FORMA_PAGO_LABEL[dp.forma_pago] || dp.forma_pago) + (dp.moneda && dp.moneda !== "PYG" ? ` (${dp.moneda})` : "")
+          const val = dp.moneda === "PYG" ? `${formatPYG(dp.monto)}` : `${dp.moneda} ${Number(dp.monto).toFixed(2)}`
+          t += escposTwoCol(`  ${lbl} (${dp.cantidad || 0}):`, val, W) + "\n"
+        }
+      }
+
+      t += escposDashes(W) + "\n"
+      t += ESCPOS_BOLD_ON + "[CONCILIACION EN GUARANIES]\n" + ESCPOS_BOLD_OFF
+      t += escposTwoCol("  Fondo Apertura Gs:", formatPYG(sessionSummary.monto_apertura || 0), W) + "\n"
+      t += escposTwoCol("  Ventas Efectivo Gs:", formatPYG(summary?.efectivo_pyg_esperado || 0), W) + "\n"
+      t += escposTwoCol("  Total Esperado Gs:", formatPYG(sessionSummary.monto_cierre_esperado || (sessionSummary.monto_apertura + (summary?.efectivo_pyg_esperado || 0))), W) + "\n"
+      t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado en Gaveta:", formatPYG(sessionSummary.monto_cierre || 0), W) + ESCPOS_BOLD_OFF + "\n"
+      const difPyg = sessionSummary.diferencia || 0
+      t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA GS:", `${difPyg >= 0 ? "+" : ""}${formatPYG(difPyg)}`, W) + ESCPOS_BOLD_OFF + "\n"
+
+      if (sessionSummary.monto_apertura_brl > 0 || sessionSummary.diferencia_brl !== null) {
+        t += "\n" + ESCPOS_BOLD_ON + "[CONCILIACION EN REALES (R$)]\n" + ESCPOS_BOLD_OFF
+        t += escposTwoCol("  Fondo Inicial R$:", `R$ ${Number(sessionSummary.monto_apertura_brl || 0).toFixed(2)}`, W) + "\n"
+        t += escposTwoCol("  Ventas Efectivo R$:", `R$ ${Number(summary?.efectivo_brl_esperado || 0).toFixed(2)}`, W) + "\n"
+        const difBrl = sessionSummary.diferencia_brl || 0
+        t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA R$:", `${difBrl >= 0 ? "+" : ""}R$ ${Number(difBrl).toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
+      }
+
+      t += escposDashes(W) + "\n\n"
+      t += "Firma Cajero/a: _________________________\n\n"
+      t += "Firma Supervisora: ______________________\n\n\n\n\n"
+
+      const b64 = btoa(unescape(encodeURIComponent(t)))
+      if ((window as any).electronAPI?.printEscPos) {
+        const res = await (window as any).electronAPI.printEscPos(b64, tpl.nombre_impresora_windows || "ZKP8008")
+        if (!res?.success) {
+          toast.warning("No se pudo imprimir", res?.error || "Revise la impresora.")
+          return
+        }
+      }
+      toast.success("Cierre Reimpreso", `Arqueo del turno ${sessionSummary.id.slice(0, 8)} enviado a la impresora ZKP8008.`)
+    } catch (e: any) {
+      toast.warning("Error al reimprimir", e?.message || "Verifique la conexión.")
+    }
+  }
+
 
   // ── PRODUCTOS FALTANTES (DEMANDA PERDIDA) -> COMPRAS ────────────────────────
   // El backend y el cliente API ya existian (api.purchases.lostDemand),
@@ -8441,7 +8546,16 @@ export default function POSPage() {
               >
                 Devoluciones
               </button>
+              <button
+                onClick={() => { setReimprimirTab("cierres"); if (reimprimirSessions.length === 0) fetchReimprimirSessions() }}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer ${
+                  reimprimirTab === "cierres" ? "bg-brand-orange text-[#1C1710]" : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                }`}
+              >
+                Cierres / Arqueos
+              </button>
             </div>
+
 
             <div className="overflow-y-auto flex-1 p-2">
               {reimprimirLoading && (
@@ -8567,7 +8681,55 @@ export default function POSPage() {
                   ))}
                 </>
               )}
+
+              {reimprimirTab === "cierres" && !reimprimirLoading && !reimprimirError && (
+                <>
+                  {reimprimirSessions.length === 0 && (
+                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">No hay cierres de turno anteriores para mostrar.</div>
+                  )}
+                  {reimprimirSessions.map((ses) => (
+                    <div
+                      key={ses.id}
+                      className="p-3 mx-1 my-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent hover:border-slate-300 dark:hover:border-slate-700"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>Turno {ses.id.slice(0, 8).toUpperCase()}</span>
+                            <span className="text-xs px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold">
+                              {ses.cajero_nombre || "Cajero/a"}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            Cierre: {ses.fecha_cierre ? new Date(ses.fecha_cierre).toLocaleString("es-PY") : "—"} · Gaveta: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(ses.monto_cierre || 0)}</strong>
+                            {ses.monto_apertura_brl > 0 ? ` · R$ ${Number(ses.monto_apertura_brl).toFixed(2)}` : ""}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => handleDownloadCierrePdf(ses.id)}
+                            title="Descargar PDF Oficial"
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-blue-500" />
+                            PDF
+                          </button>
+                          <button
+                            onClick={() => handleReimprimirCierreEscPos(ses)}
+                            title="Reimprimir Arqueo ESC/POS (ZKP8008)"
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-[#1C1710]"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            Imprimir Ticket
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
+
           </div>
         </div>
       )}
@@ -9018,9 +9180,7 @@ export default function POSPage() {
                     type="button"
                     onClick={() => {
                       if (lastClosedSessionId) {
-                        const token = localStorage.getItem("auth_token") || localStorage.getItem("token") || ""
-                        const url = `/api/v1/cash-sessions/${lastClosedSessionId}/export/cierre.pdf?token=${encodeURIComponent(token)}`
-                        window.open(url, "_blank")
+                        handleDownloadCierrePdf(lastClosedSessionId)
                       }
                     }}
                     className="py-2.5 px-3 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-xs font-bold flex items-center justify-center gap-1.5"
@@ -9029,6 +9189,7 @@ export default function POSPage() {
                     Descargar PDF Oficial
                   </button>
                 </div>
+
 
                 <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
                   <button
