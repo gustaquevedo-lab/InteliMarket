@@ -649,9 +649,47 @@ export default function POSPage() {
   const [devolucionObservaciones, setDevolucionObservaciones] = useState("")
   const [devolucionSubmitting, setDevolucionSubmitting] = useState(false)
 
-  // ── ESTADOS DE CARRITO & CLIENTE ──────────────────────────────────────────
-  const [cart, setCart] = useState<CartItem[]>([])
-  const [customer, setCustomer] = useState<Customer>(DEFAULT_CUSTOMER)
+  // ── ESTADOS DE CARRITO & CLIENTE (Auto-Persistidos contra recargas o reinicios) ──
+  const ACTIVE_CART_KEY = `pos_active_cart_${COMPANY_ID}`
+  const ACTIVE_CUSTOMER_KEY = `pos_active_customer_${COMPANY_ID}`
+
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    try {
+      const s = localStorage.getItem(`pos_active_cart_${COMPANY_ID}`)
+      return s ? JSON.parse(s) : []
+    } catch {
+      return []
+    }
+  })
+  const [customer, setCustomer] = useState<Customer>(() => {
+    try {
+      const s = localStorage.getItem(`pos_active_customer_${COMPANY_ID}`)
+      return s ? JSON.parse(s) : DEFAULT_CUSTOMER
+    } catch {
+      return DEFAULT_CUSTOMER
+    }
+  })
+
+  useEffect(() => {
+    try {
+      if (cart.length > 0) {
+        localStorage.setItem(ACTIVE_CART_KEY, JSON.stringify(cart))
+      } else {
+        localStorage.removeItem(ACTIVE_CART_KEY)
+      }
+    } catch {}
+  }, [cart])
+
+  useEffect(() => {
+    try {
+      if (customer && customer.id !== DEFAULT_CUSTOMER.id) {
+        localStorage.setItem(ACTIVE_CUSTOMER_KEY, JSON.stringify(customer))
+      } else {
+        localStorage.removeItem(ACTIVE_CUSTOMER_KEY)
+      }
+    } catch {}
+  }, [customer])
+
   const [showCustomerModal, setShowCustomerModal] = useState(false)
   const [customerSearch, setCustomerSearch] = useState("")
   const [showCreateCustomerForm, setShowCreateCustomerForm] = useState(false)
@@ -660,6 +698,7 @@ export default function POSPage() {
   const [newCustTelefono, setNewCustTelefono] = useState("")
   const [lookupDvSuggested, setLookupDvSuggested] = useState<string | null>(null)
   const [customerHighlight, setCustomerHighlight] = useState(0)
+
 
   // Persistidas en localStorage -- antes vivían solo en memoria y una venta
   // pausada se perdía sin aviso ante cualquier recarga (HMR, crash, F5).
@@ -3174,10 +3213,16 @@ export default function POSPage() {
       return
     }
 
-    // 2. Coincidencia exacta en memoria local
-    const localMatch = products.find(
-      (p) => p.codigo_barra === code || p.sku === code || p.codigo_barra?.endsWith(code) || (p.codigo_barra && code.endsWith(p.codigo_barra))
-    )
+    // 2. Coincidencia exacta en memoria local (con soporte estricto de padding para EAN-13/UPC)
+    const cleanCode = code.trim()
+    const localMatch = products.find((p) => {
+      if (p.codigo_barra === cleanCode || p.sku === cleanCode) return true
+      const pCode = p.codigo_barra?.trim()
+      if (pCode && pCode.length >= 8 && cleanCode.length >= 8) {
+        return pCode.padStart(13, "0") === cleanCode.padStart(13, "0")
+      }
+      return false
+    })
 
     if (localMatch) {
       addToCart(localMatch, qtyPrefix ?? undefined)
@@ -3186,31 +3231,33 @@ export default function POSPage() {
       return
     }
 
-    // 3. Consulta inmediata al backend por código de barras
+    // 3. Consulta al backend por código exacto
     try {
-      const serverRes = await api.products.list({ search: code, limit: 10 })
+      const serverRes = await api.products.list({ search: cleanCode, limit: 10 })
       if (serverRes && serverRes.length > 0) {
-        const best = serverRes.find((p) => p.codigo_barra === code || p.sku === code) || serverRes[0]
-        addToCart(best, qtyPrefix ?? undefined)
-        setSearch("")
-        searchInputRef.current?.focus()
-        return
+        const best = serverRes.find((p) => {
+          if (p.codigo_barra === cleanCode || p.sku === cleanCode) return true
+          const pCode = p.codigo_barra?.trim()
+          if (pCode && pCode.length >= 8 && cleanCode.length >= 8) {
+            return pCode.padStart(13, "0") === cleanCode.padStart(13, "0")
+          }
+          return false
+        })
+        if (best) {
+          addToCart(best, qtyPrefix ?? undefined)
+          setSearch("")
+          searchInputRef.current?.focus()
+          return
+        }
       }
     } catch (err) {}
 
-    // 4. Si hay un único resultado en la lista filtrada
-    if (filteredProducts.length === 1) {
-      addToCart(filteredProducts[0], qtyPrefix ?? undefined)
-      setSearch("")
-      searchInputRef.current?.focus()
-      return
-    }
-
-    // 5. Si no existe, abrir modal de faltante
-    toast.warning("Producto no encontrado", `Código ${code} no está en catálogo.`)
-    setLostDemandRows([{ producto: code, motivo: "sin_stock" }])
+    // 4. Si no existe coincidencia exacta de código, no adivinar ni agregar productos ajenos
+    toast.warning("Producto no encontrado", `Código ${cleanCode} no está en catálogo.`)
+    setLostDemandRows([{ producto: cleanCode, motivo: "sin_stock" }])
     setShowLostDemandModal(true)
   }
+
 
   // ── CONTROL DE SEGURIDAD PARA ANULACIONES Y AJUSTES DE POS (SUPERVISOR PIN) ──
   // Ademas del PIN (sin cambios, a proposito), ahora se exige que exista un

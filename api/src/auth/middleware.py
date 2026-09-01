@@ -37,26 +37,18 @@ async def get_current_user(
         if "tenant_id" not in user or not user["tenant_id"]:
             user["tenant_id"] = "00000000-0000-0000-0000-000000000001"
 
-        # ── VALIDACIÓN DE SESIÓN ÚNICA ACTIVA (solo para cajeros POS) ───────
-        token_sid = user.get("sid")
+        # ── VALIDACIÓN DE USUARIO ACTIVO ────────────────────────────────────
         user_id = user.get("id")
-        user_rol = user.get("rol")
-        if token_sid and user_id and user_rol == "cajero":
+        if user_id:
             import uuid
             uid = uuid.UUID(str(user_id)) if isinstance(user_id, str) else user_id
-            db_res = await db.execute(select(User.current_session_id, User.activo).where(User.id == uid))
+            db_res = await db.execute(select(User.activo).where(User.id == uid))
             db_user_row = db_res.first()
-            if db_user_row:
-                active_sid, is_active = db_user_row
-                if not is_active:
-                    raise HTTPException(status_code=403, detail="Usuario desactivado")
-                if active_sid and active_sid != token_sid:
-                    raise HTTPException(
-                        status_code=401,
-                        detail="Esta sesión fue cerrada porque el usuario inició sesión en otra terminal o caja."
-                    )
+            if db_user_row and not db_user_row[0]:
+                raise HTTPException(status_code=403, detail="Usuario desactivado")
 
         return user
+
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
 
