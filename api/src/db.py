@@ -6,9 +6,14 @@ from sqlalchemy.orm import DeclarativeBase
 
 from api.src.config import settings
 
-_connect_args = {}
+_connect_args = {
+    "server_settings": {
+        "timezone": "America/Asuncion"
+    }
+}
 if settings.db_search_path:
-    _connect_args["server_settings"] = {"search_path": settings.db_search_path}
+    _connect_args["server_settings"]["search_path"] = settings.db_search_path
+
 
 engine = create_async_engine(
     settings.database_url,

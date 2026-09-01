@@ -40,6 +40,8 @@ class CashSessionCreate(BaseModel):
     user_id: UUID
     cajero_nombre: Optional[str] = None
     monto_apertura: Decimal = Decimal("0")
+    monto_apertura_usd: Decimal = Decimal("0")
+    monto_apertura_brl: Decimal = Decimal("0")
 
 
 class CashSessionResponse(BaseModel):
@@ -49,12 +51,15 @@ class CashSessionResponse(BaseModel):
     cajero_nombre: Optional[str] = None
     fecha_apertura: datetime
     monto_apertura: float
+    monto_apertura_usd: Optional[float] = 0.0
+    monto_apertura_brl: Optional[float] = 0.0
     fecha_cierre: Optional[datetime] = None
     monto_cierre: Optional[float] = None
     estado: str
     ultimo_cash_drop_at: Optional[datetime] = None
     observaciones: Optional[str] = None
     created_at: datetime
+
 
     class Config:
         from_attributes = True

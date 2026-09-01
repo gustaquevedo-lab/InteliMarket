@@ -77,8 +77,7 @@ async def get_applicable_tier_price(
     db: AsyncSession, company_id: str, product_id: str, quantity: int,
     price_list_id: Optional[str] = None
 ) -> Optional[dict]:
-    # Regla Comercial Extra Supermercado: Si un producto tiene una Promoción Activa,
-    # sus precios de escala mayorista quedan ON HOLD (suspendidos) mientras dure la promoción.
+    active_promo_price: Optional[Decimal] = None
     try:
         cid = uuid.UUID(company_id)
         pid = uuid.UUID(product_id)
@@ -89,15 +88,13 @@ async def get_applicable_tier_price(
             Promotion.estado == "activa",
             Promotion.valido_desde <= today,
             Promotion.valido_hasta >= today,
-            or_(
-                Promotion.producto_ids.contains([pid]),
-                Promotion.aplica_a == "carrito"
-            )
+            Promotion.producto_ids.any(pid)
+
         )
         promo_res = await db.execute(promo_q)
-        if promo_res.scalars().first():
-            # Producto en Promoción Activa -> Precios de Escala en HOLD
-            return None
+        active_promo = promo_res.scalars().first()
+        if active_promo and active_promo.tipo == "precio_fijo_oferta" and active_promo.precio_fijo_promocional:
+            active_promo_price = active_promo.precio_fijo_promocional
     except Exception:
         pass
 
@@ -115,8 +112,27 @@ async def get_applicable_tier_price(
     result = await db.execute(q)
     for t in result.scalars().all():
         if t.max_qty is None or quantity <= t.max_qty:
-            return _tiered_to_dict(t)
+            t_dict = _tiered_to_dict(t)
+            # Si hay una promo activa con precio aun menor, preferir la promo
+            if active_promo_price is not None and Decimal(str(t_dict["precio_unitario"])) > active_promo_price:
+                t_dict["precio_unitario"] = float(active_promo_price)
+            return t_dict
+
+    if active_promo_price is not None:
+        return {
+            "id": f"promo-{product_id}",
+            "company_id": company_id,
+            "price_list_id": price_list_id,
+            "product_id": product_id,
+            "min_qty": 1,
+            "max_qty": None,
+            "precio_unitario": float(active_promo_price),
+            "moneda": "PYG",
+            "activo": True,
+        }
+
     return None
+
 
 
 async def update_tiered_price(db: AsyncSession, tier_id: str, data: TieredPriceUpdate) -> Optional[dict]:

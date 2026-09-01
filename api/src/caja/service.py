@@ -142,8 +142,12 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
             existing.user_id = data["user_id"]
         if data.get("cajero_nombre"):
             existing.cajero_nombre = data.get("cajero_nombre")
-        if data.get("monto_apertura") and (not existing.monto_apertura or existing.monto_apertura == 0):
+        if data.get("monto_apertura") is not None:
             existing.monto_apertura = data.get("monto_apertura")
+        if data.get("monto_apertura_usd") is not None:
+            existing.monto_apertura_usd = data.get("monto_apertura_usd")
+        if data.get("monto_apertura_brl") is not None:
+            existing.monto_apertura_brl = data.get("monto_apertura_brl")
         await db.flush()
         await db.refresh(existing)
         return existing
@@ -153,6 +157,8 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
         user_id=data["user_id"],
         cajero_nombre=data.get("cajero_nombre"),
         monto_apertura=data.get("monto_apertura", 0),
+        monto_apertura_usd=data.get("monto_apertura_usd", 0),
+        monto_apertura_brl=data.get("monto_apertura_brl", 0),
     )
     db.add(session_obj)
     await db.flush()
@@ -186,11 +192,6 @@ async def close_session(
     observaciones: str | None = None,
     tenant_id: str | None = None,
 ) -> dict | None:
-    # FOR UPDATE: si dos cierres del mismo turno llegan casi juntos (doble
-    # click, reintento de red), el segundo espera a que el primero termine
-    # su transaccion y recien ahi lee el estado -- sin esto, ambos podian
-    # leer estado=="abierta" al mismo tiempo y los dos generaban su propio
-    # CashCount + CashHandoff para el mismo efectivo contado una sola vez.
     result = await db.execute(
         select(CashSession).where(CashSession.id == uuid.UUID(session_id)).with_for_update()
     )
@@ -207,20 +208,23 @@ async def close_session(
     )
     total_cobrado = sales_result.scalar() or 0
 
-    # El efectivo esperado en caja es solo lo que entro como EFECTIVO en
-    # guaranies -- antes se sumaba Sale.total de TODAS las ventas del turno
-    # sin importar la forma de pago, asi que una venta con tarjeta/QR/Extra
-    # Club inflaba el "esperado" en efectivo aunque esa plata nunca entro
-    # fisicamente a la caja, generando una diferencia negativa falsa contra
-    # la cajera. USD/BRL ya se calculaban bien con este mismo filtro.
+    monto_apertura_pyg = Decimal(str(session_obj.monto_apertura or 0))
+    monto_apertura_usd = Decimal(str(session_obj.monto_apertura_usd or 0))
+    monto_apertura_brl = Decimal(str(session_obj.monto_apertura_brl or 0))
+
     efectivo_pyg_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "PYG")
-    monto_cierre_esperado = Decimal(str(session_obj.monto_apertura)) + efectivo_pyg_esperado
+    monto_cierre_esperado = monto_apertura_pyg + efectivo_pyg_esperado
     diferencia = Decimal(str(monto_cierre_real)) - monto_cierre_esperado
 
     efectivo_usd_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "USD")
     efectivo_brl_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "BRL")
-    diferencia_usd = monto_cierre_usd - efectivo_usd_esperado
-    diferencia_brl = monto_cierre_brl - efectivo_brl_esperado
+    
+    monto_cierre_esperado_usd = monto_apertura_usd + efectivo_usd_esperado
+    monto_cierre_esperado_brl = monto_apertura_brl + efectivo_brl_esperado
+
+    diferencia_usd = monto_cierre_usd - monto_cierre_esperado_usd
+    diferencia_brl = monto_cierre_brl - monto_cierre_esperado_brl
+
 
     # Desglose de TODAS las formas de pago del turno (no solo efectivo) --
     # antes el cierre no mostraba nada de esto, asi que la cajera/supervisora
@@ -304,7 +308,12 @@ async def close_session(
 
     return {
         "session": session_obj,
+        "monto_apertura": Decimal(str(session_obj.monto_apertura or 0)),
+        "monto_apertura_usd": Decimal(str(session_obj.monto_apertura_usd or 0)),
+        "monto_apertura_brl": Decimal(str(session_obj.monto_apertura_brl or 0)),
         "monto_cierre_esperado": monto_cierre_esperado,
+        "monto_cierre_esperado_usd": monto_cierre_esperado_usd,
+        "monto_cierre_esperado_brl": monto_cierre_esperado_brl,
         "diferencia": diferencia,
         "diferencia_usd": diferencia_usd,
         "diferencia_brl": diferencia_brl,
@@ -313,6 +322,7 @@ async def close_session(
         "total_cobrado": Decimal(str(total_cobrado)),
         "desglose_formas_pago": desglose_formas_pago,
     }
+
 
 
 async def list_register_movements(db: AsyncSession, company_id: str, tipo: str | None = None, limit: int = 100) -> list[dict]:
@@ -1651,15 +1661,34 @@ async def get_session_pre_close_summary(db: AsyncSession, session_id: str) -> di
     total_drops_confirmados_brl = sum(float(d.monto_confirmado_brl or d.monto_brl or 0) for d in drops if d.estado == "confirmado")
 
     monto_apertura = float(session_obj.monto_apertura or 0)
+    monto_apertura_usd = float(session_obj.monto_apertura_usd or 0)
+    monto_apertura_brl = float(session_obj.monto_apertura_brl or 0)
+
     efectivo_en_gaveta_esperado_pyg = monto_apertura + float(efectivo_pyg) - total_drops_confirmados_pyg
-    efectivo_en_gaveta_esperado_usd = float(efectivo_usd) - total_drops_confirmados_usd
-    efectivo_en_gaveta_esperado_brl = float(efectivo_brl) - total_drops_confirmados_brl
+    efectivo_en_gaveta_esperado_usd = monto_apertura_usd + float(efectivo_usd) - total_drops_confirmados_usd
+    efectivo_en_gaveta_esperado_brl = monto_apertura_brl + float(efectivo_brl) - total_drops_confirmados_brl
+
+    medios_no_efectivo = [
+        {
+            "forma_pago": p["forma_pago"],
+            "moneda": p["moneda"],
+            "cantidad": p["cantidad"],
+            "monto": p["monto"],
+            "total": p["monto"],
+        }
+        for p in payments_breakdown
+        if p["forma_pago"].upper() != "EFECTIVO"
+    ]
 
     return {
         "session_id": str(session_obj.id),
         "cajero_nombre": session_obj.cajero_nombre,
         "fecha_apertura": session_obj.fecha_apertura.isoformat(),
         "monto_apertura": monto_apertura,
+        "monto_apertura_pyg": monto_apertura,
+        "monto_apertura_usd": monto_apertura_usd,
+        "monto_apertura_brl": monto_apertura_brl,
+        "ventas_count": sales_row.total_ventas if sales_row else 0,
         "total_ventas_count": sales_row.total_ventas if sales_row else 0,
         "total_cobrado_pyg": float(sales_row.total_cobrado if sales_row else 0),
         "total_donaciones_pyg": float(sales_row.total_donaciones if sales_row else 0),
@@ -1667,15 +1696,21 @@ async def get_session_pre_close_summary(db: AsyncSession, session_id: str) -> di
         "efectivo_usd_esperado": float(efectivo_usd),
         "efectivo_brl_esperado": float(efectivo_brl),
         "monto_cierre_esperado_pyg": monto_apertura + float(efectivo_pyg),
+        "monto_cierre_esperado_usd": monto_apertura_usd + float(efectivo_usd),
+        "monto_cierre_esperado_brl": monto_apertura_brl + float(efectivo_brl),
         "efectivo_en_gaveta_esperado_pyg": efectivo_en_gaveta_esperado_pyg,
         "efectivo_en_gaveta_esperado_usd": efectivo_en_gaveta_esperado_usd,
         "efectivo_en_gaveta_esperado_brl": efectivo_en_gaveta_esperado_brl,
         "desglose_formas_pago": payments_breakdown,
+        "medios_no_efectivo": medios_no_efectivo,
         "cash_drops": drops_list,
+        "total_cash_drops_pyg": total_drops_confirmados_pyg,
         "total_drops_confirmados_pyg": total_drops_confirmados_pyg,
         "total_drops_confirmados_usd": total_drops_confirmados_usd,
         "total_drops_confirmados_brl": total_drops_confirmados_brl,
     }
+
+
 
 
 async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, company_id: str) -> dict | None:

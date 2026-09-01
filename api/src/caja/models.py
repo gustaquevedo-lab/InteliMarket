@@ -29,6 +29,9 @@ class CashSession(Base):
     user_id = Column(UUID(as_uuid=True), nullable=False)
     cajero_nombre = Column(String(100))
     monto_apertura = Column(Numeric(15, 0), nullable=False)
+    monto_apertura_usd = Column(Numeric(15, 2), default=0)
+    monto_apertura_brl = Column(Numeric(15, 2), default=0)
+
     fecha_apertura = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     fecha_cierre = Column(DateTime(timezone=True))
     monto_cierre = Column(Numeric(15, 0))
