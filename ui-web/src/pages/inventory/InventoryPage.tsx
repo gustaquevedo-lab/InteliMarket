@@ -48,6 +48,18 @@ export default function InventoryPage() {
   const [kardexSearch, setKardexSearch] = useState("")
   const [kardexFechaDesde, setKardexFechaDesde] = useState("")
   const [kardexFechaHasta, setKardexFechaHasta] = useState("")
+  // Antes el kardex traia siempre limit=100 fijo, sin forma de ver mas --
+  // con miles de movimientos reales eso mostraba una fraccion minima del
+  // historial. Ahora es paginado de verdad (cargar mas por offset) y
+  // ademas se puede hacer clic en un producto para ver SU historial
+  // completo aparte, sin competir con el limite de pagina del listado
+  // general.
+  const [kardexOffset, setKardexOffset] = useState(0)
+  const [kardexHasMore, setKardexHasMore] = useState(true)
+  const [loadingMoreMovements, setLoadingMoreMovements] = useState(false)
+  const [kardexProductoDetalle, setKardexProductoDetalle] = useState<{ id: string; nombre: string; sku?: string } | null>(null)
+  const [kardexDetalleMovs, setKardexDetalleMovs] = useState<any[]>([])
+  const [loadingKardexDetalle, setLoadingKardexDetalle] = useState(false)
 
   // Paginación Stock
   const [pageStock, setPageStock] = useState(1)
@@ -102,19 +114,59 @@ export default function InventoryPage() {
 
   const loadMovementsData = useCallback(async () => {
     setLoadingMovements(true)
+    setKardexOffset(0)
     try {
       const m = await api.inventory.listMovements({
-        limit: 100,
+        limit: 200,
+        offset: 0,
         fecha_desde: kardexFechaDesde || undefined,
         fecha_hasta: kardexFechaHasta || undefined,
       })
       setMovements(m as any)
+      setKardexHasMore((m as any[]).length === 200)
     } catch (e: any) {
       toast.error("Error al cargar kardex", e.message)
     } finally {
       setLoadingMovements(false)
     }
   }, [kardexFechaDesde, kardexFechaHasta])
+
+  const loadMoreMovements = async () => {
+    const nextOffset = kardexOffset + 200
+    setLoadingMoreMovements(true)
+    try {
+      const m = await api.inventory.listMovements({
+        limit: 200,
+        offset: nextOffset,
+        fecha_desde: kardexFechaDesde || undefined,
+        fecha_hasta: kardexFechaHasta || undefined,
+      })
+      setMovements(prev => [...prev, ...(m as any)])
+      setKardexOffset(nextOffset)
+      setKardexHasMore((m as any[]).length === 200)
+    } catch (e: any) {
+      toast.error("Error al cargar mas movimientos", e.message)
+    } finally {
+      setLoadingMoreMovements(false)
+    }
+  }
+
+  // Historial COMPLETO de un producto puntual -- se abre al hacer clic en
+  // cualquier fila del kardex general. No hereda el filtro de fecha del
+  // listado general (el cajero quiere ver TODO el historial de ese SKU,
+  // no solo lo que estaba viendo en la grilla).
+  const openKardexProductoDetalle = async (productId: string, nombre: string, sku?: string) => {
+    setKardexProductoDetalle({ id: productId, nombre, sku })
+    setLoadingKardexDetalle(true)
+    try {
+      const m = await api.inventory.listMovements({ product_id: productId, limit: 500 })
+      setKardexDetalleMovs(m as any)
+    } catch (e: any) {
+      toast.error("Error al cargar historial del producto", e.message)
+    } finally {
+      setLoadingKardexDetalle(false)
+    }
+  }
 
   const loadExpiriesData = useCallback(async () => {
     setLoadingExpiries(true)
@@ -901,8 +953,14 @@ export default function InventoryPage() {
                           </span>
                         </td>
                         <td className="p-3.5">
-                          <p className="font-extrabold text-gray-900 dark:text-white">{m.product_nombre || m.product?.nombre || "Producto"}</p>
-                          <span className="text-[10px] font-mono text-gray-400">SKU: {m.product_sku || m.product?.sku}</span>
+                          <button
+                            onClick={() => openKardexProductoDetalle(m.product_id, m.product_nombre || m.product?.nombre || "Producto", m.product_sku || m.product?.sku)}
+                            className="text-left hover:underline cursor-pointer"
+                            title="Ver historial completo de este producto"
+                          >
+                            <p className="font-extrabold text-gray-900 dark:text-white">{m.product_nombre || m.product?.nombre || "Producto"}</p>
+                            <span className="text-[10px] font-mono text-gray-400">SKU: {m.product_sku || m.product?.sku}</span>
+                          </button>
                         </td>
                         <td className="p-3.5 text-gray-600 dark:text-gray-300">
                           {m.warehouse_nombre || "Depósito Central"}
@@ -928,6 +986,93 @@ export default function InventoryPage() {
                 </tbody>
               </table>
             )}
+            {!loadingMovements && kardexHasMore && (
+              <div className="p-4 text-center border-t border-gray-100 dark:border-slate-800">
+                <button
+                  onClick={loadMoreMovements}
+                  disabled={loadingMoreMovements}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-200 disabled:opacity-50 cursor-pointer"
+                >
+                  {loadingMoreMovements ? "Cargando..." : `Cargar ${filteredMovements.length} más`}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: HISTORIAL COMPLETO DE UN PRODUCTO (clic en fila del Kardex) ── */}
+      {kardexProductoDetalle && (
+        <div className="fixed inset-0 z-[150] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col">
+            <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="font-extrabold text-sm text-gray-900 dark:text-white">{kardexProductoDetalle.nombre}</h3>
+                <p className="text-[10px] font-mono text-gray-400">SKU: {kardexProductoDetalle.sku} · Historial completo (hasta 500 movimientos más recientes)</p>
+              </div>
+              <button
+                onClick={() => { setKardexProductoDetalle(null); setKardexDetalleMovs([]) }}
+                className="text-gray-400 hover:text-gray-700 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              {loadingKardexDetalle ? (
+                <div className="p-16 text-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mx-auto mb-2" />
+                  <p className="text-xs text-gray-400 font-bold">Cargando historial...</p>
+                </div>
+              ) : kardexDetalleMovs.length === 0 ? (
+                <div className="p-16 text-center text-gray-400">
+                  <p className="font-bold text-xs">Sin movimientos registrados para este producto.</p>
+                </div>
+              ) : (
+                <table className="w-full text-left text-xs min-w-[600px]">
+                  <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800 sticky top-0">
+                    <tr>
+                      <th className="p-3">Fecha & Hora</th>
+                      <th className="p-3">Tipo</th>
+                      <th className="p-3">Depósito</th>
+                      <th className="p-3 text-right">Cantidad</th>
+                      <th className="p-3 text-right">Saldo</th>
+                      <th className="p-3">Usuario</th>
+                      <th className="p-3">Motivo / Documento</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80 font-medium">
+                    {kardexDetalleMovs.map((m) => {
+                      const isPositive = m.tipo === "ENTRADA" || (m.cantidad ?? 0) > 0
+                      return (
+                        <tr key={m.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                          <td className="p-3 font-mono text-[11px] text-gray-500">
+                            {new Date(m.created_at).toLocaleString("es-PY", { dateStyle: "short", timeStyle: "short" })}
+                          </td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                              m.tipo === "ENTRADA"
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                : m.tipo === "SALIDA"
+                                ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
+                                : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                            }`}>
+                              {m.tipo}
+                            </span>
+                          </td>
+                          <td className="p-3 text-gray-600 dark:text-gray-300">{m.warehouse_nombre || "Depósito Central"}</td>
+                          <td className={`p-3 text-right font-mono font-black ${isPositive ? "text-emerald-600" : "text-red-600"}`}>
+                            {isPositive ? `+${Math.abs(m.cantidad ?? 0)}` : `-${Math.abs(m.cantidad ?? 0)}`}
+                          </td>
+                          <td className="p-3 text-right font-mono font-black text-gray-900 dark:text-white">{m.saldo_acumulado ?? "—"}</td>
+                          <td className="p-3 text-gray-500 text-[11px]">{m.user_nombre || "—"}</td>
+                          <td className="p-3 text-gray-500 text-[11px]">{m.motivo || "Movimiento operativo"}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}
