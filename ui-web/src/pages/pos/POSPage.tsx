@@ -910,6 +910,8 @@ export default function POSPage() {
   const [qrSubMethod, setQrSubMethod] = useState<"zimple" | "pix" | "dinelco">("zimple")
   const [dinelcoQrState, setDinelcoQrState] = useState<"idle" | "esperando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
   const [dinelcoQrError, setDinelcoQrError] = useState<string>("")
+  const [dinelcoQrMode, setDinelcoQrMode] = useState<"qr" | "pix">("qr")
+  const [dinelcoPixCpf, setDinelcoPixCpf] = useState("")
   // Efectivo Multimoneda simultáneo (Guaraníes NUNCA tiene decimales)
   const [payCashPyg, setPayCashPyg] = useState<string>("")
   const [payCashBrl, setPayCashBrl] = useState<string>("")
@@ -1211,7 +1213,7 @@ export default function POSPage() {
     setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null); setShowBancardQrManualFallback(false); setPosQrCupon(""); setPosQrAuth("")
     setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); clearPlugpayPoll()
     setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
-    setDinelcoQrState("idle"); setDinelcoQrError("")
+    setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf("")
   }
 
   // El terminal Bancard no tiene forma via API de forzar la limpieza de una
@@ -1440,6 +1442,10 @@ export default function POSPage() {
       toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
       return
     }
+    if (dinelcoQrMode === "pix" && dinelcoPixCpf.replace(/\D/g, "").length !== 11) {
+      toast.warning("CPF inválido", "El CPF del comprador debe tener 11 dígitos para procesar PIX.")
+      return
+    }
     const electronAPI = (window as any).electronAPI
     if (!electronAPI?.dinelcoCall) {
       setDinelcoQrState("error_conexion")
@@ -1449,13 +1455,17 @@ export default function POSPage() {
     setDinelcoQrState("esperando")
     setDinelcoQrError("")
 
-    const res = await electronAPI.dinelcoCall(ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+    const res = dinelcoQrMode === "pix"
+      ? await electronAPI.dinelcoCall(ip, "pix", { monto: montoQrDinelco, cpf: dinelcoPixCpf.replace(/\D/g, "") }, null, 90000)
+      : await electronAPI.dinelcoCall(ip, "qr", { op: "01", monto: montoQrDinelco }, null, 90000)
+
+    const tipoOperacion = dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr"
 
     if (!res.ok) {
       setDinelcoQrState(res.error ? "error_conexion" : "error_rechazo")
       setDinelcoQrError(res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."))
       await logDinelcoTxn({
-        tipo_operacion: "dinelco_qr", exitosa: false, verificado_automaticamente: true,
+        tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
         error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
       })
       return
@@ -1463,7 +1473,7 @@ export default function POSPage() {
 
     setDinelcoQrState("aprobada")
     await logDinelcoTxn({
-      tipo_operacion: "dinelco_qr", exitosa: true, verificado_automaticamente: true,
+      tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
       monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
     })
   }
@@ -8995,13 +9005,13 @@ export default function POSPage() {
                           </div>
                         )}
 
-                        {/* SUB-PANEL 3: QR DINELCO */}
+                        {/* SUB-PANEL 3: QR / PIX DINELCO */}
                         {qrSubMethod === "dinelco" && (
                           <div className="flex flex-col items-center text-center space-y-2.5 w-full">
                             <div className="flex items-center gap-2">
                               <QrCode className="w-7 h-7 text-purple-600" />
                               <div className="text-left">
-                                <div className="font-bold text-xs text-slate-900 dark:text-white">QR Dinámico Dinelco (Ingenico AXIUM)</div>
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">Dinelco (Ingenico AXIUM)</div>
                                 {!isMultiPayment && (
                                   <div className="text-xs font-posMono tabular-nums font-black text-purple-600 dark:text-purple-400">
                                     {formatPYG(totalPyg)}
@@ -9010,10 +9020,42 @@ export default function POSPage() {
                               </div>
                             </div>
 
+                            {dinelcoQrState !== "aprobada" && (
+                              <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl gap-1 w-full max-w-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => setDinelcoQrMode("qr")}
+                                  className={`flex-1 py-1 px-2 rounded-lg text-[11px] font-black transition-all cursor-pointer ${dinelcoQrMode === "qr" ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-300 shadow-xs" : "text-slate-500 dark:text-slate-400"}`}
+                                >
+                                  QR Guaraníes
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDinelcoQrMode("pix")}
+                                  className={`flex-1 py-1 px-2 rounded-lg text-[11px] font-black transition-all cursor-pointer ${dinelcoQrMode === "pix" ? "bg-white dark:bg-slate-900 text-orange-600 dark:text-orange-300 shadow-xs" : "text-slate-500 dark:text-slate-400"}`}
+                                >
+                                  PIX Brasil
+                                </button>
+                              </div>
+                            )}
+
                             {!activePosConfig.dinelcoIp && (
                               <div className="w-full max-w-sm p-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300">
                                 No hay IP de terminal Dinelco configurada para esta caja.{" "}
                                 <button type="button" onClick={() => setShowPosConfigModal(true)} className="underline font-bold cursor-pointer">Configurar ahora</button>
+                              </div>
+                            )}
+
+                            {dinelcoQrMode === "pix" && dinelcoQrState !== "aprobada" && (
+                              <div className="w-full max-w-sm">
+                                <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF del comprador (11 dígitos):</label>
+                                <input
+                                  type="text"
+                                  value={dinelcoPixCpf}
+                                  onChange={(e) => setDinelcoPixCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                                  placeholder="52998224725"
+                                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-orange-500 text-center font-bold"
+                                />
                               </div>
                             )}
 
@@ -9025,13 +9067,17 @@ export default function POSPage() {
                                 className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
                               >
                                 {dinelcoQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
-                                <span>{dinelcoQrState === "esperando" ? "Esperando el pago del cliente..." : "Generar QR en Terminal Dinelco"}</span>
+                                <span>
+                                  {dinelcoQrState === "esperando"
+                                    ? "Esperando el pago del cliente..."
+                                    : dinelcoQrMode === "pix" ? "Generar PIX en Terminal Dinelco" : "Generar QR en Terminal Dinelco"}
+                                </span>
                               </button>
                             )}
 
                             {dinelcoQrState === "aprobada" && (
                               <div className="w-full max-w-sm p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
-                                <div className="font-black">✓ Transacción QR Dinelco Aprobada</div>
+                                <div className="font-black">✓ Transacción {dinelcoQrMode === "pix" ? "PIX" : "QR"} Dinelco Aprobada</div>
                               </div>
                             )}
 
