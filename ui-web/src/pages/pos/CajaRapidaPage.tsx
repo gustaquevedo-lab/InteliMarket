@@ -1607,29 +1607,61 @@ export default function POSPage() {
   }
 
   // Busqueda de socio Extra Club por numero/RUC/cedula/nombre -- mismo
-  // criterio de fallback pedido explicitamente ("estandar, con fallback a
-  // cedula y nombre"), ya cubierto por el search del backend que matchea
-  // extra_club_numero/ruc/ci/razon_social en un solo query.
+  const getCustomerCreditFallback = (c: any) => {
+    if (!c) return null
+    const lim = Number(c.credito_limite ?? c.limite_credito ?? 0)
+    const usado = Number(c.credito_usado ?? 0)
+    const disp = Math.max(0, lim - usado)
+    return {
+      limite_credito: lim,
+      saldo_disponible: disp,
+      saldo_utilizado: usado,
+      activo: c.activo !== false,
+    }
+  }
+
+  // Criterio de búsqueda Extra Club: búsqueda instantánea local + fallback remoto
   useEffect(() => {
     if (!activeMethods.has("extra_club")) return
     const query = extraClubQuery.trim()
     if (!query) { setExtraClubResults([]); setExtraClubSearching(false); return }
+
+    // 1. Coincidencias instantáneas en memoria/IndexedDB (0ms)
+    const localMatches = (customers || []).filter((c: any) => {
+      const name = (c.nombre || c.razon_social || c.nombre_fantasia || "").toLowerCase()
+      const ruc = (c.ruc || "").toLowerCase()
+      const ci = (c.ci || "").toLowerCase()
+      const club = (c.extra_club_numero || "").toLowerCase()
+      const q = query.toLowerCase()
+      return name.includes(q) || ruc.includes(q) || ci.includes(q) || club.includes(q)
+    }).slice(0, 15).map(normalizeCustomer)
+
+    if (localMatches.length > 0) {
+      setExtraClubResults(localMatches)
+      setExtraClubHighlight(0)
+      if (localMatches.length === 1) {
+        setCustomer(localMatches[0])
+        setExtraClubQuery("")
+        setExtraClubResults([])
+        setExtraClubAdminOverride(false)
+      }
+    }
+
+    // 2. Consulta remota en background
     const timer = setTimeout(async () => {
       setExtraClubSearching(true)
       try {
         const res = (await api.customers.list({ search: query, limit: 15 })) || []
         const normalized = res.map(normalizeCustomer)
-        setExtraClubResults(normalized)
-        setExtraClubHighlight(0)
-        // Consulta directa: si trae la tarjeta (numero unico) o el fallback
-        // por cedula/nombre da una sola coincidencia, mostrar sus datos de
-        // una -- no tiene sentido pedir un click mas cuando ya no hay
-        // ambiguedad que resolver.
-        if (normalized.length === 1) {
-          setCustomer(normalized[0])
-          setExtraClubQuery("")
-          setExtraClubResults([])
-          setExtraClubAdminOverride(false)
+        if (normalized.length > 0) {
+          setExtraClubResults(normalized)
+          setExtraClubHighlight(0)
+          if (normalized.length === 1) {
+            setCustomer(normalized[0])
+            setExtraClubQuery("")
+            setExtraClubResults([])
+            setExtraClubAdminOverride(false)
+          }
         }
       } catch (e) {
       } finally {
@@ -1637,40 +1669,79 @@ export default function POSPage() {
       }
     }, 250)
     return () => clearTimeout(timer)
-  }, [extraClubQuery, activeMethods])
+  }, [extraClubQuery, activeMethods, customers])
 
-  // Linea de credito real del cliente elegido para Extra Club -- se pide
-  // apenas hay un cliente real seleccionado en ese tab (no el generico
-  // DEFAULT_CUSTOMER). Sin cuenta de credito, extraClubCredit queda null
-  // -- eso es lo que bloquea el cobro salvo override de admin.
+  // Línea de crédito real del cliente elegido para Extra Club
   useEffect(() => {
     if (!activeMethods.has("extra_club") || !customer || customer.id === DEFAULT_CUSTOMER.id) {
       setExtraClubCredit(null)
       return
     }
+    const fallbackCredit = getCustomerCreditFallback(customer)
+    if (fallbackCredit && fallbackCredit.limite_credito > 0) {
+      setExtraClubCredit(fallbackCredit)
+    } else {
+      setExtraClubCredit("loading")
+    }
+
     let cancelled = false
-    setExtraClubCredit("loading")
     api.creditAccounts.getByCustomer(customer.id)
-      .then((acc) => { if (!cancelled) setExtraClubCredit(acc ? { limite_credito: Number(acc.limite_credito || 0), saldo_disponible: Number(acc.saldo_disponible || 0), saldo_utilizado: Number(acc.saldo_utilizado || 0), activo: acc.activo !== false } : null) })
-      .catch(() => { if (!cancelled) setExtraClubCredit(null) })
+      .then((acc) => {
+        if (!cancelled) {
+          if (acc) {
+            setExtraClubCredit({
+              limite_credito: Number(acc.limite_credito || 0),
+              saldo_disponible: Number(acc.saldo_disponible || 0),
+              saldo_utilizado: Number(acc.saldo_utilizado || 0),
+              activo: acc.activo !== false,
+            })
+          } else {
+            setExtraClubCredit(fallbackCredit)
+          }
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setExtraClubCredit(fallbackCredit)
+      })
     return () => { cancelled = true }
   }, [customer, activeMethods])
 
-  // Busqueda para el boton dedicado de consulta de saldo (Electron toolbar)
-  // -- no toca el carrito ni el cliente de la venta, es solo lectura.
+  // Búsqueda para el modal de consulta de saldo (Header / Toolbar)
   useEffect(() => {
     if (!showExtraClubBalanceModal) return
     const query = balanceModalQuery.trim()
     if (!query) { setBalanceModalResults([]); setBalanceModalSearching(false); return }
+
+    // 1. Coincidencias instantáneas en memoria/IndexedDB
+    const localMatches = (customers || []).filter((c: any) => {
+      const name = (c.nombre || c.razon_social || c.nombre_fantasia || "").toLowerCase()
+      const ruc = (c.ruc || "").toLowerCase()
+      const ci = (c.ci || "").toLowerCase()
+      const club = (c.extra_club_numero || "").toLowerCase()
+      const q = query.toLowerCase()
+      return name.includes(q) || ruc.includes(q) || ci.includes(q) || club.includes(q)
+    }).slice(0, 15).map(normalizeCustomer)
+
+    if (localMatches.length > 0) {
+      setBalanceModalResults(localMatches)
+      setBalanceModalHighlight(0)
+      if (localMatches.length === 1) {
+        setBalanceModalSelected(localMatches[0])
+      }
+    }
+
+    // 2. Consulta remota en background
     const timer = setTimeout(async () => {
       setBalanceModalSearching(true)
       try {
         const res = (await api.customers.list({ search: query, limit: 15 })) || []
         const normalized = res.map(normalizeCustomer)
-        setBalanceModalResults(normalized)
-        setBalanceModalHighlight(0)
-        if (normalized.length === 1) {
-          setBalanceModalSelected(normalized[0])
+        if (normalized.length > 0) {
+          setBalanceModalResults(normalized)
+          setBalanceModalHighlight(0)
+          if (normalized.length === 1) {
+            setBalanceModalSelected(normalized[0])
+          }
         }
       } catch (e) {
       } finally {
@@ -1678,15 +1749,36 @@ export default function POSPage() {
       }
     }, 250)
     return () => clearTimeout(timer)
-  }, [balanceModalQuery, showExtraClubBalanceModal])
+  }, [balanceModalQuery, showExtraClubBalanceModal, customers])
 
   useEffect(() => {
     if (!balanceModalSelected) { setBalanceModalCredit(null); return }
+    const fallbackCredit = getCustomerCreditFallback(balanceModalSelected)
+    if (fallbackCredit && fallbackCredit.limite_credito > 0) {
+      setBalanceModalCredit(fallbackCredit)
+    } else {
+      setBalanceModalCredit("loading")
+    }
+
     let cancelled = false
-    setBalanceModalCredit("loading")
     api.creditAccounts.getByCustomer(balanceModalSelected.id)
-      .then((acc) => { if (!cancelled) setBalanceModalCredit(acc ? { limite_credito: Number(acc.limite_credito || 0), saldo_disponible: Number(acc.saldo_disponible || 0), saldo_utilizado: Number(acc.saldo_utilizado || 0), activo: acc.activo !== false } : null) })
-      .catch(() => { if (!cancelled) setBalanceModalCredit(null) })
+      .then((acc) => {
+        if (!cancelled) {
+          if (acc) {
+            setBalanceModalCredit({
+              limite_credito: Number(acc.limite_credito || 0),
+              saldo_disponible: Number(acc.saldo_disponible || 0),
+              saldo_utilizado: Number(acc.saldo_utilizado || 0),
+              activo: acc.activo !== false,
+            })
+          } else {
+            setBalanceModalCredit(fallbackCredit)
+          }
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setBalanceModalCredit(fallbackCredit)
+      })
     return () => { cancelled = true }
   }, [balanceModalSelected])
 
@@ -3055,18 +3147,14 @@ export default function POSPage() {
     // (categoria.nombre, la que ya carga y mantiene el catalogo), no por
     // palabras sueltas adivinadas del nombre -- eso traia cualquier cosa
     // (en Carnicería aparecía cualquier producto salvo carne, en Panadería
-    // cualquier cosa salvo pan) porque el nombre de un producto no dice de
-    // forma confiable a que rubro pertenece.
     const catMatch = (p: Product, keywords: string[]) => {
-      const cat = escposStripAccents((p as any).categoria?.nombre || "").toUpperCase()
-      return cat.length > 0 && keywords.some((k) => cat.includes(k))
+      const cat = escposStripAccents((p as any).categoria?.nombre || (p as any).categoria_nombre || (typeof (p as any).categoria === "string" ? (p as any).categoria : "")).toUpperCase()
+      const name = escposStripAccents(p.nombre || "").toUpperCase()
+      return cat.length > 0
+        ? keywords.some((k) => cat.includes(k))
+        : keywords.some((k) => name.includes(k))
     }
 
-    // Categorías grandes (Almacén tiene 3000+ productos, Limpieza 1600+) no
-    // entran enteras en pantalla ni conviene renderizar todo de una vez --
-    // se corta en CATEGORY_TILE_LIMIT, pero ordenado por lo más vendido
-    // (mismo ranking real de "Frecuentes"), no en cualquier orden. Así lo
-    // que se corta es lo menos relevante, no una selección arbitraria.
     const topRankIndex = new Map(topProductSkus.map((sku, idx) => [sku, idx]))
     const rankSlice = (list: Product[], limit: number) => {
       if (topRankIndex.size === 0) return list.slice(0, limit)
@@ -3080,37 +3168,39 @@ export default function POSPage() {
     const CATEGORY_TILE_LIMIT = 150
 
     if (selectedCategoryTab === "CARNICERIA") {
-      return rankSlice(products.filter((p) => catMatch(p, ["CARNE", "CARNICERIA", "POLLO", "PESCADO", "TILAPIA", "CAMARON"])), CATEGORY_TILE_LIMIT)
+      return rankSlice(products.filter((p) => catMatch(p, ["CARNE", "CARNICERIA", "POLLO", "PESCADO", "TILAPIA", "CAMARON", "CONGELADO", "EMBUTIDO", "NUGGET", "BOVINO", "AVICOLA", "COSTILLA", "BIFE", "MOLIDA", "ASADO", "VACIO", "CHORIZO", "CERDO"])), CATEGORY_TILE_LIMIT)
     }
 
     if (selectedCategoryTab === "PANADERIA") {
-      return rankSlice(products.filter((p) => catMatch(p, ["PANIFIC", "PANADER", "REPOSTER", "HORNEAD", "MASAS"])), CATEGORY_TILE_LIMIT)
+      return rankSlice(products.filter((p) => catMatch(p, ["PAN", "PANIFIC", "PANADER", "REPOSTER", "HORNEAD", "MASA", "TOSTADA", "GALLETITA", "PASTELERIA", "CHIPA", "FACTURA", "BIZCOCHO"])), CATEGORY_TILE_LIMIT)
     }
 
     if (selectedCategoryTab === "VERDULERIA") {
-      return rankSlice(products.filter((p) => catMatch(p, ["VERDU", "FRUTA", "LEGUMBRE", "FLV"])), CATEGORY_TILE_LIMIT)
+      return rankSlice(products.filter((p) => catMatch(p, ["VERDU", "FRUTA", "LEGUMBRE", "FLV", "HUEVO", "MANDIOCA", "TOMATE", "CEBOLLA", "PAPA", "BANANA", "MANZANA", "NARANJA", "LECHUGA", "ZANAHORIA", "ZAPALLO"])), CATEGORY_TILE_LIMIT)
     }
 
     if (selectedCategoryTab === "BEBIDAS") {
-      return rankSlice(products.filter((p) => catMatch(p, ["ALCOHOL", "BEBIDA", "GASEOSA"])), CATEGORY_TILE_LIMIT)
+      return rankSlice(products.filter((p) => catMatch(p, ["BEBIDA", "ALCOHOL", "GASEOSA", "PARESA", "REFRESCO", "CERVEZA", "VINO", "JUGO", "AGUA", "COCA", "PEPSI", "BRAHMA", "PILSEN"])), CATEGORY_TILE_LIMIT)
     }
 
     if (selectedCategoryTab === "LACTEOS") {
-      return rankSlice(products.filter((p) => catMatch(p, ["LECHE", "LACTEO", "DERIVADO", "MANTECA", "EMBUTIDO", "FIAMBRE", "CUAJADA"])), CATEGORY_TILE_LIMIT)
+      return rankSlice(products.filter((p) => catMatch(p, ["LACTEO", "LECHE", "MANTECA", "CUAJADA", "DERIVADO", "DULCE DE LECHE", "HELADO", "TREBOL", "QUESO", "YOGUR", "FIAMBRE", "JAMON", "PALETA"])), CATEGORY_TILE_LIMIT)
     }
 
     if (selectedCategoryTab === "ALMACEN") {
       return rankSlice(products.filter((p) => catMatch(p, [
-        "ALIMENTOS", "FIDEOS", "CONDIMENTOS", "ADEREZOS", "CONSERVADOS", "ARROZ", "AZUCAR",
-        "HARINAS", "ACEITES", "CEREALES", "COMESTIBLES", "ALMACEN", "ABARROTES", "YERBA",
-        "INFUSIONES", "GALLETITA", "DULCES", "SNACKS", "PASTAS",
+        "ALMACEN", "ABARROTE", "ACEITE", "ADEREZO", "ALIMENTO", "ALMIDON", "APOLO", "ARROZ", "AZUCAR",
+        "CEREAL", "COMESTIBLE", "CONDIMENTO", "CONSERV", "DULCE", "FARINHA", "FAROFA", "FEIJAO", "FIDEO",
+        "GOLOSINA", "SNACK", "HARINA", "INFUSION", "LASAÑA", "LASANA", "LENTEJA", "LEVADURA", "MAIZ",
+        "MATINAL", "PASTA", "SEMILLA", "TE", "CAF", "YERBA"
       ])), CATEGORY_TILE_LIMIT)
     }
 
     if (selectedCategoryTab === "LIMPIEZA") {
       return rankSlice(products.filter((p) => catMatch(p, [
-        "LIMPIEZA", "JABON", "DESODORANTE", "DENTAL", "CAPILAR", "CORPORAL", "FEMENINO",
-        "PERFUMERIA", "HIGIENE", "PIEL", "PAÑAL", "PANAL", "BETUN", "PLAGAS",
+        "LIMPIEZA", "HIGIENE", "JABON", "PERFUMERIA", "CUIDADO", "DENTAL", "DESODORANTE", "CAPILAR", "FEMENINO",
+        "PAÑAL", "PANAL", "PAPEL HIGIENICO", "LIMPIA VIDRIO", "PLAGA", "VENENO", "HOGAR", "BAZAR", "COCINA",
+        "DETERGENTE", "LAVANDINA", "SUAVIZANTE"
       ])), CATEGORY_TILE_LIMIT)
     }
 
@@ -4224,15 +4314,18 @@ export default function POSPage() {
   }
 
   // ── CÁLCULOS DE TOTALES Y MULTIMONEDA ──────────────────────────────────────
-  const { totalBrutoPyg, descuentoTotalPyg, totalPyg, totalBrl, totalUsd, gravada10Pyg, gravada5Pyg, exentaPyg, iva10Pyg, iva5Pyg } = useMemo(() => {
+  const { totalBrutoPyg, totalBasePyg, totalAhorroPyg, descuentoTotalPyg, totalPyg, totalBrl, totalUsd, gravada10Pyg, gravada5Pyg, exentaPyg, iva10Pyg, iva5Pyg } = useMemo(() => {
     let totBruto = 0
+    let totBase = 0
     let g10 = 0
     let g5 = 0
     let ex = 0
 
     for (const item of cart) {
       const lineTotal = item.precio * item.quantity
+      const lineBase = (Number(item.precio_base) || Number(item.precio) || 0) * item.quantity
       totBruto += lineTotal
+      totBase += lineBase
 
       if (item.iva_tasa === 10) {
         g10 += lineTotal
@@ -4252,6 +4345,8 @@ export default function POSPage() {
       }
     }
 
+    const ahorroPromos = Math.max(0, totBase - totBruto)
+    const totalAhorro = Math.round(ahorroPromos + descMonto)
     const netTot = Math.max(0, totBruto - descMonto)
     const factorDesc = totBruto > 0 ? netTot / totBruto : 1
 
@@ -4263,6 +4358,8 @@ export default function POSPage() {
 
     return {
       totalBrutoPyg: Math.round(totBruto),
+      totalBasePyg: Math.round(totBase),
+      totalAhorroPyg: totalAhorro,
       descuentoTotalPyg: Math.round(descMonto),
       totalPyg: Math.round(netTot),
       totalBrl: totBrl,
@@ -5813,8 +5910,13 @@ export default function POSPage() {
                           </div>
                         </td>
                         <td className="py-2 px-2">
-                          <div className={`font-bold text-xs truncate max-w-[160px] lg:max-w-[200px] ${textHeading}`}>
-                            {item.nombre}
+                          <div className={`font-bold text-xs truncate max-w-[160px] lg:max-w-[200px] ${textHeading} flex items-center gap-1`}>
+                            {((item as any).en_promocion || (item.precio_base && item.precio < item.precio_base)) && (
+                              <span className="inline-flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 animate-pulse shadow-xs">
+                                🔥 PROMO
+                              </span>
+                            )}
+                            <span className="truncate">{item.nombre}</span>
                           </div>
                           <div className={`text-[10px] font-posMono tabular-nums flex items-center gap-1.5 ${textMuted}`}>
                             <span>SKU: {item.sku}</span>
@@ -5823,10 +5925,22 @@ export default function POSPage() {
                                 ⚖️ Balanza ({item.quantity.toFixed(3)} KG)
                               </span>
                             )}
+                            {item.precio_base && item.precio < item.precio_base && (
+                              <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-black">
+                                Ahorras {formatPYG((item.precio_base - item.precio) * item.quantity)}
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className={`py-2 px-2 text-right font-posMono tabular-nums font-semibold ${textBody}`}>
-                          {formatPYG(item.precio)}
+                        <td className={`py-2 px-2 text-right font-posMono tabular-nums ${textBody}`}>
+                          {item.precio_base && item.precio < item.precio_base ? (
+                            <div className="flex flex-col items-end">
+                              <span className="line-through text-[10px] text-slate-400 font-normal">{formatPYG(item.precio_base)}</span>
+                              <span className="font-black text-red-600 dark:text-red-400 text-xs">{formatPYG(item.precio)}</span>
+                            </div>
+                          ) : (
+                            <span className="font-semibold">{formatPYG(item.precio)}</span>
+                          )}
                         </td>
                         <td className="py-2 px-2 text-right font-posMono tabular-nums font-black text-emerald-600">
                           {formatPYG(lineTotal)}
@@ -5850,6 +5964,26 @@ export default function POSPage() {
 
           {/* Panel de Totales y Liquidación */}
           <div className={`p-3 border-t space-y-2 shrink-0 ${bgInner}`}>
+            {/* Banner Destacado y Animado de Ahorro */}
+            {totalAhorroPyg > 0 && (
+              <div className="bg-gradient-to-r from-amber-500/20 via-emerald-500/20 to-amber-500/20 border-2 border-amber-500/50 rounded-xl px-3 py-2 flex items-center justify-between shadow-xs animate-pulse">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg animate-bounce">🎉</span>
+                  <div>
+                    <div className="text-[11px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wide leading-tight">
+                      ¡TU EXTRA AHORRO HOY!
+                    </div>
+                    <div className="text-[9px] text-slate-500 dark:text-slate-400 font-medium">
+                      Descuentos y ofertas aplicadas en tu compra
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right font-posMono tabular-nums font-black text-base text-emerald-600 dark:text-emerald-400">
+                  -{formatPYG(totalAhorroPyg)}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-baseline justify-between">
               <span className={`text-xs font-bold uppercase tracking-wider ${textMuted}`}>Total a Cobrar:</span>
               <div className="text-right">
@@ -6065,21 +6199,32 @@ export default function POSPage() {
                   </thead>
                   <tbody className={`divide-y ${dark ? "divide-slate-800/40" : "divide-slate-200"}`}>
                     {filteredProducts.map((p) => {
-                      const pVenta = Number(p.precio_venta) || 0
-                      const pMayor = Math.round(pVenta * 0.93)
+                      const pBase = Number(p.precio_venta) || 0
+                      const isPromo = Boolean((p as any).en_promocion && (p as any).precio_promo)
+                      const pPromo = isPromo ? Number((p as any).precio_promo) : null
+                      const pEffective = isPromo && pPromo ? pPromo : pBase
+                      const pMayor = Math.round(pEffective * 0.93)
                       const isPesable = isPesableProduct(p)
+                      const ahorroUnit = isPromo && pPromo ? Math.max(0, pBase - pPromo) : 0
 
                       return (
                         <tr
                           key={p.id}
                           onClick={() => addToCart(p)}
                           className={`group cursor-pointer transition-colors ${
-                            dark ? "hover:bg-blue-600/10" : "hover:bg-blue-50"
+                            isPromo
+                              ? (dark ? "bg-red-950/20 hover:bg-red-900/30" : "bg-red-50/40 hover:bg-red-100/60")
+                              : (dark ? "hover:bg-blue-600/10" : "hover:bg-blue-50")
                           }`}
                         >
                           <td className="py-2 px-2">
-                            <div className={`font-bold text-xs group-hover:text-blue-600 truncate max-w-[190px] ${textHeading}`}>
-                              {p.nombre}
+                            <div className={`font-bold text-xs group-hover:text-blue-600 truncate max-w-[190px] ${textHeading} flex items-center gap-1`}>
+                              {isPromo && (
+                                <span className="inline-flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 animate-pulse shadow-xs">
+                                  🔥 OFERTA
+                                </span>
+                              )}
+                              <span className="truncate">{p.nombre}</span>
                             </div>
                             <div className={`text-[10px] font-posMono tabular-nums flex items-center gap-1.5 ${textMuted}`}>
                               <span>SKU: {p.sku}</span>
@@ -6088,15 +6233,27 @@ export default function POSPage() {
                                   ⚖️ KG
                                 </span>
                               )}
+                              {ahorroUnit > 0 && (
+                                <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-extrabold">
+                                  (Ahorras {formatPYG(ahorroUnit)})
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className={`py-2 px-2 text-center font-posMono tabular-nums font-bold ${textBody}`}>
                             {stockMap[p.id] ?? 0} UN
                           </td>
-                          <td className="py-2 px-2 text-right font-posMono tabular-nums font-black text-emerald-600">
-                            {formatPYG(pVenta)}
+                          <td className="py-2 px-2 text-right font-posMono tabular-nums">
+                            {isPromo && pPromo ? (
+                              <div className="flex flex-col items-end">
+                                <span className="line-through text-[10px] text-slate-400 font-normal">{formatPYG(pBase)}</span>
+                                <span className="font-black text-red-600 dark:text-red-400 text-xs">{formatPYG(pPromo)}</span>
+                              </div>
+                            ) : (
+                              <span className="font-black text-emerald-600 text-xs">{formatPYG(pBase)}</span>
+                            )}
                           </td>
-                          <td className="py-2 px-2 text-right font-posMono tabular-nums font-bold text-amber-600">
+                          <td className="py-2 px-2 text-right font-posMono tabular-nums font-bold text-amber-600 text-xs">
                             {formatPYG(pMayor)}
                           </td>
                           <td className="py-2 px-2 text-center">
@@ -6105,7 +6262,7 @@ export default function POSPage() {
                                 e.stopPropagation()
                                 addToCart(p)
                               }}
-                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-bold shadow-xs cursor-pointer active:scale-95"
+                              className={`px-2.5 py-1 ${isPromo ? 'bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500' : 'bg-blue-600 hover:bg-blue-500'} text-white rounded-lg text-[11px] font-bold shadow-xs cursor-pointer active:scale-95`}
                             >
                               + Agregar
                             </button>
@@ -6120,22 +6277,30 @@ export default function POSPage() {
                 /* ── MODO TARJETAS CON ESCALA DE PRECIOS ────────────────────────── */
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                   {filteredProducts.map((p) => {
-                    const pVenta = Number(p.precio_venta) || 0
-                    const pMayor = Math.round(pVenta * 0.93)
+                    const pBase = Number(p.precio_venta) || 0
+                    const isPromo = Boolean((p as any).en_promocion && (p as any).precio_promo)
+                    const pPromo = isPromo ? Number((p as any).precio_promo) : null
+                    const pEffective = isPromo && pPromo ? pPromo : pBase
+                    const pMayor = Math.round(pEffective * 0.93)
                     const isPesable = isPesableProduct(p)
-
+                    const ahorroUnit = isPromo && pPromo ? Math.max(0, pBase - pPromo) : 0
 
                     return (
                       <button
                         key={p.id}
                         onClick={() => addToCart(p)}
                         className={`border rounded-xl p-2 text-left flex flex-col justify-between transition-all group active:scale-98 cursor-pointer ${
-                          dark 
-                            ? "bg-slate-950/80 hover:bg-slate-800/80 border-slate-800 hover:border-blue-500/50" 
-                            : "bg-white hover:bg-blue-50/50 border-slate-300 hover:border-blue-500 shadow-xs"
+                          isPromo
+                            ? (dark ? "bg-red-950/30 hover:bg-red-900/40 border-red-800/60 hover:border-red-500" : "bg-red-50/60 hover:bg-red-100/80 border-red-300 hover:border-red-500 shadow-xs")
+                            : (dark ? "bg-slate-950/80 hover:bg-slate-800/80 border-slate-800 hover:border-blue-500/50" : "bg-white hover:bg-blue-50/50 border-slate-300 hover:border-blue-500 shadow-xs")
                         }`}
                       >
                         <div className={`w-full h-20 rounded-lg overflow-hidden mb-1 flex items-center justify-center border relative ${bgInner}`}>
+                          {isPromo && (
+                            <span className="absolute top-1 left-1 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-xs z-10 animate-pulse">
+                              🔥 OFERTA
+                            </span>
+                          )}
                           {p.imagen_url ? (
                             <img
                               src={p.imagen_url.startsWith("http") ? p.imagen_url : `${API_ORIGIN}${p.imagen_url}`}
@@ -6146,7 +6311,7 @@ export default function POSPage() {
                             <Package className="w-8 h-8 opacity-40" />
                           )}
                           {isPesable && (
-                            <span className="absolute top-1 right-1 bg-emerald-600 text-white text-[8px] font-black px-1 rounded">
+                            <span className="absolute top-1 right-1 bg-emerald-600 text-white text-[8px] font-black px-1 rounded z-10">
                               KG
                             </span>
                           )}
@@ -6156,13 +6321,25 @@ export default function POSPage() {
                             {p.nombre}
                           </div>
                           <div className="flex items-center justify-between mt-1 font-posMono tabular-nums">
-                            <span className="font-black text-xs text-emerald-600">
-                              {formatPYG(pVenta)}
-                            </span>
+                            {isPromo && pPromo ? (
+                              <div className="flex items-baseline gap-1">
+                                <span className="line-through text-[10px] text-slate-400 font-normal">{formatPYG(pBase)}</span>
+                                <span className="font-black text-xs text-red-600 dark:text-red-400">{formatPYG(pPromo)}</span>
+                              </div>
+                            ) : (
+                              <span className="font-black text-xs text-emerald-600">
+                                {formatPYG(pBase)}
+                              </span>
+                            )}
                             <span className="font-bold text-[10px] text-amber-600">
                               M: {formatPYG(pMayor)}
                             </span>
                           </div>
+                          {ahorroUnit > 0 && (
+                            <div className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 font-posMono mt-0.5">
+                              Ahorras {formatPYG(ahorroUnit)}
+                            </div>
+                          )}
                         </div>
                       </button>
                     )
