@@ -504,21 +504,15 @@ async def reopen_sale_payment(
     motivo: str,
     autorizado_por_id: str,
     autorizado_por_nombre: str,
+    customer_id: str | None = None,
 ) -> Sale | None:
-    """Cambia la forma de pago de una venta ya cerrada.
+    """Cambia la forma de pago de una venta ya cerrada y opcionalmente vincula al socio cliente.
 
-    Esta es una operacion de alto riesgo contable:
+    Esta es una operación de alto riesgo contable:
     - Solo debe ejecutarse en ventas del turno activo (validado en frontend).
-    - Requiere autorizacion de supervisor y motivo descriptivo.
+    - Requiere autorización de supervisor y motivo descriptivo.
     - Deja trazabilidad completa en `observaciones` (no borra el dato anterior).
-    - No recalcula montos, IVA ni saldos -- solo actualiza el campo `forma_pago`
-      y el registro de auditoría.
-
-    Riesgos a considerar:
-    - Si la venta original usó Extra Club (crédito fiado), el saldo del cliente
-      NO se revierte automáticamente aquí. Eso requiere intervención manual.
-    - Si hay reportes de cierre ya generados para este turno, el cambio afecta
-      el desglose por forma de pago en ese reporte histórico.
+    - Actualiza `forma_pago`, `customer_id` (si se provee), `condicion` y los registros en `sale_payments`.
     """
     from .schemas import FORMAS_PAGO_VALIDAS
     if nueva_forma_pago.upper() not in FORMAS_PAGO_VALIDAS:
@@ -530,11 +524,27 @@ async def reopen_sale_payment(
         return None
 
     forma_pago_anterior = sale.forma_pago or "DESCONOCIDA"
+    if customer_id:
+        sale.customer_id = uuid.UUID(customer_id)
+
+    if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO"):
+        sale.condicion = "credito"
+    elif nueva_forma_pago.upper() in ("EFECTIVO", "TARJETA", "TRANSFERENCIA", "QR"):
+        sale.condicion = "contado"
+
+    # Actualizar desglose en sale_payments si existen
+    await db.execute(
+        update(SalePayment)
+        .where(SalePayment.sale_id == sale.id)
+        .values(forma_pago=nueva_forma_pago.upper())
+    )
+
     ts = datetime.now(timezone.utc).isoformat()
+    socio_txt = f" | Socio/Cliente ID: {customer_id}" if customer_id else ""
     nota_auditoria = (
         f"[{ts}] ⚠️ CAMBIO DE FORMA DE PAGO — Autorizado por: {autorizado_por_nombre} "
         f"(ID: {autorizado_por_id}) | "
-        f"Anterior: {forma_pago_anterior} → Nueva: {nueva_forma_pago.upper()} | "
+        f"Anterior: {forma_pago_anterior} → Nueva: {nueva_forma_pago.upper()}{socio_txt} | "
         f"Motivo: {motivo.strip()}"
     )
     sale.forma_pago = nueva_forma_pago.upper()

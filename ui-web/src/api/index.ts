@@ -824,7 +824,7 @@ export const api = {
     linkOrder: (id: string, orderId: string) => client.post<any>(`/v1/sales/${id}/link-order`, { order_id: orderId }),
     attachTicket: (id: string, ticketB64: string) => client.patch<any>(`/v1/sales/${id}/ticket`, { recibo_escpos_b64: ticketB64 }),
     reopenCustomer: (id: string, data: { customer_id: string; autorizado_por_id: string; autorizado_por_nombre: string }) => client.patch<Sale>(`/v1/sales/${id}/customer`, data),
-    reopenPayment: (id: string, data: { forma_pago: string; motivo: string; autorizado_por_id: string; autorizado_por_nombre: string }) => client.patch<Sale>(`/v1/sales/${id}/payment-method`, data),
+    reopenPayment: (id: string, data: { forma_pago: string; motivo: string; autorizado_por_id: string; autorizado_por_nombre: string; customer_id?: string }) => client.patch<Sale>(`/v1/sales/${id}/payment-method`, data),
     downloadReceipt: (id: string) => client.get<Blob>(`/v1/receipts/${id}`),
   },
   payments: {

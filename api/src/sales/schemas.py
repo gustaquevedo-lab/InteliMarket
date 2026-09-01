@@ -135,6 +135,7 @@ class SaleReopenPayment(BaseModel):
     Solo aplicable a ventas del turno activo de caja.
     """
     forma_pago: str
+    customer_id: Optional[UUID] = None
     motivo: str = Field(..., min_length=10, max_length=500,
                         description="Motivo descriptivo obligatorio (mín. 10 caracteres)")
     autorizado_por_id: UUID

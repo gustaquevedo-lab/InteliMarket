@@ -198,6 +198,7 @@ async def reopen_sale_payment(sale_id: str, body: SaleReopenPayment, db: AsyncSe
             body.motivo,
             str(body.autorizado_por_id),
             body.autorizado_por_nombre,
+            str(body.customer_id) if body.customer_id else None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
