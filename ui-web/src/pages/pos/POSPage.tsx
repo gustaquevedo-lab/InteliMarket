@@ -447,19 +447,17 @@ export default function POSPage() {
     api.caja.registers.list()
       .then((regs) => {
         if (!Array.isArray(regs) || regs.length === 0) return
-        const normalizado = puntoEmision.replace(/[^0-9]/g, "").replace(/^0+/, "") || puntoEmision
-        const match = regs.find((r: any) =>
-          r.codigo === puntoEmision ||
-          r.codigo?.replace(/[^0-9]/g, "").replace(/^0+/, "") === normalizado
-        )
-        // Los puntos de emision fiscales (001-012..020, PUNTOS_EMISION) y las
-        // cash_registers fisicas (POS-01..05) son dos numeraciones que nunca
-        // coinciden por texto -- antes esto siempre caia en regs[0] sin
-        // importar que "Caja" se eligiera en la apertura, asi que CUALQUIER
-        // seleccion terminaba pisando la misma caja fisica (y fallaba si esa
-        // ya tenia sesion abierta). Mientras no haya una asignacion real
-        // punto_emision -> caja fisica, se reparte por indice para que cada
-        // opcion del desplegable use una caja fisica distinta.
+        const peNum = puntoEmision.includes("-") ? puntoEmision.split("-")[1] : puntoEmision
+        const peClean = peNum.replace(/[^0-9]/g, "").replace(/^0+/, "")
+        const match = regs.find((r: any) => {
+          const rNum = (r.codigo || "").replace(/[^0-9]/g, "").replace(/^0+/, "")
+          return (
+            r.codigo === puntoEmision ||
+            r.codigo === `POS-${peNum.padStart(3, "0")}` ||
+            (peClean && rNum === peClean) ||
+            (terminalAssignment?.caja_nombre && r.nombre?.toLowerCase() === terminalAssignment.caja_nombre.toLowerCase())
+          )
+        })
         if (match) {
           setCashRegisterId(match.id)
         } else {
@@ -469,7 +467,7 @@ export default function POSPage() {
         }
       })
       .catch(() => {})
-  }, [puntoEmision])
+  }, [puntoEmision, terminalAssignment])
 
   // Detecta el hostname real de esta máquina (vía Electron) y busca si un
   // administrador ya la asignó a una caja fija. Si existe, puntoEmision
@@ -493,11 +491,17 @@ export default function POSPage() {
           } catch (e) {}
         }
         if (assignment && assignment.punto_emision) {
-          const pe = assignment.punto_emision.startsWith("001-")
-            ? assignment.punto_emision
-            : `001-${assignment.punto_emision.padStart(3, "0")}`
+          const rawPe = String(assignment.punto_emision).trim()
+          const pe = rawPe.startsWith("001-")
+            ? rawPe
+            : `001-${rawPe.replace(/[^0-9]/g, "").padStart(3, "0")}`
           setTerminalAssignment(assignment)
           setPuntoEmision(pe)
+          try {
+            const saved = localStorage.getItem(userCajaKey)
+            const currentData = saved ? JSON.parse(saved) : {}
+            localStorage.setItem(userCajaKey, JSON.stringify({ ...currentData, puntoEmision: pe }))
+          } catch (e) {}
         }
       } catch (e) {
         // sin asignación todavía -- se maneja en la UI de Apertura de Caja
@@ -5497,7 +5501,7 @@ export default function POSPage() {
                 {isSupervisorUser && <span className="text-[9px] bg-purple-500/20 text-purple-600 font-bold px-1 rounded shrink-0">SUPERVISOR</span>}
               </div>
               <div className={`text-[10px] font-posMono tabular-nums leading-none mt-0.5 ${textMuted}`}>
-                {PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre.split('·')[0] || puntoEmision}
+                {terminalAssignment?.caja_nombre || PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre.split('·')[0] || puntoEmision}
               </div>
             </div>
 
