@@ -774,6 +774,12 @@ export const api = {
       client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/lots/expiries`, params),
     listMovements: (params?: { product_id?: string; warehouse_id?: string; tipo?: string; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
       client.get<InventoryMovementRecord[]>(`/v1/inventory/movements`, { company_id: COMPANY_ID, ...params } as any),
+    getKardexSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>
+      client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/movements/summary`, params as any),
+    downloadKardexExcel: (params?: { fecha_desde?: string; fecha_hasta?: string; tipo?: string; product_id?: string }) =>
+      downloadAuthenticated(`/v1/companies/${COMPANY_ID}/inventory/movements/export.xlsx`, params, "kardex.xlsx"),
+    downloadKardexPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; tipo?: string; product_id?: string }) =>
+      downloadAuthenticated(`/v1/companies/${COMPANY_ID}/inventory/movements/export.pdf`, params, "kardex.pdf"),
     listAdjustments: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
       client.get<InventoryAdjustmentRecord[]>(`/v1/companies/${COMPANY_ID}/adjustments`, params as any),
     recordMerma: (data: { warehouse_id: string; product_id: string; cantidad: number; motivo: string; observaciones?: string }) =>

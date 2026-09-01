@@ -1,19 +1,28 @@
 """Inventory API router"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from uuid import UUID
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.inventory.schemas import (
     WarehouseCreate, WarehouseResponse,
     StockResponse, MovementCreate, MovementResponse,
     TransferCreate, TransferResponse,
     AdjustmentCreate, AdjustmentResponse,
 )
-from api.src.inventory import service
+from api.src.inventory import service, export_service, pdf_reports
 
 router = APIRouter(prefix="/api/v1", tags=["inventory"])
+
+
+async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
+    r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    row = r.first()
+    return {"razon_social": row.razon_social, "ruc": row.ruc, "logo_url": row.logo_url} if row else {"razon_social": "Empresa", "ruc": "N/A"}
 
 
 @router.post("/warehouses", response_model=WarehouseResponse, status_code=status.HTTP_201_CREATED)
@@ -81,6 +90,66 @@ async def list_movements(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.list_movements(db, company_id, product_id, warehouse_id, tipo, fecha_desde, fecha_hasta, limit, offset)
+
+
+@router.get("/companies/{company_id}/inventory/movements/summary")
+async def get_kardex_summary(
+    company_id: str,
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_kardex_summary(db, company_id, fecha_desde, fecha_hasta)
+
+
+@router.get("/companies/{company_id}/inventory/movements/export.xlsx")
+async def export_kardex_xlsx(
+    company_id: str,
+    product_id: str | None = Query(None),
+    warehouse_id: str | None = Query(None),
+    tipo: str | None = Query(None),
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import date as date_type
+    movements = await service.list_movements(db, company_id, product_id, warehouse_id, tipo, fecha_desde, fecha_hasta, limit=20000, offset=0)
+    xlsx = export_service.export_kardex_excel(
+        movements,
+        date_type.fromisoformat(fecha_desde) if fecha_desde else None,
+        date_type.fromisoformat(fecha_hasta) if fecha_hasta else None,
+    )
+    return StreamingResponse(
+        iter([xlsx]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=kardex.xlsx"},
+    )
+
+
+@router.get("/companies/{company_id}/inventory/movements/export.pdf")
+async def export_kardex_pdf(
+    company_id: str,
+    product_id: str | None = Query(None),
+    warehouse_id: str | None = Query(None),
+    tipo: str | None = Query(None),
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    from datetime import date as date_type
+    movements = await service.list_movements(db, company_id, product_id, warehouse_id, tipo, fecha_desde, fecha_hasta, limit=2000, offset=0)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_kardex_pdf(
+        company, movements,
+        date_type.fromisoformat(fecha_desde) if fecha_desde else None,
+        date_type.fromisoformat(fecha_hasta) if fecha_hasta else None,
+        generated_by,
+    )
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=kardex.pdf", "Content-Length": str(len(pdf_bytes))},
+    )
 
 
 @router.post("/inventory/transfers", response_model=TransferResponse, status_code=status.HTTP_201_CREATED)

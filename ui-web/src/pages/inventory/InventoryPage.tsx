@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { createPortal } from "react-dom"
 import {
   Warehouse, ArrowLeftRight, AlertTriangle, Package, Search, Plus, Loader2, X,
   Send, Trash2, Minus, Scale, ThermometerSnowflake, HeartPulse, ClipboardCheck,
@@ -60,6 +61,37 @@ export default function InventoryPage() {
   const [kardexProductoDetalle, setKardexProductoDetalle] = useState<{ id: string; nombre: string; sku?: string } | null>(null)
   const [kardexDetalleMovs, setKardexDetalleMovs] = useState<any[]>([])
   const [loadingKardexDetalle, setLoadingKardexDetalle] = useState(false)
+  const [kardexSummary, setKardexSummary] = useState<any>(null)
+  const [loadingKardexSummary, setLoadingKardexSummary] = useState(false)
+  const [exportingKardex, setExportingKardex] = useState<"xlsx" | "pdf" | null>(null)
+
+  const loadKardexSummary = useCallback(async () => {
+    setLoadingKardexSummary(true)
+    try {
+      const s = await api.inventory.getKardexSummary({
+        fecha_desde: kardexFechaDesde || undefined,
+        fecha_hasta: kardexFechaHasta || undefined,
+      })
+      setKardexSummary(s)
+    } catch (e: any) {
+      // El dashboard es un extra visual -- si falla, no tapamos la tabla del kardex con un error
+    } finally {
+      setLoadingKardexSummary(false)
+    }
+  }, [kardexFechaDesde, kardexFechaHasta])
+
+  const handleExportKardex = async (formato: "xlsx" | "pdf") => {
+    setExportingKardex(formato)
+    try {
+      const params = { fecha_desde: kardexFechaDesde || undefined, fecha_hasta: kardexFechaHasta || undefined, tipo: kardexTipo || undefined }
+      if (formato === "xlsx") await api.inventory.downloadKardexExcel(params)
+      else await api.inventory.downloadKardexPdf(params)
+    } catch (e: any) {
+      toast.error("No se pudo exportar", e.message)
+    } finally {
+      setExportingKardex(null)
+    }
+  }
 
   // Paginación Stock
   const [pageStock, setPageStock] = useState(1)
@@ -201,8 +233,8 @@ export default function InventoryPage() {
   useEffect(() => {
     if (activeTab === "stock") loadStockData()
     if (activeTab === "vencimientos") loadExpiriesData()
-    if (activeTab === "kardex") loadMovementsData()
-  }, [activeTab, loadStockData, loadExpiriesData, loadMovementsData, kardexFechaDesde, kardexFechaHasta])
+    if (activeTab === "kardex") { loadMovementsData(); loadKardexSummary() }
+  }, [activeTab, loadStockData, loadExpiriesData, loadMovementsData, loadKardexSummary, kardexFechaDesde, kardexFechaHasta])
 
   // Filtrado de stock
   const filteredStock = useMemo(() => {
@@ -853,6 +885,67 @@ export default function InventoryPage() {
       {/* ── CONTENIDO PESTAÑA 3: KARDEX ─────────────────────────────────────── */}
       {activeTab === "kardex" && (
         <div className="space-y-4">
+          {/* ── DASHBOARD DEL KARDEX: KPIs, Top Productos, movimiento diario ── */}
+          {kardexSummary && !loadingKardexSummary && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-wide">Movimientos</p>
+                  <p className="text-xl font-black text-gray-900 dark:text-white mt-1">{kardexSummary.total_movimientos?.toLocaleString("es-PY")}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{kardexSummary.productos_con_movimiento?.toLocaleString("es-PY")} productos distintos</p>
+                </div>
+                <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-wide">Entradas del período</p>
+                  <p className="text-xl font-black text-emerald-600 mt-1">+{Math.abs(kardexSummary.total_entradas || 0).toLocaleString("es-PY")}</p>
+                </div>
+                <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-wide">Salidas del período</p>
+                  <p className="text-xl font-black text-red-600 mt-1">-{Math.abs(kardexSummary.total_salidas || 0).toLocaleString("es-PY")}</p>
+                </div>
+                <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-wide">Neto del período</p>
+                  <p className={`text-xl font-black mt-1 ${(kardexSummary.total_entradas + kardexSummary.total_salidas) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    {(kardexSummary.total_entradas + kardexSummary.total_salidas) >= 0 ? "+" : ""}{Math.round(kardexSummary.total_entradas + kardexSummary.total_salidas).toLocaleString("es-PY")}
+                  </p>
+                </div>
+              </div>
+
+              {(kardexSummary.top_productos?.length > 0 || kardexSummary.por_dia?.length > 0) && (
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+                  {kardexSummary.top_productos?.length > 0 && (
+                    <div className="lg:col-span-2 card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-wide mb-2">Top Productos por Volumen Movido</p>
+                      <div className="space-y-1.5">
+                        {kardexSummary.top_productos.slice(0, 6).map((p: any, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="truncate text-gray-700 dark:text-gray-300 font-medium">{p.nombre}</span>
+                            <span className="font-mono font-black text-gray-900 dark:text-white shrink-0">{p.volumen.toLocaleString("es-PY")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {kardexSummary.por_dia?.length > 0 && (
+                    <div className="lg:col-span-3 card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-wide mb-2">Movimiento Diario (Entradas vs. Salidas)</p>
+                      <div className="flex items-end gap-1.5 h-24">
+                        {(() => {
+                          const maxVal = Math.max(1, ...kardexSummary.por_dia.map((d: any) => Math.max(d.entradas, Math.abs(d.salidas))))
+                          return kardexSummary.por_dia.slice(-14).map((d: any, idx: number) => (
+                            <div key={idx} className="flex-1 flex flex-col items-center justify-end h-full gap-0.5" title={`${d.dia}: +${d.entradas} / ${d.salidas}`}>
+                              <div className="w-full bg-emerald-500/70 rounded-t-sm" style={{ height: `${(d.entradas / maxVal) * 45}%`, minHeight: d.entradas > 0 ? "2px" : "0" }} />
+                              <div className="w-full bg-red-500/70 rounded-b-sm" style={{ height: `${(Math.abs(d.salidas) / maxVal) * 45}%`, minHeight: d.salidas < 0 ? "2px" : "0" }} />
+                            </div>
+                          ))
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs flex flex-col sm:flex-row gap-3 items-center justify-between">
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <div className="relative flex-1 sm:w-64">
@@ -904,7 +997,25 @@ export default function InventoryPage() {
                 )}
               </div>
             </div>
-            <span className="text-xs text-gray-400 font-mono">Últimos {filteredMovements.length} movimientos</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400 font-mono">{filteredMovements.length} movimientos cargados</span>
+              <button
+                onClick={() => handleExportKardex("xlsx")}
+                disabled={exportingKardex !== null}
+                className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-950/70 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+              >
+                {exportingKardex === "xlsx" ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                Excel
+              </button>
+              <button
+                onClick={() => handleExportKardex("pdf")}
+                disabled={exportingKardex !== null}
+                className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-950/70 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+              >
+                {exportingKardex === "pdf" ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                PDF
+              </button>
+            </div>
           </div>
 
           <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
@@ -1002,8 +1113,8 @@ export default function InventoryPage() {
       )}
 
       {/* ── MODAL: HISTORIAL COMPLETO DE UN PRODUCTO (clic en fila del Kardex) ── */}
-      {kardexProductoDetalle && (
-        <div className="fixed inset-0 z-[150] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+      {kardexProductoDetalle && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col">
             <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between shrink-0">
               <div>
@@ -1074,7 +1185,8 @@ export default function InventoryPage() {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ── CONTENIDO PESTAÑA 3: TOMA FÍSICA ─────────────────────────────────── */}

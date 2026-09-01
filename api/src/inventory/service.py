@@ -672,3 +672,91 @@ async def get_lots_expiries(
         },
         "lots": lots,
     }
+
+async def get_kardex_summary(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: str | None = None,
+    fecha_hasta: str | None = None,
+) -> dict:
+    """Estadisticas para el dashboard del Kardex: totales del periodo, top
+    productos por volumen movido, y movimientos por dia para el mini-grafico.
+    Sin fecha_desde/fecha_hasta, se limita a los ultimos 30 dias -- sino,
+    con 780K+ movimientos historicos, agregar "todo" seria carisimo y poco
+    util como resumen."""
+    from sqlalchemy import text
+    import uuid
+    from datetime import date as date_type
+
+    comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    where = "im.company_id = :comp_id"
+    params: dict = {"comp_id": comp_uuid}
+
+    if fecha_desde:
+        where += " AND im.created_at >= :fecha_desde"
+        params["fecha_desde"] = date_type.fromisoformat(fecha_desde)
+    if fecha_hasta:
+        where += " AND im.created_at < (CAST(:fecha_hasta AS date) + interval '1 day')"
+        params["fecha_hasta"] = date_type.fromisoformat(fecha_hasta)
+    if not fecha_desde and not fecha_hasta:
+        where += " AND im.created_at >= NOW() - INTERVAL '30 days'"
+
+    totales_row = await db.execute(
+        text(f"""
+            SELECT
+                COUNT(*) AS total_movimientos,
+                COUNT(DISTINCT im.product_id) AS productos_con_movimiento,
+                COALESCE(SUM(im.cantidad) FILTER (WHERE im.cantidad > 0), 0) AS total_entradas,
+                COALESCE(SUM(im.cantidad) FILTER (WHERE im.cantidad < 0), 0) AS total_salidas,
+                COUNT(*) FILTER (WHERE im.referencia_type = 'legacy_import') AS total_legacy
+            FROM inventory_movements im
+            WHERE {where}
+        """),
+        params,
+    )
+    totales = totales_row.first()
+
+    top_result = await db.execute(
+        text(f"""
+            SELECT p.nombre, p.sku, SUM(ABS(im.cantidad)) AS volumen, COUNT(*) AS movimientos
+            FROM inventory_movements im
+            LEFT JOIN products p ON p.id = im.product_id
+            WHERE {where}
+            GROUP BY p.nombre, p.sku
+            ORDER BY volumen DESC
+            LIMIT 8
+        """),
+        params,
+    )
+    top_productos = [
+        {"nombre": r[0] or "Producto", "sku": r[1], "volumen": float(r[2]), "movimientos": r[3]}
+        for r in top_result
+    ]
+
+    dias_result = await db.execute(
+        text(f"""
+            SELECT
+                date_trunc('day', im.created_at)::date AS dia,
+                COALESCE(SUM(im.cantidad) FILTER (WHERE im.cantidad > 0), 0) AS entradas,
+                COALESCE(SUM(im.cantidad) FILTER (WHERE im.cantidad < 0), 0) AS salidas
+            FROM inventory_movements im
+            WHERE {where}
+            GROUP BY 1
+            ORDER BY 1
+        """),
+        params,
+    )
+    por_dia = [
+        {"dia": r[0].isoformat(), "entradas": float(r[1]), "salidas": float(r[2])}
+        for r in dias_result
+    ]
+
+    return {
+        "total_movimientos": totales.total_movimientos if totales else 0,
+        "productos_con_movimiento": totales.productos_con_movimiento if totales else 0,
+        "total_entradas": float(totales.total_entradas) if totales else 0.0,
+        "total_salidas": float(totales.total_salidas) if totales else 0.0,
+        "total_legacy": totales.total_legacy if totales else 0,
+        "top_productos": top_productos,
+        "por_dia": por_dia,
+    }
