@@ -89,6 +89,7 @@ from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment, Ba
 from api.src.petty_cash.models import Expense, ExpenseCategory
 from api.src.finance_agent.models import FinanceAgentRun, FinanceRecommendation
 from api.src.products.models import Product
+from api.src.smart_pricing.models import TieredPrice
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.returns.models import Return, ReturnItem
 from api.src.currency.models import ExchangeRate
@@ -2129,6 +2130,117 @@ async def sync_cash_register_movements(db: AsyncSession, company_id: str, since:
     return count
 
 
+async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, since: date | None = None) -> int:
+    """Sincroniza precios de venta (VL_PRECO_VENDA_VAREJO), costos (VL_CUSTO_MEDIO_GS),
+    estado activo y escalas mayoristas (ven_preco_quantidade_produto) desde Ñemuha/Legacy.
+    Garantiza que cualquier cambio de precio en el sistema legacy se refleje en cada ciclo.
+    """
+    cid = UUID(company_id) if isinstance(company_id, str) else company_id
+
+    # 1. Leer productos de MySQL
+    rows_prod = await _fetch("""
+        SELECT ID_PRODUTO, DS_PRODUTO, UNIDADE_MEDIDA, QTD_MINIMA_EM_ESTOQUE,
+               VL_PRECO_VENDA_VAREJO, VL_PRECO_VENDA_ATACADO, VL_CUSTO_MEDIO_GS,
+               BO_ATIVO, DT_MODIFICACAO
+        FROM est_produto;
+    """)
+
+    # 2. Mapear productos existentes en PostgreSQL
+    res = await db.execute(select(Product).where(Product.company_id == cid))
+    pg_prods = res.scalars().all()
+    sku_to_prod = {p.sku.strip(): p for p in pg_prods if p.sku}
+
+    count = 0
+
+    for r in rows_prod:
+        sku = str(r["ID_PRODUTO"]).strip()
+        p_venta = Decimal(str(r["VL_PRECO_VENDA_VAREJO"] or 0))
+        p_costo = Decimal(str(r["VL_CUSTO_MEDIO_GS"] or 0))
+        activo = bool(r["BO_ATIVO"])
+        stock_min = int(r["QTD_MINIMA_EM_ESTOQUE"] or 0)
+
+        if sku in sku_to_prod:
+            prod = sku_to_prod[sku]
+            changed = False
+            if prod.precio_venta != p_venta:
+                prod.precio_venta = p_venta
+                changed = True
+            if prod.activo != activo:
+                prod.activo = activo
+                changed = True
+            if p_costo > 0 and prod.costo_promedio != p_costo:
+                prod.costo_promedio = p_costo
+                prod.ultimo_costo = p_costo
+                changed = True
+            if prod.stock_minimo != stock_min:
+                prod.stock_minimo = stock_min
+                changed = True
+            if changed:
+                prod.updated_at = func.now()
+                count += 1
+        else:
+            new_prod = Product(
+                company_id=cid,
+                sku=sku,
+                nombre=r["DS_PRODUTO"] or f"Producto {sku}",
+                precio_venta=p_venta,
+                costo_promedio=p_costo,
+                ultimo_costo=p_costo,
+                stock_minimo=stock_min,
+                activo=activo,
+                unidad_medida=r["UNIDADE_MEDIDA"] or "UN",
+            )
+            db.add(new_prod)
+            await db.flush()
+            sku_to_prod[sku] = new_prod
+            await _save_map(db, str(company_id), "est_produto", r["ID_PRODUTO"], "products", new_prod.id)
+            count += 1
+
+    # 3. Leer escalas por cantidad de MySQL
+    rows_tiers = await _fetch("""
+        SELECT ID_PRODUTO, QTD_PRODUTO, VL_PRECO_VENDA_VAREJO
+        FROM ven_preco_quantidade_produto
+        WHERE QTD_PRODUTO >= 2;
+    """)
+
+    res_tp = await db.execute(select(TieredPrice).where(
+        TieredPrice.company_id == cid,
+        TieredPrice.price_list_id == None
+    ))
+    existing_tiers = {(tp.product_id, tp.min_qty): tp for tp in res_tp.scalars().all()}
+
+    for r in rows_tiers:
+        sku = str(r["ID_PRODUTO"]).strip()
+        if sku not in sku_to_prod:
+            continue
+        prod = sku_to_prod[sku]
+        min_qty = int(r["QTD_PRODUTO"])
+        tier_price = Decimal(str(r["VL_PRECO_VENDA_VAREJO"] or 0))
+
+        key = (prod.id, min_qty)
+        if key in existing_tiers:
+            tp = existing_tiers[key]
+            if tp.precio_unitario != tier_price or not tp.activo:
+                tp.precio_unitario = tier_price
+                tp.activo = True
+                tp.updated_at = func.now()
+                count += 1
+        else:
+            tp = TieredPrice(
+                company_id=cid,
+                product_id=prod.id,
+                min_qty=min_qty,
+                precio_unitario=tier_price,
+                moneda="PYG",
+                activo=True
+            )
+            db.add(tp)
+            existing_tiers[key] = tp
+            count += 1
+
+    return count
+
+
 # ── Orquestador ──────────────────────────────────────────────────────────────
 
 async def run_sync(db: AsyncSession, company_id: str, since: date | None = None) -> NemuhaSyncRun:
@@ -2153,6 +2265,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
         ("cash_register_arqueo", sync_cash_register_arqueo),
         ("cash_deposit_gaps", sync_cash_deposit_gaps),
         ("cash_sessions", sync_cash_sessions),
+        ("catalog_prices_and_scales", sync_catalog_prices_and_scales),
         ("sales", sync_sales),
         ("sale_payments", sync_sale_payments),
         ("customer_returns", sync_customer_returns),
