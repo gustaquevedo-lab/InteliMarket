@@ -134,27 +134,123 @@ async def get_session_with_summary(db: AsyncSession, session_id: str) -> dict | 
     }
 
 
+async def get_active_user_session(db: AsyncSession, user_id: str) -> dict | None:
+    """Busca si el usuario tiene un turno activo ('abierta') o en relevo ('pausada').
+    Permite Turno Nómada (retomar en otra caja) y Modelo A (reanudar tras almuerzo).
+    """
+    result = await db.execute(
+        select(CashSession, CashRegister.nombre.label("register_nombre"), CashRegister.codigo.label("register_codigo"))
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(CashSession.user_id == uuid.UUID(user_id))
+        .where(CashSession.estado.in_(["abierta", "pausada"]))
+        .order_by(CashSession.fecha_apertura.desc())
+        .limit(1)
+    )
+    row = result.first()
+    if not row:
+        return None
+
+    session_obj = row[0]
+    sales_res = await db.execute(
+        select(
+            func.count(Sale.id).label("total_ventas"),
+            func.coalesce(func.sum(Sale.total), 0).label("total_cobrado"),
+        ).where(
+            Sale.session_id == session_obj.id,
+            Sale.estado == "confirmado",
+        )
+    )
+    sales_row = sales_res.first()
+
+    return {
+        "id": str(session_obj.id),
+        "register_id": str(session_obj.register_id),
+        "register_nombre": row.register_nombre,
+        "register_codigo": row.register_codigo,
+        "user_id": str(session_obj.user_id),
+        "cajero_nombre": session_obj.cajero_nombre,
+        "monto_apertura": float(session_obj.monto_apertura or 0),
+        "monto_apertura_usd": float(session_obj.monto_apertura_usd or 0),
+        "monto_apertura_brl": float(session_obj.monto_apertura_brl or 0),
+        "fecha_apertura": session_obj.fecha_apertura.isoformat() if session_obj.fecha_apertura else None,
+        "estado": session_obj.estado,
+        "total_ventas": sales_row.total_ventas if sales_row else 0,
+        "total_cobrado": float(sales_row.total_cobrado if sales_row else 0),
+    }
+
+
+async def pause_session(db: AsyncSession, session_id: str, motivo: str | None = None) -> CashSession | None:
+    """Pausa el turno de la cajera (Modelo A: Relevo / Salida a Almuerzo con gaveta extraíble).
+    La terminal física queda libre para que otra cajera abra su propio turno.
+    """
+    result = await db.execute(select(CashSession).where(CashSession.id == uuid.UUID(session_id)))
+    session_obj = result.scalar_one_or_none()
+    if not session_obj:
+        return None
+    session_obj.estado = "pausada"
+    ts = datetime.now(timezone.utc).isoformat()
+    nota = f"[{ts}] ⏸️ TURNO PAUSADO (Relevo / Almuerzo) — Motivo: {motivo or 'Salida a almuerzo / relevo de gaveta'}"
+    session_obj.observaciones = f"{session_obj.observaciones}\n{nota}" if session_obj.observaciones else nota
+    await db.commit()
+    await db.refresh(session_obj)
+    return session_obj
+
+
+async def resume_session(
+    db: AsyncSession,
+    session_id: str,
+    register_id: str | None = None,
+    punto_emision: str | None = None,
+) -> CashSession | None:
+    """Reanuda el turno de la cajera en la terminal física actual (Turno Nómada o Reanudación de Almuerzo)."""
+    result = await db.execute(select(CashSession).where(CashSession.id == uuid.UUID(session_id)))
+    session_obj = result.scalar_one_or_none()
+    if not session_obj:
+        return None
+
+    prev_reg = str(session_obj.register_id)
+    if register_id and uuid.UUID(register_id) != session_obj.register_id:
+        session_obj.register_id = uuid.UUID(register_id)
+
+    session_obj.estado = "abierta"
+    ts = datetime.now(timezone.utc).isoformat()
+    nota = f"[{ts}] ▶️ TURNO REANUDADO / ACTIVO en Caja {register_id or prev_reg} (Punto {punto_emision or 'N/A'})"
+    session_obj.observaciones = f"{session_obj.observaciones}\n{nota}" if session_obj.observaciones else nota
+    await db.commit()
+    await db.refresh(session_obj)
+    return session_obj
+
+
 async def open_session(db: AsyncSession, data: dict) -> CashSession:
     register_id = data["cash_register_id"]
-    existing = await get_open_session(db, str(register_id))
-    if existing:
-        if data.get("user_id"):
-            existing.user_id = data["user_id"]
-        if data.get("cajero_nombre"):
-            existing.cajero_nombre = data.get("cajero_nombre")
-        if data.get("monto_apertura") is not None:
-            existing.monto_apertura = data.get("monto_apertura")
-        if data.get("monto_apertura_usd") is not None:
-            existing.monto_apertura_usd = data.get("monto_apertura_usd")
-        if data.get("monto_apertura_brl") is not None:
-            existing.monto_apertura_brl = data.get("monto_apertura_brl")
-        await db.flush()
-        await db.refresh(existing)
-        return existing
+    user_id = data.get("user_id")
 
+    # 1. Si este MISMO usuario ya tiene un turno abierto o pausado, reanudarlo/actualizarlo
+    if user_id:
+        existing_user_session = await db.execute(
+            select(CashSession)
+            .where(CashSession.user_id == uuid.UUID(str(user_id)))
+            .where(CashSession.estado.in_(["abierta", "pausada"]))
+            .order_by(CashSession.fecha_apertura.desc())
+            .limit(1)
+        )
+        user_sess = existing_user_session.scalar_one_or_none()
+        if user_sess:
+            user_sess.estado = "abierta"
+            if register_id:
+                user_sess.register_id = register_id
+            if data.get("cajero_nombre"):
+                user_sess.cajero_nombre = data.get("cajero_nombre")
+            if data.get("monto_apertura") is not None and float(data.get("monto_apertura") or 0) > 0 and float(user_sess.monto_apertura or 0) == 0:
+                user_sess.monto_apertura = data.get("monto_apertura")
+            await db.flush()
+            await db.refresh(user_sess)
+            return user_sess
+
+    # 2. Si no es el mismo usuario, crear una sesión INDEPENDIENTE y limpia para este cajero
     session_obj = CashSession(
         register_id=register_id,
-        user_id=data["user_id"],
+        user_id=user_id,
         cajero_nombre=data.get("cajero_nombre"),
         monto_apertura=data.get("monto_apertura", 0),
         monto_apertura_usd=data.get("monto_apertura_usd", 0),

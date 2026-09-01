@@ -427,6 +427,14 @@ export default function POSPage() {
   const confirmedDropIdsRef = useRef<Set<string>>(new Set())
   const pendingHandoffIdRef = useRef<string | null>(null)
 
+  // ── TURNO NÓMADA & PAUSA DE TURNO (MODELO A / ENFOQUE 1) ─────────────────
+  const [showPausaTurnoModal, setShowPausaTurnoModal] = useState(false)
+  const [pausaMotivo, setPausaMotivo] = useState("Salida a almuerzo / relevo de gaveta")
+  const [submittingPausa, setSubmittingPausa] = useState(false)
+  const [activeUserSessionInfo, setActiveUserSessionInfo] = useState<any>(null)
+  const [showReanudarModal, setShowReanudarModal] = useState(false)
+  const [submittingReanudar, setSubmittingReanudar] = useState(false)
+
   const [showCashDropModal, setShowCashDropModal] = useState(false)
   const [cashDropMonto, setCashDropMonto] = useState<string>("")
   const [cashDropMontoUsd, setCashDropMontoUsd] = useState<string>("")
@@ -2190,6 +2198,92 @@ export default function POSPage() {
       toast.error("No se pudo abrir la caja", msg)
     } finally {
       setSubmittingApertura(false)
+    }
+  }
+
+  // ── DETECCIÓN AUTOMÁTICA DE TURNO ACTIVO / PAUSADO (NÓMADA & MODELO A) ──
+  useEffect(() => {
+    if (!user?.id) return
+    let isCancelled = false
+    api.caja.sessions.activeUser()
+      .then((active) => {
+        if (isCancelled || !active) return
+        setActiveUserSessionInfo(active)
+        if (active.estado === "pausada") {
+          // Sesión pausada (Modelo A: Relevo / Almuerzo) -> Mostrar modal para reanudar
+          setShowReanudarModal(true)
+          setShowAperturaModal(false)
+        } else if (active.estado === "abierta") {
+          // Sesión abierta detectada en backend
+          if (!cashSessionId || cashSessionId !== active.id) {
+            setCashSessionId(active.id)
+            setCajaAbierta(true)
+            setShowAperturaModal(false)
+            toast.info(
+              "Turno Activo Detectado",
+              `Continuando turno de ${active.cajero_nombre || user?.nombre} (${active.total_ventas} ventas hoy).`
+            )
+          }
+        }
+      })
+      .catch(() => {})
+    return () => { isCancelled = true }
+  }, [user?.id])
+
+  const handleConfirmPausaTurno = async () => {
+    if (!cashSessionId) return
+    setSubmittingPausa(true)
+    try {
+      await api.caja.sessions.pause(cashSessionId, { motivo: pausaMotivo.trim() || undefined })
+      localStorage.removeItem(userCajaKey)
+      setCashSessionId(null)
+      setCajaAbierta(false)
+      setShowPausaTurnoModal(false)
+      toast.success(
+        "Turno en Pausa",
+        "Tu turno fue pausado con éxito. Puedes retirar tu gaveta. Al regresar podrás reanudarlo aquí o en otra caja."
+      )
+      // Salir de la sesión de usuario para dejar la pantalla lista para la siguiente cajera
+      logout()
+    } catch (e: any) {
+      toast.error("No se pudo pausar el turno", e?.message || "Intente nuevamente.")
+    } finally {
+      setSubmittingPausa(false)
+    }
+  }
+
+  const handleReanudarTurno = async (sessionData?: any) => {
+    const targetSession = sessionData || activeUserSessionInfo
+    if (!targetSession?.id) return
+    setSubmittingReanudar(true)
+    try {
+      await api.caja.sessions.resume(targetSession.id, {
+        cash_register_id: cashRegisterId || undefined,
+        punto_emision: puntoEmision || undefined,
+      })
+      const registro = {
+        puntoEmision,
+        cajeroId: user?.id,
+        cajeroNombre: user?.nombre || "Cajero",
+        fechaApertura: targetSession.fecha_apertura || new Date().toISOString(),
+        fondoPyg: targetSession.monto_apertura || 0,
+        fondoBrl: targetSession.monto_apertura_brl || 0,
+        fondoUsd: targetSession.monto_apertura_usd || 0,
+        cashSessionId: targetSession.id,
+      }
+      localStorage.setItem(userCajaKey, JSON.stringify(registro))
+      setCashSessionId(targetSession.id)
+      setCajaAbierta(true)
+      setShowReanudarModal(false)
+      setShowAperturaModal(false)
+      toast.success(
+        "¡Turno Reanudado!",
+        `Continuando turno en ${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}.`
+      )
+    } catch (e: any) {
+      toast.error("No se pudo reanudar el turno", e?.message || "Intente nuevamente.")
+    } finally {
+      setSubmittingReanudar(false)
     }
   }
 
@@ -5854,6 +5948,15 @@ export default function POSPage() {
           </button>
 
           <span className={`w-px h-5 shrink-0 ${borderTone} border-l`} />
+
+          <button
+            onClick={() => { setPausaMotivo("Salida a almuerzo / relevo de gaveta"); setShowPausaTurnoModal(true) }}
+            title="Pausar Turno (Relevo / Salida a Almuerzo con gaveta extraíble)"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 cursor-pointer shrink-0"
+          >
+            <Pause className="w-3.5 h-3.5" />
+            <span className="text-[11px] hidden sm:inline">Pausar</span>
+          </button>
 
           <button
             onClick={handleOpenCierreModal}
@@ -10559,6 +10662,172 @@ export default function POSPage() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* ── MODAL PAUSAR TURNO (RELEVO DE ALMUERZO CON GAVETA EXTRAÍBLE) ────── */}
+      {showPausaTurnoModal && (
+        <div className="fixed inset-0 z-[140] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-amber-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3.5 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
+                <Pause className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">Pausar Turno de Caja</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Relevo de almuerzo / cambio de gaveta física</p>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 text-amber-900 dark:text-amber-200 space-y-1">
+                <div className="font-black flex items-center gap-1.5 uppercase text-[11px]">
+                  <span>🔐 Control de Custodia de Efectivo</span>
+                </div>
+                <div className="text-[11px] leading-relaxed opacity-90">
+                  Tu turno quedará <strong>congelado</strong> en el sistema con tus ventas y montos exactos.
+                  <strong> Recuerda retirar tu gaveta física con llave</strong> para que la cajera de relevo pueda ingresar a esta terminal con su propia gaveta.
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                  Motivo de la Pausa / Relevo:
+                </label>
+                <input
+                  type="text"
+                  value={pausaMotivo}
+                  onChange={(e) => setPausaMotivo(e.target.value)}
+                  placeholder="Ej: Salida a almuerzo / relevo de gaveta..."
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="p-3 bg-slate-100 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-1 text-slate-600 dark:text-slate-300 text-[11px]">
+                <div className="flex justify-between">
+                  <span>Cajero:</span>
+                  <strong className="text-slate-900 dark:text-white">{user?.nombre || "Cajero"}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Punto de Emisión:</span>
+                  <strong className="text-slate-900 dark:text-white">{PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}</strong>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPausaTurnoModal(false)}
+                  className="py-3 px-4 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={submittingPausa}
+                  onClick={handleConfirmPausaTurno}
+                  className="py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black text-xs shadow-lg shadow-amber-500/25 flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                >
+                  {submittingPausa ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Pausando...
+                    </>
+                  ) : (
+                    <>
+                      <Pause className="w-3.5 h-3.5" />
+                      Confirmar y Salir
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL REANUDAR TURNO (TURNO PAUSADO O TURNO NÓMADA) ───────────────── */}
+      {showReanudarModal && activeUserSessionInfo && (
+        <div className="fixed inset-0 z-[140] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3.5 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                <Play className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                  {activeUserSessionInfo.estado === "pausada" ? "Reanudar Turno Pausado" : "Continuar Turno Nómada"}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {activeUserSessionInfo.estado === "pausada"
+                    ? "Turno en pausa (regreso de almuerzo / relevo)"
+                    : "Turno iniciado en otra terminal"}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-emerald-900 dark:text-emerald-200 space-y-1">
+                <div className="font-black flex items-center gap-1.5 uppercase text-[11px]">
+                  <span>✅ Estado de Turno Detectado</span>
+                </div>
+                <div className="text-[11px] leading-relaxed opacity-90">
+                  {activeUserSessionInfo.estado === "pausada"
+                    ? `Tienes un turno pausado de hoy (${activeUserSessionInfo.total_ventas} ventas previas). Coloca tu gaveta física con llave para continuar.`
+                    : `Iniciaste tu turno en ${activeUserSessionInfo.register_nombre || "otra caja"}. Las nuevas ventas emitidas aquí saldrán timbradas con el punto fiscal de esta terminal (${PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}) y tu arqueo de dinero seguirá unificado.`}
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-100 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700/60 space-y-2 text-slate-600 dark:text-slate-300 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Cajera / Titular:</span>
+                  <strong className="text-slate-900 dark:text-white text-sm">{activeUserSessionInfo.cajero_nombre || user?.nombre}</strong>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Fondo Inicial:</span>
+                  <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{formatPYG(activeUserSessionInfo.monto_apertura || 0)}</strong>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Ventas Acumuladas:</span>
+                  <strong className="text-slate-900 dark:text-white font-bold">{activeUserSessionInfo.total_ventas} tickets ({formatPYG(activeUserSessionInfo.total_cobrado || 0)})</strong>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-slate-200 dark:border-slate-700">
+                  <span className="text-slate-500">Terminal Actual:</span>
+                  <strong className="text-blue-600 dark:text-blue-400 font-black">{PUNTOS_EMISION.find(p => p.id === puntoEmision)?.nombre || puntoEmision}</strong>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReanudarModal(false)
+                    setShowAperturaModal(true)
+                  }}
+                  className="py-3 px-3 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer text-center"
+                >
+                  Abrir Nuevo Turno
+                </button>
+                <button
+                  type="button"
+                  disabled={submittingReanudar}
+                  onClick={() => handleReanudarTurno()}
+                  className="py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                >
+                  {submittingReanudar ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Reanudando...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5" />
+                      Reanudar Turno
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

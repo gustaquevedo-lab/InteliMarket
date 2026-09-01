@@ -72,6 +72,15 @@ class CashSessionClose(BaseModel):
     observaciones: Optional[str] = None
 
 
+class CashSessionPause(BaseModel):
+    motivo: Optional[str] = "Relevo / Salida a Almuerzo"
+
+
+class CashSessionResume(BaseModel):
+    cash_register_id: Optional[UUID] = None
+    punto_emision: Optional[str] = None
+
+
 class CashDropCreate(BaseModel):
     monto: Decimal = Decimal("0")
     monto_usd: Decimal = Decimal("0")

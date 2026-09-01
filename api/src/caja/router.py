@@ -12,6 +12,7 @@ from api.src.auth.middleware import require_auth
 from api.src.caja.schemas import (
     CashRegisterCreate, CashRegisterUpdate, CashRegisterResponse,
     CashSessionCreate, CashSessionClose, CashSessionResponse, CashDropCreate,
+    CashSessionPause, CashSessionResume,
     ConfirmHandoffRequest, DepositVaultEntriesRequest, RejectVaultDepositRequest,
     ConfirmCashDropRequest, RejectCashDropRequest, VoidCashDropRequest,
     CreateTreasuryRemittanceRequest, ReceiveTreasuryRemittanceRequest,
@@ -93,11 +94,37 @@ async def list_sessions(
     return await service.list_sessions(db, company_id, register_id, user_id, estado, limit=limit, offset=offset)
 
 
+@router.get("/cash-sessions/active-user")
+async def get_active_user_session(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_active_user_session(db, str(user["id"]))
+
+
+@router.post("/cash-sessions/{session_id}/pause")
+async def pause_session(session_id: str, body: CashSessionPause, db: AsyncSession = Depends(get_db)):
+    result = await service.pause_session(db, session_id, body.motivo)
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    return {"success": True, "id": str(result.id), "estado": result.estado}
+
+
+@router.post("/cash-sessions/{session_id}/resume")
+async def resume_session(session_id: str, body: CashSessionResume, db: AsyncSession = Depends(get_db)):
+    result = await service.resume_session(
+        db,
+        session_id,
+        str(body.cash_register_id) if body.cash_register_id else None,
+        body.punto_emision,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    return {"success": True, "id": str(result.id), "estado": result.estado, "register_id": str(result.register_id)}
+
+
 @router.get("/cash-sessions/{session_id}")
 async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     result = await service.get_session_with_summary(db, session_id)
     if not result:
-        raise HTTPException(status_code=404, detail="Sesi\u00f3n no encontrada")
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
     return result
 
 
@@ -116,7 +143,7 @@ async def close_session(session_id: str, body: CashSessionClose, db: AsyncSessio
         tenant_id=user.get("tenant_id"),
     )
     if not result:
-        raise HTTPException(status_code=400, detail="No se pudo cerrar la sesi\u00f3n")
+        raise HTTPException(status_code=400, detail="No se pudo cerrar la sesión")
     return result
 
 
