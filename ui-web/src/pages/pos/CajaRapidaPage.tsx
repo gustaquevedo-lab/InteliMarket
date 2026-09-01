@@ -1064,27 +1064,27 @@ export default function POSPage() {
       }
 
       setPlugpayResult(startRes.data)
-      const refInterna = startRes.data.referenciaInterna
+      const refInterna = startRes.data.serialNumber || startRes.data.SerialNumber || startRes.data.referenciaInterna || String(startRes.data.IdInitialTransaction || "")
 
       plugpayPollIntervalRef.current = setInterval(async () => {
         try {
           const statusRes = await api.plugpay.parceladoStatus(refInterna)
           if (statusRes.ok && statusRes.data) {
-            const status = statusRes.data.status || (statusRes.data.transaction && statusRes.data.transaction.status)
-            console.log(`[PLUGPAY-TRACE] Polling Crédito status=${status}`)
-            if (status === 1) {
+            const txn = statusRes.data.transaction || statusRes.data
+            console.log(`[PLUGPAY-TRACE] Polling Crédito status:`, txn)
+            if (txn.token || txn.payment_method_id || txn.status === 1 || txn.status === "approved") {
               clearPlugpayPoll()
               setPlugpayState("aprobada")
               toast.success("Crédito Aprobado", "La transacción con tarjeta de Brasil fue aprobada con éxito.")
               setBancardQrResult({
-                codigoAutorizacion: statusRes.data.transaction?.transactionCode || "PLUGPAY",
-                nroBoleta: String(statusRes.data.transaction?.id || Date.now()),
+                codigoAutorizacion: txn.SerialNumber || String(txn.id || "PLUGPAY"),
+                nroBoleta: String(txn.id || Date.now()),
                 mensajeDisplay: "APROBADA",
-                nombreTarjeta: "PLUGPAY BRL",
-                nombreCliente: "CLIENTE BRASILEÑO",
+                nombreTarjeta: "PLUGPAY CRÉDITO",
+                nombreCliente: plugpayCpf,
               })
               setBancardQrState("aprobada")
-            } else if (status === 6) {
+            } else if (txn.status === 6 || txn.status === "rejected" || txn.status === "cancelled") {
               clearPlugpayPoll()
               setPlugpayState("error")
               setPlugpayError("La transacción con tarjeta fue cancelada o rechazada.")
@@ -1094,7 +1094,7 @@ export default function POSPage() {
         } catch (err) {
           console.error("Error en polling parcelado:", err)
         }
-      }, 5000)
+      }, 4000)
 
     } catch (e: any) {
       console.error(e)
@@ -8688,7 +8688,69 @@ export default function POSPage() {
                               className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-blue-600/20 flex items-center justify-center gap-2"
                             >
                               <CreditCard className="w-4 h-4" />
-                              <span>Iniciar Crédito Parcelado en Terminal</span>
+                              <span>Iniciar Crédito Parcelado</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {plugpayState === "esperando" && (
+                          <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-800 space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
+                                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                <span>Esperando cobro con tarjeta...</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={resetBancardFlow}
+                                className="text-xs text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+
+                            {plugpayResult?.UrlPaymentForm && (
+                              <div className="bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center justify-between gap-2">
+                                <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                                  <span className="font-bold block text-xs text-slate-900 dark:text-white">Pasarela de Pago Segura</span>
+                                  {plugpayCuotas} cuotas de R$ {(plugpayBrlValue ? (plugpayBrlValue / plugpayCuotas).toFixed(2) : "0.00")}
+                                </div>
+                                <a
+                                  href={plugpayResult.UrlPaymentForm}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg flex items-center gap-1 shrink-0 shadow-sm cursor-pointer"
+                                >
+                                  <span>Abrir Pasarela</span>
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {plugpayState === "aprobada" && (
+                          <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left space-y-0.5">
+                            <div className="font-black flex items-center gap-1.5">
+                              <CheckCircle className="w-4 h-4 text-emerald-500" />
+                              <span>✓ Crédito Parcelado Aprobado</span>
+                            </div>
+                            <div className="text-[11px] opacity-90">Autorización / Serial: {plugpayResult?.serialNumber || plugpayResult?.SerialNumber || plugpayResult?.IdInitialTransaction}</div>
+                          </div>
+                        )}
+
+                        {plugpayState === "error" && (
+                          <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 text-left space-y-1.5">
+                            <div className="font-bold flex items-center gap-1">
+                              <AlertCircle className="w-4 h-4 text-rose-500" />
+                              <span>Error en PlugPay: {plugpayError || "Transacción cancelada o fallida"}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => { setPlugpayState("idle"); setPlugpayError("") }}
+                              className="px-2.5 py-1 bg-rose-600 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                            >
+                              Reintentar
                             </button>
                           </div>
                         )}

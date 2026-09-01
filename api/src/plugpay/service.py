@@ -197,7 +197,7 @@ async def start_credito_parcelado(db: AsyncSession, company_id: str, monto: floa
 
 
 async def get_credito_parcelado_status(db: AsyncSession, company_id: str, referencia_interna: str) -> dict:
-    return await _authed_request(db, company_id, "GET", f"/transactionCreditoParcelado/status/{referencia_interna}")
+    return await _authed_request(db, company_id, "GET", f"/transactionCreditoParcelado/id/{referencia_interna}")
 
 
 async def cancel_credito_parcelado(db: AsyncSession, company_id: str, referencia_interna: str) -> dict:
