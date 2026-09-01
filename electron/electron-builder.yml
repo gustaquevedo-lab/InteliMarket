@@ -16,6 +16,8 @@ files:
       - "main.cjs"
       - "preload.cjs"
       - "pos-config.json"
+      - "bridges-b64.cjs"
+      - "dinelco-client.cjs"
 
 win:
   target:
