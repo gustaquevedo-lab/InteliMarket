@@ -57,6 +57,23 @@ mantener espejadas.
 
 ---
 
+## 🖥️ SESIÓN 2026-09-02 — Cajas 2-5: app.asar viejo (sin Dinelco) + DNS roto, Nilda Aquino, reset de contraseña mentiroso
+
+**Cajas físicas 2, 3, 4 y 5** (`192.168.0.12-15`, WinRM user `Caja N` / pass `cajaN`) tenían DOS problemas independientes, ambos afectando la integración Dinelco (y probablemente cualquier otra cosa que dependa de la conexión al backend):
+
+1. **`app.asar` desactualizado**: instalado en `C:\InteliMarket\win-unpacked\resources\app.asar`, sin el bridge `dinelcoCall` de Electron (agregado recien el 2026-09-01 en `0e85b92`). Por eso Dinelco tiraba "esta pantalla no está corriendo dentro de la app de caja" aunque SÍ era Electron -- el mensaje es impreciso, no distingue "no es Electron" de "es Electron pero con un build viejo". Se rebuildeó con `cd ui-web && npx electron-builder --win --x64 --config ../electron/electron-builder.yml` (el `npm run electron:build` normal en Linux compila para Linux por default, hay que forzar `--win --x64`) y se distribuyó el `app.asar` nuevo a las 4 cajas via un servidor HTTP temporal en la VM (`python3 -m http.server 8090` sobre `dist-electron/win-unpacked/resources`) + `Invoke-WebRequest` desde cada caja.
+2. **Ninguna de las 4 podía resolver `intelimarket-ia`** (el hostname que `VITE_API_URL` usa, ver `ui-web/.env`) -- ni por DNS ni por archivo hosts. `Resolve-DnsName` fallaba directo y `Test-NetConnection` al puerto 8000 daba `False`. Se agregó `192.168.0.242 intelimarket-ia` a `C:\Windows\System32\drivers\etc\hosts` en las 4. No se pudo determinar la causa raiz (¿DNS del router que dejó de resolverlo? ¿nunca estuvo bien configurado y functionaba por otra via?) -- si esto reaparece, sospechar primero de la resolución de nombre antes que del código.
+
+**IMPORTANTE -- relanzar SIEMPRE vía tarea programada one-off, nunca `Start-Process` directo por WinRM**: al desplegar el asar nuevo se relanzó la app con `Start-Process` directo desde el script de WinRM y aterrizó en Session 0 invisible (mismo bug documentado para los kiosks del Verificador) -- las 4 cajas quedaron con el proceso "corriendo" pero invisible en pantalla, cajeras viendo el escritorio. Se corrigió relanzando con `Register-ScheduledTask -Principal (LogonType Interactive) + Start-ScheduledTask`, igual que el patrón ya usado en los kiosks.
+
+**Cajas 1, 6, 7, 8, 9 y 10** no se pudieron verificar (`No route to host` en el puerto 5985 de WinRM al momento de la sesión) -- probablemente tengan el mismo problema de app.asar viejo y/o DNS. Revisar cuando estén alcanzables.
+
+**Nilda Aquino** (`nilda.aquino@intelimarket.com.py`) no podía entrar en Caja 5 -- la causa real fue el problema de DNS de arriba (Caja 5 nunca pudo llegar al backend), no la contraseña. Contraseña final seteada a mano vía hash bcrypt directo en la DB (`Extra5983*`), confirmada con un login real contra la API antes de avisar.
+
+**Bug de "Resetear Contraseña" en Usuarios y RBAC**: ambas pantallas mostraban el toast de éxito con una clave inventada SIN IMPORTAR si el pedido al backend funcionaba -- en `RbacPage.tsx` incluso mostraba el éxito ANTES de intentar el cambio, y el catch decía literalmente `// optimista` tapando cualquier error. La contraseña real nunca cambiaba pero el admin creía que sí. Corregido en ambas: solo confirma después de que el backend confirma, y muestra el error real si falla (permisos -- el endpoint requiere rol `admin` exacto, no `supervisor` -- o lo que sea). Commit `297adb7`.
+
+---
+
 ## 🔒 SESIÓN 2026-08-26 (tarde) — Verificador de Precios: blindaje definitivo contra volver a sandbox / pantalla sin logo
 
 Pedido explícito del cliente, textual: *"nunca mas van a apuntar a sandbox y no quiero volver a ver sin logo y cotizacion, esto debe ser infalible, granitico."* Esto NO es una preferencia estética, es una directiva dura. Cualquier sesión futura que toque los terminales físicos del Verificador debe leer esto ANTES de tocar nada.
