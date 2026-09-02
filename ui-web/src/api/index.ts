@@ -935,6 +935,7 @@ export const api = {
     list: (params?: { activo?: boolean }) => client.get<CreditAccount[]>("/v1/credit-accounts", params),
     get: (id: string) => client.get<CreditAccount>(`/v1/credit-accounts/${id}`),
     create: (data: Partial<CreditAccount>) => client.post<CreditAccount>("/v1/credit-accounts", data),
+    update: (id: string, data: { limite_credito?: number; activo?: boolean }) => client.patch<CreditAccount>(`/v1/credit-accounts/${id}`, data),
     getByCustomer: (customerId: string) => client.get<CreditAccount>(`/v1/credit-accounts/customer/${customerId}`),
     movements: (id: string) => client.get<CreditMovement[]>(`/v1/credit-accounts/${id}/movements`),
     payment: (id: string, data: { monto: number; metodo_pago_id?: string; observaciones?: string }) => client.post<CreditAccount>(`/v1/credit-accounts/${id}/payment`, data),

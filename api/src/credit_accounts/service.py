@@ -83,6 +83,7 @@ async def update_credit_account(db: AsyncSession, account_id: str, data: CreditA
     if not account:
         return None
     update_data = data.model_dump(exclude_unset=True)
+    nuevo_limite = None
     if "limite_credito" in update_data:
         nuevo_limite = Decimal(str(update_data["limite_credito"]))
         diferencia = nuevo_limite - Decimal(str(account.limite_credito))
@@ -90,9 +91,23 @@ async def update_credit_account(db: AsyncSession, account_id: str, data: CreditA
         account.limite_credito = nuevo_limite
     if "activo" in update_data:
         account.activo = update_data["activo"]
+
+    # Sincronizar tabla customers para mantener coherencia total
+    if account.customer_id:
+        from api.src.customers.models import Customer
+        cust_res = await db.execute(select(Customer).where(Customer.id == account.customer_id))
+        cust = cust_res.scalar_one_or_none()
+        if cust:
+            if nuevo_limite is not None:
+                cust.limite_credito = nuevo_limite
+                cust.credito_limite = nuevo_limite
+            if "activo" in update_data:
+                cust.activo = update_data["activo"]
+
     await db.commit()
     await db.refresh(account)
     return account
+
 
 
 MORA_BLOQUEO_DIAS = 60  # facturas vencidas hace mas de esto retienen nuevas ventas a credito, aunque haya limite disponible

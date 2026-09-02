@@ -10,6 +10,13 @@ import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
 
+const getCreditoLimite = (c: Customer | null | undefined): number => {
+  if (!c) return 0
+  const val = c.credito_limite ?? (c as any).limite_credito ?? 0
+  const num = typeof val === "number" ? val : Number(val)
+  return isNaN(num) ? 0 : num
+}
+
 export default function CustomersPage() {
   const toast = useToast()
   const confirm = useConfirm()
@@ -22,7 +29,7 @@ export default function CustomersPage() {
 
   // Paginación
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(25)
 
   // Modales
   const [showForm, setShowForm] = useState(false)
@@ -80,8 +87,8 @@ export default function CustomersPage() {
     const conRuc = customers.filter(c => c.ruc && c.ruc.trim().length > 0).length
     const personasFisicas = customers.filter(c => (c.tipo_persona || "").toLowerCase() === "fisica").length
     const personasJuridicas = customers.filter(c => (c.tipo_persona || "juridica").toLowerCase() === "juridica").length
-    const conCredito = customers.filter(c => Number(c.credito_limite || 0) > 0).length
-    const totalCreditoOtorgado = customers.reduce((sum, c) => sum + Number(c.credito_limite || 0), 0)
+    const conCredito = customers.filter(c => getCreditoLimite(c) > 0).length
+    const totalCreditoOtorgado = customers.reduce((sum, c) => sum + getCreditoLimite(c), 0)
     return { total, conRuc, personasFisicas, personasJuridicas, conCredito, totalCreditoOtorgado }
   }, [customers])
 
@@ -100,7 +107,7 @@ export default function CustomersPage() {
       let matchTab = true
       if (tab === "fisica") matchTab = (c.tipo_persona || "").toLowerCase() === "fisica"
       else if (tab === "juridica") matchTab = (c.tipo_persona || "juridica").toLowerCase() === "juridica"
-      else if (tab === "con_credito") matchTab = Number(c.credito_limite || 0) > 0
+      else if (tab === "con_credito") matchTab = getCreditoLimite(c) > 0
       else if (tab === "inactivos") matchTab = c.activo === false
 
       return matchSearch && matchTab
@@ -148,7 +155,7 @@ export default function CustomersPage() {
       direccion: c.direccion || "",
       ciudad: c.ciudad || "",
       departamento: (c as any).departamento || "",
-      credito_limite: c.credito_limite || 0,
+      credito_limite: getCreditoLimite(c),
       condicion_iva: (c as any).condicion_iva || "contribuyente",
       activo: c.activo !== false,
     })
@@ -162,11 +169,17 @@ export default function CustomersPage() {
     }
     setSaving(true)
     try {
+      const limiteNum = Number(form.credito_limite) || 0
+      const payload = {
+        ...form,
+        credito_limite: limiteNum,
+        limite_credito: limiteNum,
+      }
       if (editingCustomer) {
-        await api.customers.update(editingCustomer.id, form)
+        await api.customers.update(editingCustomer.id, payload)
         toast.success("Cliente Actualizado", `Se actualizaron los datos de ${form.razon_social}`)
       } else {
-        await api.customers.create(form)
+        await api.customers.create(payload)
         toast.success("Cliente Creado", `Se registró a ${form.razon_social}`)
       }
       setShowForm(false)
@@ -429,8 +442,8 @@ export default function CustomersPage() {
                       {c.ciudad || "—"}
                     </td>
                     <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white">
-                      {Number(c.credito_limite || 0) > 0 ? (
-                        <span className="text-emerald-600 dark:text-emerald-400">{formatPYG(c.credito_limite)}</span>
+                      {getCreditoLimite(c) > 0 ? (
+                        <span className="text-emerald-600 dark:text-emerald-400">{formatPYG(getCreditoLimite(c))}</span>
                       ) : (
                         <span className="text-slate-400 font-normal">₲ 0</span>
                       )}
@@ -670,7 +683,7 @@ export default function CustomersPage() {
               <div className="p-4 bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl flex justify-between items-center">
                 <div>
                   <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase">Línea de Crédito</span>
-                  <p className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(viewingCustomer.credito_limite || 0)}</p>
+                  <p className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(getCreditoLimite(viewingCustomer))}</p>
                 </div>
                 <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
                   ExtraClub Habilitado

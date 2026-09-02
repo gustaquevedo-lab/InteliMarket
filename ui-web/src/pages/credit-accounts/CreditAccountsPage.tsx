@@ -29,6 +29,9 @@ export default function CreditAccountsPage() {
   const [selectedAccount, setSelectedAccount] = useState<CreditAccount | null>(null)
   const [movements, setMovements] = useState<CreditMovement[]>([])
   const [form, setForm] = useState({ customer_id: "", limite_credito: "" })
+  const [editingAccount, setEditingAccount] = useState<CreditAccount | null>(null)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editForm, setEditForm] = useState({ limite_credito: "", activo: true })
   const [paymentForm, setPaymentForm] = useState({ monto: "", observaciones: "" })
   const [submitting, setSubmitting] = useState(false)
 
@@ -329,6 +332,37 @@ export default function CreditAccountsPage() {
     }
   }
 
+  const handleOpenEdit = (account: CreditAccount) => {
+    setEditingAccount(account)
+    setEditForm({
+      limite_credito: String(account.limite_credito || ""),
+      activo: account.activo !== false,
+    })
+    setShowEditModal(true)
+  }
+
+  const handleUpdate = async () => {
+    if (!editingAccount || !editForm.limite_credito) {
+      toast.error("Error", "El límite de crédito es obligatorio")
+      return
+    }
+    setSubmitting(true)
+    try {
+      await api.creditAccounts.update(editingAccount.id, {
+        limite_credito: parseFloat(editForm.limite_credito),
+        activo: editForm.activo,
+      })
+      toast.success("Actualizado", "Línea de crédito modificada correctamente")
+      setShowEditModal(false)
+      setEditingAccount(null)
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error", e?.message || "No se pudo actualizar la línea de crédito")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   const handlePayment = async () => {
     if (!selectedAccount || !paymentForm.monto) {
       toast.error("Error", "Ingresá el monto del pago")
@@ -565,6 +599,13 @@ export default function CreditAccountsPage() {
                             </td>
                             <td className="p-3.5 text-right whitespace-nowrap">
                               <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleOpenEdit(a)}
+                                  className="btn-outline py-1 px-2.5 text-xs flex items-center gap-1"
+                                  title="Editar límite o estado"
+                                >
+                                  <Settings2 className="w-3.5 h-3.5" /> Editar
+                                </button>
                                 <button
                                   onClick={() => handleViewMovements(a)}
                                   className="btn-outline py-1 px-2.5 text-xs flex items-center gap-1"
@@ -828,6 +869,60 @@ export default function CreditAccountsPage() {
               <button onClick={() => setShowModal(false)} className="btn-ghost text-xs">Cancelar</button>
               <button onClick={handleSubmit} disabled={submitting || !form.customer_id || !form.limite_credito} className="btn-primary text-xs disabled:opacity-50">
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Habilitar Línea"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Editar Línea de Crédito */}
+      {showEditModal && editingAccount && (
+        <div className="modal-overlay" onClick={() => setShowEditModal(false)}>
+          <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Editar Línea de Crédito</h3>
+              <p className="text-xs text-gray-500 mt-1">{editingAccount.customer_nombre} · RUC: {editingAccount.customer_ruc || "—"}</p>
+            </div>
+            <div className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="label-field">Límite de Crédito (₲) *</label>
+                <input
+                  className="input-field font-mono"
+                  type="number"
+                  placeholder="Ej: 5000000"
+                  value={editForm.limite_credito}
+                  onChange={e => setEditForm({ ...editForm, limite_credito: e.target.value })}
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Utilizado actual: <span className="font-mono font-bold text-amber-600">{formatPYG(editingAccount.saldo_utilizado || 0)}</span>
+                </p>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-xl border border-gray-200 dark:border-gray-700">
+                <div>
+                  <div className="font-semibold text-gray-900 dark:text-white">Estado de la cuenta</div>
+                  <div className="text-[11px] text-gray-400 mt-0.5">Desactivar bloquea nuevas compras a crédito</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditForm({ ...editForm, activo: !editForm.activo })}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${
+                    editForm.activo ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"
+                  }`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                    editForm.activo ? "translate-x-6" : "translate-x-0"
+                  }`} />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button onClick={() => setShowEditModal(false)} className="btn-ghost text-xs">Cancelar</button>
+              <button
+                onClick={handleUpdate}
+                disabled={submitting || !editForm.limite_credito}
+                className="btn-primary text-xs disabled:opacity-50"
+              >
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar Cambios"}
               </button>
             </div>
           </div>

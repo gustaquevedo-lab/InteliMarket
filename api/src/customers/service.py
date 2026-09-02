@@ -7,12 +7,6 @@ from api.src.customers.models import Customer
 from api.src.customers.schemas import CustomerCreate, CustomerUpdate
 
 
-async def create_customer(db: AsyncSession, data: CustomerCreate) -> Customer:
-    customer = Customer(**data.model_dump())
-    db.add(customer)
-    await db.flush()
-    await db.refresh(customer)
-    return customer
 
 
 async def get_customer(db: AsyncSession, customer_id: str) -> Customer | None:
@@ -74,13 +68,88 @@ async def list_customers(
     return list(result.scalars().all())
 
 
+async def create_customer(db: AsyncSession, data: CustomerCreate) -> Customer:
+    data_dict = data.model_dump()
+    from decimal import Decimal
+    # Asegurar sincronización de ambos campos de límite
+    limite = None
+    if data_dict.get("credito_limite") is not None and Decimal(str(data_dict["credito_limite"])) > 0:
+        limite = Decimal(str(data_dict["credito_limite"]))
+    elif data_dict.get("limite_credito") is not None and Decimal(str(data_dict["limite_credito"])) > 0:
+        limite = Decimal(str(data_dict["limite_credito"]))
+    if limite is not None:
+        data_dict["credito_limite"] = limite
+        data_dict["limite_credito"] = limite
+
+    customer = Customer(**data_dict)
+    db.add(customer)
+    await db.flush()
+    await db.refresh(customer)
+
+    # Si se creó con crédito, registrar también en credit_accounts
+    if limite is not None and limite > 0:
+        from api.src.credit_accounts.models import CreditAccount
+        db.add(CreditAccount(
+            company_id=customer.company_id,
+            customer_id=customer.id,
+            limite_credito=limite,
+            saldo_disponible=limite,
+            saldo_utilizado=Decimal("0"),
+            activo=customer.activo,
+        ))
+        await db.flush()
+
+    return customer
+
+
 async def update_customer(db: AsyncSession, customer_id: str, data: CustomerUpdate) -> Customer | None:
     customer = await get_customer(db, customer_id)
     if not customer:
         return None
+    from decimal import Decimal
     update_data = data.model_dump(exclude_unset=True)
+
+    # Sincronizar credito_limite y limite_credito si alguno fue enviado
+    nuevo_limite = None
+    if "credito_limite" in update_data and update_data["credito_limite"] is not None:
+        nuevo_limite = Decimal(str(update_data["credito_limite"]))
+    elif "limite_credito" in update_data and update_data["limite_credito"] is not None:
+        nuevo_limite = Decimal(str(update_data["limite_credito"]))
+
+    if nuevo_limite is not None:
+        update_data["credito_limite"] = nuevo_limite
+        update_data["limite_credito"] = nuevo_limite
+
     for key, value in update_data.items():
         setattr(customer, key, value)
+
+    # Sincronizar tabla credit_accounts para que el POS y cuentas de crédito reflejen el cambio
+    if nuevo_limite is not None or "activo" in update_data:
+        from api.src.credit_accounts.models import CreditAccount
+        r = await db.execute(
+            select(CreditAccount).where(
+                CreditAccount.company_id == customer.company_id,
+                CreditAccount.customer_id == customer.id
+            )
+        )
+        ca = r.scalar_one_or_none()
+        if ca:
+            if nuevo_limite is not None:
+                ca.limite_credito = nuevo_limite
+                saldo_utilizado = ca.saldo_utilizado or Decimal("0")
+                ca.saldo_disponible = nuevo_limite - saldo_utilizado
+            if "activo" in update_data:
+                ca.activo = update_data["activo"]
+        elif nuevo_limite is not None and nuevo_limite > 0:
+            db.add(CreditAccount(
+                company_id=customer.company_id,
+                customer_id=customer.id,
+                limite_credito=nuevo_limite,
+                saldo_disponible=nuevo_limite,
+                saldo_utilizado=Decimal("0"),
+                activo=customer.activo if "activo" not in update_data else update_data["activo"],
+            ))
+
     await db.flush()
     await db.refresh(customer)
     return customer
@@ -93,3 +162,4 @@ async def delete_customer(db: AsyncSession, customer_id: str) -> bool:
     await db.delete(customer)
     await db.flush()
     return True
+

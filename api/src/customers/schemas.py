@@ -31,6 +31,10 @@ class CustomerCreate(BaseModel):
 
 
 class CustomerUpdate(BaseModel):
+    razon_social: Optional[str] = None
+    ruc: Optional[str] = None
+    ci: Optional[str] = None
+    tipo_persona: Optional[str] = None
     tipo: Optional[str] = None
     nombre_fantasia: Optional[str] = None
     condicion_iva: Optional[str] = None
@@ -44,6 +48,9 @@ class CustomerUpdate(BaseModel):
     limite_credito: Optional[Decimal] = None
     pago_default: Optional[str] = None
     activo: Optional[bool] = None
+    extra_club_numero: Optional[str] = None
+    empresa_vinculada_nombre: Optional[str] = None
+    empresa_vinculada_ruc: Optional[str] = None
 
 
 class CustomerResponse(BaseModel):
@@ -64,9 +71,9 @@ class CustomerResponse(BaseModel):
     departamento: Optional[str] = None
     telefono: Optional[str] = None
     email: Optional[str] = None
-    credito_limite: Decimal
-    limite_credito: Optional[Decimal] = Decimal("0")
-    credito_usado: Decimal
+    credito_limite: float
+    limite_credito: Optional[float] = 0.0
+    credito_usado: float
     pago_default: Optional[str] = None
     activo: bool
     created_at: datetime
@@ -74,3 +81,4 @@ class CustomerResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
