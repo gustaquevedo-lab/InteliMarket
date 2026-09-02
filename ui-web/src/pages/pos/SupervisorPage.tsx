@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import {
   ShieldCheck, LogOut, RefreshCcw, Wallet, AlertTriangle, Clock, Loader2,
-  CheckCircle2, ChevronRight, X, Banknote, ShieldAlert, Check, Eye, EyeOff,
-  Sun, Moon, Home, Users, Landmark, TrendingDown, Inbox, ArrowDownToLine,
-  User as UserIcon, ArrowLeft, Volume2, VolumeX, Sparkles, Send,
-  DollarSign, Smartphone, ArrowUpRight, Flame, FileText, Printer, BarChart3, Download
+  CheckCircle2, X, Banknote, ShieldAlert, Check, Eye, EyeOff,
+  Sun, Moon, Home, Users, Landmark, ArrowDownToLine,
+  User as UserIcon, ArrowLeft, Volume2, VolumeX,
+  ArrowUpRight, Flame, Bell, Download, PackageSearch, ListChecks,
+  CreditCard, ClipboardCheck, Boxes, Radio
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -96,6 +97,46 @@ interface CajeroPerf {
   ultimo_cierre: string | null
 }
 
+interface CreditApprovalRequest {
+  id: string
+  motivo?: string
+  cliente_nombre?: string
+  monto?: number
+  estado: string
+  solicitado_por_nombre?: string
+  aprobado_gerente_id?: string | null
+  created_at: string
+}
+
+interface SystemNotification {
+  id: string
+  title: string
+  body?: string
+  tipo?: string
+  link?: string
+  leida: boolean
+  created_at: string
+}
+
+interface BeforeInstallPromptEventLike extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: string }>
+}
+
+interface LowStockItem {
+  id?: string
+  product_id?: string
+  nombre?: string
+  producto_nombre?: string
+  sku?: string
+  unidad?: string
+  stock_actual?: number
+  disponible?: number
+  stock?: number
+  stock_minimo?: number
+  minimo?: number
+}
+
 const formatPYG = (n: number) => `₲ ${Math.round(n || 0).toLocaleString("es-PY")}`
 const formatUSD = (n: number) => `US$ ${(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const formatBRL = (n: number) => `R$ ${(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -113,35 +154,131 @@ function timeSince(iso: string) {
 const displayFont = { fontFamily: "'Archivo Expanded', system-ui, sans-serif" }
 const monoFont = { fontFamily: "'IBM Plex Mono', 'SF Mono', monospace" }
 
-type Tab = "inicio" | "cajas" | "boveda" | "equipo"
+type Tab = "inicio" | "cajas" | "aprobaciones" | "boveda" | "stock" | "equipo"
 
 type PendingItem =
   | { kind: "auth"; id: string; created_at: string; data: AuthRequest }
   | { kind: "vault"; id: string; created_at: string; data: VaultApproval }
 
 // ── SINTETIZADOR DE AUDIO (Web Audio API) ──────────────────────────────────
-function playChime(freqs: number[], type: OscillatorType = "sine", duration = 0.12) {
+type AlertStep = {
+  at: number                 // offset desde el inicio (s)
+  freq: number               // frecuencia base (Hz)
+  dur: number                // duración (s)
+  type?: OscillatorType
+  vol?: number
+  glideTo?: number           // desliza la frecuencia hasta este valor
+  wobble?: { rate: number; depth: number }  // LFO sobre la frecuencia (efecto "poco común")
+}
+
+function playAlertSound(steps: AlertStep[]) {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
     if (!AudioCtx) return
     const ctx = new AudioCtx()
-    let delay = 0
-    for (const f of freqs) {
+    const master = ctx.createGain()
+    master.connect(ctx.destination)
+    const t0 = ctx.currentTime
+    for (const s of steps) {
+      const start = t0 + s.at
       const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = type
-      osc.frequency.setValueAtTime(f, ctx.currentTime + delay)
-      gain.gain.setValueAtTime(0.18, ctx.currentTime + delay)
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + duration)
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.start(ctx.currentTime + delay)
-      osc.stop(ctx.currentTime + delay + duration)
-      delay += 0.08
+      const g = ctx.createGain()
+      osc.type = s.type || "sine"
+      osc.frequency.setValueAtTime(s.freq, start)
+      if (s.glideTo && s.glideTo !== s.freq) {
+        osc.frequency.exponentialRampToValueAtTime(s.glideTo, start + s.dur)
+      }
+      if (s.wobble) {
+        const lfo = ctx.createOscillator()
+        const lfoGain = ctx.createGain()
+        lfo.frequency.value = s.wobble.rate
+        lfoGain.gain.value = s.wobble.depth
+        lfo.connect(lfoGain)
+        lfoGain.connect(osc.frequency)
+        lfo.start(start)
+        lfo.stop(start + s.dur)
+      }
+      g.gain.setValueAtTime(0.0001, start)
+      g.gain.exponentialRampToValueAtTime(s.vol || 0.2, start + 0.012)
+      g.gain.exponentialRampToValueAtTime(0.0001, start + s.dur)
+      osc.connect(g)
+      g.connect(master)
+      osc.start(start)
+      osc.stop(start + s.dur + 0.03)
     }
+    const total = steps.reduce((m, s) => Math.max(m, s.at + s.dur), 0)
+    setTimeout(() => { ctx.close().catch(() => {}) }, (total + 0.2) * 1000)
   } catch (e) {
     // Audio context bloqueado por el navegador
   }
+}
+
+export type EventSoundKind =
+  | "nuevo_pedido"     // llegó una autorización de piso
+  | "nuevo_retiro"     // cajera pidió un Drop Cash
+  | "nueva_entrega"    // cierre de turno entregado
+  | "drop_urgente"     // caja superó el tope de sangría
+  | "aprobacion"       // llega un pedido de aprobación (crédito/inventario)
+  | "stock_bajo"       // apareció stock crítico nuevo
+  | "positivo"         // acción exitosa
+  | "error"
+
+const ALERT_SOUNDS: Record<EventSoundKind, AlertStep[]> = {
+  // Radar ping: eco descendente con wobble — autorización nueva
+  nuevo_pedido: [
+    { at: 0, freq: 1240, dur: 0.14, type: "sine", vol: 0.22, wobble: { rate: 28, depth: 70 } },
+    { at: 0.16, freq: 880, dur: 0.14, type: "sine", vol: 0.18, glideTo: 1108 },
+  ],
+  // Drop cash: escala menor descendente con deslizamiento final
+  nuevo_retiro: [
+    { at: 0, freq: 659, dur: 0.12, type: "triangle", vol: 0.2 },
+    { at: 0.13, freq: 587, dur: 0.12, type: "triangle", vol: 0.2 },
+    { at: 0.26, freq: 494, dur: 0.24, type: "triangle", vol: 0.2, glideTo: 440 },
+  ],
+  // Cierre de turno: campanilla brillante D6→G6
+  nueva_entrega: [
+    { at: 0, freq: 1174, dur: 0.2, type: "triangle", vol: 0.18 },
+    { at: 0.22, freq: 1568, dur: 0.3, type: "triangle", vol: 0.16, glideTo: 1318 },
+  ],
+  // ALARMA: sirena de dos tonos ascendente — superó tope de sangría
+  drop_urgente: [
+    { at: 0, freq: 660, dur: 0.18, type: "square", vol: 0.16, glideTo: 880 },
+    { at: 0.2, freq: 880, dur: 0.18, type: "square", vol: 0.16, glideTo: 660 },
+    { at: 0.4, freq: 660, dur: 0.18, type: "square", vol: 0.16, glideTo: 880 },
+    { at: 0.6, freq: 1040, dur: 0.3, type: "sawtooth", vol: 0.12, wobble: { rate: 22, depth: 150 } },
+  ],
+  // Aprobación: sonda suave ascendente con vibrato
+  aprobacion: [
+    { at: 0, freq: 523, dur: 0.14, type: "sine", vol: 0.18, glideTo: 587 },
+    { at: 0.16, freq: 659, dur: 0.22, type: "sine", vol: 0.18, glideTo: 784, wobble: { rate: 18, depth: 28 } },
+  ],
+  // Stock bajo: "gong" grave con caída de tono
+  stock_bajo: [
+    { at: 0, freq: 220, dur: 0.5, type: "sawtooth", vol: 0.14, glideTo: 147, wobble: { rate: 8, depth: 32 } },
+    { at: 0.05, freq: 110, dur: 0.6, type: "sine", vol: 0.18, glideTo: 82 },
+  ],
+  // Acción confirmada: ascenso corto y alegre
+  positivo: [
+    { at: 0, freq: 659, dur: 0.1, type: "sine", vol: 0.18 },
+    { at: 0.11, freq: 987, dur: 0.18, type: "sine", vol: 0.16, glideTo: 1174 },
+  ],
+  // Error: zumbido grave con oscilación fuerte
+  error: [
+    { at: 0, freq: 180, dur: 0.3, type: "square", vol: 0.14, wobble: { rate: 35, depth: 95 } },
+  ],
+}
+
+function playEventSound(kind: EventSoundKind) {
+  playAlertSound(ALERT_SOUNDS[kind])
+}
+
+function systemNotify(title: string, body: string) {
+  try {
+    if (!("Notification" in window)) return
+    if (Notification.permission === "granted" && document.visibilityState === "hidden") {
+      new Notification(title, { body, tag: "supervisor-event", icon: "/pwa-192x192.png", silent: true })
+    }
+  } catch (e) { /* sin soporte */ }
 }
 
 export default function SupervisorPage() {
@@ -159,20 +296,30 @@ export default function SupervisorPage() {
     const next = !soundEnabled
     setSoundEnabled(next)
     localStorage.setItem("supervisor_sound_enabled", String(next))
-    if (next) playChime([523, 659, 784])
+    if (next && typeof navigator !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {})
+    }
+    if (next) playEventSound("positivo")
   }
 
-  const triggerAlertSound = useCallback(() => {
+  const emitSound = useCallback((kind: EventSoundKind) => {
     if (!soundEnabled) return
-    playChime([880, 1174], "triangle", 0.16)
-    if (navigator.vibrate) navigator.vibrate([150, 80, 150])
+    playEventSound(kind)
+    const pattern =
+      kind === "drop_urgente" ? [180, 90, 180] :
+      kind === "nuevo_pedido" || kind === "nuevo_retiro" ? [120, 60, 120] :
+      kind === "error" ? [200] :
+      [60]
+    if (navigator.vibrate) navigator.vibrate(pattern)
   }, [soundEnabled])
 
-  const triggerSuccessSound = useCallback(() => {
-    if (!soundEnabled) return
-    playChime([523, 659, 784, 1046], "sine", 0.1)
-    if (navigator.vibrate) navigator.vibrate([60])
-  }, [soundEnabled])
+  const askNotificationPermission = useCallback(() => {
+    try {
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission().catch(() => {})
+      }
+    } catch (e) { /* sin soporte */ }
+  }, [])
 
   // ── LOGIN CON SELECTOR DE SUPERVISORA ────────────────────────────────────
   const [staffList, setStaffList] = useState<PosStaffMember[]>([])
@@ -202,7 +349,7 @@ export default function SupervisorPage() {
     setLoggingIn(true)
     try {
       await login(selectedStaff.email, loginPassword)
-      triggerSuccessSound()
+      emitSound("positivo")
     } catch (err: any) {
       setLoginError(err?.message || "Contraseña incorrecta")
     } finally {
@@ -253,6 +400,44 @@ export default function SupervisorPage() {
   // Referencias para alertar solo en nuevos pedidos entrantes
   const prevPendingCountRef = useRef(0)
   const prevDropAlertsRef = useRef(0)
+  const prevRetirosRef = useRef(0)
+  const prevHandoffsRef = useRef(0)
+
+  // ── PWA: PROMPT DE INSTALACIÓN ───────────────────────────────────────────
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEventLike | null>(null)
+  const [isInstalled, setIsInstalled] = useState<boolean>(() => {
+    try {
+      return !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)
+    } catch {
+      return false
+    }
+  })
+
+  // ── NOTIFICACIONES, APROBACIONES EXTRA Y STOCK ───────────────────────────
+  const [notes, setNotes] = useState<SystemNotification[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [creditApprovals, setCreditApprovals] = useState<CreditApprovalRequest[]>([])
+  const [lowStock, setLowStock] = useState<LowStockItem[]>([])
+  const [now, setNow] = useState(new Date())
+  const prevCreditRef = useRef(0)
+  const prevStockRef = useRef(0)
+
+  useEffect(() => {
+    const onBeforeInstall = (e: Event) => {
+      e.preventDefault()
+      setInstallPrompt(e as BeforeInstallPromptEventLike)
+    }
+    const onInstalled = () => { setIsInstalled(true); setInstallPrompt(null) }
+    window.addEventListener("beforeinstallprompt", onBeforeInstall)
+    window.addEventListener("appinstalled", onInstalled)
+    const clock = setInterval(() => setNow(new Date()), 1000)
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall)
+      window.removeEventListener("appinstalled", onInstalled)
+      clearInterval(clock)
+    }
+  }, [])
 
   // Marca turno de supervisor
   useEffect(() => {
@@ -277,7 +462,8 @@ export default function SupervisorPage() {
 
       // Si entraron nuevos pedidos pendientes, sonar alerta
       if (currentTotal > prevPendingCountRef.current && prevPendingCountRef.current !== 0) {
-        triggerAlertSound()
+        emitSound("nuevo_pedido")
+        systemNotify("Nueva autorización en piso", `${currentTotal} pedido(s) esperando respuesta.`)
       }
       prevPendingCountRef.current = currentTotal
 
@@ -287,7 +473,7 @@ export default function SupervisorPage() {
     } catch (e: any) {
       setSyncError(e?.message || "Sin conexión con el servidor")
     }
-  }, [triggerAlertSound])
+  }, [emitSound])
 
   useEffect(() => {
     if (!isAuthorized) return
@@ -318,10 +504,28 @@ export default function SupervisorPage() {
 
       // Alertar si aumentó el número de cajas con alerta de Drop Cash
       const dropAlertsCount = validSessions.filter((s) => s.cash_drop_alert).length
+      const retirosCount = (ret || []).length
+      const handoffsCount = (ho || []).length
+
       if (dropAlertsCount > prevDropAlertsRef.current && prevDropAlertsRef.current !== 0) {
-        triggerAlertSound()
+        emitSound("drop_urgente")
+        systemNotify("Drop Cash urgente", `La caja superó su tope de efectivo: ${dropAlertsCount} caso(s).`)
       }
       prevDropAlertsRef.current = dropAlertsCount
+
+      // Nuevos retiros solicitados por cajeras
+      if (retirosCount > prevRetirosRef.current && prevRetirosRef.current !== 0) {
+        emitSound("nuevo_retiro")
+        systemNotify("Retiro solicitado", `Una cajera pidió un Drop Cash de ${retirosCount - prevRetirosRef.current} retiro(s).`)
+      }
+      prevRetirosRef.current = retirosCount
+
+      // Nueva entrega de turno para verificar
+      if (handoffsCount > prevHandoffsRef.current && prevHandoffsRef.current !== 0) {
+        emitSound("nueva_entrega")
+        systemNotify("Cierre de turno recibido", "Hay una entrega de caja esperando verificación.")
+      }
+      prevHandoffsRef.current = handoffsCount
 
       setSessions(validSessions)
       setHandoffs(ho || [])
@@ -333,7 +537,7 @@ export default function SupervisorPage() {
     } finally {
       setLoading(false)
     }
-  }, [triggerAlertSound])
+  }, [emitSound])
 
   useEffect(() => {
     if (!isAuthorized) return
@@ -373,6 +577,110 @@ export default function SupervisorPage() {
     return () => clearInterval(interval)
   }, [isAuthorized, fetchRecentResolved])
 
+  // ── INSTALACIÓN DE LA PWA ────────────────────────────────────────────────
+  const installApp = async () => {
+    if (!installPrompt) return
+try {
+        await installPrompt.prompt()
+        setInstallPrompt(null)
+      } catch (e) { void e }
+  }
+
+  // ── CENTRO DE NOTIFICACIONES ─────────────────────────────────────────────
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const data = await api.notifications.listNotifications({ limit: 15 })
+      setNotes((data.notifications as SystemNotification[]) || [])
+      setUnreadCount(data.unread_count || 0)
+    } catch (e) { void e }
+  }, [])
+
+  useEffect(() => {
+    if (!isAuthorized) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch asíncrono intencional
+    fetchNotifications()
+    const interval = setInterval(fetchNotifications, 15000)
+    return () => clearInterval(interval)
+  }, [isAuthorized, fetchNotifications])
+
+  const markNoteRead = async (n: SystemNotification) => {
+    if (!n.leida) {
+      setNotes(prev => prev.map(x => x.id === n.id ? { ...x, leida: true } : x))
+      setUnreadCount(prev => Math.max(0, prev - 1))
+      try { await api.notifications.markAsRead([n.id]) } catch (e) { void e }
+    }
+    if (n.link) {
+      setNotifOpen(false)
+      window.location.assign(n.link)
+    }
+  }
+
+  const markAllNotesRead = async () => {
+    setNotes(prev => prev.map(n => ({ ...n, leida: true })))
+    setUnreadCount(0)
+    try { await api.notifications.markAllAsRead() } catch (e) { void e }
+  }
+
+  // ── APROBACIONES DE CRÉDITO PENDIENTES ───────────────────────────────────
+  const fetchCreditApprovals = useCallback(async () => {
+    try {
+      const pendientes = (await api.creditApprovalRequests.list({ estado: "pendiente" })) || []
+      if (pendientes.length > prevCreditRef.current && prevCreditRef.current !== 0) {
+        emitSound("aprobacion")
+        systemNotify("Aprobación de crédito en espera", `${pendientes.length} pedido(s) pendientes.`)
+      }
+      prevCreditRef.current = pendientes.length
+      setCreditApprovals(pendientes as CreditApprovalRequest[])
+    } catch (e) { void e }
+  }, [emitSound])
+
+  useEffect(() => {
+    if (!isAuthorized) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch asíncrono intencional
+    fetchCreditApprovals()
+    const interval = setInterval(fetchCreditApprovals, 15000)
+    return () => clearInterval(interval)
+  }, [isAuthorized, fetchCreditApprovals])
+
+  const resolveCreditApproval = async (id: string, aprobado: boolean, motivo?: string) => {
+    setResolvingId(`cred-${id}`)
+    try {
+      if (aprobado) {
+        await api.creditApprovalRequests.approve(id)
+      } else {
+        await api.creditApprovalRequests.reject(id, motivo?.trim() || "Rechazado por supervisor")
+      }
+      toast.success(aprobado ? "Crédito aprobado" : "Crédito rechazado", aprobado ? "El cliente ya puede operar con el crédito." : "Se notificó la decisión.")
+      emitSound("positivo")
+      fetchCreditApprovals()
+    } catch (e: any) {
+      toast.error("No se pudo procesar", e?.message || "Intente de nuevo.")
+    } finally {
+      setResolvingId(null)
+    }
+  }
+
+  // ── STOCK CRÍTICO / BAJO ─────────────────────────────────────────────────
+  const fetchLowStock = useCallback(async () => {
+    try {
+      const items = (await api.stock.lowStock()) || []
+      if (items.length > prevStockRef.current && prevStockRef.current !== 0) {
+        emitSound("stock_bajo")
+        systemNotify("Stock crítico", `${items.length} producto(s) bajo mínimos.`)
+      }
+      prevStockRef.current = items.length
+      setLowStock(items)
+    } catch (e) { void e }
+  }, [emitSound])
+
+  useEffect(() => {
+    if (!isAuthorized) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch asíncrono intencional
+    fetchLowStock()
+    const interval = setInterval(fetchLowStock, 30000)
+    return () => clearInterval(interval)
+  }, [isAuthorized, fetchLowStock])
+
   // ── ACCIONES DE AUTORIZACIÓN ─────────────────────────────────────────────
   const resolveAuthRequest = async (id: string, aprobado: boolean) => {
     if (!user) return
@@ -380,7 +688,7 @@ export default function SupervisorPage() {
     try {
       await api.supervisorRequests.resolve(id, { aprobado, resuelto_por: user.id, resuelto_por_nombre: user.nombre })
       toast.success(aprobado ? "Autorizado" : "Rechazado", aprobado ? "La caja ya puede continuar." : "Se notificó a la cajera.")
-      if (aprobado) triggerSuccessSound()
+      if (aprobado) emitSound("positivo")
       fetchPending()
     } catch (e: any) {
       toast.error("No se pudo resolver", e?.message || "Intente de nuevo.")
@@ -394,7 +702,7 @@ export default function SupervisorPage() {
     try {
       await api.vault.depositApprovals.approve(v.id)
       toast.success("Depósito aprobado", "Se registró su firma en el depósito a bóveda.")
-      triggerSuccessSound()
+      emitSound("positivo")
       fetchPending()
     } catch (e: any) {
       toast.error("No se pudo aprobar", e?.message || "Intente de nuevo.")
@@ -470,7 +778,7 @@ export default function SupervisorPage() {
         })
         toast.success("Retiro Confirmado", "El efectivo ya está registrado en bóveda.")
       }
-      triggerSuccessSound()
+      emitSound("positivo")
       setConfirmingItem(null)
       fetchData()
       fetchVaultAndTeam()
@@ -517,7 +825,7 @@ export default function SupervisorPage() {
         observaciones: dropObs.trim() || "Sangría solicitada por supervisora",
       })
       toast.success("Sangría Registrada", `Se procesó el Drop Cash de ${requestingDropSession.cajero_nombre || "Caja"}.`)
-      triggerSuccessSound()
+      emitSound("positivo")
       setRequestingDropSession(null)
       setDropAmountPyg("")
       setDropAmountUsd("")
@@ -739,9 +1047,11 @@ export default function SupervisorPage() {
   const firstName = (user.nombre || "").split(" ")[0]
 
   const tabs: { key: Tab; label: string; icon: typeof Home; badge?: number }[] = [
-    { key: "inicio", label: "Autorizaciones", icon: ShieldAlert, badge: totalPendientes },
+    { key: "inicio", label: "Autorización", icon: ShieldAlert, badge: totalPendientes },
     { key: "cajas", label: "Radar Cajas", icon: Wallet, badge: cashDropAlerts.length },
+    { key: "aprobaciones", label: "Aprobar", icon: ListChecks, badge: creditApprovals.length },
     { key: "boveda", label: "Bóveda", icon: Landmark },
+    { key: "stock", label: "Stock", icon: Boxes, badge: lowStock.length },
     { key: "equipo", label: "Cajeras", icon: Users },
   ]
 
@@ -765,13 +1075,37 @@ export default function SupervisorPage() {
                 </span>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Turno Activo · Piso</span>
+                <span className={`w-1.5 h-1.5 rounded-full ${syncError ? "bg-rose-500" : "bg-emerald-500"} animate-pulse`} />
+                <span>{syncError ? "Sin Conexión" : "Turno Activo · Piso"}</span>
+                <span className="text-slate-400 dark:text-slate-500 font-mono">
+                  · {now.toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            {installPrompt && !isInstalled && (
+              <button
+                onClick={installApp}
+                title="Instalar la PWA en este dispositivo"
+                className="p-2 rounded-xl bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 border border-slate-800 dark:border-amber-400 hover:opacity-90 transition cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={() => { setNotifOpen(true); askNotificationPermission() }}
+              title="Notificaciones"
+              className="relative p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 cursor-pointer"
+            >
+              <Bell className="w-4 h-4" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 text-[9px] font-black bg-rose-500 text-white min-w-4 h-4 px-1 rounded-full flex items-center justify-center animate-pulse">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </button>
             <button
               onClick={toggleSound}
               title={soundEnabled ? "Silenciar alertas sonoras" : "Activar alertas sonoras"}
@@ -1103,6 +1437,97 @@ export default function SupervisorPage() {
           </div>
         )}
 
+        {/* ══════════════════════ TAB 2.5: APROBACIONES EXTRA (CRÉDITO) ══════════════════════ */}
+        {tab === "aprobaciones" && (
+          <div className="space-y-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                  <CreditCard className="w-4 h-4" />
+                </div>
+                <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400" style={displayFont}>
+                  Aprobaciones de Crédito
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 pl-10">
+                Clientes esperando línea de crédito o ampliación de límite.
+              </p>
+            </div>
+
+            {creditApprovals.length === 0 ? (
+              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center shadow-xs">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div className="font-black text-sm text-slate-900 dark:text-white">Sin solicitudes de crédito</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  No hay líneas de crédito en espera de su aprobación.
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {creditApprovals.map((c) => (
+                  <div key={c.id} className="rounded-3xl border-2 border-blue-400 bg-white dark:bg-slate-900 p-4 shadow-xl shadow-blue-500/10 animate-fade-in">
+                    <div className="flex items-start gap-3 mb-3">
+                      <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
+                        <ClipboardCheck className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                          {c.aprobado_gerente_id ? "Requiere su firma final" : "Solicitud de Crédito"}
+                        </div>
+                        <div className="font-bold text-sm text-slate-900 dark:text-white mt-0.5">
+                          {c.cliente_nombre || c.motivo || "Cliente"}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                          {c.solicitado_por_nombre ? `Por ${c.solicitado_por_nombre} · ` : ""}{timeSince(c.created_at)}
+                        </div>
+                        {c.motivo && (
+                          <div className="text-xs bg-slate-100 dark:bg-slate-800 p-2 rounded-xl mt-2 text-slate-700 dark:text-slate-300">
+                            {c.motivo}
+                          </div>
+                        )}
+                      </div>
+                      {c.monto != null && (
+                        <div className="text-right shrink-0">
+                          <div className="font-black text-base text-blue-600 dark:text-blue-400" style={monoFont}>
+                            {formatPYG(c.monto)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        onClick={() => resolveCreditApproval(c.id, false)}
+                        disabled={resolvingId === `cred-${c.id}`}
+                        className="py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer disabled:opacity-50 transition"
+                      >
+                        <X className="w-4 h-4" /> Rechazar
+                      </button>
+                      <button
+                        onClick={() => resolveCreditApproval(c.id, true)}
+                        disabled={resolvingId === `cred-${c.id}`}
+                        className="py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50 transition active:scale-[0.98]"
+                      >
+                        {resolvingId === `cred-${c.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                        Aprobar Crédito
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-3.5 flex items-start gap-2.5">
+              <Radio className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                Las cuentas por cobrar, bajas y créditos sin aprobar se revisan automáticamente cada 15 segundos. Si aparece una solicitud nueva, sonará una alerta.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ══════════════════════ TAB 2: RADAR DE CAJAS & DROP CASH ══════════════════════ */}
         {tab === "cajas" && (
           <div className="space-y-4">
@@ -1366,6 +1791,70 @@ export default function SupervisorPage() {
           </div>
         )}
 
+        {/* ══════════════════════ TAB 3.5: STOCK CRÍTICO & CONSULTA ══════════════════════ */}
+        {tab === "stock" && (
+          <div className="space-y-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                  <PackageSearch className="w-4 h-4" />
+                </div>
+                <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400" style={displayFont}>
+                  Stock Crítico y Consultas en Piso
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 pl-10">
+                Verificación rápida de existencias para reponer góndolas o responder a clientes.
+              </p>
+            </div>
+
+            <div className="rounded-3xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-4 text-white shadow-xl">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Boxes className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-300" style={displayFont}>
+                    Productos bajo mínimos ({lowStock.length})
+                  </span>
+                </div>
+                <button onClick={fetchLowStock} className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer">
+                  <RefreshCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {lowStock.length === 0 ? (
+                <div className="text-xs text-slate-400 py-3 text-center">
+                  Sin productos bajo mínimos. Stock saludable.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                  {lowStock.map((p) => (
+                    <div key={p.id || p.product_id || `${p.nombre}-${p.sku}`} className="flex items-center justify-between gap-2 rounded-2xl bg-slate-800/70 border border-slate-700/70 p-2.5">
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white truncate">{p.nombre || p.producto_nombre || "Producto"}</div>
+                        <div className="text-[10px] text-slate-400 truncate">{p.sku || "---"} {p.unidad ? `· ${p.unidad}` : ""}</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-black text-sm text-rose-400" style={monoFont}>{p.stock_actual ?? p.disponible ?? p.stock ?? 0}</div>
+                        <div className="text-[9px] text-slate-400">mín {p.stock_minimo ?? p.minimo ?? 0}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs">
+              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5 flex items-center gap-1.5">
+                <Radio className="w-3.5 h-3.5 text-amber-500" /> Notas operativas
+              </div>
+              <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                <li className="flex gap-2"><span className="text-amber-500 font-bold">1.</span> El listado de stock bajo se actualiza cada 30 segundos y alerta con sonido cuando aparece un ítem nuevo.</li>
+                <li className="flex gap-2"><span className="text-amber-500 font-bold">2.</span> Use el Radar de Cajas para ejecutar Drop Cash cuando una boca supere el tope.</li>
+                <li className="flex gap-2"><span className="text-amber-500 font-bold">3.</span> Las autorizaciones de piso se resuelven desde la pestaña Autorización.</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
         {/* ══════════════════════ TAB 4: RENDIMIENTO DE CAJERAS ══════════════════════ */}
         {tab === "equipo" && (
           <div className="space-y-4">
@@ -1438,7 +1927,7 @@ export default function SupervisorPage() {
 
       {/* ── BARRA INFERIOR DE NAVEGACIÓN TÁCTIL ── */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800/80 pb-[env(safe-area-inset-bottom)] shadow-lg">
-        <div className="grid grid-cols-4 max-w-lg mx-auto">
+        <div className="flex overflow-x-auto no-scrollbar max-w-xl mx-auto">
           {tabs.map((t) => {
             const Icon = t.icon
             const active = tab === t.key
@@ -1446,7 +1935,7 @@ export default function SupervisorPage() {
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
-                className={`flex flex-col items-center gap-1 py-2.5 relative cursor-pointer transition ${
+                className={`flex flex-col items-center gap-1 py-2.5 px-3.5 min-w-[68px] flex-1 relative cursor-pointer transition ${
                   active ? "text-amber-500 font-bold" : "text-slate-400 dark:text-slate-500 hover:text-slate-600"
                 }`}
               >
@@ -1454,11 +1943,12 @@ export default function SupervisorPage() {
                   <Icon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
                   {!!t.badge && t.badge > 0 && (
                     <span className="absolute -top-1.5 -right-2 text-[9px] font-black bg-rose-500 text-white w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
-                      {t.badge}
+                      {t.badge > 99 ? "99+" : t.badge}
                     </span>
                   )}
                 </div>
-                <span className="text-[10px] tracking-tight">{t.label}</span>
+                <span className="text-[10px] tracking-tight whitespace-nowrap">{t.label}</span>
+                {active && <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-amber-500" />}
               </button>
             )
           })}
@@ -1726,6 +2216,80 @@ export default function SupervisorPage() {
               {submittingReject ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
               Rechazar Depósito
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL CENTRO DE NOTIFICACIONES ── */}
+      {notifOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl overflow-hidden pb-[env(safe-area-inset-bottom)] animate-fade-in">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
+                  <Bell className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                    Centro de Notificaciones
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    {unreadCount > 0 ? `${unreadCount} sin leer` : "Todo al día"}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                {unreadCount > 0 && (
+                  <button
+                    onClick={markAllNotesRead}
+                    className="text-[10px] font-bold text-amber-500 hover:underline px-2 py-1 cursor-pointer"
+                  >
+                    Leer todo
+                  </button>
+                )}
+                <button onClick={() => setNotifOpen(false)} className="text-slate-400 p-1 cursor-pointer">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-[55vh] overflow-y-auto">
+              {notes.length === 0 ? (
+                <div className="p-8 text-center text-slate-500">
+                  <Bell className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-xs">Sin notificaciones recientes.</p>
+                </div>
+              ) : (
+                notes.map((n) => (
+                  <div
+                    key={n.id}
+                    onClick={() => markNoteRead(n)}
+                    className={`p-3.5 border-b border-slate-100 dark:border-slate-800/60 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40 transition ${
+                      n.leida ? "opacity-70" : "bg-amber-500/5"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${n.leida ? "bg-slate-300 dark:bg-slate-700" : "bg-amber-500"}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-bold truncate ${n.leida ? "text-slate-500 dark:text-slate-400" : "text-slate-900 dark:text-white"}`}>
+                            {n.title}
+                          </span>
+                        </div>
+                        {n.body && <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{n.body}</p>}
+                        <p className="text-[10px] text-slate-400 mt-1">{timeSince(n.created_at)}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60">
+              <p className="text-[10px] text-center text-slate-400">
+                Se sincronizan cada 15 segundos. Las alertas sonoras varían según el evento.
+              </p>
+            </div>
           </div>
         </div>
       )}

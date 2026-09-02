@@ -6,15 +6,6 @@ import { ConfirmProvider } from "./components/ConfirmDialog"
 import App from "./App"
 import "./index.css"
 
-// Desactivar Service Workers cacheados para evitar código viejo en el POS
-if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then((registrations) => {
-    for (const registration of registrations) {
-      registration.unregister()
-    }
-  })
-}
-
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
