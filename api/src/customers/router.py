@@ -4,10 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.customers.schemas import CustomerCreate, CustomerUpdate, CustomerResponse
 from api.src.customers import service
 
-router = APIRouter(prefix="/api/v1", tags=["customers"])
+router = APIRouter(prefix="/api/v1", tags=["customers"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/customers", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
@@ -85,7 +86,7 @@ async def lookup_ruc(ruc_or_ci: str, db: AsyncSession = Depends(get_db)):
 
     # 2. Buscar en base de datos local (customers, suppliers, companies)
     query = text("""
-        SELECT nombre, razon_social, ruc, telefono, email, 'cliente' as origen
+        SELECT razon_social, nombre_fantasia, ruc, telefono, email, 'cliente' as origen
         FROM customers
         WHERE ruc = :ruc OR ruc = :clean OR ci = :clean OR ruc LIKE :prefix
         LIMIT 1
@@ -98,8 +99,8 @@ async def lookup_ruc(ruc_or_ci: str, db: AsyncSession = Depends(get_db)):
             "ruc": row.ruc or ruc_completo,
             "ci": clean,
             "dv": str(dv),
-            "nombre": row.nombre or row.razon_social,
-            "razon_social": row.razon_social or row.nombre,
+            "nombre": row.nombre_fantasia or row.razon_social,
+            "razon_social": row.razon_social or row.nombre_fantasia,
             "telefono": row.telefono or "",
             "email": row.email or "",
             "encontrado_en_db": True,
@@ -108,7 +109,7 @@ async def lookup_ruc(ruc_or_ci: str, db: AsyncSession = Depends(get_db)):
 
     # Buscar en proveedores si no estaba en clientes
     sup_q = text("""
-        SELECT nombre, razon_social, ruc, telefono, email
+        SELECT razon_social, ruc, telefono, email
         FROM suppliers
         WHERE ruc = :ruc OR ruc = :clean OR ruc LIKE :prefix
         LIMIT 1
@@ -121,8 +122,8 @@ async def lookup_ruc(ruc_or_ci: str, db: AsyncSession = Depends(get_db)):
             "ruc": sup_row.ruc or ruc_completo,
             "ci": clean,
             "dv": str(dv),
-            "nombre": sup_row.nombre or sup_row.razon_social,
-            "razon_social": sup_row.razon_social or sup_row.nombre,
+            "nombre": sup_row.razon_social,
+            "razon_social": sup_row.razon_social,
             "telefono": sup_row.telefono or "",
             "email": sup_row.email or "",
             "encontrado_en_db": True,
