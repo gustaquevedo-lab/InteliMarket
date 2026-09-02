@@ -196,14 +196,18 @@ export default function RbacPage() {
     }
   }
 
-  // Reset de Contraseña
+  // Reset de Contraseña -- antes avisaba "listo" ANTES de siquiera intentar
+  // el cambio, y si el pedido fallaba (permisos, red) el error se tapaba
+  // con un comentario "optimista": la clave real del usuario nunca
+  // cambiaba pero el admin se iba pensando que si. Ahora solo confirma
+  // despues de que el backend confirmo el cambio real.
   const handleResetPassword = async (user: TenantUser) => {
     const tempPass = `Extra${Math.floor(1000 + Math.random() * 9000)}*`
-    toast.success("Contraseña Actualizada en DB", `La nueva clave de acceso para ${user.nombre} es: ${tempPass}`)
     try {
       await api.auth.users.resetPassword(user.id, tempPass)
-    } catch {
-      // optimista
+      toast.success("Contraseña Actualizada", `La nueva clave de acceso para ${user.nombre} es: ${tempPass}`)
+    } catch (e: any) {
+      toast.error("No se pudo resetear la contraseña", e instanceof Error ? e.message : "Intentá nuevamente o verificá que tengas permisos de administrador.")
     }
   }
 

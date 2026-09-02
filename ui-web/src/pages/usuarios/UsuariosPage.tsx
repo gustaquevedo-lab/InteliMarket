@@ -134,13 +134,21 @@ export default function UsuariosPage() {
   const handleResetPassword = async (u: TenantUser) => {
     try {
       const result = await api.auth.users.resetPassword(u.id)
-      const pass = result?.temporary_password || `Extra${Math.floor(1000 + Math.random() * 9000)}*`
-      setTempPasswordFor({ email: u.email, password: pass })
+      if (!result?.temporary_password) {
+        // Si el backend respondio sin la clave temporal (formato inesperado)
+        // no hay forma de saber cual quedo puesta de verdad -- mostrar una
+        // inventada aca seria mentirle al admin con una clave que el usuario
+        // real no podria usar para entrar.
+        toast.error("Respuesta inesperada del servidor", "La contraseña puede haberse actualizado pero no se recibió la clave nueva. Verificá con el usuario o reintentá.")
+        return
+      }
+      setTempPasswordFor({ email: u.email, password: result.temporary_password })
       toast.success("Contraseña Reseteada", `Nueva clave generada para ${u.email}`)
-    } catch {
-      const tempPass = `Extra${Math.floor(1000 + Math.random() * 9000)}*`
-      setTempPasswordFor({ email: u.email, password: tempPass })
-      toast.success("Contraseña Reseteada", `Nueva clave generada para ${u.email}`)
+    } catch (e: any) {
+      // Antes, cualquier error acá (permisos, red, lo que sea) se tapaba
+      // mostrando una clave inventada como si el reseteo hubiera funcionado
+      // -- la contraseña real del usuario nunca cambiaba y nadie se enteraba.
+      toast.error("No se pudo resetear la contraseña", e instanceof Error ? e.message : "Intentá nuevamente o verificá que tengas permisos de administrador.")
     }
   }
 
