@@ -16,7 +16,7 @@ from api.src.inventory.schemas import (
 )
 from api.src.inventory import service, export_service, pdf_reports
 
-router = APIRouter(prefix="/api/v1", tags=["inventory"])
+router = APIRouter(prefix="/api/v1", tags=["inventory"], dependencies=[Depends(require_auth)])
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:

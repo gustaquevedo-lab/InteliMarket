@@ -27,7 +27,7 @@ from api.src.financial.schemas import (
 )
 from api.src.financial import service
 
-router = APIRouter(prefix="/api/v1/financial", tags=["financial"])
+router = APIRouter(prefix="/api/v1/financial", tags=["financial"], dependencies=[Depends(require_auth)])
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
