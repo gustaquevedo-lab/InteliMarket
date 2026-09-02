@@ -1404,6 +1404,12 @@ export const api = {
     resolve: (filtro: Record<string, any>) => client.post<any[]>("/v1/label-printing/resolve", filtro),
     printZebra: (data: { items: any[]; template_id?: string }) => client.post<{ zpl: string; enviado_por_red: boolean }>("/v1/label-printing/print/zebra", data),
   },
+  intelifact: {
+    getConfig: () => client.get<any | null>("/v1/intelifact/config"),
+    updateConfig: (data: Record<string, any>) => client.put<any>("/v1/intelifact/config", data),
+    previewInvoice: (data: Record<string, any>) => client.post<any>("/v1/intelifact/invoices/preview", data),
+    telemetryStatus: () => client.get<{ disponible: boolean; detalle?: any; error?: string }>("/v1/intelifact/telemetry/status"),
+  },
   plugpay: {
     compliance: (cpf: string) => client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/compliance/${cpf}`),
     createPix: (data: { monto: number; moneda?: string; customer_cpf?: string; customer_cpf_cnpj?: string; sale_id?: string; customer_id?: string }) =>

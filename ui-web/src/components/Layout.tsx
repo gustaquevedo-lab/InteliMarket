@@ -4,7 +4,7 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom"
 import {
   LayoutDashboard, MonitorSmartphone, Receipt, FileSpreadsheet, Users, MessageCircle, Megaphone,
   Tags, Warehouse, Scale, ShoppingBag, Briefcase, Banknote, Landmark, CreditCard, Wallet, ReceiptText,
-  Truck, ShoppingCart, ShieldCheck, BadgeDollarSign, Blocks, LineChart, Fingerprint, Settings,
+  Truck, ShoppingCart, ShieldCheck, BadgeDollarSign, Blocks, LineChart, Fingerprint, Settings, FileSignature,
   LogOut, Menu, X, Moon, Sun, Monitor, Search, Store, ChevronDown, Building, Scan, QrCode, BookOpen, PiggyBank,
   PieChart, DollarSign, TrendingUp, Bot, Clock, Award, Globe, Repeat, Wrench,
   Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Carrot, ChefHat, Radio, Plus, Sparkles, Tag,
@@ -129,6 +129,7 @@ const navGroups: NavGroup[] = [
     title: "Integraciones",
     items: [
       { icon: ShieldCheck, label: "Facturación & Autoimpresor (DNIT)", path: "/sifen" },
+      { icon: FileSignature, label: "Facturación Electrónica (Próximamente)", path: "/facturacion-electronica" },
       { icon: Scale, label: "Básculas & Balanzas", path: "/escalas" },
       { icon: Radio, label: "Etiquetas Electrónicas (ESL)", path: "/esl" },
       { icon: Globe, label: "Delivery Apps", path: "/delivery-integrations" },

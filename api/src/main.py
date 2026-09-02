@@ -67,6 +67,7 @@ from api.src.price_lists.router import router as price_lists_router
 from api.src.pos_terminal_transactions.router import router as pos_terminal_transactions_router
 from api.src.payment_integrations.router import router as payment_integrations_router
 from api.src.label_printing.router import router as label_printing_router
+from api.src.intelifact.router import router as intelifact_router
 from api.src.plugpay.router import router as plugpay_router
 from api.src.portal.router import router as portal_router
 from api.src.security.router import router as security_router
@@ -302,6 +303,7 @@ app.include_router(price_lists_router)
 app.include_router(pos_terminal_transactions_router)
 app.include_router(payment_integrations_router)
 app.include_router(label_printing_router)
+app.include_router(intelifact_router)
 app.include_router(plugpay_router)
 app.include_router(portal_router)
 app.include_router(security_router)

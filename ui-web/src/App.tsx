@@ -12,6 +12,7 @@ const Login = lazy(() => import("./pages/Login"))
 const Dashboard = lazy(() => import("./pages/Dashboard"))
 const MarketingPage = lazy(() => import("./pages/marketing/MarketingPage"))
 const SifenPage = lazy(() => import("./pages/sifen/SifenPage"))
+const InteliFactPage = lazy(() => import("./pages/sifen/InteliFactPage"))
 const ProductsPage = lazy(() => import("./pages/products/ProductsPage"))
 const InventoryPage = lazy(() => import("./pages/inventory/InventoryPage"))
 const CustomersPage = lazy(() => import("./pages/customers/CustomersPage"))
@@ -222,6 +223,7 @@ function AppRoutes() {
           ["gerencial", <ExecutiveReportPage />],
           ["settings", <SettingsPage />],
           ["sifen", <SifenPage />],
+          ["facturacion-electronica", <InteliFactPage />],
           ["caja", <CajaPage />],
           ["admin", <AdminPage />],
           ["admin/verticals", <VerticalsPage />],

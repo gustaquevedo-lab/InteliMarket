@@ -99,6 +99,7 @@ import api.src.suscripciones.models
 import api.src.retail.models
 import api.src.servicios.models
 import api.src.label_printing.models
+import api.src.intelifact.models
 
 target_metadata = Base.metadata
 
