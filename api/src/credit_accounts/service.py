@@ -158,7 +158,20 @@ async def process_purchase(
     de limite (que ya se hizo antes, para generar la aprobacion) no debe
     volver a rechazarla — el saldo_disponible puede quedar en negativo, que
     es justamente lo que la aprobacion autorizo."""
-    account = await get_credit_account_by_customer(db, company_id, customer_id)
+    # SELECT ... FOR UPDATE -- sin esto, dos ventas a credito casi
+    # simultaneas del mismo cliente pueden leer el mismo saldo_disponible
+    # antes de que ninguna confirme, y la que commitea despues pisa
+    # silenciosamente el descuento de la otra (mismo patron de carrera ya
+    # corregido en caja.confirm_cash_drop_request). El bloqueo mantiene la
+    # fila tomada hasta el commit de esta transaccion, asi la segunda venta
+    # concurrente espera y vuelve a leer el saldo ya actualizado.
+    result = await db.execute(
+        select(CreditAccount).where(
+            CreditAccount.company_id == company_id,
+            CreditAccount.customer_id == uuid.UUID(customer_id),
+        ).with_for_update()
+    )
+    account = result.scalar_one_or_none()
     if not account:
         return {"error": "No credit account for customer"}
     if not account.activo:
