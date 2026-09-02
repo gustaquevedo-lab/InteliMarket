@@ -88,8 +88,8 @@ async function createWindow() {
     if (mainWindow) mainWindow.webContents.reload()
   })
 
-  // ── DETERMINAR URL DESTINO (SANDBOX POR DEFECTO) ──────────────────────────
-  let targetUrl = 'http://192.168.0.10:5174/pos'
+  // ── DETERMINAR URL DESTINO (PRODUCCIÓN POR DEFECTO) ────────────────────────
+  let targetUrl = 'http://192.168.0.10:5173/pos'
 
   const argUrl = process.argv.find(arg => arg && arg.startsWith('--url='))
   if (argUrl) {
