@@ -274,9 +274,28 @@ function playEventSound(kind: EventSoundKind) {
 
 function systemNotify(title: string, body: string) {
   try {
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      navigator.vibrate([200, 100, 200, 100, 300])
+    }
     if (!("Notification" in window)) return
-    if (Notification.permission === "granted" && document.visibilityState === "hidden") {
-      new Notification(title, { body, tag: "supervisor-event", icon: "/pwa-192x192.png", silent: true })
+    if (Notification.permission === "granted") {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.ready.then((reg) => {
+          reg.showNotification(title, {
+            body,
+            tag: "supervisor-auth-event",
+            icon: "/pwa-192x192.png",
+            badge: "/pwa-192x192.png",
+            vibrate: [200, 100, 200, 100, 300],
+          } as any).catch(() => {
+            new Notification(title, { body, tag: "supervisor-event", icon: "/pwa-192x192.png" })
+          })
+        }).catch(() => {
+          new Notification(title, { body, tag: "supervisor-event", icon: "/pwa-192x192.png" })
+        })
+      } else {
+        new Notification(title, { body, tag: "supervisor-event", icon: "/pwa-192x192.png" })
+      }
     }
   } catch (e) { /* sin soporte */ }
 }
@@ -285,6 +304,25 @@ export default function SupervisorPage() {
   const { user, loading: authLoading, login, logout } = useAuth()
   const toast = useToast()
   const { dark, toggle: toggleTheme } = useTheme()
+
+  // ── DESBLOQUEO DE AUDIO EN DISPOSITIVOS MÓVILES (TOUCH UNLOCK) ────────────
+  useEffect(() => {
+    const unlockAudio = () => {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+        if (AudioCtx) {
+          const dummy = new AudioCtx()
+          dummy.resume().then(() => dummy.close()).catch(() => {})
+        }
+      } catch (e) {}
+    }
+    window.addEventListener("touchstart", unlockAudio, { once: true, passive: true })
+    window.addEventListener("click", unlockAudio, { once: true })
+    return () => {
+      window.removeEventListener("touchstart", unlockAudio)
+      window.removeEventListener("click", unlockAudio)
+    }
+  }, [])
 
   // ── SONIDO Y AVISOS SONOROS ──────────────────────────────────────────────
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
@@ -310,7 +348,9 @@ export default function SupervisorPage() {
       kind === "nuevo_pedido" || kind === "nuevo_retiro" ? [120, 60, 120] :
       kind === "error" ? [200] :
       [60]
-    if (navigator.vibrate) navigator.vibrate(pattern)
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try { navigator.vibrate(pattern) } catch (e) {}
+    }
   }, [soundEnabled])
 
   const askNotificationPermission = useCallback(() => {
@@ -397,7 +437,9 @@ export default function SupervisorPage() {
   const [dropObs, setDropObs] = useState("")
   const [submittingDrop, setSubmittingDrop] = useState(false)
 
-  // Referencias para alertar solo en nuevos pedidos entrantes
+  // Referencias para alertar en nuevos pedidos entrantes
+  const isInitializedPendingRef = useRef(false)
+  const isInitializedDataRef = useRef(false)
   const prevPendingCountRef = useRef(0)
   const prevDropAlertsRef = useRef(0)
   const prevRetirosRef = useRef(0)
@@ -449,7 +491,7 @@ export default function SupervisorPage() {
     return () => { cancelled = true }
   }, [isAuthorized])
 
-  // ── POLLING DE ALTA PRIORIDAD (CADA 4s) ──────────────────────────────────
+  // ── POLLING DE ALTA PRIORIDAD (CADA 1.5s EN PISO) ────────────────────────
   const fetchPending = useCallback(async () => {
     try {
       const [reqs, vApprovals] = await Promise.all([
@@ -460,11 +502,12 @@ export default function SupervisorPage() {
       const newVault = vApprovals || []
       const currentTotal = newReqs.length + newVault.length
 
-      // Si entraron nuevos pedidos pendientes, sonar alerta
-      if (currentTotal > prevPendingCountRef.current && prevPendingCountRef.current !== 0) {
+      // Si aumentaron los pedidos pendientes (incluyendo de 0 a 1), sonar alerta y vibrar
+      if (isInitializedPendingRef.current && currentTotal > prevPendingCountRef.current) {
         emitSound("nuevo_pedido")
-        systemNotify("Nueva autorización en piso", `${currentTotal} pedido(s) esperando respuesta.`)
+        systemNotify("Nueva autorización en piso", `${currentTotal} pedido(s) de cajera esperando respuesta.`)
       }
+      isInitializedPendingRef.current = true
       prevPendingCountRef.current = currentTotal
 
       setAuthRequests(newReqs)
@@ -474,13 +517,6 @@ export default function SupervisorPage() {
       setSyncError(e?.message || "Sin conexión con el servidor")
     }
   }, [emitSound])
-
-  useEffect(() => {
-    if (!isAuthorized) return
-    fetchPending()
-    const interval = setInterval(fetchPending, 4000)
-    return () => clearInterval(interval)
-  }, [isAuthorized, fetchPending])
 
   // ── POLLING GENERAL DE CAJAS & RETIROS (FILTRADO ESTRICTO: HOY Y AYER) ───
   const fetchData = useCallback(async () => {
@@ -507,24 +543,23 @@ export default function SupervisorPage() {
       const retirosCount = (ret || []).length
       const handoffsCount = (ho || []).length
 
-      if (dropAlertsCount > prevDropAlertsRef.current && prevDropAlertsRef.current !== 0) {
-        emitSound("drop_urgente")
-        systemNotify("Drop Cash urgente", `La caja superó su tope de efectivo: ${dropAlertsCount} caso(s).`)
+      if (isInitializedDataRef.current) {
+        if (dropAlertsCount > prevDropAlertsRef.current) {
+          emitSound("drop_urgente")
+          systemNotify("Drop Cash urgente", `La caja superó su tope de efectivo: ${dropAlertsCount} caso(s).`)
+        }
+        if (retirosCount > prevRetirosRef.current) {
+          emitSound("nuevo_retiro")
+          systemNotify("Retiro solicitado", `Una cajera pidió un Drop Cash de ${retirosCount - prevRetirosRef.current} retiro(s).`)
+        }
+        if (handoffsCount > prevHandoffsRef.current) {
+          emitSound("nueva_entrega")
+          systemNotify("Cierre de turno recibido", "Hay una entrega de caja esperando verificación.")
+        }
       }
+      isInitializedDataRef.current = true
       prevDropAlertsRef.current = dropAlertsCount
-
-      // Nuevos retiros solicitados por cajeras
-      if (retirosCount > prevRetirosRef.current && prevRetirosRef.current !== 0) {
-        emitSound("nuevo_retiro")
-        systemNotify("Retiro solicitado", `Una cajera pidió un Drop Cash de ${retirosCount - prevRetirosRef.current} retiro(s).`)
-      }
       prevRetirosRef.current = retirosCount
-
-      // Nueva entrega de turno para verificar
-      if (handoffsCount > prevHandoffsRef.current && prevHandoffsRef.current !== 0) {
-        emitSound("nueva_entrega")
-        systemNotify("Cierre de turno recibido", "Hay una entrega de caja esperando verificación.")
-      }
       prevHandoffsRef.current = handoffsCount
 
       setSessions(validSessions)
@@ -539,12 +574,29 @@ export default function SupervisorPage() {
     }
   }, [emitSound])
 
+  // Polling combinado y reactivación instantánea al desbloquear pantalla
   useEffect(() => {
     if (!isAuthorized) return
+    fetchPending()
     fetchData()
-    const interval = setInterval(fetchData, 8000)
-    return () => clearInterval(interval)
-  }, [isAuthorized, fetchData])
+
+    const intervalPending = setInterval(fetchPending, 1500)
+    const intervalData = setInterval(fetchData, 6000)
+
+    const onWake = () => {
+      fetchPending()
+      fetchData()
+    }
+    document.addEventListener("visibilitychange", onWake)
+    window.addEventListener("focus", onWake)
+
+    return () => {
+      clearInterval(intervalPending)
+      clearInterval(intervalData)
+      document.removeEventListener("visibilitychange", onWake)
+      window.removeEventListener("focus", onWake)
+    }
+  }, [isAuthorized, fetchPending, fetchData])
 
   // ── DATOS SECUNDARIOS (BÓVEDA Y EQUIPO) ──────────────────────────────────
   const fetchVaultAndTeam = useCallback(async () => {
@@ -1189,6 +1241,57 @@ try {
           </div>
         </div>
       </div>
+
+      {/* ── BANNER FLOTANTE DE ALERTA GLOBAL DE PISO (SI HAY PEDIDOS PENDIENTES) ── */}
+      {authRequests.length > 0 && tab !== "inicio" && (
+        <div className="sticky top-28 z-40 px-4 max-w-2xl mx-auto pointer-events-auto mb-4 animate-fade-in">
+          <div className="rounded-3xl border-2 border-amber-500 bg-amber-500 text-slate-950 p-4 shadow-2xl shadow-amber-500/40">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-slate-950 text-amber-400 flex items-center justify-center shrink-0 font-black shadow-md">
+                  <ShieldAlert className="w-5 h-5 animate-pulse" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                    <span>⚡ PEDIDO DE CAJA EN VIVO ({authRequests.length})</span>
+                    <span className="bg-slate-950 text-white text-[9px] px-1.5 py-0.2 rounded font-mono">
+                      {tipoLabel[authRequests[0].tipo] || authRequests[0].tipo}
+                    </span>
+                  </div>
+                  <div className="font-black text-sm text-slate-950 line-clamp-1 mt-0.5">
+                    {authRequests[0].descripcion}
+                  </div>
+                  <div className="text-[11px] font-bold text-slate-900/80 mt-0.5">
+                    {authRequests[0].cajero_nombre || "Cajera"} · {authRequests[0].caja_nombre || "Caja"}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => resolveAuthRequest(authRequests[0].id, false)}
+                disabled={resolvingId === authRequests[0].id}
+                className="flex-1 py-2.5 rounded-xl bg-slate-950/20 hover:bg-slate-950/30 text-slate-950 font-black text-xs flex items-center justify-center gap-1 cursor-pointer transition"
+              >
+                <X className="w-4 h-4" /> Rechazar
+              </button>
+              <button
+                onClick={() => resolveAuthRequest(authRequests[0].id, true)}
+                disabled={resolvingId === authRequests[0].id}
+                className="flex-2 py-2.5 rounded-xl bg-slate-950 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg hover:bg-slate-900 transition active:scale-[0.98]"
+              >
+                {resolvingId === authRequests[0].id ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                ) : (
+                  <Check className="w-4 h-4 text-emerald-400" />
+                )}
+                <span>APROBAR (1 TOQUE)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── CUERPO PRINCIPAL ── */}
       <div className="p-4 space-y-4 max-w-2xl mx-auto">
