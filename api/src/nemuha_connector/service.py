@@ -78,7 +78,7 @@ from uuid import UUID
 
 import pymysql
 import pymysql.cursors
-from sqlalchemy import select, text, func, case
+from sqlalchemy import select, text, func, case, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.config import settings
@@ -219,6 +219,51 @@ async def _resolve_pessoa(db: AsyncSession, company_id: str, id_pessoa: int, rol
 # UNIDADE_MEDIDA real: solo 2 valores en toda la base — UNIDAD (10463 productos)
 # y KILOGRAMOS (489) — verificado contra datos reales, no asumido.
 UNIDAD_MEDIDA_MAP = {"UNIDAD": "UN", "KILOGRAMOS": "KG"}
+
+
+async def reconcile_unresolved_products(db: AsyncSession, company_id: str, since: date | None) -> int:
+    """Reintenta resolver el nombre real de productos que quedaron con el
+    placeholder 'Producto legacy #N' (ver _resolve_producto) -- antes ese
+    nombre quedaba fabricado para siempre porque el mapeo en
+    nemuha_record_map cortocircuitaba cualquier reintento. Se corre al
+    principio de cada sync, antes de sales/purchase_orders, para que si el
+    dato ya esta disponible en el legacy, la corrida de hoy use el nombre
+    real en vez del placeholder."""
+    result = await db.execute(
+        select(Product.id, Product.sku).where(
+            Product.company_id == company_id,
+            Product.nombre.like("Producto legacy #%"),
+        )
+    )
+    candidatos = result.all()
+    if not candidatos:
+        return 0
+
+    reconciliados = 0
+    for product_id, sku in candidatos:
+        try:
+            id_produto = int(sku)
+        except (TypeError, ValueError):
+            continue
+        rows = await _fetch(
+            "SELECT DS_PRODUTO, UNIDADE_MEDIDA, QTD_MINIMA_EM_ESTOQUE, VL_PRECO_VENDA_VAREJO FROM est_produto WHERE ID_PRODUTO = %s",
+            (id_produto,),
+        )
+        if not rows or not rows[0]["DS_PRODUTO"]:
+            continue  # sigue sin existir en el legacy, se deja marcado para revision manual
+        r = rows[0]
+        await db.execute(
+            update(Product).where(Product.id == product_id).values(
+                nombre=r["DS_PRODUTO"],
+                unidad_medida=UNIDAD_MEDIDA_MAP.get(r["UNIDADE_MEDIDA"], "UN"),
+                stock_minimo=int(r["QTD_MINIMA_EM_ESTOQUE"] or 0),
+                precio_venta=Decimal(str(r["VL_PRECO_VENDA_VAREJO"] or 0)),
+            )
+        )
+        reconciliados += 1
+    if reconciliados:
+        await db.flush()
+    return reconciliados
 
 
 async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, codigo_barra: str | None, iva_tasa: Decimal) -> UUID:
@@ -2366,6 +2411,7 @@ async def run_sync(db: AsyncSession, company_id: str, since: date | None = None)
     errors: dict[str, str] = {}
 
     for name, fn in (
+        ("reconcile_legacy_placeholders", reconcile_unresolved_products),
         ("accounts_payable", sync_accounts_payable),
         ("accounts_receivable", sync_accounts_receivable),
         ("bank_accounts", sync_bank_accounts),
