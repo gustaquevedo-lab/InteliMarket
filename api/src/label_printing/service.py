@@ -7,10 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.label_printing.models import LabelPrinterConfig, LabelTemplate
 from api.src.label_printing.schemas import (
-    LabelPrinterConfigUpsert, LabelTemplateCreate, LabelSourceFilter, ResolvedLabelItem,
+    LabelPrinterConfigUpsert, LabelTemplateCreate, LabelSourceFilter, ResolvedLabelItem, PriceScaleTierItem,
 )
 from api.src.products.models import Product
 from api.src.purchases.models import PurchaseReceipt, PurchaseReceiptItem, Supplier
+from api.src.smart_pricing.models import TieredPrice
 
 
 # ── Config de impresoras ──────────────────────────────────────────────────
@@ -98,18 +99,19 @@ def _to_resolved(product: Product, cantidad: int, costo_unitario=None, proveedor
 
 async def resolve_label_items(db: AsyncSession, company_id: str, filtro: LabelSourceFilter) -> list[ResolvedLabelItem]:
     cid = uuid.UUID(company_id)
+    items: list[ResolvedLabelItem] = []
 
     if filtro.producto_ids:
         ids = [item.product_id for item in filtro.producto_ids]
         result = await db.execute(select(Product).where(Product.id.in_(ids), Product.company_id == cid))
         products = {p.id: p for p in result.scalars().all()}
-        return [
+        items = [
             _to_resolved(products[item.product_id], item.cantidad)
             for item in filtro.producto_ids
             if item.product_id in products
         ]
 
-    if filtro.receipt_id:
+    elif filtro.receipt_id:
         result = await db.execute(
             select(PurchaseReceiptItem, Product, PurchaseReceipt, Supplier)
             .join(Product, Product.id == PurchaseReceiptItem.product_id)
@@ -118,7 +120,7 @@ async def resolve_label_items(db: AsyncSession, company_id: str, filtro: LabelSo
             .where(PurchaseReceiptItem.receipt_id == filtro.receipt_id, PurchaseReceipt.company_id == cid)
         )
         rows = result.all()
-        return [
+        items = [
             _to_resolved(
                 product,
                 int(receipt_item.cantidad_recibida),
@@ -129,10 +131,7 @@ async def resolve_label_items(db: AsyncSession, company_id: str, filtro: LabelSo
             for receipt_item, product, receipt, supplier in rows
         ]
 
-    if filtro.proveedor_id:
-        # Productos que alguna vez se recibieron de este proveedor -- no hay
-        # tabla directa producto<->proveedor, se resuelve via el historial de
-        # recepciones (misma limitacion documentada en el plan).
+    elif filtro.proveedor_id:
         latest_costo = (
             select(
                 PurchaseReceiptItem.product_id,
@@ -150,12 +149,12 @@ async def resolve_label_items(db: AsyncSession, company_id: str, filtro: LabelSo
             .join(latest_costo, latest_costo.c.product_id == Product.id)
             .where(Product.company_id == cid, Product.activo.is_(True))
         )
-        return [
+        items = [
             _to_resolved(product, filtro.cantidad_default, costo_unitario=costo, proveedor_nombre=supplier.razon_social if supplier else None)
             for product, costo in result.all()
         ]
 
-    if filtro.categoria_id:
+    elif filtro.categoria_id:
         result = await db.execute(
             select(Product).where(
                 Product.company_id == cid,
@@ -163,9 +162,30 @@ async def resolve_label_items(db: AsyncSession, company_id: str, filtro: LabelSo
                 Product.activo.is_(True),
             )
         )
-        return [_to_resolved(p, filtro.cantidad_default) for p in result.scalars().all()]
+        items = [_to_resolved(p, filtro.cantidad_default) for p in result.scalars().all()]
 
-    return []
+    # Cargar escalas de precios (Tiered Pricing) para los productos encontrados
+    if items:
+        pids = [i.product_id for i in items]
+        tier_res = await db.execute(
+            select(TieredPrice)
+            .where(
+                TieredPrice.company_id == cid,
+                TieredPrice.product_id.in_(pids),
+                TieredPrice.activo.is_(True),
+                TieredPrice.price_list_id == None,
+            )
+            .order_by(TieredPrice.min_qty.asc())
+        )
+        tiers_by_prod: dict[uuid.UUID, list[PriceScaleTierItem]] = {}
+        for tp in tier_res.scalars().all():
+            tiers_by_prod.setdefault(tp.product_id, []).append(
+                PriceScaleTierItem(min_qty=tp.min_qty, precio_unitario=tp.precio_unitario)
+            )
+        for it in items:
+            it.escalas = tiers_by_prod.get(it.product_id, [])
+
+    return items
 
 
 # ── ZPL (Zebra) ──────────────────────────────────────────────────────────

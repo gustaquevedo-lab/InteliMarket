@@ -35,13 +35,18 @@ class LabelPrinterConfigResponse(LabelPrinterConfigUpsert):
 class LabelTemplateFields(BaseModel):
     mostrar_nombre: bool = True
     mostrar_precio: bool = True
+    mostrar_escalas: bool = True
+    jerarquia_precio: str = "minorista_gigante"  # minorista_gigante | mayorista_gigante | doble_destacado
     mostrar_costo: bool = False
     mostrar_barcode: bool = True
     mostrar_sku: bool = False
     mostrar_proveedor: bool = False
     mostrar_fecha: bool = False
+    mostrar_encabezado: bool = True
+    texto_encabezado: str = "EXTRA SUPERMERCADO"
     fuente_tamano_nombre: int = 8
-    fuente_tamano_precio: int = 12
+    fuente_tamano_precio: int = 14
+    fuente_tamano_escala: int = 8
 
 
 class LabelTemplateCreate(BaseModel):
@@ -80,6 +85,11 @@ class LabelSourceFilter(BaseModel):
     cantidad_default: int = 1
 
 
+class PriceScaleTierItem(BaseModel):
+    min_qty: int
+    precio_unitario: Decimal
+
+
 class ResolvedLabelItem(BaseModel):
     product_id: UUID
     nombre: str
@@ -90,6 +100,8 @@ class ResolvedLabelItem(BaseModel):
     proveedor_nombre: Optional[str] = None
     fecha: Optional[str] = None
     cantidad: int
+    categoria_nombre: Optional[str] = None
+    escalas: list[PriceScaleTierItem] = Field(default_factory=list)
 
 
 # ── Impresión Zebra ────────────────────────────────────────────────────────
