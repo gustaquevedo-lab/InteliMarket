@@ -8,6 +8,7 @@ import uuid
 
 from api.src.sales.models import Sale, SaleItem, SalePayment
 from api.src.auth.models import User
+from api.src.caja.models import CashSession, CashRegister
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
 from api.src.fiscal import service as fiscal_service
@@ -101,6 +102,51 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     iva_10 = Decimal("0")
     iva_5 = Decimal("0")
 
+    # ── PROTECCIÓN ANTI-HUÉRFANAS: RESOLUCIÓN INTELIGENTE DE SESIÓN ──────
+    effective_session_id = data.session_id
+    if effective_session_id:
+        sess_check = await db.execute(
+            select(CashSession.id, CashSession.estado)
+            .where(CashSession.id == effective_session_id)
+        )
+        sess_row = sess_check.first()
+        if not sess_row or sess_row[1] == "cerrada":
+            # La sesión enviada por el frontend no existe o ya fue cerrada previamente
+            effective_session_id = None
+
+    if not effective_session_id and data.user_id:
+        active_user_sess = await db.execute(
+            select(CashSession.id)
+            .where(CashSession.user_id == data.user_id, CashSession.estado == "abierta")
+            .order_by(CashSession.fecha_apertura.desc())
+            .limit(1)
+        )
+        found_sess = active_user_sess.scalar_one_or_none()
+        if found_sess:
+            effective_session_id = found_sess
+        else:
+            # Auto-abrir sesión para que ninguna venta quede huérfana
+            reg_res = await db.execute(select(CashRegister.id).where(CashRegister.activo == True).limit(1))
+            reg_id = reg_res.scalar_one_or_none()
+            if not reg_id:
+                reg_res = await db.execute(select(CashRegister.id).limit(1))
+                reg_id = reg_res.scalar_one_or_none()
+            if reg_id:
+                u_res = await db.execute(select(User.nombre).where(User.id == data.user_id))
+                u_nombre = u_res.scalar_one_or_none() or "Cajero"
+                auto_sess = CashSession(
+                    register_id=reg_id,
+                    user_id=data.user_id,
+                    cajero_nombre=u_nombre,
+                    monto_apertura=Decimal("0"),
+                    monto_apertura_usd=Decimal("0"),
+                    monto_apertura_brl=Decimal("0"),
+                    estado="abierta",
+                )
+                db.add(auto_sess)
+                await db.flush()
+                effective_session_id = auto_sess.id
+
     sale = Sale(
         id=uuid.uuid4(),
         company_id=data.company_id,
@@ -116,7 +162,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         estado="confirmado",
         observaciones=data.observaciones,
         user_id=data.user_id,
-        session_id=data.session_id,
+        session_id=effective_session_id,
         recibo_html=data.recibo_html,
         recibo_escpos_b64=data.recibo_escpos_b64,
         monto_donacion=data.monto_donacion or Decimal("0"),
