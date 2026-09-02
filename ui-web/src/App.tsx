@@ -55,6 +55,7 @@ const BoutiquePage = lazy(() => import("./pages/boutique/BoutiquePage"))
 const ServiciosPage = lazy(() => import("./pages/servicios/ServiciosPage"))
 const InteliContPage = lazy(() => import("./pages/intelicont/InteliContPage"))
 const IntegrationsPage = lazy(() => import("./pages/integrations/IntegrationsPage"))
+const LabelsPage = lazy(() => import("./pages/labels/LabelsPage"))
 const PromotionsPage = lazy(() => import("./pages/marketing/PromocionesPage"))
 const CapturaCuponesPage = lazy(() => import("./pages/cupones/CapturaCuponesPage"))
 const IntelliZappPage = lazy(() => import("./pages/intellizapp/IntelliZappPage"))
@@ -215,6 +216,7 @@ function AppRoutes() {
           ["products", <ProductsPage />],
           ["inventory", <InventoryPage />],
           ["purchases", <PurchasesPage />],
+          ["etiquetas", <LabelsPage />],
           ["customers", <CustomersPage />],
           ["reports", <ReportsPage />],
           ["gerencial", <ExecutiveReportPage />],

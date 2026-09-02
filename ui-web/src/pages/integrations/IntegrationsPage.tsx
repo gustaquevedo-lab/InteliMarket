@@ -99,6 +99,58 @@ export default function IntegrationsPage() {
   const [dinelcoEnabled, setDinelcoEnabled] = useState(true)
   const [savingDinelco, setSavingDinelco] = useState(false)
 
+  const [pantumConfig, setPantumConfig] = useState({ nombre: "Pantum PT-D160", ancho_mm: 33, alto_mm: 22, columnas: 3, activa: true })
+  const [zebraConfig, setZebraConfig] = useState({ nombre: "Zebra ZD-220", conexion: "qz_tray", qz_printer_name: "", host: "", puerto_tcp: 9100, ancho_mm: 50, alto_mm: 30, columnas: 1, activa: true })
+  const [loadingPrinters, setLoadingPrinters] = useState(false)
+  const [savingPantum, setSavingPantum] = useState(false)
+  const [savingZebra, setSavingZebra] = useState(false)
+
+  const loadLabelPrinters = useCallback(async () => {
+    setLoadingPrinters(true)
+    try {
+      const [pantum, zebra] = await Promise.all([
+        api.labelPrinting.getPrinterConfig("pantum_rollo").catch(() => null),
+        api.labelPrinting.getPrinterConfig("zebra_zpl").catch(() => null),
+      ])
+      if (pantum) setPantumConfig({ nombre: pantum.nombre, ancho_mm: Number(pantum.ancho_mm), alto_mm: Number(pantum.alto_mm), columnas: pantum.columnas, activa: pantum.activa })
+      if (zebra) setZebraConfig({
+        nombre: zebra.nombre, conexion: zebra.conexion || "qz_tray", qz_printer_name: zebra.qz_printer_name || "",
+        host: zebra.host || "", puerto_tcp: zebra.puerto_tcp || 9100, ancho_mm: Number(zebra.ancho_mm), alto_mm: Number(zebra.alto_mm),
+        columnas: zebra.columnas, activa: zebra.activa,
+      })
+    } finally {
+      setLoadingPrinters(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (tab === "hardware") loadLabelPrinters()
+  }, [tab, loadLabelPrinters])
+
+  async function handleSavePantum() {
+    setSavingPantum(true)
+    try {
+      await api.labelPrinting.updatePrinterConfig("pantum_rollo", pantumConfig)
+      toast.success("Guardado", "Configuración de la Pantum actualizada.")
+    } catch {
+      toast.error("Error", "No se pudo guardar la configuración de la Pantum.")
+    } finally {
+      setSavingPantum(false)
+    }
+  }
+
+  async function handleSaveZebra() {
+    setSavingZebra(true)
+    try {
+      await api.labelPrinting.updatePrinterConfig("zebra_zpl", zebraConfig)
+      toast.success("Guardado", "Configuración de la Zebra actualizada.")
+    } catch {
+      toast.error("Error", "No se pudo guardar la configuración de la Zebra.")
+    } finally {
+      setSavingZebra(false)
+    }
+  }
+
   const [plugpayClientId, setPlugpayClientId] = useState("")
   const [plugpayPassword, setPlugpayPassword] = useState("")
   const [plugpayHasSavedPassword, setPlugpayHasSavedPassword] = useState(false)
@@ -568,11 +620,91 @@ export default function IntegrationsPage() {
 
       {/* ── TAB: HARDWARE DE CAJA ── */}
       {tab === "hardware" && (
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-3">
-          <h2 className="text-base font-black text-gray-900 dark:text-white">Dispositivos Periféricos de Caja POS</h2>
+        <div className="space-y-5">
           <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300">
-            InteliMarket no tiene todavía un inventario real de hardware de caja (impresoras, gavetas, lectores) por sucursal/terminal. Esta pestaña mostraba antes una lista de ejemplo con marcas y modelos inventados; se sacó para no mostrar algo que parece un inventario real sin serlo.
+            InteliMarket todavía no tiene un inventario completo de hardware de caja (gavetas, lectores, impresoras de ticket) por sucursal/terminal. Lo que sí hay, real y funcional, es la config de las dos impresoras de etiquetas -- se usan desde la pestaña "Etiquetas" del menú principal.
           </div>
+
+          {loadingPrinters && <div className="flex items-center justify-center py-8 text-gray-400"><RefreshCcw className="w-5 h-5 animate-spin" /></div>}
+
+          {!loadingPrinters && (
+            <>
+              {/* PANTUM: rollo 3 columnas */}
+              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-3">
+                <h2 className="text-base font-black text-gray-900 dark:text-white">Pantum PT-D160 -- Etiquetas de Producto (rollo 3 columnas)</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Nombre</label>
+                    <input type="text" value={pantumConfig.nombre} onChange={(e) => setPantumConfig((p) => ({ ...p, nombre: e.target.value }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Ancho etiqueta (mm)</label>
+                    <input type="number" value={pantumConfig.ancho_mm} onChange={(e) => setPantumConfig((p) => ({ ...p, ancho_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Alto etiqueta (mm)</label>
+                    <input type="number" value={pantumConfig.alto_mm} onChange={(e) => setPantumConfig((p) => ({ ...p, alto_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Columnas</label>
+                    <input type="number" value={pantumConfig.columnas} onChange={(e) => setPantumConfig((p) => ({ ...p, columnas: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">Se imprime desde el diálogo normal del navegador ("Imprimir") en la PC donde está instalada la Pantum -- no necesita más configuración acá.</p>
+                <button onClick={handleSavePantum} disabled={savingPantum} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold disabled:opacity-60 cursor-pointer">
+                  {savingPantum ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Guardar Pantum
+                </button>
+              </div>
+
+              {/* ZEBRA: ZPL gondola */}
+              <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-3">
+                <h2 className="text-base font-black text-gray-900 dark:text-white">Zebra ZD-220 -- Cartel de Precio de Góndola</h2>
+                <div className="flex gap-2">
+                  <button onClick={() => setZebraConfig((z) => ({ ...z, conexion: "qz_tray" }))} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${zebraConfig.conexion === "qz_tray" ? "bg-indigo-600 text-white" : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300"}`}>USB (QZ Tray)</button>
+                  <button onClick={() => setZebraConfig((z) => ({ ...z, conexion: "red_tcp" }))} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${zebraConfig.conexion === "red_tcp" ? "bg-indigo-600 text-white" : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300"}`}>Red (IP propia)</button>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Nombre</label>
+                    <input type="text" value={zebraConfig.nombre} onChange={(e) => setZebraConfig((z) => ({ ...z, nombre: e.target.value }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs outline-none" />
+                  </div>
+                  {zebraConfig.conexion === "qz_tray" ? (
+                    <div className="col-span-2">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Nombre de impresora en QZ Tray</label>
+                      <input type="text" value={zebraConfig.qz_printer_name} onChange={(e) => setZebraConfig((z) => ({ ...z, qz_printer_name: e.target.value }))} placeholder="ZDesigner ZD220-203dpi ZPL" className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">IP</label>
+                        <input type="text" value={zebraConfig.host} onChange={(e) => setZebraConfig((z) => ({ ...z, host: e.target.value }))} placeholder="192.168.0.x" className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Puerto</label>
+                        <input type="number" value={zebraConfig.puerto_tcp} onChange={(e) => setZebraConfig((z) => ({ ...z, puerto_tcp: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                      </div>
+                    </>
+                  )}
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Ancho etiqueta (mm)</label>
+                    <input type="number" value={zebraConfig.ancho_mm} onChange={(e) => setZebraConfig((z) => ({ ...z, ancho_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Alto etiqueta (mm)</label>
+                    <input type="number" value={zebraConfig.alto_mm} onChange={(e) => setZebraConfig((z) => ({ ...z, alto_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
+                </div>
+                {zebraConfig.conexion === "qz_tray" && (
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Requiere tener <a href="https://qz.io/download/" target="_blank" rel="noreferrer" className="underline font-bold">QZ Tray</a> instalado y corriendo en la PC donde está conectada la Zebra por USB.</p>
+                )}
+                <button onClick={handleSaveZebra} disabled={savingZebra} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold disabled:opacity-60 cursor-pointer">
+                  {savingZebra ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Guardar Zebra
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 

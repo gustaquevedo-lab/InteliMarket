@@ -85,6 +85,7 @@ const navGroups: NavGroup[] = [
     title: "Abastecimiento",
     items: [
       { icon: ShoppingBag, label: "Gestión de Compras", path: "/purchases" },
+      { icon: Tags, label: "Etiquetas", path: "/etiquetas" },
       { icon: TrendingUp, label: "Forecast & Reposición", path: "/demand-forecast" },
       { icon: Truck, label: "Recepción Directa DSD", path: "/dsd" },
       { icon: Briefcase, label: "Contratos & Rebates", path: "/contratos-proveedores" },

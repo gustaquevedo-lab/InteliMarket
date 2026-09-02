@@ -1395,6 +1395,15 @@ export const api = {
     update: (provider: "bancard" | "plugpay" | "dinelco", data: { environment?: string; enabled?: boolean; config?: Record<string, any> }) =>
       client.put<PaymentIntegrationConfig>(`/v1/payment-integrations/${provider}`, data),
   },
+  labelPrinting: {
+    getPrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl") => client.get<any | null>(`/v1/label-printing/printer-config/${tipo}`),
+    updatePrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl", data: Record<string, any>) => client.put<any>(`/v1/label-printing/printer-config/${tipo}`, data),
+    listTemplates: (tipoImpresora?: string) => client.get<any[]>("/v1/label-printing/templates", tipoImpresora ? { tipo_impresora: tipoImpresora } : undefined),
+    createTemplate: (data: Record<string, any>) => client.post<any>("/v1/label-printing/templates", data),
+    deleteTemplate: (id: string) => client.delete<void>(`/v1/label-printing/templates/${id}`),
+    resolve: (filtro: Record<string, any>) => client.post<any[]>("/v1/label-printing/resolve", filtro),
+    printZebra: (data: { items: any[]; template_id?: string }) => client.post<{ zpl: string; enviado_por_red: boolean }>("/v1/label-printing/print/zebra", data),
+  },
   plugpay: {
     compliance: (cpf: string) => client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/compliance/${cpf}`),
     createPix: (data: { monto: number; moneda?: string; customer_cpf?: string; customer_cpf_cnpj?: string; sale_id?: string; customer_id?: string }) =>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { useNavigate } from "react-router-dom"
 import {
   Search, ShoppingCart, Package, DollarSign, TrendingDown, Users, CheckCircle2, Loader2,
   Plus, Eye, X, Trash2, Minus, FileText, Truck, Award, BarChart3, Download, Clock,
@@ -195,6 +196,8 @@ export default function PurchasesPage() {
     items: [],
   })
   const [savingReceipt, setSavingReceipt] = useState(false)
+  const [lastReceiptForLabels, setLastReceiptForLabels] = useState<{ id: string; numero: string } | null>(null)
+  const navigate = useNavigate()
 
   // Modal de Nueva Requisición Interna
   const [showReqModal, setShowReqModal] = useState(false)
@@ -540,7 +543,7 @@ export default function PurchasesPage() {
 
     setSavingReceipt(true)
     try {
-      await api.purchases.createReceipt({
+      const created = await api.purchases.createReceipt({
         purchase_order_id: receiptForm.purchase_order_id,
         proveedor_ref: receiptForm.proveedor_ref || undefined,
         observaciones: receiptForm.observaciones || undefined,
@@ -556,6 +559,7 @@ export default function PurchasesPage() {
       })
       toast.success("¡Mercadería Recibida en Muelle!", "Se actualizó el stock físico y se registraron los lotes.")
       setShowReceiptModal(false)
+      if (created?.id) setLastReceiptForLabels({ id: created.id, numero: created.numero || "" })
       fetchAll()
     } catch (e: any) {
       toast.error("Error al registrar recepción", e.message)
@@ -1823,6 +1827,22 @@ export default function PurchasesPage() {
       ────────────────────────────────────────────────────────────────────────── */}
       {tab === "recepciones" && (
         <div className="space-y-5">
+          {lastReceiptForLabels && (
+            <div className="card p-4 bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800 flex items-center justify-between gap-3">
+              <span className="text-xs font-bold text-indigo-800 dark:text-indigo-300">
+                Recepción {lastReceiptForLabels.numero} registrada -- ¿imprimir las etiquetas de los productos recibidos?
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => navigate(`/etiquetas?receipt_id=${lastReceiptForLabels.id}`)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                >
+                  Imprimir Etiquetas de esta Recepción
+                </button>
+                <button onClick={() => setLastReceiptForLabels(null)} className="text-xs text-indigo-500 hover:text-indigo-700 cursor-pointer">✕</button>
+              </div>
+            </div>
+          )}
           <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">

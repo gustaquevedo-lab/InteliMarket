@@ -98,6 +98,7 @@ import api.src.delivery_integrations.models
 import api.src.suscripciones.models
 import api.src.retail.models
 import api.src.servicios.models
+import api.src.label_printing.models
 
 target_metadata = Base.metadata
 
