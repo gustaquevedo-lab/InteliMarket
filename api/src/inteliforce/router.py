@@ -153,3 +153,34 @@ async def sync_from_sueldok(
         raise HTTPException(status_code=401, detail="API key invalida")
     result = await service.sync_records(db, str(key.company_id), data.records)
     return result
+
+
+@router.get("/tracking-logs")
+async def get_tracking_logs(
+    hours: int = 24,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Puntos de GPS recientes sincronizados desde SueldOK/Inteliforce, para
+    el mapa de telemetria en vivo del panel web (InteliforcePage). Lee
+    directo de inteliforce_sync_records -- no existia ningun endpoint de
+    lectura para esta tabla, solo el /sync que la escribe."""
+    result = await db.execute(
+        text(
+            """
+            SELECT employee_convex_id,
+                   (payload->'coords'->>'lat')::float AS lat,
+                   (payload->'coords'->>'lng')::float AS lng,
+                   (payload->>'batteryLevel')::float AS battery,
+                   recorded_at
+            FROM inteliforce_sync_records
+            WHERE company_id = :company_id
+              AND record_type = 'tracking_log'
+              AND recorded_at >= now() - (:hours || ' hours')::interval
+            ORDER BY recorded_at DESC
+            LIMIT 500
+            """
+        ),
+        {"company_id": user["company_id"], "hours": str(hours)},
+    )
+    return [dict(row._mapping) for row in result.fetchall()]

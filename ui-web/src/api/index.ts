@@ -1187,6 +1187,9 @@ export const api = {
       emitir: (notaId: string) => client.post<NotaCreditoDebito>(`/v1/fiscal/notas/${notaId}/emitir`),
     },
   },
+  inteliforce: {
+    trackingLogs: (hours?: number) => client.get<{ employee_convex_id: string; lat: number; lng: number; battery: number; recorded_at: string }[]>("/v1/inteliforce/tracking-logs", hours ? { hours: String(hours) } : undefined),
+  },
   distribuidora: {
     dashboard: (companyId: string) => client.get<DistribuidoraDashboard>(`/v1/distribuidora/dashboard/${companyId}`),
     containers: {

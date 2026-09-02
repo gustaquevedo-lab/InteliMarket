@@ -75,6 +75,7 @@ const SupplierLogin = lazy(() => import("./pages/supplier-portal/SupplierLogin")
 const SupplierDashboard = lazy(() => import("./pages/supplier-portal/SupplierDashboard"))
 const CustomerAgreementsPage = lazy(() => import("./pages/customer-agreements/CustomerAgreementsPage"))
 const DistribuidoraPage = lazy(() => import("./pages/distribuidora/DistribuidoraPage"))
+const InteliforcePage = lazy(() => import("./pages/inteliforce/InteliforcePage"))
 const SupermerPage = lazy(() => import("./pages/supermer/SupermerPage"))
 const CajaRapidaPage = lazy(() => import("./pages/pos/CajaRapidaPage"))
 const SelfCheckoutPage = lazy(() => import("./pages/pos/SelfCheckoutPage"))
@@ -296,6 +297,7 @@ function AppRoutes() {
         <Route path="supermer" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SupermerPage /></FeatureRoute></Suspense>} />
         <Route path="escalas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><ScalesPage /></FeatureRoute></Suspense>} />
         <Route path="distribuidora" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="distribuidora"><DistribuidoraPage /></FeatureRoute></Suspense>} />
+        <Route path="inteliforce" element={<Suspense fallback={<PageLoader />}><InteliforcePage /></Suspense>} />
         <Route path="advanced-inventory" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><InventoryAdvancedPage /></FeatureRoute></Suspense>} />
         <Route path="integrated-finance" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="integrated_finance"><IntegratedFinancePage /></FeatureRoute></Suspense>} />
         <Route path="smart-pricing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="smart_pricing"><SmartPricingPage /></FeatureRoute></Suspense>} />

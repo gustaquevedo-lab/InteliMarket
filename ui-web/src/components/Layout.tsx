@@ -72,6 +72,7 @@ const navGroups: NavGroup[] = [
     title: "Distribución & Logística",
     items: [
       { icon: Factory, label: "Módulo Distribuidora", path: "/distribuidora" },
+      { icon: Smartphone, label: "Inteliforce", path: "/inteliforce" },
       { icon: Navigation, label: "Rutas de Venta", path: "/rutas" },
       { icon: MapPinned, label: "Rutas de Logística", path: "/logistics" },
       { icon: Truck, label: "Flota & Entregas", path: "/intelientregas" },
