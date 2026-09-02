@@ -835,14 +835,24 @@ export default function POSPage() {
   // existiendo, pero ahora requiere prender "Pago mixto" a proposito.
   const [allowMixedPayment, setAllowMixedPayment] = useState(false)
   const toggleActiveMethod = (m: "cash" | "bancard" | "dinelco" | "qr" | "extra_club" | "plugpay_pix" | "plugpay_credito") => {
+    // Solo resetear Bancard/Dinelco/QR/PlugPay cuando de verdad corresponde:
+    // reemplazo total (modo no-mixto) o se está SACANDO un metodo del mix.
+    // Agregar un metodo nuevo al pago mixto NO puede resetear nada -- antes
+    // togglear cualquier metodo llamaba resetBancardFlow() sin condicion, asi
+    // que si la cajera ya habia cobrado con Bancard (resultado "aprobada" ya
+    // en pantalla) y despues prendia otro medio para completar el mix, ese
+    // resultado recien obtenido se borraba solo.
+    let shouldReset = false
     setActiveMethods(prev => {
       if (!allowMixedPayment) {
+        shouldReset = true
         return new Set([m])
       }
       const next = new Set(prev as any)
       if (next.has(m)) {
         if (next.size === 1) return prev
         next.delete(m)
+        shouldReset = true
       } else {
         next.add(m)
       }
@@ -851,7 +861,7 @@ export default function POSPage() {
     setPosVerifyStatus("idle")
     setPosVerifyCandidates([])
     setPosVerifiedTxn(null)
-    resetBancardFlow()
+    if (shouldReset) resetBancardFlow()
   }
   
   const [qrSubMethod, setQrSubMethod] = useState<"zimple" | "pix" | "dinelco">("zimple")
