@@ -1,6 +1,6 @@
 """Sales service"""
 
-from sqlalchemy import select, update, func, cast, Integer, text
+from sqlalchemy import select, update, func, cast, Integer, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -125,12 +125,40 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         if found_sess:
             effective_session_id = found_sess
         else:
-            # Auto-abrir sesión para que ninguna venta quede huérfana
-            reg_res = await db.execute(select(CashRegister.id).where(CashRegister.activo == True).limit(1))
-            reg_id = reg_res.scalar_one_or_none()
-            if not reg_id:
-                reg_res = await db.execute(select(CashRegister.id).limit(1))
+            # Auto-abrir sesión para que ninguna venta quede huérfana,
+            # buscando la caja que coincide con el punto de emisión del ticket (ej: 015 -> Caja 5)
+            punto_emision_code = None
+            if numero and "-" in numero:
+                parts = numero.split("-")
+                if len(parts) >= 2:
+                    punto_emision_code = parts[1]  # ej: "015"
+
+            reg_id = None
+            if punto_emision_code:
+                clean_num = punto_emision_code.lstrip("0")
+                reg_res = await db.execute(
+                    select(CashRegister.id)
+                    .where(
+                        CashRegister.activo == True,
+                        or_(
+                            CashRegister.codigo.ilike(f"%{punto_emision_code}%"),
+                            CashRegister.nombre.ilike(f"%Caja {clean_num}%") if clean_num else False,
+                        )
+                    )
+                    .limit(1)
+                )
                 reg_id = reg_res.scalar_one_or_none()
+
+            if not reg_id:
+                # Fallback: primera caja activa de producción (nunca inactivas ni Caja 2 de sandbox)
+                reg_res = await db.execute(
+                    select(CashRegister.id)
+                    .where(CashRegister.activo == True, CashRegister.codigo != "POS-012")
+                    .order_by(CashRegister.nombre.asc())
+                    .limit(1)
+                )
+                reg_id = reg_res.scalar_one_or_none()
+
             if reg_id:
                 u_res = await db.execute(select(User.nombre).where(User.id == data.user_id))
                 u_nombre = u_res.scalar_one_or_none() or "Cajero"
@@ -142,6 +170,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                     monto_apertura_usd=Decimal("0"),
                     monto_apertura_brl=Decimal("0"),
                     estado="abierta",
+                    observaciones=f"Apertura automática de emergencia al emitir comprobante {numero} sin sesión previa.",
                 )
                 db.add(auto_sess)
                 await db.flush()
