@@ -32,6 +32,64 @@ const DEFAULT_CAMPOS = {
   fuente_tamano_precio: 12,
 }
 
+const PREVIEW_SCALE = 4
+
+// 1mm ~= 3.7795px a 96dpi -- la misma conversion que usa el navegador al
+// interpretar unidades "mm" en CSS (y que se usa en la hoja real que se manda
+// a imprimir). El box se dibuja a tamano real en mm y despues se amplia con
+// transform: scale() -- así el preview es una foto fiel en proporcion exacta
+// de lo que después imprime handlePrintPantum, en vez de una aproximación a
+// ojo con multiplicadores inventados.
+const MM_TO_PX = 3.7795
+
+function LabelPreviewCell({ item, campos, anchoMm, altoMm }: { item: ResolvedItem; campos: typeof DEFAULT_CAMPOS; anchoMm: number; altoMm: number }) {
+  const svgRef = useRef<SVGSVGElement>(null)
+
+  useEffect(() => {
+    if (!campos.mostrar_barcode || !item.codigo_barra || !svgRef.current) return
+    try {
+      JsBarcode(svgRef.current, item.codigo_barra, { format: "CODE128", width: 1, height: 24, displayValue: false, margin: 0 })
+    } catch (e) { /* codigo de barras invalido, se omite en el preview */ }
+  }, [item.codigo_barra, campos.mostrar_barcode])
+
+  const anchoPx = anchoMm * MM_TO_PX
+  const altoPx = altoMm * MM_TO_PX
+
+  return (
+    <div className="shrink-0" style={{ width: anchoPx * PREVIEW_SCALE, height: altoPx * PREVIEW_SCALE, overflow: "hidden" }}>
+      <div
+        className="bg-white border border-dashed border-gray-300 flex flex-col items-center justify-center overflow-hidden"
+        style={{ width: anchoPx, height: altoPx, padding: 2, transform: `scale(${PREVIEW_SCALE})`, transformOrigin: "top left" }}
+      >
+        {campos.mostrar_nombre && (
+          <div className="text-center leading-tight text-black" style={{ fontSize: campos.fuente_tamano_nombre, fontWeight: 700 }}>{item.nombre}</div>
+        )}
+        {campos.mostrar_precio && (
+          <div className="text-black" style={{ fontSize: campos.fuente_tamano_precio, fontWeight: 900 }}>{formatPYG(item.precio_venta)}</div>
+        )}
+        {campos.mostrar_costo && item.costo_unitario != null && (
+          <div className="text-gray-600" style={{ fontSize: 7 }}>Costo: {formatPYG(item.costo_unitario)}</div>
+        )}
+        {campos.mostrar_proveedor && item.proveedor_nombre && (
+          <div className="text-gray-600" style={{ fontSize: 7 }}>{item.proveedor_nombre}</div>
+        )}
+        {campos.mostrar_sku && item.sku && (
+          <div className="text-gray-600" style={{ fontSize: 7 }}>SKU {item.sku}</div>
+        )}
+        {campos.mostrar_fecha && item.fecha && (
+          <div className="text-gray-600" style={{ fontSize: 7 }}>{item.fecha}</div>
+        )}
+        {campos.mostrar_barcode && item.codigo_barra && <svg ref={svgRef} style={{ maxWidth: "95%" }} />}
+      </div>
+    </div>
+  )
+}
+
+const SAMPLE_ITEM: ResolvedItem = {
+  product_id: "sample", nombre: "PRODUCTO DE EJEMPLO", sku: "000000", codigo_barra: "7891234567895",
+  precio_venta: 15000, costo_unitario: 11000, proveedor_nombre: "PROVEEDOR EJEMPLO", fecha: "2026-09-02", cantidad: 1,
+}
+
 export default function LabelsPage() {
   const toast = useToast()
 
@@ -177,10 +235,10 @@ export default function LabelsPage() {
         const n = win.document.createElement("div"); n.className = "nombre"; n.textContent = item.nombre; cell.appendChild(n)
       }
       if (campos.mostrar_precio) {
-        const p = win.document.createElement("div"); p.className = "precio"; p.textContent = `Gs. ${formatPYG(item.precio_venta)}`; cell.appendChild(p)
+        const p = win.document.createElement("div"); p.className = "precio"; p.textContent = `${formatPYG(item.precio_venta)}`; cell.appendChild(p)
       }
       if (campos.mostrar_costo && item.costo_unitario) {
-        const c = win.document.createElement("div"); c.className = "sub"; c.textContent = `Costo: Gs. ${formatPYG(item.costo_unitario)}`; cell.appendChild(c)
+        const c = win.document.createElement("div"); c.className = "sub"; c.textContent = `Costo: ${formatPYG(item.costo_unitario)}`; cell.appendChild(c)
       }
       if (campos.mostrar_proveedor && item.proveedor_nombre) {
         const pr = win.document.createElement("div"); pr.className = "sub"; pr.textContent = item.proveedor_nombre; cell.appendChild(pr)
@@ -383,6 +441,22 @@ export default function LabelsPage() {
             No hay una impresora {tipoImpresora === "pantum_rollo" ? "Pantum" : "Zebra"} configurada. Configurala en Integraciones &gt; Hardware de Caja.
           </div>
         )}
+
+        {/* Vista previa -- una etiqueta a tamaño ampliado (x4) con los toggles y
+            el ancho/alto reales de la impresora activa, para ver el diseño
+            antes de gastar rollo. Usa el primer producto de la lista, o un
+            ejemplo si todavía no se cargó ninguno. */}
+        <div className="space-y-1.5">
+          <span className="text-[10px] font-bold text-gray-400 uppercase">Vista previa (ampliada x4 -- el tamaño real es {printerConfig ? `${printerConfig.ancho_mm}×${printerConfig.alto_mm}mm` : "33×22mm"})</span>
+          <div className="flex justify-center p-4 bg-gray-100 dark:bg-slate-950 rounded-xl overflow-x-auto">
+            <LabelPreviewCell
+              item={items[0] || SAMPLE_ITEM}
+              campos={campos}
+              anchoMm={printerConfig ? Number(printerConfig.ancho_mm) : (tipoImpresora === "pantum_rollo" ? 33 : 50)}
+              altoMm={printerConfig ? Number(printerConfig.alto_mm) : (tipoImpresora === "pantum_rollo" ? 22 : 30)}
+            />
+          </div>
+        </div>
 
         <button
           onClick={tipoImpresora === "pantum_rollo" ? handlePrintPantum : handlePrintZebra}
