@@ -8,6 +8,7 @@ class PosTerminalAssignmentCreate(BaseModel):
     hostname: str
     ip_address: Optional[str] = None
     ip_pos_bancard: Optional[str] = None
+    ip_pos_dinelco: Optional[str] = None
     punto_emision: str
     caja_nombre: str
 
@@ -16,6 +17,7 @@ class PosTerminalAssignmentUpdate(BaseModel):
     hostname: Optional[str] = None
     ip_address: Optional[str] = None
     ip_pos_bancard: Optional[str] = None
+    ip_pos_dinelco: Optional[str] = None
     punto_emision: Optional[str] = None
     caja_nombre: Optional[str] = None
     activo: Optional[bool] = None
@@ -26,6 +28,7 @@ class PosTerminalAssignmentResponse(BaseModel):
     hostname: str
     ip_address: Optional[str] = None
     ip_pos_bancard: Optional[str] = None
+    ip_pos_dinelco: Optional[str] = None
     punto_emision: str
     caja_nombre: str
     activo: bool

@@ -87,6 +87,7 @@ export default function SettingsPage() {
     hostname: string
     ip_address?: string
     ip_pos_bancard?: string
+    ip_pos_dinelco?: string
     punto_emision: string
     caja_nombre: string
     activo: boolean
@@ -101,6 +102,7 @@ export default function SettingsPage() {
   const [newTerminalHostname, setNewTerminalHostname] = useState("")
   const [newTerminalIp, setNewTerminalIp] = useState("")
   const [newTerminalIpPosBancard, setNewTerminalIpPosBancard] = useState("")
+  const [newTerminalIpPosDinelco, setNewTerminalIpPosDinelco] = useState("")
   const [newTerminalPunto, setNewTerminalPunto] = useState("011")
   const [newTerminalCajaNombre, setNewTerminalCajaNombre] = useState("")
   const [savingNewTerminal, setSavingNewTerminal] = useState(false)
@@ -108,6 +110,8 @@ export default function SettingsPage() {
   const [editingIpVal, setEditingIpVal] = useState("")
   const [editingBancardIpId, setEditingBancardIpId] = useState<string | null>(null)
   const [editingBancardIpVal, setEditingBancardIpVal] = useState("")
+  const [editingDinelcoIpId, setEditingDinelcoIpId] = useState<string | null>(null)
+  const [editingDinelcoIpVal, setEditingDinelcoIpVal] = useState("")
 
   const fetchPosTerminals = useCallback(async () => {
     setLoadingPosTerminals(true)
@@ -132,6 +136,7 @@ export default function SettingsPage() {
         hostname: newTerminalHostname.trim().toUpperCase() || `CAJA-${newTerminalPunto}`,
         ip_address: newTerminalIp.trim() || undefined,
         ip_pos_bancard: newTerminalIpPosBancard.trim() || undefined,
+        ip_pos_dinelco: newTerminalIpPosDinelco.trim() || undefined,
         punto_emision: newTerminalPunto,
         caja_nombre: newTerminalCajaNombre.trim() || `Caja ${newTerminalPunto}`,
       })
@@ -139,6 +144,7 @@ export default function SettingsPage() {
       setNewTerminalHostname("")
       setNewTerminalIp("")
       setNewTerminalIpPosBancard("")
+      setNewTerminalIpPosDinelco("")
       setNewTerminalCajaNombre("")
       fetchPosTerminals()
     } catch (e: any) {
@@ -167,6 +173,17 @@ export default function SettingsPage() {
       fetchPosTerminals()
     } catch (e: any) {
       toast.error("Error al actualizar IP POS Bancard", e?.message || "Intente nuevamente.")
+    }
+  }
+
+  const handleSaveTerminalDinelcoIp = async (id: string) => {
+    try {
+      await api.posTerminals.update(id, { ip_pos_dinelco: editingDinelcoIpVal.trim() || null })
+      toast.success("IP POS Dinelco Actualizada", "La dirección IP del POS Dinelco quedó guardada y rige en cajas.")
+      setEditingDinelcoIpId(null)
+      fetchPosTerminals()
+    } catch (e: any) {
+      toast.error("Error al actualizar IP POS Dinelco", e?.message || "Intente nuevamente.")
     }
   }
 
@@ -2720,7 +2737,7 @@ export default function SettingsPage() {
           {/* Alta de nueva asignación */}
           <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-3">
             <h3 className="text-sm font-black text-gray-900 dark:text-white">Asignar Nueva Caja / Máquina</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
               <div>
                 <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">Hostname (Windows):</label>
                 <input
@@ -2748,6 +2765,16 @@ export default function SettingsPage() {
                   value={newTerminalIpPosBancard}
                   onChange={(e) => setNewTerminalIpPosBancard(e.target.value.trim())}
                   placeholder="192.168.0.51"
+                  className="w-full bg-gray-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-sm text-gray-900 dark:text-white outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block mb-1">IP POS Dinelco:</label>
+                <input
+                  type="text"
+                  value={newTerminalIpPosDinelco}
+                  onChange={(e) => setNewTerminalIpPosDinelco(e.target.value.trim())}
+                  placeholder="192.168.0.61"
                   className="w-full bg-gray-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-mono text-sm text-gray-900 dark:text-white outline-none focus:border-blue-500"
                 />
               </div>
@@ -2803,6 +2830,7 @@ export default function SettingsPage() {
                     <th className="p-3">Hostname</th>
                     <th className="p-3">IP Máquina (LAN)</th>
                     <th className="p-3">IP POS Bancard</th>
+                    <th className="p-3">IP POS Dinelco</th>
                     <th className="p-3 text-center">Punto Fiscal</th>
                     <th className="p-3 text-center">Facturas (Actual / Final)</th>
                     <th className="p-3 text-center">Notas de Crédito</th>
@@ -2813,12 +2841,13 @@ export default function SettingsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-slate-700/60">
                   {!loadingPosTerminals && posTerminals.length === 0 && (
-                    <tr><td colSpan={10} className="p-6 text-center text-gray-400 text-xs">Ninguna caja asignada todavía.</td></tr>
+                    <tr><td colSpan={11} className="p-6 text-center text-gray-400 text-xs">Ninguna caja asignada todavía.</td></tr>
                   )}
                   {posTerminals.map((t) => {
                     const isFiscalOk = t.tiene_factura && t.tiene_nc
                     const isEditingIp = editingIpId === t.id
                     const isEditingBancardIp = editingBancardIpId === t.id
+                    const isEditingDinelcoIp = editingDinelcoIpId === t.id
 
                     return (
                       <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-slate-750/50">
@@ -2905,6 +2934,48 @@ export default function SettingsPage() {
                                 {t.ip_pos_bancard || "Sin POS (Asignar)"}
                               </span>
                               <span className="opacity-0 group-hover:opacity-100 text-[10px] text-emerald-500">✏️</span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Celda de IP POS Dinelco con edición rápida */}
+                        <td className="p-3 font-mono text-xs">
+                          {isEditingDinelcoIp ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                value={editingDinelcoIpVal}
+                                onChange={(e) => setEditingDinelcoIpVal(e.target.value)}
+                                placeholder="192.168.0.X"
+                                className="w-28 bg-white dark:bg-slate-900 border border-purple-500 rounded px-1.5 py-0.5 text-xs font-mono text-gray-900 dark:text-white"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => handleSaveTerminalDinelcoIp(t.id)}
+                                className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-[10px] cursor-pointer"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                onClick={() => setEditingDinelcoIpId(null)}
+                                className="px-1.5 py-0.5 rounded bg-gray-300 dark:bg-slate-700 text-gray-700 dark:text-gray-300 text-[10px] cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={() => {
+                                setEditingDinelcoIpId(t.id)
+                                setEditingDinelcoIpVal(t.ip_pos_dinelco || "")
+                              }}
+                              className="group flex items-center gap-1.5 cursor-pointer hover:text-purple-600"
+                              title="Hacer clic para editar IP del POS Dinelco"
+                            >
+                              <span className={t.ip_pos_dinelco ? "text-purple-700 dark:text-purple-400 font-bold" : "text-gray-400 italic"}>
+                                {t.ip_pos_dinelco || "Sin POS (Asignar)"}
+                              </span>
+                              <span className="opacity-0 group-hover:opacity-100 text-[10px] text-purple-500">✏️</span>
                             </div>
                           )}
                         </td>
