@@ -1,5 +1,6 @@
 """Sales service"""
 
+import logging
 from sqlalchemy import select, update, func, cast, Integer, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ from api.src.caja.models import CashSession, CashRegister
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
 from api.src.fiscal import service as fiscal_service
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_taxes(item: dict) -> dict:
@@ -435,7 +438,16 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
                 remaining -= deduct
 
             if remaining > 0:
-                pass
+                # Los lotes (FIFO) no alcanzaron para cubrir toda la cantidad
+                # vendida -- el costo promedio de esta venta va a estar
+                # subestimado (actual_cost solo cuenta lo que si se encontro
+                # en lotes). Antes esto se perdia en silencio; ahora queda
+                # en el log para poder auditar el costo real despues.
+                logger.warning(
+                    "Venta %s: stock_lots insuficiente para product_id=%s -- "
+                    "faltaron %s unidades sin lote de origen (costo promedio subestimado)",
+                    sale.id, item_data.product_id, remaining,
+                )
 
             avg_cost = (actual_cost / Decimal(str(qty_to_deduct))).quantize(Decimal("1")) if qty_to_deduct > 0 else Decimal("0")
 
@@ -967,6 +979,12 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
     from api.src.payments.models import Payment
     from api.src.payments.schemas import PaymentCreate
 
+    # sale.total y sale.total_pagado siempre estan en PYG (moneda base de
+    # la venta) -- si el pago manual viene en una moneda extranjera
+    # (BRL/USD), hay que sumar el monto ya convertido, no el monto crudo,
+    # o el saldo/estado de la venta quedan mal calculados.
+    monto_pyg = data.monto if sale.moneda == "PYG" else data.monto * sale.tipo_cambio
+
     payment = Payment(
         company_id=sale.company_id,
         tipo="cobro",
@@ -974,7 +992,7 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
         moneda=sale.moneda,
         tipo_cambio=sale.tipo_cambio,
         monto=data.monto,
-        monto_pyg=data.monto if sale.moneda == "PYG" else data.monto * sale.tipo_cambio,
+        monto_pyg=monto_pyg,
         referencia=data.referencia,
         estado="confirmado",
         user_id=data.user_id,
@@ -987,10 +1005,10 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
             INSERT INTO payment_allocations (payment_id, sale_id, monto_asignado)
             VALUES (:payment_id, :sale_id, :monto)
         """),
-        {"payment_id": payment.id, "sale_id": sale.id, "monto": float(data.monto)},
+        {"payment_id": payment.id, "sale_id": sale.id, "monto": float(monto_pyg)},
     )
 
-    sale.total_pagado = (sale.total_pagado or 0) + data.monto
+    sale.total_pagado = (sale.total_pagado or 0) + monto_pyg
     sale.saldo = sale.total - sale.total_pagado
 
     if sale.saldo <= 0:
