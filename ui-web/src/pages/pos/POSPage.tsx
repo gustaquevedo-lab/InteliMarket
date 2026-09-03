@@ -6417,13 +6417,13 @@ export default function POSPage() {
                           </div>
                         </td>
                         <td className="py-2 px-2">
-                          <div className={`font-bold text-xs truncate max-w-[160px] lg:max-w-[200px] ${textHeading} flex items-center gap-1`}>
+                          <div className={`font-bold text-xs ${textHeading} flex items-start gap-1`}>
                             {((item as any).en_promocion || (item.precio_base && item.precio < item.precio_base)) && (
-                              <span className="inline-flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 animate-pulse shadow-xs">
+                              <span className="inline-flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 animate-pulse shadow-xs mt-0.5">
                                 🔥 PROMO
                               </span>
                             )}
-                            <span className="truncate">{item.nombre}</span>
+                            <span className="leading-tight">{item.nombre}</span>
                           </div>
                           <div className={`text-[10px] font-posMono tabular-nums flex items-center gap-1.5 ${textMuted}`}>
                             <span>SKU: {item.sku}</span>
@@ -6599,7 +6599,7 @@ export default function POSPage() {
                 <div className={`text-[11px] font-bold uppercase tracking-wider ${textMuted}`}>
                   ÚLTIMO PRODUCTO ESCANEADO
                 </div>
-                <div className={`font-black text-sm lg:text-base truncate mt-0.5 ${textHeading}`}>
+                <div className={`font-black text-sm lg:text-base leading-tight mt-0.5 ${textHeading}`}>
                   {lastScannedProduct ? lastScannedProduct.nombre : "LISTO PARA ESCANEAR"}
                 </div>
                 {lastScannedProduct && (
@@ -6725,13 +6725,13 @@ export default function POSPage() {
                           }`}
                         >
                           <td className="py-2 px-2">
-                            <div className={`font-bold text-xs group-hover:text-blue-600 truncate max-w-[190px] ${textHeading} flex items-center gap-1`}>
+                            <div className={`font-bold text-xs group-hover:text-blue-600 ${textHeading} flex items-start gap-1`}>
                               {isPromo && (
-                                <span className="inline-flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 animate-pulse shadow-xs">
+                                <span className="inline-flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-amber-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 animate-pulse shadow-xs mt-0.5">
                                   🔥 OFERTA
                                 </span>
                               )}
-                              <span className="truncate">{p.nombre}</span>
+                              <span className="leading-tight">{p.nombre}</span>
                             </div>
                             <div className={`text-[10px] font-posMono tabular-nums flex items-center gap-1.5 ${textMuted}`}>
                               <span>SKU: {p.sku}</span>
@@ -6824,7 +6824,7 @@ export default function POSPage() {
                           )}
                         </div>
                         <div>
-                          <div className={`font-bold text-xs line-clamp-1 group-hover:text-blue-600 transition-colors ${textHeading}`}>
+                          <div className={`font-bold text-xs leading-tight group-hover:text-blue-600 transition-colors ${textHeading}`}>
                             {p.nombre}
                           </div>
                           <div className="flex items-center justify-between mt-1 font-posMono tabular-nums">
@@ -7779,7 +7779,7 @@ export default function POSPage() {
                               className="w-4 h-4 accent-rose-500 cursor-pointer disabled:cursor-not-allowed"
                             />
                             <div className="flex-1 min-w-0">
-                              <div className="font-bold text-xs text-slate-900 dark:text-white truncate">{it.productName}</div>
+                              <div className="font-bold text-xs text-slate-900 dark:text-white leading-tight">{it.productName}</div>
                               <div className="text-[10px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">
                                 Vendido: {it.cantidad} x {formatPYG(it.precio_unitario)}
                                 {yaDevuelto > 0 && (
@@ -10024,8 +10024,8 @@ export default function POSPage() {
                       priceCheckHighlight === i ? "bg-orange-100 dark:bg-orange-900/30 ring-1 ring-brand-orange" : "hover:bg-slate-100 dark:hover:bg-slate-800/40"
                     }`}
                   >
-                    <div className="truncate">
-                      <div className="font-bold text-sm text-slate-900 dark:text-white truncate">{p.nombre}</div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm text-slate-900 dark:text-white leading-tight">{p.nombre}</div>
                       <div className="text-[10px] font-posMono tabular-nums text-slate-500 dark:text-slate-400">{p.codigo_barra || p.sku || "Sin código"}</div>
                     </div>
                     <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums shrink-0">{formatPYG(Number(p.precio_venta) || 0)}</div>
@@ -10064,7 +10064,7 @@ export default function POSPage() {
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="font-black text-xl text-slate-900 dark:text-white mb-1 pr-16 truncate">{priceCheckSelected.nombre}</div>
+                    <div className={`font-black text-xl text-slate-900 dark:text-white mb-1 leading-tight ${priceCheckPromo ? "pr-24" : ""}`}>{priceCheckSelected.nombre}</div>
                     <div className="text-xs font-posMono tabular-nums text-slate-500 dark:text-slate-400 mb-3">
                       {priceCheckSelected.codigo_barra || priceCheckSelected.sku || "Sin código"}
                     </div>
