@@ -1359,7 +1359,14 @@ export default function POSPage() {
     setDinelcoSessionId(res1.sessionId)
     setDinelcoTxnState("confirmando")
     const cuotasParam = dinelcoCardType === "credito" && dinelcoCuotas > 1 ? dinelcoCuotas : 0
-    const res2 = await electronAPI.dinelcoCall(ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 30000)
+    // ENDOP dispara la autorizacion real via ISO8583 contra el adquirente
+    // (manual Bepsa/Dinelco pag. 10, pasos 3-6) -- una autorizacion real
+    // puede tardar mas que un mensaje local. 30s quedaba corto (mas corto
+    // incluso que el timeout de QR/PIX, que ademas de la autorizacion
+    // esperan que el cliente escanee y apruebe en su banco) y explicaba el
+    // sintoma reportado: el terminal seguia "calculando" la autorizacion
+    // real mientras nuestro cliente ya habia tirado la toalla por timeout.
+    const res2 = await electronAPI.dinelcoCall(ip, "venta_confirmar", { cuotas: cuotasParam, monto: montoDinelco }, res1.sessionId, 90000)
 
     if (!res2.ok) {
       setDinelcoTxnState(res2.error ? "error_conexion" : "error_rechazo")
