@@ -13,6 +13,7 @@ import {
   type StockItem,
   type InventoryMovementRecord,
   type Product,
+  type PackBarcode,
 } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
@@ -27,6 +28,7 @@ export default function InventoryPage() {
   const [stats, setStats] = useState<any>(null)
   const [movements, setMovements] = useState<any[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [packBarcodeMap, setPackBarcodeMap] = useState<Map<string, { productId: string; etiqueta: string; unidadesPorPaquete: number }>>(new Map())
 
   // Control de Lotes & Vencimientos
   const [expiriesData, setExpiriesData] = useState<any>(null)
@@ -223,6 +225,21 @@ export default function InventoryPage() {
     } catch {
       // ignore
     }
+    try {
+      const packBarcodes = await api.products.packBarcodes.list()
+      const map = new Map<string, { productId: string; etiqueta: string; unidadesPorPaquete: number }>()
+      for (const pb of (packBarcodes || []) as PackBarcode[]) {
+        if (!pb.activo) continue
+        map.set(pb.codigo_barra, {
+          productId: pb.product_id,
+          etiqueta: pb.etiqueta,
+          unidadesPorPaquete: Number(pb.unidades_por_paquete),
+        })
+      }
+      setPackBarcodeMap(map)
+    } catch {
+      // ignore
+    }
   }, [])
 
   useEffect(() => {
@@ -305,7 +322,8 @@ export default function InventoryPage() {
     e.preventDefault()
     if (!scanCode.trim()) return
 
-    const p = products.find(prod => prod.codigo_barra === scanCode.trim() || prod.sku === scanCode.trim())
+    const cleanCode = scanCode.trim()
+    const p = products.find(prod => prod.codigo_barra === cleanCode || prod.sku === cleanCode)
     if (p) {
       setScannedItems(prev => {
         const idx = prev.findIndex(item => item.product.id === p.id)
@@ -319,7 +337,23 @@ export default function InventoryPage() {
       })
       toast.success("Producto Escaneado", `${p.nombre} (+1)`)
     } else {
-      toast.warning("Código no encontrado", `No se encontró ningún producto con código ${scanCode}`)
+      const packMatch = packBarcodeMap.get(cleanCode)
+      const baseProduct = packMatch ? products.find(prod => prod.id === packMatch.productId) : undefined
+      if (packMatch && baseProduct) {
+        setScannedItems(prev => {
+          const idx = prev.findIndex(item => item.product.id === baseProduct.id)
+          if (idx >= 0) {
+            const updated = [...prev]
+            updated[idx].cantidad_fisica += packMatch.unidadesPorPaquete
+            return updated
+          }
+          const sysStock = stock.find(s => s.product_id === baseProduct.id)?.cantidad ?? 0
+          return [{ product: baseProduct, cantidad_fisica: packMatch.unidadesPorPaquete, cantidad_sistema: sysStock }, ...prev]
+        })
+        toast.success(`${packMatch.etiqueta} detectado`, `${baseProduct.nombre} (+${packMatch.unidadesPorPaquete})`)
+      } else {
+        toast.warning("Código no encontrado", `No se encontró ningún producto con código ${scanCode}`)
+      }
     }
     setScanCode("")
     scanInputRef.current?.focus()

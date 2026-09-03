@@ -27,6 +27,7 @@ import {
   type SmartReplenishmentResponse,
   type SupplierInvoice,
   type CustomerLostDemand,
+  type PackBarcode,
 } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -183,6 +184,8 @@ export default function PurchasesPage() {
       sku: string
       cantidad_ordenada: number
       cantidad_recibir: number
+      presentacion_id: string
+      cantidad_presentacion: number
       precio_unitario: number
       lote: string
       fecha_vencimiento: string
@@ -196,6 +199,7 @@ export default function PurchasesPage() {
     items: [],
   })
   const [savingReceipt, setSavingReceipt] = useState(false)
+  const [packBarcodesByProduct, setPackBarcodesByProduct] = useState<Map<string, PackBarcode[]>>(new Map())
   const [lastReceiptForLabels, setLastReceiptForLabels] = useState<{ id: string; numero: string } | null>(null)
   const navigate = useNavigate()
 
@@ -508,28 +512,79 @@ export default function PurchasesPage() {
     }
 
     try {
-      const items = await api.purchases.getOrderItems(targetPO.id)
+      const [items, packBarcodes] = await Promise.all([
+        api.purchases.getOrderItems(targetPO.id),
+        api.products.packBarcodes.list().catch(() => [] as PackBarcode[]),
+      ])
+
+      const byProduct = new Map<string, PackBarcode[]>()
+      for (const pb of packBarcodes || []) {
+        if (!pb.activo) continue
+        const list = byProduct.get(pb.product_id) || []
+        list.push(pb)
+        byProduct.set(pb.product_id, list)
+      }
+      setPackBarcodesByProduct(byProduct)
+
       setReceiptForm({
         purchase_order_id: targetPO.id,
         proveedor_ref: "",
         observaciones: "",
-        items: (items || []).map(it => ({
-          product_id: (it as any).product_id || (it as any).producto_id || (it as any).id || "",
-          nombre: (it as any).producto?.nombre || (it as any).descripcion || "Producto",
-          sku: (it as any).producto?.sku || "",
-          cantidad_ordenada: Number(it.cantidad || 0),
-          cantidad_recibir: Math.max(0, Number(it.cantidad || 0) - Number(it.recibido || (it as any).cantidad_recibida || 0)),
-          precio_unitario: Number(it.precio_unitario || 0),
-          lote: "",
-          fecha_vencimiento: "",
-          cantidad_rechazada: 0,
-          motivo_rechazo: "",
-        }))
+        items: (items || []).map(it => {
+          const cantidadRecibir = Math.max(0, Number(it.cantidad || 0) - Number(it.recibido || (it as any).cantidad_recibida || 0))
+          return {
+            product_id: (it as any).product_id || (it as any).producto_id || (it as any).id || "",
+            nombre: (it as any).producto?.nombre || (it as any).descripcion || "Producto",
+            sku: (it as any).producto?.sku || "",
+            cantidad_ordenada: Number(it.cantidad || 0),
+            cantidad_recibir: cantidadRecibir,
+            presentacion_id: "",
+            cantidad_presentacion: cantidadRecibir,
+            precio_unitario: Number(it.precio_unitario || 0),
+            lote: "",
+            fecha_vencimiento: "",
+            cantidad_rechazada: 0,
+            motivo_rechazo: "",
+          }
+        })
       })
       setShowReceiptModal(true)
     } catch (e: any) {
       toast.error("Error al cargar orden para recepción", e.message)
     }
+  }
+
+  const handleReceiptPresentationChange = (idx: number, presentacionId: string) => {
+    setReceiptForm(prev => {
+      const copy = [...prev.items]
+      const item = copy[idx]
+      const packs = packBarcodesByProduct.get(item.product_id) || []
+      const pack = packs.find(p => p.id === presentacionId)
+      const multiplier = pack ? Number(pack.unidades_por_paquete) : 1
+      copy[idx] = {
+        ...item,
+        presentacion_id: presentacionId,
+        cantidad_recibir: Math.max(0, item.cantidad_presentacion) * multiplier,
+      }
+      return { ...prev, items: copy }
+    })
+  }
+
+  const handleReceiptCantidadPresentacionChange = (idx: number, cantidad: number) => {
+    setReceiptForm(prev => {
+      const copy = [...prev.items]
+      const item = copy[idx]
+      const packs = packBarcodesByProduct.get(item.product_id) || []
+      const pack = packs.find(p => p.id === item.presentacion_id)
+      const multiplier = pack ? Number(pack.unidades_por_paquete) : 1
+      const cantidadPresentacion = Math.max(0, cantidad)
+      copy[idx] = {
+        ...item,
+        cantidad_presentacion: cantidadPresentacion,
+        cantidad_recibir: cantidadPresentacion * multiplier,
+      }
+      return { ...prev, items: copy }
+    })
   }
 
   const handleSaveReceipt = async (e: React.FormEvent) => {
@@ -2858,7 +2913,9 @@ export default function PurchasesPage() {
                     <tr>
                       <th className="p-2.5">Producto</th>
                       <th className="p-2.5 text-right w-20">Pedido</th>
-                      <th className="p-2.5 text-right w-28">Recibir (Un.)</th>
+                      <th className="p-2.5 w-40">Presentación</th>
+                      <th className="p-2.5 text-right w-24">Cantidad</th>
+                      <th className="p-2.5 text-right w-24">Total (Un.)</th>
                       <th className="p-2.5 w-28">N° Lote</th>
                       <th className="p-2.5 w-32">Vencimiento</th>
                       <th className="p-2.5 text-right w-24">Rechazo</th>
@@ -2875,22 +2932,32 @@ export default function PurchasesPage() {
                         <td className="p-2.5 text-right font-mono font-bold text-gray-600 dark:text-gray-300">
                           {it.cantidad_ordenada.toLocaleString()}
                         </td>
+                        <td className="p-2.5">
+                          <select
+                            value={it.presentacion_id}
+                            onChange={(e) => handleReceiptPresentationChange(idx, e.target.value)}
+                            className="input-field w-full p-1 text-xs"
+                          >
+                            <option value="">Unidad suelta</option>
+                            {(packBarcodesByProduct.get(it.product_id) || []).map(pb => (
+                              <option key={pb.id} value={pb.id}>
+                                {pb.etiqueta} (x{pb.unidades_por_paquete})
+                              </option>
+                            ))}
+                          </select>
+                        </td>
                         <td className="p-2.5 text-right">
                           <input
                             type="number"
                             min={0}
-                            value={it.cantidad_recibir}
-                            onChange={(e) => {
-                              const val = Math.max(0, Number(e.target.value))
-                              setReceiptForm(prev => {
-                                const copy = [...prev.items]
-                                copy[idx].cantidad_recibir = val
-                                return { ...prev, items: copy }
-                              })
-                            }}
-                            className="input-field w-24 p-1 text-right font-mono font-bold text-xs"
+                            value={it.cantidad_presentacion}
+                            onChange={(e) => handleReceiptCantidadPresentacionChange(idx, Number(e.target.value))}
+                            className="input-field w-20 p-1 text-right font-mono font-bold text-xs"
                             required
                           />
+                        </td>
+                        <td className="p-2.5 text-right font-mono font-bold text-gray-600 dark:text-gray-300">
+                          {it.cantidad_recibir.toLocaleString()}
                         </td>
                         <td className="p-2.5">
                           <input

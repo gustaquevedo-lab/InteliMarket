@@ -2,6 +2,7 @@ import { useEntityLookup, getProductName, getSupplierName } from "../../hooks/us
 import { useState, useEffect } from "react"
 import { MapPin, ClipboardList, RotateCcw, Layers, Truck, Bell, PackageSearch } from "lucide-react"
 import { advInvApi } from "../../api/advancedInventory"
+import { api, type PackBarcode } from "../../api"
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api"
 
@@ -302,7 +303,20 @@ function CycleCountTab() {
   const [showForm, setShowForm] = useState(false)
   const [whId, setWhId] = useState("")
   const [addItem, setAddItem] = useState({ product_id: "", cantidad_sistema: "0" })
+  const [packBarcodesByProduct, setPackBarcodesByProduct] = useState<Map<string, PackBarcode[]>>(new Map())
   useEffect(() => { apiGet("/cycle-counts").then(setCounts).catch(() => {}) }, [])
+  useEffect(() => {
+    api.products.packBarcodes.list().then((list) => {
+      const map = new Map<string, PackBarcode[]>()
+      for (const pb of list || []) {
+        if (!pb.activo) continue
+        const arr = map.get(pb.product_id) || []
+        arr.push(pb)
+        map.set(pb.product_id, arr)
+      }
+      setPackBarcodesByProduct(map)
+    }).catch(() => {})
+  }, [])
 
   const loadDetail = async (id: string) => {
     try { setDetail(await apiGet(`/cycle-counts/${id}`)); setSelected(id) } catch {}
@@ -320,9 +334,20 @@ function CycleCountTab() {
     } catch {}
   }
 
-  const record = async (itemId: string) => {
-    const cf = prompt("Cantidad física:") || "0"
-    try { await apiPost(`/cycle-counts/${detail.id}/items/${itemId}/count`, { cantidad_fisica: parseFloat(cf) }); loadDetail(detail.id) } catch {}
+  const record = async (itemId: string, productId: string) => {
+    const packs = packBarcodesByProduct.get(productId) || []
+    let cantidadFisica: number
+    if (packs.length > 0) {
+      const opciones = packs.map(p => `${p.etiqueta} (x${p.unidades_por_paquete})`).join(" | ")
+      const presentacion = (prompt(`Presentación contada (dejar vacío = unidad suelta)\nOpciones: ${opciones}`) || "").trim().toLowerCase()
+      const cantidadStr = prompt("Cantidad en esa presentación:") || "0"
+      const cantidad = parseFloat(cantidadStr) || 0
+      const pack = packs.find(p => p.etiqueta.trim().toLowerCase() === presentacion)
+      cantidadFisica = pack ? cantidad * Number(pack.unidades_por_paquete) : cantidad
+    } else {
+      cantidadFisica = parseFloat(prompt("Cantidad física:") || "0")
+    }
+    try { await apiPost(`/cycle-counts/${detail.id}/items/${itemId}/count`, { cantidad_fisica: cantidadFisica }); loadDetail(detail.id) } catch {}
   }
 
   const complete = async () => {
@@ -381,7 +406,7 @@ function CycleCountTab() {
                         <p className="text-sm font-medium">{i.product_nombre || i.product_id.slice(0, 8)}</p>
                         <p className="text-xs text-gray-500">Sist: {i.cantidad_sistema} · Fis: {i.cantidad_fisica ?? "—"} · Diff: {i.diferencia != null ? (i.diferencia > 0 ? `+${i.diferencia}` : i.diferencia) : "—"}</p>
                       </div>
-                      {i.estado !== "contado" && <button onClick={() => record(i.id)} className="text-xs bg-blue-500 text-white px-2 py-1 rounded">Contar</button>}
+                      {i.estado !== "contado" && <button onClick={() => record(i.id, i.product_id)} className="text-xs bg-blue-500 text-white px-2 py-1 rounded">Contar</button>}
                       {i.estado === "contado" && <span className={`text-xs font-medium ${i.diferencia !== 0 ? "text-red-500" : "text-green-500"}`}>{i.diferencia !== 0 ? "Discrepancia" : "✓ OK"}</span>}
                     </div>
                   </div>
