@@ -2,21 +2,25 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   UtensilsCrossed, Tag, Monitor,
   Plus, Check, X, RefreshCcw, Trash2,
-  Clock, Scan, Printer,
+  Clock, Scan, Printer, Download,
   Sun, Moon,
   Loader2, Thermometer,
   Boxes, Search, Percent, AlertCircle,
   Beef, ChefHat, Carrot, AlertTriangle,
-  Flame, ShoppingCart, Layers, ExternalLink
+  Flame, ShoppingCart, Layers, ExternalLink,
+  Volume2, ShieldCheck, Sparkles, Scale,
+  ChevronRight, ArrowRight, CheckCircle2
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { useTheme } from "../../context/ThemeContext"
 import { api, type Product } from "../../api"
+import { soundAlerts } from "../../utils/audioAlerts"
 import { DEFAULT_TV_CONFIG, DEFAULT_CORTES, type TvCarniceriaConfig } from "../kiosk/CarniceriaTvDigitalPage"
 
 // Tipos Maestros de Salón de Ventas (5 Módulos del Encargado)
-type SalonTab = "gondola" | "mermas" | "reposicion" | "frescos" | "haccp"
+type SalonTab = "gondola" | "produccion" | "mermas" | "reposicion" | "haccp"
+type ProduccionSector = "carniceria" | "panaderia" | "verduleria"
 
 export interface LabelQueueItem {
   id: string
@@ -69,6 +73,20 @@ export interface TemperaturaItem {
   responsable?: string
 }
 
+export interface LoteProduccion {
+  id: string
+  sector: "Carnicería" | "Panadería" | "Verdulería"
+  receta_nombre: string
+  insumo_origen: string
+  cantidad_insumo: number
+  producto_obtenido: string
+  cantidad_obtenida: number
+  unidad: string
+  costo_unitario: number
+  lote_codigo: string
+  hora: string
+}
+
 const displayFont = { fontFamily: "'Archivo Expanded', system-ui, sans-serif" }
 const monoFont = { fontFamily: "'IBM Plex Mono', 'SF Mono', monospace" }
 const formatPYG = (n: number) => `₲ ${Math.round(n || 0).toLocaleString("es-PY")}`
@@ -100,6 +118,7 @@ export default function SalonOperacionesPwaPage() {
   const { dark, toggle: toggleTheme } = useTheme()
 
   const [tab, setTab] = useState<SalonTab>("gondola")
+  const [produccionSector, setProduccionSector] = useState<ProduccionSector>("carniceria")
   const [products, setProducts] = useState<Product[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
 
@@ -125,7 +144,66 @@ export default function SalonOperacionesPwaPage() {
   const [barcodeQuery, setBarcodeQuery] = useState("")
   const [scannedProduct, setScannedProduct] = useState<Product | null>(null)
   const [precioVistoGondola, setPrecioVistoGondola] = useState("")
-  const [qtyLabelsToAdd, setQtyLabelsToAdd] = useState("1")
+
+  // ── ESTADOS DE PRODUCCIÓN & TRANSFORMACIÓN REAL ──
+  const [lotesProduccion, setLotesProduccion] = useState<LoteProduccion[]>([
+    {
+      id: "lp-101",
+      sector: "Carnicería",
+      receta_nombre: "Elaboración de Chorizo Parrillero Casero Extra",
+      insumo_origen: "Trimmings de Res (Recortes) + Tocino de Cerdo",
+      cantidad_insumo: 45,
+      producto_obtenido: "Chorizo Casero Parrillero Extra",
+      cantidad_obtenida: 43.5,
+      unidad: "Kg",
+      costo_unitario: 24500,
+      lote_codigo: "CH-260903-01",
+      hora: "07:30"
+    },
+    {
+      id: "lp-102",
+      sector: "Panadería",
+      receta_nombre: "Residuo Cero: Pan Francés de Ayer ➔ Pan Rallado",
+      insumo_origen: "Pan Francés Seco (Sobrante)",
+      cantidad_insumo: 30,
+      producto_obtenido: "Pan Rallado Artesanal Extra 1Kg",
+      cantidad_obtenida: 29.2,
+      unidad: "Kg",
+      costo_unitario: 6200,
+      lote_codigo: "PR-260903-A",
+      hora: "08:15"
+    },
+    {
+      id: "lp-103",
+      sector: "Verdulería",
+      receta_nombre: "Fraccionamiento Fresh Cut: Zapallo en Cubos",
+      insumo_origen: "Zapallo Kabutiá a granel",
+      cantidad_insumo: 50,
+      producto_obtenido: "Bandejas Zapallo Pelado en Cubos 500g",
+      cantidad_obtenida: 76,
+      unidad: "Bandejas",
+      costo_unitario: 4100,
+      lote_codigo: "VC-260903-Z",
+      hora: "08:45"
+    }
+  ])
+
+  // Formulario de Producción de Embutidos / Carnicería
+  const [carneReceta, setCarneReceta] = useState("Chorizo Parrillero Casero Extra")
+  const [carneKgTrimmings, setCarneKgTrimmings] = useState("30")
+  const [carneKgTocino, setCarneKgTocino] = useState("10")
+
+  // Formulario de Panadería (Amasado y Transformación)
+  const [panModo, setPanModo] = useState<"amasado" | "sobrante">("sobrante")
+  const [panKgHarina, setPanKgHarina] = useState("50")
+  const [panTipoAmasado, setPanTipoAmasado] = useState("Pan Francés Tradicional")
+  const [panKgSobrante, setPanKgSobrante] = useState("25")
+  const [panDestinoSobrante, setPanDestinoSobrante] = useState("Pan Rallado Artesanal Extra")
+
+  // Formulario de Verdulería (Fraccionamiento & Fresh Cut)
+  const [verduraInsumo, setVerduraInsumo] = useState("Zapallo Kabutiá")
+  const [verduraKgBrutos, setVerduraKgBrutos] = useState("40")
+  const [verduraBandejasDestino, setVerduraBandejasDestino] = useState("Bandejas Zapallo en Cubos 500g")
 
   // ── ESTADOS DE MERMAS OFICIALES ──
   const [mermasList, setMermasList] = useState<MermaItem[]>([])
@@ -160,16 +238,6 @@ export default function SalonOperacionesPwaPage() {
   // ── ESTADOS DE DESPOSTE DE CARNES (CALCULADORA REAL DE RENDIMIENTO) ──
   const [despostePesoEntrada, setDespostePesoEntrada] = useState<number>(240)
   const [desposteCostoTotal, setDesposteCostoTotal] = useState<number>(5500000)
-  const [desposteEspecie, setDesposteEspecie] = useState<string>("Vacuno Novillo")
-
-  // ── ESTADOS DE TV CARNICERÍA 55" ──
-  const [tvConfig, setTvConfig] = useState<TvCarniceriaConfig>(() => {
-    try {
-      const saved = localStorage.getItem("extra_tv_carniceria_config")
-      if (saved) return { ...DEFAULT_TV_CONFIG, ...JSON.parse(saved) }
-    } catch {}
-    return DEFAULT_TV_CONFIG
-  })
 
   // Cargar Catálogo de Productos
   const loadCatalog = useCallback(async () => {
@@ -207,7 +275,7 @@ export default function SalonOperacionesPwaPage() {
         setMermasList(mapped)
       }
     } catch {
-      // Mantiene lista previa si la tabla no tiene filas
+      // Fallback
     } finally {
       setLoadingMermas(false)
     }
@@ -218,7 +286,7 @@ export default function SalonOperacionesPwaPage() {
     loadMermas()
   }, [loadCatalog, loadMermas])
 
-  // ── ACCIÓN: ESCANEAR O BUSCAR PRODUCTO ──
+  // ── ACCIÓN: ESCANEAR O BUSCAR PRODUCTO CON SONIDO ──
   const handleScanSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const q = barcodeQuery.trim().toLowerCase()
@@ -231,11 +299,13 @@ export default function SalonOperacionesPwaPage() {
     )
 
     if (match) {
+      soundAlerts.playScanSuccess()
       setScannedProduct(match)
       setPrecioVistoGondola("")
       setBarcodeQuery("")
       toast.success("Producto Localizado", match.nombre)
     } else {
+      soundAlerts.playPriceMismatchAlert()
       toast.error("No Encontrado", `No se encontró ningún producto con código o nombre '${barcodeQuery}'`)
     }
   }
@@ -247,7 +317,8 @@ export default function SalonOperacionesPwaPage() {
     customQty?: number,
     customDiscount?: number
   ) => {
-    const qty = customQty || parseInt(qtyLabelsToAdd) || 1
+    soundAlerts.playScanSuccess()
+    const qty = customQty || 1
     const pVenta = prod.precio_venta || prod.precio || 0
     const precioFinal = customDiscount ? Math.round(pVenta * (1 - customDiscount / 100)) : pVenta
 
@@ -268,6 +339,115 @@ export default function SalonOperacionesPwaPage() {
     const updated = [newItem, ...labelQueue]
     saveLabelQueue(updated)
     toast.success("Etiqueta en Cola", `${qty} etiqueta(s) agregadas para ${prod.nombre}`)
+  }
+
+  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE CARNICERÍA (EMBUTIDOS / MILANESAS) ──
+  const handleConfirmProduccionCarne = (e: React.FormEvent) => {
+    e.preventDefault()
+    const trimmings = parseFloat(carneKgTrimmings) || 0
+    const tocino = parseFloat(carneKgTocino) || 0
+    if (trimmings <= 0) {
+      toast.warning("Faltan insumos", "Ingrese los Kilos de recortes/trimmings.")
+      return
+    }
+
+    const kgObtenidos = (trimmings + tocino) * 0.97 // 3% merma de embutido
+    const loteCod = `EMB-${Date.now().toString().slice(-4)}`
+    const nuevoLote: LoteProduccion = {
+      id: `lp-${Date.now()}`,
+      sector: "Carnicería",
+      receta_nombre: carneReceta,
+      insumo_origen: `${trimmings}kg Trimmings + ${tocino}kg Tocino`,
+      cantidad_insumo: trimmings + tocino,
+      producto_obtenido: carneReceta,
+      cantidad_obtenida: Math.round(kgObtenidos * 10) / 10,
+      unidad: "Kg",
+      costo_unitario: 23500,
+      lote_codigo: loteCod,
+      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+    }
+
+    soundAlerts.playScanSuccess()
+    setLotesProduccion([nuevoLote, ...lotesProduccion])
+    toast.success("Producción Registrada", `${kgObtenidos.toFixed(1)} Kg de ${carneReceta} listos con lote ${loteCod}.`)
+  }
+
+  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE PANADERÍA (SOBRANTES O AMASADO) ──
+  const handleConfirmProduccionPan = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (panModo === "sobrante") {
+      const sobrante = parseFloat(panKgSobrante) || 0
+      if (sobrante <= 0) {
+        toast.warning("Faltan datos", "Ingrese los Kilos de pan sobrante a moler.")
+        return
+      }
+      const obtenido = sobrante * 0.96 // 4% merma molino
+      const loteCod = `RES-${Date.now().toString().slice(-4)}`
+      const nuevoLote: LoteProduccion = {
+        id: `lp-${Date.now()}`,
+        sector: "Panadería",
+        receta_nombre: "Transformación Residuo Cero (Pan Seco ➔ Pan Rallado)",
+        insumo_origen: `${sobrante}kg Pan Francés de Ayer`,
+        cantidad_insumo: sobrante,
+        producto_obtenido: panDestinoSobrante,
+        cantidad_obtenida: Math.round(obtenido * 10) / 10,
+        unidad: "Kg",
+        costo_unitario: 5800,
+        lote_codigo: loteCod,
+        hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+      }
+      soundAlerts.playScanSuccess()
+      setLotesProduccion([nuevoLote, ...lotesProduccion])
+      toast.success("Residuo Cero Registrado", `Convertidos ${sobrante}kg de pan seco en ${obtenido.toFixed(1)}kg de Pan Rallado.`)
+    } else {
+      const harina = parseFloat(panKgHarina) || 0
+      const obtenido = harina * 1.35 // Rendimiento panadería 135% por agua/levadura
+      const loteCod = `PAN-${Date.now().toString().slice(-4)}`
+      const nuevoLote: LoteProduccion = {
+        id: `lp-${Date.now()}`,
+        sector: "Panadería",
+        receta_nombre: `Amasado Diario: ${panTipoAmasado}`,
+        insumo_origen: `${harina}kg Harina 000 + Insumos`,
+        cantidad_insumo: harina,
+        producto_obtenido: panTipoAmasado,
+        cantidad_obtenida: Math.round(obtenido * 10) / 10,
+        unidad: "Kg",
+        costo_unitario: 8200,
+        lote_codigo: loteCod,
+        hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+      }
+      soundAlerts.playScanSuccess()
+      setLotesProduccion([nuevoLote, ...lotesProduccion])
+      toast.success("Horneada Registrada", `Producidos ${obtenido.toFixed(1)}kg de ${panTipoAmasado}.`)
+    }
+  }
+
+  // ── ACCIÓN: REGISTRAR PRODUCCIÓN DE VERDULERÍA (FRESH CUT / FRACCIONAMIENTO) ──
+  const handleConfirmProduccionVerdura = (e: React.FormEvent) => {
+    e.preventDefault()
+    const brutos = parseFloat(verduraKgBrutos) || 0
+    if (brutos <= 0) {
+      toast.warning("Faltan datos", "Ingrese los Kilos brutos fraccionados.")
+      return
+    }
+    const bandejas = Math.floor((brutos * 0.85) / 0.5) // 15% merma cascara, bandejas de 500g
+    const loteCod = `FC-${Date.now().toString().slice(-4)}`
+    const nuevoLote: LoteProduccion = {
+      id: `lp-${Date.now()}`,
+      sector: "Verdulería",
+      receta_nombre: `Fresh Cut: ${verduraBandejasDestino}`,
+      insumo_origen: `${brutos}kg ${verduraInsumo} a granel`,
+      cantidad_insumo: brutos,
+      producto_obtenido: verduraBandejasDestino,
+      cantidad_obtenida: bandejas,
+      unidad: "Bandejas",
+      costo_unitario: 4300,
+      lote_codigo: loteCod,
+      hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })
+    }
+    soundAlerts.playScanSuccess()
+    setLotesProduccion([nuevoLote, ...lotesProduccion])
+    toast.success("Fraccionamiento Terminado", `Empacadas ${bandejas} bandejas listas para batea refrigerada.`)
   }
 
   // ── ACCIÓN: REGISTRAR MERMA OFICIAL EN BACKEND ──
@@ -297,6 +477,7 @@ export default function SalonOperacionesPwaPage() {
 
       await api.supermer.waste.create(payload)
 
+      soundAlerts.playScanSuccess()
       toast.success("Merma Registrada Oficialmente", `Se descontaron ${cant} un. de ${prod.nombre} del stock.`)
       setMermaQty("")
       setMermaObs("")
@@ -319,6 +500,7 @@ export default function SalonOperacionesPwaPage() {
         registrado_por: user?.nombre || "Encargado de Salón",
       }
       setMermasList([fallbackItem, ...mermasList])
+      soundAlerts.playScanSuccess()
       toast.success("Merma Guardada", `Registrada localmente: ${cant} un. de ${prod.nombre}.`)
       setMermaQty("")
       setMermaObs("")
@@ -349,6 +531,7 @@ export default function SalonOperacionesPwaPage() {
       hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }),
     }
 
+    soundAlerts.playRestockChime()
     setReposiciones([nuevaRepo, ...reposiciones])
     toast.success("Pedido al Depósito Enviado", `Solicitada bajada de ${cant} un. de ${prod.nombre}.`)
     setRepoQty("")
@@ -383,8 +566,10 @@ export default function SalonOperacionesPwaPage() {
 
     setTemperaturas([nuevaTemp, ...temperaturas])
     if (esOptimo) {
+      soundAlerts.playScanSuccess()
       toast.success("Control HACCP Guardado", `${tempEquipo}: ${val}°C (Dentro de rango seguro).`)
     } else {
+      soundAlerts.playHaccpWarning()
       toast.error("¡ALERTA DE TEMPERATURA!", `${tempEquipo}: ${val}°C fuera de rango crítico (${min}°C a ${max}°C).`)
     }
     setTempValor("")
@@ -433,16 +618,16 @@ export default function SalonOperacionesPwaPage() {
         <div className="flex items-center justify-between py-2.5 sm:py-3 max-w-4xl mx-auto gap-2">
           
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-slate-950 font-black shadow-md shadow-amber-500/25 shrink-0">
-              <UtensilsCrossed className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-600 via-amber-500 to-emerald-500 flex items-center justify-center text-slate-950 font-black shadow-md shadow-amber-500/25 shrink-0">
+              <UtensilsCrossed className="w-5 h-5 text-slate-950" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="font-black text-sm uppercase tracking-wider truncate" style={displayFont}>
-                  OPERACIONES DE SALÓN
+                  EXTRA SALÓN
                 </span>
                 <span className="text-[8.5px] font-black uppercase px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
-                  Extra Salón
+                  Floor Ops
                 </span>
               </div>
               <div className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate">
@@ -452,6 +637,17 @@ export default function SalonOperacionesPwaPage() {
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Botón Descarga APK Extra Salón */}
+            <a
+              href="/download/extra-salon.apk"
+              download="extra-salon.apk"
+              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 transition cursor-pointer flex items-center gap-1.5 text-xs font-black"
+              title="Descargar APK Extra Salón para Celular/Tablet"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">APK Salón</span>
+            </a>
+
             {/* Botón Flotante de Cola de Impresión */}
             <button
               onClick={() => setShowQueueModal(true)}
@@ -479,10 +675,10 @@ export default function SalonOperacionesPwaPage() {
         <div className="grid grid-cols-4 gap-2 pb-3 max-w-4xl mx-auto">
           <div className="rounded-xl p-2 text-center border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
             <div className="font-black text-base text-slate-900 dark:text-white" style={monoFont}>
-              {products.length}
+              {lotesProduccion.length}
             </div>
             <div className="text-[8.5px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider truncate">
-              Catálogo
+              Lotes Prod.
             </div>
           </div>
 
@@ -577,7 +773,7 @@ export default function SalonOperacionesPwaPage() {
                   </div>
                 </div>
 
-                {/* Validador de Precio en Góndola */}
+                {/* Validador de Precio en Góndola con Alarma Sonora */}
                 <div className="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
                   <label className="text-[10.5px] font-black uppercase tracking-wider text-slate-500 block mb-1.5">
                     ¿Qué precio tiene el fleje en la góndola?
@@ -586,7 +782,17 @@ export default function SalonOperacionesPwaPage() {
                     <input
                       type="text"
                       value={precioVistoGondola}
-                      onChange={(e) => setPrecioVistoGondola(e.target.value.replace(/\D/g, ""))}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, "")
+                        setPrecioVistoGondola(val)
+                        if (val) {
+                          const visto = parseFloat(val) || 0
+                          const oficial = scannedProduct.precio_venta || scannedProduct.precio || 0
+                          if (visto !== oficial && visto > 0) {
+                            soundAlerts.playPriceMismatchAlert()
+                          }
+                        }
+                      }}
                       placeholder="Ingrese precio visto en góndola (₲)..."
                       className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
                       style={monoFont}
@@ -602,7 +808,7 @@ export default function SalonOperacionesPwaPage() {
                         )
                       }
                       return (
-                        <div className="px-3 py-2 rounded-xl bg-rose-500/20 text-rose-600 dark:text-rose-400 font-black text-xs flex items-center gap-1 shrink-0">
+                        <div className="px-3 py-2 rounded-xl bg-rose-500/20 text-rose-600 dark:text-rose-400 font-black text-xs flex items-center gap-1 shrink-0 animate-pulse">
                           <AlertTriangle className="w-4 h-4" /> ¡Diferencia!
                         </div>
                       )
@@ -660,18 +866,406 @@ export default function SalonOperacionesPwaPage() {
                   Auditoría Rápida de Góndola
                 </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mt-1">
-                  Escanée el código de barras de cualquier producto en góndola para comprobar su precio oficial de caja, generar etiquetas faltantes o registrar mermas al instante.
+                  Escanée el código de barras de cualquier producto en góndola para comprobar su precio oficial de caja registradora, generar etiquetas faltantes o registrar mermas al instante.
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* ══════════════════════ TAB 2: MERMAS OFICIALES EN SALÓN ══════════════════════ */}
-        {tab === "mermas" && (
+        {/* ══════════════════════ TAB 2: PRODUCCIÓN & TRANSFORMACIÓN REAL EN SECTORES ══════════════════════ */}
+        {tab === "produccion" && (
           <div className="space-y-4 animate-fade-in">
             
-            {/* Formulario de Merma */}
+            {/* Selector de Sector Productivo */}
+            <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+              {[
+                { id: "carniceria", label: "🥩 Carnicería", sub: "Desposte & Embutidos" },
+                { id: "panaderia", label: "🥖 Panadería", sub: "Amasado & Residuo Cero" },
+                { id: "verduleria", label: "🥕 Verdulería", sub: "Fresh Cut & Fraccionado" },
+              ].map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setProduccionSector(s.id as ProduccionSector)}
+                  className={`flex-1 p-2.5 rounded-2xl text-left transition cursor-pointer ${
+                    produccionSector === s.id
+                      ? "bg-slate-900 text-white dark:bg-white dark:text-slate-950 shadow-md"
+                      : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800"
+                  }`}
+                >
+                  <div className="font-black text-xs">{s.label}</div>
+                  <div className="text-[9.5px] opacity-70 truncate">{s.sub}</div>
+                </button>
+              ))}
+            </div>
+
+            {/* ── SUB-SECTOR 1: CARNICERÍA (DESPOSTE & EMBUTIDOS) ── */}
+            {produccionSector === "carniceria" && (
+              <div className="space-y-4 animate-fade-in">
+                
+                {/* Desposte de Res */}
+                <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <div>
+                      <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                        Desposte de Media Res (Cuarteo Gancho)
+                      </h2>
+                      <div className="text-[11px] text-slate-500">
+                        Deconstrucción de media res a cortes nobles, recortes y hueso.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => window.open("/tv/carniceria", "_blank")}
+                      className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-[11px] font-black flex items-center gap-1 shadow-xs cursor-pointer"
+                    >
+                      <Monitor className="w-3.5 h-3.5" />
+                      <span>TV 55"</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        Peso en Gancho (Kg):
+                      </label>
+                      <input
+                        type="number"
+                        value={despostePesoEntrada}
+                        onChange={(e) => setDespostePesoEntrada(Number(e.target.value) || 0)}
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-base font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                        style={monoFont}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        Costo Total Compra (₲):
+                      </label>
+                      <input
+                        type="text"
+                        value={desposteCostoTotal}
+                        onChange={(e) => setDesposteCostoTotal(Number(e.target.value.replace(/\D/g, "")) || 0)}
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-base font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                        style={monoFont}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center">
+                    <div>
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Costo / Kg Gancho</div>
+                      <div className="font-black text-sm text-slate-900 dark:text-white" style={monoFont}>
+                        {formatPYG(desposteCalculo.costoKgGancho)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Valorizado Venta</div>
+                      <div className="font-black text-sm text-emerald-600 dark:text-emerald-400" style={monoFont}>
+                        {formatPYG(desposteCalculo.valorizadoTotal)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase font-bold text-slate-400">Margen Bruto</div>
+                      <div className="font-black text-sm text-amber-600 dark:text-amber-400" style={monoFont}>
+                        {desposteCalculo.margenPct.toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Elaboración de Embutidos (Chorizos) */}
+                <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
+                  <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                    Elaboración de Embutidos & Chacinados
+                  </h2>
+                  <form onSubmit={handleConfirmProduccionCarne} className="space-y-3">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        Receta a Elaborar:
+                      </label>
+                      <select
+                        value={carneReceta}
+                        onChange={(e) => setCarneReceta(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                      >
+                        <option value="Chorizo Parrillero Casero Extra">Chorizo Parrillero Casero Extra (BOM: Trimmings + Tocino)</option>
+                        <option value="Chorizo Toscano con Hierbas">Chorizo Toscano con Hierbas</option>
+                        <option value="Morcilla Criolla Tradicional">Morcilla Criolla Tradicional</option>
+                        <option value="Milanesas de Bola de Lomo Rebozadas">Milanesas Rebozadas (con Pan Rallado Panadería)</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                          Kg Recortes / Trimmings:
+                        </label>
+                        <input
+                          type="number"
+                          value={carneKgTrimmings}
+                          onChange={(e) => setCarneKgTrimmings(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                          style={monoFont}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                          Kg Tocino / Grasa:
+                        </label>
+                        <input
+                          type="number"
+                          value={carneKgTocino}
+                          onChange={(e) => setCarneKgTocino(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                          style={monoFont}
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-red-600/20 cursor-pointer"
+                    >
+                      <Beef className="w-4 h-4" />
+                      Registrar Lote de Elaborados en Carnicería
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* ── SUB-SECTOR 2: PANADERÍA (AMASADO & RESIDUO CERO) ── */}
+            {produccionSector === "panaderia" && (
+              <div className="space-y-4 animate-fade-in">
+                <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
+                  <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <button
+                      onClick={() => setPanModo("sobrante")}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
+                        panModo === "sobrante" ? "bg-amber-500 text-slate-950 shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                      }`}
+                    >
+                      ♻️ Residuo Cero (Pan Rallado)
+                    </button>
+                    <button
+                      onClick={() => setPanModo("amasado")}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
+                        panModo === "amasado" ? "bg-amber-500 text-slate-950 shadow-xs" : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                      }`}
+                    >
+                      🥖 Horneada Diaria (Amasado)
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleConfirmProduccionPan} className="space-y-3">
+                    {panModo === "sobrante" ? (
+                      <>
+                        <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-700 dark:text-emerald-300">
+                          <strong>Upcycling / Residuo Cero:</strong> Convierte el pan no vendido de ayer en Pan Rallado embolsado o tostadas para eliminar la merma y generar margen.
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                              Kg Pan Francés Seco:
+                            </label>
+                            <input
+                              type="number"
+                              value={panKgSobrante}
+                              onChange={(e) => setPanKgSobrante(e.target.value)}
+                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                              style={monoFont}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                              Destino de Transformación:
+                            </label>
+                            <select
+                              value={panDestinoSobrante}
+                              onChange={(e) => setPanDestinoSobrante(e.target.value)}
+                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                            >
+                              <option value="Pan Rallado Artesanal Extra">Pan Rallado Artesanal Extra (Bolsas 1Kg)</option>
+                              <option value="Tostadas Saborizadas con Orégano">Tostadas Saborizadas con Orégano</option>
+                              <option value="Budín de Pan Artesanal Rotisería">Budín de Pan Artesanal (Rotisería)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 cursor-pointer"
+                        >
+                          <ChefHat className="w-4 h-4" />
+                          Transformar en Pan Rallado (Residuo Cero)
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                              Kg Harina Amasada:
+                            </label>
+                            <input
+                              type="number"
+                              value={panKgHarina}
+                              onChange={(e) => setPanKgHarina(e.target.value)}
+                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                              style={monoFont}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                              Variedad Horneada:
+                            </label>
+                            <select
+                              value={panTipoAmasado}
+                              onChange={(e) => setPanTipoAmasado(e.target.value)}
+                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                            >
+                              <option value="Pan Francés Tradicional">Pan Francés Tradicional</option>
+                              <option value="Pan Felipe">Pan Felipe</option>
+                              <option value="Galletas Cuarteleras">Galletas Cuarteleras</option>
+                              <option value="Chipa Almidón">Chipa Almidón</option>
+                              <option value="Facturas / Medialunas">Facturas / Medialunas</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 cursor-pointer"
+                        >
+                          <ChefHat className="w-4 h-4" />
+                          Registrar Horneada y Descontar Harina
+                        </button>
+                      </>
+                    )}
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* ── SUB-SECTOR 3: VERDULERÍA (FRESH CUT & FRACCIONAMIENTO) ── */}
+            {produccionSector === "verduleria" && (
+              <div className="space-y-4 animate-fade-in">
+                <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
+                  <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                      Fraccionamiento Fresh Cut (Valor Agregado)
+                    </h2>
+                    <div className="text-[11px] text-slate-500">
+                      Convierte verduras a granel en bandejas peladas de conveniencia (margen 50%+).
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleConfirmProduccionVerdura} className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                          Verdura Insumo (Granel):
+                        </label>
+                        <select
+                          value={verduraInsumo}
+                          onChange={(e) => setVerduraInsumo(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                        >
+                          <option value="Zapallo Kabutiá">Zapallo Kabutiá</option>
+                          <option value="Mandioca Seleccionada">Mandioca Seleccionada</option>
+                          <option value="Repollo / Zanahoria / Choclo">Mix Sopa de Verduras</option>
+                          <option value="Frutas de Estación">Ensalada de Frutas</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                          Kg Brutos Insumidos:
+                        </label>
+                        <input
+                          type="number"
+                          value={verduraKgBrutos}
+                          onChange={(e) => setVerduraKgBrutos(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-sm font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                          style={monoFont}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        Producto Final Empacado:
+                      </label>
+                      <select
+                        value={verduraBandejasDestino}
+                        onChange={(e) => setVerduraBandejasDestino(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                      >
+                        <option value="Bandejas Zapallo en Cubos 500g">Bandejas Zapallo en Cubos 500g</option>
+                        <option value="Bolsas Mandioca Pelada Envasada 1Kg">Bolsas Mandioca Pelada Envasada 1Kg</option>
+                        <option value="Bandejas Sopa de Verduras Picadas">Bandejas Sopa de Verduras Picadas</option>
+                        <option value="Potes Ensalada de Frutas 350g">Potes Ensalada de Frutas 350g</option>
+                      </select>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 cursor-pointer"
+                    >
+                      <Carrot className="w-4 h-4" />
+                      Registrar Bandejeado en Batea Refrigerada
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Historial de Lotes Producidos Hoy */}
+            <div className="space-y-2">
+              <h3 className="font-black text-xs uppercase tracking-wider text-slate-500" style={displayFont}>
+                Lotes Producidos Hoy en Salón ({lotesProduccion.length})
+              </h3>
+              <div className="space-y-2">
+                {lotesProduccion.map((lp) => (
+                  <div key={lp.id} className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          lp.sector === "Carnicería" ? "bg-red-500/20 text-red-600 dark:text-red-400" :
+                          lp.sector === "Panadería" ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" :
+                          "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                        }`}>
+                          {lp.sector}
+                        </span>
+                        <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                          {lp.producto_obtenido}
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-1">
+                        Insumo: {lp.insumo_origen} · Lote: <strong className="text-slate-700 dark:text-slate-300 font-mono">{lp.lote_codigo}</strong> · {lp.hora}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-black text-sm text-slate-900 dark:text-white" style={monoFont}>
+                        {lp.cantidad_obtenida} {lp.unidad}
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        Costo: {formatPYG(lp.costo_unitario)}/{lp.unidad === "Bandejas" ? "un" : "kg"}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ══════════════════════ TAB 3: MERMAS OFICIALES EN SALÓN ══════════════════════ */}
+        {tab === "mermas" && (
+          <div className="space-y-4 animate-fade-in">
             <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
               <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
                 <div className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center font-black">
@@ -688,7 +1282,6 @@ export default function SalonOperacionesPwaPage() {
               </div>
 
               <form onSubmit={handleConfirmMerma} className="space-y-3">
-                {/* Producto Seleccionado */}
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
                     Producto a Mermar:
@@ -821,7 +1414,7 @@ export default function SalonOperacionesPwaPage() {
           </div>
         )}
 
-        {/* ══════════════════════ TAB 3: REPOSICIÓN & QUIEBRES (DEPÓSITO ➔ SALÓN) ══════════════════════ */}
+        {/* ══════════════════════ TAB 4: REPOSICIÓN & QUIEBRES ══════════════════════ */}
         {tab === "reposicion" && (
           <div className="space-y-4 animate-fade-in">
             <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
@@ -939,104 +1532,6 @@ export default function SalonOperacionesPwaPage() {
           </div>
         )}
 
-        {/* ══════════════════════ TAB 4: FRESCOS & ELABORADOS (CARNICERÍA, ROTISERÍA, TV 55") ══════════════════════ */}
-        {tab === "frescos" && (
-          <div className="space-y-4 animate-fade-in">
-            
-            {/* Calculadora de Desposte de Media Res */}
-            <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-red-600 text-white flex items-center justify-center font-black">
-                    <Beef className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h2 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
-                      Rendimiento de Desposte (Media Res)
-                    </h2>
-                    <div className="text-[11px] text-slate-500">
-                      Cálculo en tiempo real de cortes obtenidos vs gancho.
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => window.open("/tv/carniceria", "_blank")}
-                  className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-[11px] font-black flex items-center gap-1 shadow-xs cursor-pointer"
-                >
-                  <Monitor className="w-3.5 h-3.5" />
-                  <span>TV Carnicería 55"</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
-                    Peso en Gancho (Kg):
-                  </label>
-                  <input
-                    type="number"
-                    value={despostePesoEntrada}
-                    onChange={(e) => setDespostePesoEntrada(Number(e.target.value) || 0)}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-base font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
-                    style={monoFont}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
-                    Costo Total Compra (₲):
-                  </label>
-                  <input
-                    type="text"
-                    value={desposteCostoTotal}
-                    onChange={(e) => setDesposteCostoTotal(Number(e.target.value.replace(/\D/g, "")) || 0)}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 text-base font-black text-slate-900 dark:text-white outline-none focus:border-amber-500"
-                    style={monoFont}
-                  />
-                </div>
-              </div>
-
-              {/* Resultados del Desposte */}
-              <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-center">
-                <div>
-                  <div className="text-[9px] uppercase font-bold text-slate-400">Costo / Kg Gancho</div>
-                  <div className="font-black text-sm text-slate-900 dark:text-white" style={monoFont}>
-                    {formatPYG(desposteCalculo.costoKgGancho)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[9px] uppercase font-bold text-slate-400">Valorizado Venta</div>
-                  <div className="font-black text-sm text-emerald-600 dark:text-emerald-400" style={monoFont}>
-                    {formatPYG(desposteCalculo.valorizadoTotal)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[9px] uppercase font-bold text-slate-400">Margen Bruto</div>
-                  <div className="font-black text-sm text-amber-600 dark:text-amber-400" style={monoFont}>
-                    {desposteCalculo.margenPct.toFixed(1)}%
-                  </div>
-                </div>
-              </div>
-
-              {/* Cortes Desglosados */}
-              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                {desposteCalculo.cortes.map((c) => (
-                  <div key={c.nombre} className="p-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800/60 flex items-center justify-between text-xs">
-                    <div className="min-w-0">
-                      <span className="font-bold text-slate-800 dark:text-slate-200 truncate">{c.nombre}</span>
-                      <span className="text-[10px] text-slate-400 ml-1">({c.pct}%)</span>
-                    </div>
-                    <div className="text-right shrink-0 font-mono font-black text-slate-900 dark:text-white">
-                      {c.kg.toFixed(1)} Kg · {formatPYG(c.precio_venta_kg)}/kg
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* ══════════════════════ TAB 5: TEMPERATURAS & INOCUIDAD HACCP ══════════════════════ */}
         {tab === "haccp" && (
           <div className="space-y-4 animate-fade-in">
@@ -1114,7 +1609,7 @@ export default function SalonOperacionesPwaPage() {
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className={`font-black text-base ${t.estado === "optimo" ? "text-teal-600 dark:text-teal-400" : "text-rose-600 dark:text-rose-400"}`} style={monoFont}>
+                      <div className={`font-black text-base ${t.estado === "optimo" ? "text-teal-600 dark:text-teal-400" : "text-rose-600 dark:text-rose-400 animate-pulse"}`} style={monoFont}>
                         {t.temperatura}°C
                       </div>
                       <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${t.estado === "optimo" ? "bg-teal-500/20 text-teal-600 dark:text-teal-400" : "bg-rose-500/20 text-rose-600 dark:text-rose-400"}`}>
@@ -1135,10 +1630,10 @@ export default function SalonOperacionesPwaPage() {
         <div className="grid grid-cols-5 w-full max-w-lg mx-auto px-1 py-1">
           {[
             { id: "gondola", label: "Góndola", icon: Tag, badge: labelQueue.length },
+            { id: "produccion", label: "Producción", icon: ChefHat, badge: lotesProduccion.length },
             { id: "mermas", label: "Mermas", icon: Trash2, badge: mermasList.length },
             { id: "reposicion", label: "Quiebres", icon: Boxes, badge: reposiciones.filter(r => r.estado === "pendiente").length },
-            { id: "frescos", label: "Frescos", icon: Beef },
-            { id: "haccp", label: "Frío", icon: Thermometer },
+            { id: "haccp", label: "HACCP Frío", icon: Thermometer },
           ].map((sec) => {
             const Icon = sec.icon
             const active = tab === sec.id
