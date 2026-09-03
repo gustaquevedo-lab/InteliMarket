@@ -2177,7 +2177,7 @@ try {
                 <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1.5 flex items-center justify-between">
                   <span>Monto Declarado por Cajera</span>
                   <span className="text-amber-500 font-bold">
-                    {"caja_id" in confirmingItem.data ? `Caja ${confirmingItem.data.caja_id}` : ""}
+                    {"register_nombre" in confirmingItem.data && confirmingItem.data.register_nombre ? confirmingItem.data.register_nombre : ""}
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between">

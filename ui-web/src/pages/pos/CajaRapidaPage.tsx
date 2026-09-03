@@ -423,6 +423,7 @@ export default function POSPage() {
   const [cierreTab, setCierreTab] = useState<"conteo" | "conciliacion">("conteo")
   const [lastClosedSessionId, setLastClosedSessionId] = useState<string | null>(null)
   const [lastCierreTicketHtml, setLastCierreTicketHtml] = useState<string | null>(null)
+  const [lastCierreEscPosB64, setLastCierreEscPosB64] = useState<string | null>(null)
   const pendingDropIdsRef = useRef<Set<string>>(new Set())
   const confirmedDropIdsRef = useRef<Set<string>>(new Set())
   const pendingHandoffIdRef = useRef<string | null>(null)
@@ -2616,6 +2617,7 @@ export default function POSPage() {
         t += GS + 'V' + '\x01'
 
         const b64 = btoa(unescape(encodeURIComponent(t)))
+        setLastCierreEscPosB64(b64)
         const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
         try {
           await (window as any).electronAPI.printEscPos(b64, tpl.nombre_impresora_windows || "ZKP8008")
@@ -11017,9 +11019,33 @@ export default function POSPage() {
                   <button
                     type="button"
                     onClick={async () => {
-                      if (lastCierreTicketHtml) {
+                      if ((window as any).electronAPI?.printEscPos && lastCierreEscPosB64) {
+                        const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
+                        try {
+                          await (window as any).electronAPI.printEscPos(lastCierreEscPosB64, tpl.nombre_impresora_windows || "ZKP8008")
+                          toast.success("Ticket reimpreso", "Enviado a impresora térmica.")
+                        } catch (err: any) {
+                          toast.error("Error al reimprimir", err?.message || "Revise la impresora.")
+                        }
+                      } else if (lastCierreTicketHtml) {
                         await printTicketHtml(lastCierreTicketHtml)
-                        toast.success("Ticket reimpreso", "Enviado a impresora térmica.")
+                        toast.success("Ticket reimpreso", "Enviado a impresora.")
+                      } else if (lastClosedSessionId) {
+                        await handleReimprimirCierreEscPos({
+                          id: lastClosedSessionId,
+                          cajero_nombre: user?.nombre,
+                          register_nombre: puntoEmision || "Caja",
+                          fecha_apertura: preCloseData?.fecha_apertura,
+                          fecha_cierre: new Date().toISOString(),
+                          monto_apertura: preCloseData?.monto_apertura_pyg,
+                          monto_apertura_brl: preCloseData?.monto_apertura_brl,
+                          monto_cierre: cierreResult?.contado,
+                          monto_cierre_esperado: cierreResult?.monto_cierre_esperado,
+                          diferencia: cierreResult?.diferencia,
+                          diferencia_brl: cierreResult?.diferencia_brl,
+                        })
+                      } else {
+                        toast.warning("Sin datos de cierre", "No se encontró el ticket para reimprimir.")
                       }
                     }}
                     className="py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center gap-1.5"

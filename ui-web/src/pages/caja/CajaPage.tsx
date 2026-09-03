@@ -1041,16 +1041,17 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   <th className="p-3.5 text-right">Esperado (POS)</th>
                   <th className="p-3.5 text-right">Descuadre</th>
                   <th className="p-3.5 text-center">Estado Cuadre</th>
+                  <th className="p-3.5 text-center">Acta</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
                 {historialLoading ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-emerald-600" /></td>
+                    <td colSpan={7} className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-emerald-600" /></td>
                   </tr>
                 ) : filteredHistorial.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-gray-400">No se encontraron cierres históricos.</td>
+                    <td colSpan={7} className="p-8 text-center text-gray-400">No se encontraron cierres históricos.</td>
                   </tr>
                 ) : (
                   filteredHistorial.map(s => {
@@ -1088,6 +1089,24 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           }`}>
                             {isPerfect ? "✓ Cuadrado" : isSobrante ? "↑ Sobrante" : "↓ Faltante"}
                           </span>
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await downloadPdf(`/v1/cash-sessions/${s.id}/export/cierre.pdf`, `cierre_caja_${s.id.slice(0, 8)}.pdf`)
+                                toast.success("Acta descargada", `Cierre ${s.id.slice(0, 8)} descargado.`)
+                              } catch {
+                                toast.error("Error", "No se pudo generar el PDF del cierre.")
+                              }
+                            }}
+                            title="Descargar Acta Oficial en PDF"
+                            className="p-1.5 rounded-lg border border-blue-200 dark:border-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 inline-flex items-center gap-1 font-bold text-[11px]"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            PDF
+                          </button>
                         </td>
                       </tr>
                     )
@@ -2096,7 +2115,24 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </div>
             )}
 
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (selectedSession) {
+                    try {
+                      await downloadPdf(`/v1/cash-sessions/${selectedSession.id}/export/cierre.pdf`, `cierre_caja_${selectedSession.id.slice(0, 8)}.pdf`)
+                      toast.success("Acta descargada", "Comprobante de cierre generado correctamente.")
+                    } catch {
+                      toast.error("Error", "No se pudo generar el PDF del cierre.")
+                    }
+                  }
+                }}
+                className="btn-outline !text-blue-600 dark:!text-blue-400 !border-blue-500/30 hover:!bg-blue-50 dark:hover:!bg-blue-950/30 text-xs flex items-center gap-1.5"
+              >
+                <FileText className="w-4 h-4" />
+                Descargar Acta Oficial (PDF)
+              </button>
               <button onClick={() => setShowBreakdownModal(false)} className="btn-primary text-xs">
                 Cerrar
               </button>
