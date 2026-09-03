@@ -5,7 +5,7 @@ import {
   Sun, Moon, Home, Users, Landmark, ArrowDownToLine,
   User as UserIcon, ArrowLeft, Volume2, VolumeX,
   ArrowUpRight, Flame, Bell, Download, PackageSearch, ListChecks,
-  CreditCard, ClipboardCheck, Boxes, Radio
+  CreditCard, ClipboardCheck, Boxes, Radio, PackageCheck, Send, FileText, Inbox
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -140,6 +140,14 @@ interface LowStockItem {
 const formatPYG = (n: number) => `₲ ${Math.round(n || 0).toLocaleString("es-PY")}`
 const formatUSD = (n: number) => `US$ ${(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const formatBRL = (n: number) => `R$ ${(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const formatDateTime = (iso?: string | null) => {
+  if (!iso) return "—"
+  try {
+    return new Date(iso).toLocaleString("es-PY", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+  } catch {
+    return String(iso)
+  }
+}
 
 function timeSince(iso: string) {
   if (!iso) return "reciente"
@@ -437,6 +445,57 @@ export default function SupervisorPage() {
   const [dropObs, setDropObs] = useState("")
   const [submittingDrop, setSubmittingDrop] = useState(false)
 
+  // ── REMESAS DE SOBRES A TESORERÍA ──
+  const [pendingSobres, setPendingSobres] = useState<any[]>([])
+  const [supervisorRemittances, setSupervisorRemittances] = useState<any[]>([])
+  const [submittingRemesa, setSubmittingRemesa] = useState(false)
+  const [createdRemesaResult, setCreatedRemesaResult] = useState<any | null>(null)
+
+  const handleCreateTreasuryRemittance = async () => {
+    if (pendingSobres.length === 0) return
+    const obs = window.prompt(`Enviar ${pendingSobres.length} sobre(s) a Tesorería.\nObservaciones de entrega (opcional):`)
+    if (obs === null) return
+    setSubmittingRemesa(true)
+    try {
+      const itemIds = pendingSobres.map(s => s.id)
+      const res = await api.caja.treasuryRemittances.create({
+        item_ids: itemIds,
+        observaciones: obs.trim() || undefined,
+      })
+      setCreatedRemesaResult(res)
+      emitSound("positivo")
+      toast.success("Remesa Generada", `Remito ${res.numero} enviado formalmente a Tesorería.`)
+      fetchVaultAndTeam()
+    } catch (e: any) {
+      toast.error("Error al generar remesa", e?.message || "Verifique los datos.")
+    } finally {
+      setSubmittingRemesa(false)
+    }
+  }
+
+  const handleDownloadRemitoPdf = async (remId: string, numero: string) => {
+    try {
+      const token = localStorage.getItem("access_token")
+      const API_BASE = import.meta.env.VITE_API_URL || "/api"
+      const res = await fetch(`${API_BASE}/v1/caja/treasury-remittances/${remId}/export/remito.pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      })
+      if (!res.ok) throw new Error("No se pudo generar el PDF")
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `remito_${numero}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success("Remito descargado", `PDF ${numero} generado.`)
+    } catch {
+      toast.error("Error", "No se pudo generar el PDF del remito.")
+    }
+  }
+
   // Referencias para alertar en nuevos pedidos entrantes
   const isInitializedPendingRef = useRef(false)
   const isInitializedDataRef = useRef(false)
@@ -601,9 +660,16 @@ export default function SupervisorPage() {
   // ── DATOS SECUNDARIOS (BÓVEDA Y EQUIPO) ──────────────────────────────────
   const fetchVaultAndTeam = useCallback(async () => {
     try {
-      const [vd, perf] = await Promise.all([api.vault.dashboard(), api.caja.cajeros.performance()])
+      const [vd, perf, sobres, remList] = await Promise.all([
+        api.vault.dashboard(),
+        api.caja.cajeros.performance(),
+        api.caja.treasuryRemittances.pendingSobres(),
+        api.caja.treasuryRemittances.list(),
+      ])
       setVaultDashboard(vd as any)
       setCajeroPerf((perf as any) || [])
+      setPendingSobres(sobres || [])
+      setSupervisorRemittances(remList || [])
     } catch {}
   }, [])
 
@@ -1102,7 +1168,7 @@ try {
     { key: "inicio", label: "Autorización", icon: ShieldAlert, badge: totalPendientes },
     { key: "cajas", label: "Radar Cajas", icon: Wallet, badge: cashDropAlerts.length },
     { key: "aprobaciones", label: "Aprobar", icon: ListChecks, badge: creditApprovals.length },
-    { key: "boveda", label: "Bóveda", icon: Landmark },
+    { key: "boveda", label: "Bóveda & Sobres", icon: Landmark, badge: pendingSobres.length },
     { key: "stock", label: "Stock", icon: Boxes, badge: lowStock.length },
     { key: "equipo", label: "Cajeras", icon: Users },
   ]
@@ -1831,6 +1897,141 @@ try {
         {/* ══════════════════════ TAB 3: BÓVEDA & CAJA FUERTE ══════════════════════ */}
         {tab === "boveda" && (
           <div className="space-y-4">
+            {/* ── SECCIÓN 1: SOBRES EN CUSTODIA (PENDIENTES DE ENVIAR A TESORERÍA) ── */}
+            <div className="rounded-3xl border border-amber-300 dark:border-amber-800/80 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-sm shadow-amber-500/30">
+                    <PackageCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                      Sobres en Custodia de Piso
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Efectivo recibido de cajeras listo para entregar a Tesorería
+                    </p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-xs">
+                  {pendingSobres.length} sobre(s)
+                </span>
+              </div>
+
+              {pendingSobres.length === 0 ? (
+                <div className="py-5 text-center text-xs text-slate-400 dark:text-slate-500">
+                  ✓ No tenés sobres de caja pendientes de entrega a Tesorería.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                    {pendingSobres.map((s) => (
+                      <div
+                        key={s.id}
+                        className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 flex items-center justify-between gap-3 shadow-2xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <span>{s.caja_nombre || `Caja ${s.caja_codigo || ""}`}</span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              {s.cajero_nombre || "Cajera"}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                            {s.tipo_sobre === "cierre_turno" ? "Cierre de Turno" : "Sangría (Drop Cash)"} · {timeSince(s.fecha)}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-black text-xs text-slate-900 dark:text-white" style={monoFont}>
+                            {formatPYG(s.monto_pyg)}
+                          </div>
+                          {(s.monto_usd > 0 || s.monto_brl > 0) && (
+                            <div className="text-[9px] font-mono text-slate-500">
+                              {s.monto_usd > 0 ? `US$ ${s.monto_usd} ` : ""}
+                              {s.monto_brl > 0 ? `· R$ ${s.monto_brl}` : ""}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/40 flex items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase text-slate-400 block">Total a Entregar</span>
+                      <span className="text-sm font-black font-mono text-slate-900 dark:text-white">
+                        {formatPYG(pendingSobres.reduce((sum, s) => sum + Number(s.monto_pyg || 0), 0))}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCreateTreasuryRemittance}
+                      disabled={submittingRemesa}
+                      className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-450 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition"
+                    >
+                      {submittingRemesa ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      <span>Enviar a Tesorería</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── SECCIÓN 2: HISTORIAL DE REMESAS ENVIADAS A TESORERÍA ── */}
+            {supervisorRemittances.length > 0 && (
+              <div>
+                <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5" style={displayFont}>
+                  Remesas Enviadas a Tesorería
+                </h2>
+                <div className="space-y-2">
+                  {supervisorRemittances.slice(0, 5).map((r) => {
+                    const isPending = r.estado === "en_transito"
+                    return (
+                      <div
+                        key={r.id}
+                        className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex items-center justify-between gap-2 shadow-2xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-xs text-slate-900 dark:text-white">
+                              {r.numero}
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
+                                isPending
+                                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 animate-pulse"
+                                  : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                              }`}
+                            >
+                              {isPending ? "En Tránsito" : "Recibido"}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                            {r.total_sobres} sobre(s) · {formatDateTime(r.fecha_envio || r.created_at)}
+                            {r.tesorero_nombre ? ` · Recibió: ${r.tesorero_nombre}` : ""}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-black text-xs font-mono text-emerald-600 dark:text-emerald-400">
+                            {formatPYG(r.total_pyg)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadRemitoPdf(r.id, r.numero)}
+                            title="Descargar Remito Oficial PDF"
+                            className="p-1.5 rounded-lg border border-blue-200 dark:border-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {!vaultDashboard ? (
               <div className="flex items-center justify-center py-10">
                 <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
