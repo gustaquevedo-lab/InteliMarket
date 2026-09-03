@@ -3,7 +3,8 @@ import {
   Banknote, ShieldAlert, ShieldCheck, History, RefreshCw, Loader2,
   TrendingDown, TrendingUp, AlertTriangle, Clock, Landmark, CheckCircle,
   XCircle, FileText, Lock, KeyRound, DollarSign, ArrowUpRight, ArrowDownRight,
-  ChevronRight, Building2, Store, Activity, Layers, Download, Check, Sparkles, X
+  ChevronRight, Building2, Store, Activity, Layers, Download, Check, Sparkles, X,
+  PackageCheck, Inbox, Send
 } from "lucide-react"
 import { api, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -40,10 +41,12 @@ interface ArCustomerAging {
   saldo_total: number
 }
 
-type ActiveVaultTab = "custodia" | "bancos" | "calce" | "movimientos"
+type ActiveVaultTab = "custodia" | "remesas" | "bancos" | "calce" | "movimientos"
 
 export default function BovedaPage() {
   const [activeTab, setActiveTab] = useState<ActiveVaultTab>("custodia")
+  const [remittances, setRemittances] = useState<any[]>([])
+  const [receivingRemittanceId, setReceivingRemittanceId] = useState<string | null>(null)
   const [banks, setBanks] = useState<BankAccount[]>([])
   const [deposits, setDeposits] = useState<BankTransaction[]>([])
   const [pendientes, setPendientes] = useState<{ id: string; titulo: string; monto_relacionado?: string; entidad_relacionada?: string }[]>([])
@@ -86,7 +89,7 @@ export default function BovedaPage() {
 
   const load = async () => {
     try {
-      const [bankList, deps, recs, ap, ar, movs, vaultData, entriesData, approvals] = await Promise.all([
+      const [bankList, deps, recs, ap, ar, movs, vaultData, entriesData, approvals, remList] = await Promise.all([
         api.financial.banks.list(),
         api.financial.banks.allTransactions({ categoria: "deposito_caja", limit: 100 }),
         api.financeAgent.recommendations("pending"),
@@ -96,6 +99,7 @@ export default function BovedaPage() {
         api.vault.dashboard(),
         api.vault.entries({ estado: "en_boveda" }),
         api.vault.depositApprovals.list("pendiente"),
+        api.caja.treasuryRemittances.list(),
       ])
       setBanks(bankList)
       setDeposits(deps)
@@ -106,13 +110,39 @@ export default function BovedaPage() {
       setVault(vaultData)
       setVaultEntries(entriesData || [])
       setDepositApprovals(approvals)
+      setRemittances(remList || [])
     } catch {
       setBanks([])
       setDeposits([])
       setPendientes([])
+      setRemittances([])
     } finally {
       setLoading(false)
       setRefreshing(false)
+    }
+  }
+
+  const handleReceiveRemittance = async (remId: string, numero: string) => {
+    const obs = window.prompt(`Confirmar recepción del Remito ${numero} en Bóveda.\nObservaciones de recepción (opcional):`)
+    if (obs === null) return
+    setReceivingRemittanceId(remId)
+    try {
+      await api.caja.treasuryRemittances.receive(remId, { observaciones: obs.trim() || undefined })
+      toast.success("Remesa Recibida", `Remito ${numero} ingresado formalmente a Bóveda.`)
+      load()
+    } catch (e: any) {
+      toast.error("Error al recibir", e?.message || "No se pudo confirmar la recepción.")
+    } finally {
+      setReceivingRemittanceId(null)
+    }
+  }
+
+  const handleDownloadRemitoPdf = async (remId: string, numero: string) => {
+    try {
+      await downloadPdf(`/v1/caja/treasury-remittances/${remId}/export/remito.pdf`, `remito_${numero}.pdf`)
+      toast.success("Remito Descargado", `PDF del remito ${numero} generado.`)
+    } catch {
+      toast.error("Error", "No se pudo generar el PDF del remito.")
     }
   }
 
@@ -432,7 +462,8 @@ export default function BovedaPage() {
       {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
-          { key: "custodia", label: "Custodia Física & Remesas", icon: Lock, count: vaultEntries.length },
+          { key: "custodia", label: "Custodia Física & Bóveda", icon: Lock, count: vaultEntries.length },
+          { key: "remesas", label: "Sobres de Supervisión", icon: PackageCheck, count: remittances.filter(r => r.estado === "en_transito").length },
           { key: "bancos", label: "Cuentas Bancarias & Depósitos", icon: Landmark, count: banks.length },
           { key: "calce", label: "Auditoría de Calce (AP vs AR)", icon: Activity },
           { key: "movimientos", label: "Libro Diario de Bóveda", icon: History },
@@ -551,6 +582,129 @@ export default function BovedaPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* TAB REMESAS: SOBRES ENVIADOS POR SUPERVISORES DE PISO */}
+      {activeTab === "remesas" && (
+        <div className="card p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-700 pb-3">
+            <div>
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <PackageCheck className="w-5 h-5 text-indigo-600" />
+                Lotes de Sobres Recibidos de Supervisores
+              </h3>
+              <p className="text-xs text-gray-400">
+                Lotes de sobres de cierre de turno y sangrías (drop cash) entregados por supervisión para custodia en bóveda.
+              </p>
+            </div>
+            <span className="text-xs font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-xl">
+              {remittances.length} remesa(s) registrada(s)
+            </span>
+          </div>
+
+          {remittances.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 space-y-2">
+              <Inbox className="w-10 h-10 mx-auto text-indigo-400 opacity-50" />
+              <p className="font-semibold text-gray-700 dark:text-gray-300">No hay remesas de sobres enviadas aún</p>
+              <p className="text-xs text-gray-400">Cuando un supervisor consolide los sobres de caja en su PWA, aparecerán aquí para su recepción formal.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {remittances.map((r) => {
+                const isPending = r.estado === "en_transito"
+                return (
+                  <div
+                    key={r.id}
+                    className={`p-4 rounded-2xl border transition-all ${
+                      isPending
+                        ? "bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/60 shadow-sm"
+                        : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                    }`}
+                  >
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-black text-sm text-slate-900 dark:text-white">
+                            {r.numero}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              isPending
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300 animate-pulse"
+                                : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            }`}
+                          >
+                            {isPending ? "⏳ En Tránsito (Por Recibir)" : "✓ En Bóveda Central"}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-2">
+                          <span>Supervisor/a: <strong className="text-slate-700 dark:text-slate-200">{r.supervisor_nombre || "Supervisor"}</strong></span>
+                          <span>·</span>
+                          <span>Envío: {formatDateTime(r.fecha_envio || r.created_at)}</span>
+                          {r.tesorero_nombre && (
+                            <>
+                              <span>·</span>
+                              <span>Recibió: <strong className="text-slate-700 dark:text-slate-200">{r.tesorero_nombre}</strong> ({formatDateTime(r.fecha_recepcion)})</span>
+                            </>
+                          )}
+                        </div>
+                        {r.observaciones && (
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300 italic pt-0.5">
+                            "{r.observaciones}"
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-200/60 dark:border-slate-800">
+                        <div className="text-left md:text-right">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                            {r.total_sobres} sobre(s)
+                          </span>
+                          <span className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+                            {formatPYG(r.total_pyg)}
+                          </span>
+                          {(r.total_usd > 0 || r.total_brl > 0) && (
+                            <div className="text-[10px] font-mono text-slate-500">
+                              {r.total_usd > 0 ? `US$ ${r.total_usd.toFixed(2)} ` : ""}
+                              {r.total_brl > 0 ? `· R$ ${r.total_brl.toFixed(2)}` : ""}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isPending && (
+                            <button
+                              type="button"
+                              onClick={() => handleReceiveRemittance(r.id, r.numero)}
+                              disabled={receivingRemittanceId === r.id}
+                              className="btn-primary !bg-emerald-600 hover:!bg-emerald-500 text-xs flex items-center gap-1.5 shadow-sm"
+                            >
+                              {receivingRemittanceId === r.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Check className="w-3.5 h-3.5" />
+                              )}
+                              <span>Recibir en Bóveda</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadRemitoPdf(r.id, r.numero)}
+                            title="Descargar Remito Oficial PDF"
+                            className="btn-outline !text-blue-600 dark:!text-blue-400 !border-blue-300 dark:!border-blue-800 text-xs flex items-center gap-1"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Remito PDF</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
