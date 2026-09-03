@@ -20,6 +20,114 @@ import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG } from "../../utils/format"
 
+// Buscador de productos con autocompletado por código de barra / SKU / nombre,
+// para reemplazar los <select> que intentaban listar los ~11.000 productos de
+// una sola vez (inutilizable en un catálogo de este tamaño). Pega al backend
+// (que ya soporta buscar por codigo_barra, sku o nombre) en vez de filtrar en
+// el cliente sobre un array parcial.
+function ProductSearchPicker({
+  selectedProduct,
+  onSelect,
+  onClear,
+  placeholder = "Buscar por código de barra, SKU o nombre...",
+  disabled = false,
+}: {
+  selectedProduct: Product | null
+  onSelect: (p: Product) => void
+  onClear?: () => void
+  placeholder?: string
+  disabled?: boolean
+}) {
+  const [query, setQuery] = useState("")
+  const [results, setResults] = useState<Product[]>([])
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open || query.trim().length < 2) {
+      setResults([])
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    const timer = setTimeout(() => {
+      api.products.list({ search: query.trim(), limit: 20 })
+        .then((res) => { if (!cancelled) setResults(res || []) })
+        .catch(() => { if (!cancelled) setResults([]) })
+        .finally(() => { if (!cancelled) setLoading(false) })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [query, open])
+
+  if (disabled && selectedProduct) {
+    return (
+      <div className="input-field w-full text-xs font-bold opacity-60 flex items-center justify-between">
+        <span>{selectedProduct.nombre} (SKU: {selectedProduct.sku})</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative">
+      {selectedProduct && !open ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => { setQuery(""); setOpen(true) }}
+          className="input-field w-full text-xs font-bold flex items-center justify-between disabled:opacity-60"
+        >
+          <span className="truncate text-left">{selectedProduct.nombre} <span className="font-mono text-slate-400 font-normal">(SKU: {selectedProduct.sku})</span></span>
+          {!disabled && (
+            <X
+              className="w-3.5 h-3.5 text-slate-400 hover:text-rose-500 shrink-0 ml-2"
+              onClick={(e) => { e.stopPropagation(); setQuery(""); onClear?.() }}
+            />
+          )}
+        </button>
+      ) : (
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            autoFocus={open}
+            disabled={disabled}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            placeholder={placeholder}
+            className="input-field w-full text-xs font-bold pl-8"
+          />
+        </div>
+      )}
+
+      {open && query.trim().length >= 2 && (
+        <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg">
+          {loading ? (
+            <div className="p-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando...
+            </div>
+          ) : results.length === 0 ? (
+            <div className="p-3 text-center text-xs text-slate-400">Sin resultados para "{query}"</div>
+          ) : (
+            results.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); onSelect(p); setQuery(""); setOpen(false) }}
+                className="w-full text-left px-3 py-2 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-b border-slate-100 dark:border-slate-700/60 last:border-0"
+              >
+                <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{p.nombre}</div>
+                <div className="text-[10px] font-mono text-slate-400">SKU: {p.sku || "—"} · Cod: {p.codigo_barra || "—"}</div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ProductsPage() {
   const toast = useToast()
   const confirm = useConfirm()
@@ -79,6 +187,7 @@ export default function ProductsPage() {
 
   // Módulo de Variantes
   const [selectedParentProductId, setSelectedParentProductId] = useState<string>("")
+  const [selectedParentProduct, setSelectedParentProduct] = useState<Product | null>(null)
   const [showVariantModal, setShowVariantModal] = useState(false)
   const [savingVariant, setSavingVariant] = useState(false)
   const [variantForm, setVariantForm] = useState({
@@ -92,6 +201,7 @@ export default function ProductsPage() {
 
   // Módulo de Códigos de Pack/Caja (1 codigo = N unidades del mismo producto)
   const [selectedPackParentProductId, setSelectedPackParentProductId] = useState<string>("")
+  const [selectedPackProduct, setSelectedPackProduct] = useState<Product | null>(null)
   const [showPackBarcodeModal, setShowPackBarcodeModal] = useState(false)
   const [savingPackBarcode, setSavingPackBarcode] = useState(false)
   const [editingPackBarcode, setEditingPackBarcode] = useState<PackBarcode | null>(null)
@@ -109,6 +219,7 @@ export default function ProductsPage() {
     items: [] as Array<{ product_id: string; product_nombre: string; cantidad: number; costo_unitario: number; precio_unitario: number }>,
   })
   const [kitSelectedComponentId, setKitSelectedComponentId] = useState<string>("")
+  const [kitSelectedComponent, setKitSelectedComponent] = useState<Product | null>(null)
   const [kitComponentQty, setKitComponentQty] = useState<number>(1)
   const [kitsSaved, setKitsSaved] = useState<any[]>([])
   const [loadingKits, setLoadingKits] = useState(false)
@@ -162,6 +273,7 @@ export default function ProductsPage() {
         setProducts(validProds.length > 0 ? validProds : prodsRes.value)
         if (validProds.length > 0 && !selectedParentProductId) {
           setSelectedParentProductId(validProds[0].id)
+          setSelectedParentProduct(validProds[0])
         }
       } else {
         setProducts([])
@@ -428,6 +540,7 @@ export default function ProductsPage() {
   const handleEditPackBarcodeClick = (pb: PackBarcode) => {
     setEditingPackBarcode(pb)
     setSelectedPackParentProductId(pb.product_id)
+    setSelectedPackProduct({ id: pb.product_id, nombre: pb.product_nombre || "Producto", sku: pb.product_sku || "" } as Product)
     setPackBarcodeForm({
       codigo_barra: pb.codigo_barra,
       etiqueta: pb.etiqueta,
@@ -455,7 +568,7 @@ export default function ProductsPage() {
   // Componentes Kit
   const handleAddKitComponent = () => {
     if (!kitSelectedComponentId) return
-    const compProd = products.find(p => p.id === kitSelectedComponentId)
+    const compProd = kitSelectedComponent || products.find(p => p.id === kitSelectedComponentId)
     if (!compProd) return
 
     setKitForm(prev => {
@@ -481,6 +594,7 @@ export default function ProductsPage() {
       }
     })
     setKitSelectedComponentId("")
+    setKitSelectedComponent(null)
     setKitComponentQty(1)
   }
 
@@ -1045,16 +1159,12 @@ export default function ProductsPage() {
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
                 Filtrar por Producto Padre:
               </label>
-              <select
-                value={selectedParentProductId}
-                onChange={(e) => setSelectedParentProductId(e.target.value)}
-                className="input-field w-full text-xs font-bold py-2"
-              >
-                <option value="">Todos los productos con variantes...</option>
-                {products.slice(0, 100).map(p => (
-                  <option key={p.id} value={p.id}>{p.nombre} (SKU: {p.sku})</option>
-                ))}
-              </select>
+              <ProductSearchPicker
+                selectedProduct={selectedParentProduct}
+                onSelect={(p) => { setSelectedParentProductId(p.id); setSelectedParentProduct(p) }}
+                onClear={() => { setSelectedParentProductId(""); setSelectedParentProduct(null) }}
+                placeholder="Todos los productos con variantes... (buscar por código, SKU o nombre)"
+              />
             </div>
 
             <button
@@ -1176,16 +1286,12 @@ export default function ProductsPage() {
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
                 Filtrar por Producto:
               </label>
-              <select
-                value={selectedPackParentProductId}
-                onChange={(e) => setSelectedPackParentProductId(e.target.value)}
-                className="input-field w-full text-xs font-bold py-2"
-              >
-                <option value="">Todos los productos con códigos de pack...</option>
-                {products.slice(0, 100).map(p => (
-                  <option key={p.id} value={p.id}>{p.nombre} (SKU: {p.sku})</option>
-                ))}
-              </select>
+              <ProductSearchPicker
+                selectedProduct={selectedPackProduct}
+                onSelect={(p) => { setSelectedPackParentProductId(p.id); setSelectedPackProduct(p) }}
+                onClear={() => { setSelectedPackParentProductId(""); setSelectedPackProduct(null) }}
+                placeholder="Todos los productos con códigos de pack... (buscar por código, SKU o nombre)"
+              />
             </div>
 
             <button
@@ -1349,16 +1455,14 @@ export default function ProductsPage() {
                 <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-3">
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Agregar Componentes al Pack:</span>
                   <div className="flex gap-2">
-                    <select
-                      value={kitSelectedComponentId}
-                      onChange={(e) => setKitSelectedComponentId(e.target.value)}
-                      className="input-field flex-1 text-xs truncate"
-                    >
-                      <option value="">Seleccionar Producto...</option>
-                      {products.slice(0, 150).map(p => (
-                        <option key={p.id} value={p.id}>{p.nombre}</option>
-                      ))}
-                    </select>
+                    <div className="flex-1">
+                      <ProductSearchPicker
+                        selectedProduct={kitSelectedComponent}
+                        onSelect={(p) => { setKitSelectedComponentId(p.id); setKitSelectedComponent(p) }}
+                        onClear={() => { setKitSelectedComponentId(""); setKitSelectedComponent(null) }}
+                        placeholder="Buscar producto por código, SKU o nombre..."
+                      />
+                    </div>
                     <input
                       type="number"
                       min="1"
@@ -1553,18 +1657,13 @@ export default function ProductsPage() {
             <form onSubmit={handleSavePackBarcode} className="p-6 space-y-4">
               <div>
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Producto Base *</label>
-                <select
-                  required
+                <ProductSearchPicker
+                  selectedProduct={selectedPackProduct}
+                  onSelect={(p) => { setSelectedPackParentProductId(p.id); setSelectedPackProduct(p) }}
+                  onClear={() => { setSelectedPackParentProductId(""); setSelectedPackProduct(null) }}
                   disabled={!!editingPackBarcode}
-                  value={selectedPackParentProductId}
-                  onChange={(e) => setSelectedPackParentProductId(e.target.value)}
-                  className="input-field w-full text-xs font-bold disabled:opacity-60"
-                >
-                  <option value="">Seleccionar Producto...</option>
-                  {products.slice(0, 150).map(p => (
-                    <option key={p.id} value={p.id}>{p.nombre} (SKU: {p.sku})</option>
-                  ))}
-                </select>
+                  placeholder="Buscar producto por código de barra, SKU o nombre..."
+                />
               </div>
 
               <div>
@@ -1647,17 +1746,12 @@ export default function ProductsPage() {
             <form onSubmit={handleSaveVariant} className="p-6 space-y-4">
               <div>
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Producto Padre *</label>
-                <select
-                  required
-                  value={selectedParentProductId}
-                  onChange={(e) => setSelectedParentProductId(e.target.value)}
-                  className="input-field w-full text-xs font-bold"
-                >
-                  <option value="">Seleccionar Producto...</option>
-                  {products.slice(0, 150).map(p => (
-                    <option key={p.id} value={p.id}>{p.nombre} (SKU: {p.sku})</option>
-                  ))}
-                </select>
+                <ProductSearchPicker
+                  selectedProduct={selectedParentProduct}
+                  onSelect={(p) => { setSelectedParentProductId(p.id); setSelectedParentProduct(p) }}
+                  onClear={() => { setSelectedParentProductId(""); setSelectedParentProduct(null) }}
+                  placeholder="Buscar producto por código de barra, SKU o nombre..."
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
