@@ -38,6 +38,13 @@ def _apply_date_range(q, col, desde, hasta):
     return q
 
 
+# Mismo criterio que usa caja/service.py para el arqueo real de caja --
+# antes este archivo solo contaba "confirmado", dejando afuera ventas en
+# "completada"/"completado"/"pagado" que si entraban en el cierre de caja
+# real, asi que el resumen gerencial mostraba menos ventas que el arqueo.
+VENTA_CONTADA_ESTADOS = ("confirmado", "completada", "completado", "pagado")
+
+
 async def get_dashboard(
     db: AsyncSession, company_id: str,
     desde: Optional[date] = None, hasta: Optional[date] = None,
@@ -47,26 +54,26 @@ async def get_dashboard(
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
 
-    base_filter = lambda q: q.where(Sale.company_id == company_id, Sale.estado == "confirmado")
+    base_filter = lambda q: q.where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
 
     r = await db.execute(
         _apply_date_range(select(sa_func.coalesce(sa_func.sum(Sale.total), 0)),
                           Sale.fecha, today_start, today_start)
-        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
+        .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
     )
     ventas_hoy = float(r.scalar() or 0)
 
     r = await db.execute(
         _apply_date_range(select(sa_func.coalesce(sa_func.sum(Sale.total), 0)),
                           Sale.fecha, week_start, now)
-        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
+        .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
     )
     ventas_semana = float(r.scalar() or 0)
 
     r = await db.execute(
         _apply_date_range(select(sa_func.coalesce(sa_func.sum(Sale.total), 0)),
                           Sale.fecha, month_start, now)
-        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
+        .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
     )
     ventas_mes = float(r.scalar() or 0)
 
@@ -74,7 +81,7 @@ async def get_dashboard(
         sa_func.coalesce(sa_func.sum(Sale.total), 0),
         sa_func.count(Sale.id.distinct()),
         sa_func.count(Sale.customer_id.distinct()),
-    ).where(Sale.company_id == company_id, Sale.estado == "confirmado")
+    ).where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
     period_q = _apply_date_range(period_q, Sale.fecha, desde or month_start, hasta or now)
     r = await db.execute(period_q)
     row = r.one()
@@ -85,7 +92,7 @@ async def get_dashboard(
 
     items_q = select(sa_func.coalesce(sa_func.sum(SaleItem.cantidad), 0))\
         .join(Sale, SaleItem.sale_id == Sale.id)\
-        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
+        .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
     items_q = _apply_date_range(items_q, Sale.fecha, desde or month_start, hasta or now)
     r = await db.execute(items_q)
     productos_vendidos = int(r.scalar() or 0)
@@ -96,7 +103,7 @@ async def get_dashboard(
         sa_func.sum(SaleItem.total).label("total"),
         sa_func.avg(SaleItem.costo_unitario).label("costo_prom"),
     ).join(Sale, SaleItem.sale_id == Sale.id)\
-     .where(Sale.company_id == company_id, Sale.estado == "confirmado")
+     .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
     top_q = _apply_date_range(top_q, Sale.fecha, desde or month_start, hasta or now)
     top_q = top_q.group_by(SaleItem.product_id).order_by(sa_func.sum(SaleItem.total).desc()).limit(10)
     r = await db.execute(top_q)
@@ -130,7 +137,7 @@ async def get_dashboard(
         sa_func.extract("hour", Sale.fecha).label("hora"),
         sa_func.coalesce(sa_func.sum(Sale.total), 0).label("total"),
         sa_func.count(Sale.id).label("count"),
-    ).where(Sale.company_id == company_id, Sale.estado == "confirmado")
+    ).where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
     hour_q = _apply_date_range(hour_q, Sale.fecha, desde or month_start, hasta or now)
     hour_q = hour_q.group_by(sa_func.extract("hour", Sale.fecha)).order_by(sa_func.extract("hour", Sale.fecha))
     r = await db.execute(hour_q)
@@ -189,7 +196,7 @@ async def get_depto_pyl(
             sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
         ).join(Sale, SaleItem.sale_id == Sale.id).where(
             Sale.company_id == company_id,
-            Sale.estado == "confirmado",
+            Sale.estado.in_(VENTA_CONTADA_ESTADOS),
             SaleItem.product_id.in_(pid_uuids),
         )
         sales_q = _apply_date_range(sales_q, Sale.fecha, desde, hasta)
@@ -235,7 +242,7 @@ async def get_depto_pyl(
             sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
         ).join(Sale, SaleItem.sale_id == Sale.id).where(
             Sale.company_id == company_id,
-            Sale.estado == "confirmado",
+            Sale.estado.in_(VENTA_CONTADA_ESTADOS),
             ~SaleItem.product_id.in_([UUID(pid) for pid in all_area_pids]),
         )
         gral_q = _apply_date_range(gral_q, Sale.fecha, desde, hasta)
@@ -262,7 +269,7 @@ async def get_depto_pyl(
                 sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0),
             )
             .join(Sale, SaleItem.sale_id == Sale.id)
-            .where(Sale.company_id == company_id, Sale.estado == "confirmado")
+            .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
         )
         row = r.one()
         ventas = float(row[0] or 0)
@@ -288,7 +295,7 @@ async def get_ranking(
 ) -> list[dict]:
     total_q = select(sa_func.coalesce(sa_func.sum(SaleItem.total), 0))\
         .join(Sale, SaleItem.sale_id == Sale.id)\
-        .where(Sale.company_id == company_id, Sale.estado == "confirmado")
+        .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
     total_q = _apply_date_range(total_q, Sale.fecha, desde, hasta)
     r = await db.execute(total_q)
     total_ventas = float(r.scalar() or 1)
@@ -299,7 +306,7 @@ async def get_ranking(
         sa_func.sum(SaleItem.total).label("total"),
         sa_func.avg(SaleItem.costo_unitario).label("costo_prom"),
     ).join(Sale, SaleItem.sale_id == Sale.id)\
-     .where(Sale.company_id == company_id, Sale.estado == "confirmado")
+     .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS))
     q = _apply_date_range(q, Sale.fecha, desde, hasta)
     q = q.group_by(SaleItem.product_id).order_by(sa_func.sum(SaleItem.total).desc()).limit(limit)
     r = await db.execute(q)
@@ -360,7 +367,7 @@ async def get_alertas_negocio(
         sa_func.avg(SaleItem.costo_unitario).label("costo_prom"),
     ).join(Sale, SaleItem.sale_id == Sale.id).where(
         Sale.company_id == company_id,
-        Sale.estado == "confirmado",
+        Sale.estado.in_(VENTA_CONTADA_ESTADOS),
         Sale.fecha >= since_30,
     ).group_by(SaleItem.product_id).having(sa_func.sum(SaleItem.cantidad) >= 3)
     r = await db.execute(q)
@@ -394,7 +401,7 @@ async def get_alertas_negocio(
 
     ventas_r = await db.execute(
         select(sa_func.coalesce(sa_func.sum(Sale.total), 0))
-        .where(Sale.company_id == company_id, Sale.estado == "confirmado", Sale.fecha >= since_30)
+        .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS), Sale.fecha >= since_30)
     )
     ventas_30d = float(ventas_r.scalar() or 0)
 
@@ -439,7 +446,7 @@ async def get_pnl_data(
 
     r = await db.execute(
         select(sa_func.coalesce(sa_func.sum(Sale.total), 0))
-        .where(Sale.company_id == company_id, Sale.estado == "confirmado",
+        .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS),
                Sale.fecha >= desde, Sale.fecha <= hasta + timedelta(days=1))
     )
     total_ventas = float(r.scalar() or 0)
@@ -447,7 +454,7 @@ async def get_pnl_data(
     r = await db.execute(
         select(sa_func.coalesce(sa_func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0))
         .join(Sale, SaleItem.sale_id == Sale.id)
-        .where(Sale.company_id == company_id, Sale.estado == "confirmado",
+        .where(Sale.company_id == company_id, Sale.estado.in_(VENTA_CONTADA_ESTADOS),
                Sale.fecha >= desde, Sale.fecha <= hasta + timedelta(days=1))
     )
     total_costo = float(r.scalar() or 0)
