@@ -235,7 +235,7 @@ async def complete_cycle_count(db: AsyncSession, company_id: str, cc_id: str) ->
     for item in cc.items:
         if item.estado == "contado" and item.diferencia and item.diferencia != 0:
             sr = await db.execute(
-                select(Stock).where(Stock.warehouse_id == cc.warehouse_id, Stock.product_id == item.product_id)
+                select(Stock).where(Stock.warehouse_id == cc.warehouse_id, Stock.product_id == item.product_id).with_for_update()
             )
             stock = sr.scalar_one_or_none()
             if stock:

@@ -278,27 +278,28 @@ async def get_products_stats(db: AsyncSession, company_id: str) -> dict:
 
     # stock_bajo / quiebres eran constantes hardcodeadas (42 / 3051) --
     # calculadas de verdad ahora: stock total por producto (sumando todos
-    # los depositos), comparado contra stock_minimo. "Quiebre" = 0 o menos
-    # en algun deposito donde ya existe una fila de stock; "stock_bajo" =
-    # por debajo del minimo configurado pero todavia con algo.
+    # los depositos), comparado contra stock_minimo. LEFT JOIN (no INNER):
+    # un producto que jamas tuvo una fila de stock tambien es quiebre, no
+    # solo el que tiene una fila con cantidad <= 0.
     stock_por_producto = (
         select(Stock.product_id, func.sum(Stock.cantidad).label("total_stock"))
         .group_by(Stock.product_id)
         .subquery()
     )
+    total_stock_expr = func.coalesce(stock_por_producto.c.total_stock, 0)
     quiebres_q = await db.execute(
         select(func.count()).select_from(Product)
-        .join(stock_por_producto, stock_por_producto.c.product_id == Product.id)
-        .where(Product.company_id == c_uuid, Product.activo == True, stock_por_producto.c.total_stock <= 0)
+        .outerjoin(stock_por_producto, stock_por_producto.c.product_id == Product.id)
+        .where(Product.company_id == c_uuid, Product.activo == True, total_stock_expr <= 0)
     )
     quiebres = quiebres_q.scalar() or 0
 
     stock_bajo_q = await db.execute(
         select(func.count()).select_from(Product)
-        .join(stock_por_producto, stock_por_producto.c.product_id == Product.id)
+        .outerjoin(stock_por_producto, stock_por_producto.c.product_id == Product.id)
         .where(
             Product.company_id == c_uuid, Product.activo == True, Product.stock_minimo > 0,
-            stock_por_producto.c.total_stock > 0, stock_por_producto.c.total_stock <= Product.stock_minimo,
+            total_stock_expr > 0, total_stock_expr <= Product.stock_minimo,
         )
     )
     stock_bajo = stock_bajo_q.scalar() or 0

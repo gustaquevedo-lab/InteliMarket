@@ -32,8 +32,15 @@ async def list_warehouses(db: AsyncSession, company_id: str) -> list[Warehouse]:
 
 
 async def get_stock(db: AsyncSession, warehouse_id: str, product_id: str) -> Stock | None:
+    # FOR UPDATE: todos los llamadores reales de get_stock() son escrituras
+    # (record_movement, complete_transfer, approve_adjustment,
+    # record_quick_merma) -- sin esto, dos transferencias/ajustes/mermas
+    # concurrentes sobre el mismo producto/deposito pueden leer el mismo
+    # stock.cantidad antes de que ninguna confirme, y la que confirma
+    # despues pisa silenciosamente el descuento/ajuste de la otra (misma
+    # clase de bug ya corregida en caja y credit_accounts).
     result = await db.execute(
-        select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id)
+        select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id).with_for_update()
     )
     return result.scalar_one_or_none()
 
@@ -523,10 +530,10 @@ async def get_inventory_stats(db: AsyncSession, company_id: str) -> dict:
                     COALESCE(SUM(s.cantidad_reservada), 0) as total_unidades_reservadas,
                     COALESCE(SUM(s.cantidad * COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)), 0) as valor_total_costo,
                     COALESCE(SUM(s.cantidad * COALESCE(p.precio_venta, 0)), 0) as valor_total_venta_proyectada,
-                    COUNT(s.product_id) FILTER (WHERE s.cantidad <= 0) as total_quiebres,
-                    COUNT(s.product_id) FILTER (WHERE s.cantidad > 0 AND s.cantidad <= COALESCE(p.stock_minimo, 5)) as total_bajos
-                FROM stock s
-                JOIN products p ON p.id = s.product_id
+                    COUNT(p.id) FILTER (WHERE COALESCE(s.cantidad, 0) <= 0) as total_quiebres,
+                    COUNT(p.id) FILTER (WHERE COALESCE(s.cantidad, 0) > 0 AND COALESCE(s.cantidad, 0) <= COALESCE(p.stock_minimo, 5)) as total_bajos
+                FROM products p
+                LEFT JOIN stock s ON s.product_id = p.id
                 WHERE p.company_id = :comp_id AND p.activo = true
             ),
             mermas_agg AS (
