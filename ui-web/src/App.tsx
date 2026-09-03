@@ -26,8 +26,8 @@ const SupervisorPage = lazy(() => import("./pages/pos/SupervisorPage"))
 const CajaPage = lazy(() => import("./pages/caja/CajaPage"))
 const AdminPage = lazy(() => import("./pages/admin/AdminPage"))
 const VerticalsPage = lazy(() => import("./pages/admin/VerticalsPage"))
-const PagoparPage = lazy(() => import("./pages/pagopar/PagoparPage"))
-const KuapayPage = lazy(() => import("./pages/kuapay/KuapayPage"))
+// const PagoparPage = lazy(() => import("./pages/pagopar/PagoparPage"))  // DESACTIVADO: sin credenciales reales, ver auditoria 2026-09-02
+// const KuapayPage = lazy(() => import("./pages/kuapay/KuapayPage"))  // DESACTIVADO: sin credenciales reales, ver auditoria 2026-09-02
 const SpiPage = lazy(() => import("./pages/spi/SpiPage"))
 const BranchesPage = lazy(() => import("./pages/branches/BranchesPage"))
 const CreditAccountsPage = lazy(() => import("./pages/credit-accounts/CreditAccountsPage"))
@@ -129,7 +129,7 @@ const PriceListsPage = lazy(() => import("./pages/price-lists/PriceListsPage"))
 const ImportsPage = lazy(() => import("./pages/imports/ImportsPage"))
 const EmailPage = lazy(() => import("./pages/email/EmailPage"))
 const BancardPage = lazy(() => import("./pages/bancard/BancardPage"))
-const DinelcoPage = lazy(() => import("./pages/dinelco/DinelcoPage"))
+// const DinelcoPage = lazy(() => import("./pages/dinelco/DinelcoPage"))  // DESACTIVADO: checkout viejo apuntando a un host fantasma -- el terminal fisico real de Dinelco va por electron/dinelco-client.cjs, no toca esta pagina. Ver auditoria 2026-09-02
 const LoyaltyPage = lazy(() => import("./pages/loyalty/LoyaltyPage"))
 const PortalPage = lazy(() => import("./pages/portal/PortalPage"))
 const ClientAppPage = lazy(() => import("./pages/client-app/ClientAppPage"))
@@ -265,8 +265,8 @@ function AppRoutes() {
         ].map(([path, el]) => (
           <Route key={path as string} path={path as string} element={<Suspense fallback={<PageLoader />}>{el as React.ReactNode}</Suspense>} />
         ))}
-        <Route path="pagopar" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pagopar"><PagoparPage /></FeatureRoute></Suspense>} />
-        <Route path="kuapay" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="kuapay"><KuapayPage /></FeatureRoute></Suspense>} />
+        {/* <Route path="pagopar" .../> DESACTIVADO: sin credenciales reales, un typo en enabled_features podia exponer un checkout que parece real y no lo es. Ver auditoria 2026-09-02 */}
+        {/* <Route path="kuapay" .../> DESACTIVADO: sin credenciales reales. Ver auditoria 2026-09-02 */}
         <Route path="spi" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="spi"><SpiPage /></FeatureRoute></Suspense>} />
         <Route path="branches" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="branches"><BranchesPage /></FeatureRoute></Suspense>} />
         <Route path="credit-accounts" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="credit_accounts"><CreditAccountsPage /></FeatureRoute></Suspense>} />
@@ -320,7 +320,7 @@ function AppRoutes() {
         <Route path="imports" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="imports"><ImportsPage /></FeatureRoute></Suspense>} />
         <Route path="email" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="email"><EmailPage /></FeatureRoute></Suspense>} />
         <Route path="bancard" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="bancard"><BancardPage /></FeatureRoute></Suspense>} />
-        <Route path="dinelco" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="dinelco"><DinelcoPage /></FeatureRoute></Suspense>} />
+        {/* <Route path="dinelco" .../> DESACTIVADO: checkout viejo sin credenciales, distinto del terminal fisico real (electron/dinelco-client.cjs). Ver auditoria 2026-09-02 */}
         <Route path="loyalty" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="loyalty"><LoyaltyPage /></FeatureRoute></Suspense>} />
         <Route path="portal" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="portal"><PortalPage /></FeatureRoute></Suspense>} />
         <Route path="client-app" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="client_app"><ClientAppPage /></FeatureRoute></Suspense>} />
