@@ -81,6 +81,13 @@ class CashSessionResume(BaseModel):
     punto_emision: Optional[str] = None
 
 
+class CashSessionFondoUpdate(BaseModel):
+    monto_apertura: Decimal = Decimal("0")
+    monto_apertura_brl: Decimal = Decimal("0")
+    monto_apertura_usd: Decimal = Decimal("0")
+    motivo: Optional[str] = None
+
+
 class CashDropCreate(BaseModel):
     monto: Decimal = Decimal("0")
     monto_usd: Decimal = Decimal("0")

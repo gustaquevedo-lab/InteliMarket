@@ -5,7 +5,8 @@ import {
   Sun, Moon, Home, Users, Landmark, ArrowDownToLine,
   User as UserIcon, ArrowLeft, Volume2, VolumeX,
   ArrowUpRight, Flame, Bell, Download, PackageSearch, ListChecks,
-  CreditCard, ClipboardCheck, Boxes, Radio, PackageCheck, Send, FileText, Inbox
+  CreditCard, ClipboardCheck, Boxes, Radio, PackageCheck, Send, FileText, Inbox,
+  Pencil
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -30,6 +31,8 @@ interface SessionSummary {
   fecha_apertura: string
   fecha_cierre?: string | null
   monto_apertura: number
+  monto_apertura_brl?: number
+  monto_apertura_usd?: number
   monto_cobrado: number
   estado: string
   cash_drop_alert: boolean
@@ -444,6 +447,42 @@ export default function SupervisorPage() {
   const [dropAmountBrl, setDropAmountBrl] = useState("")
   const [dropObs, setDropObs] = useState("")
   const [submittingDrop, setSubmittingDrop] = useState(false)
+
+  // ── MODAL PARA ASIGNAR / CORREGIR FONDO INICIAL DE CAJA (SUPERVISOR) ──
+  const [editingFondoSession, setEditingFondoSession] = useState<SessionSummary | null>(null)
+  const [fondoPyg, setFondoPyg] = useState("500000")
+  const [fondoBrl, setFondoBrl] = useState("300")
+  const [fondoUsd, setFondoUsd] = useState("0")
+  const [fondoMotivo, setFondoMotivo] = useState("")
+  const [submittingFondo, setSubmittingFondo] = useState(false)
+
+  const handleUpdateFondo = async () => {
+    if (!editingFondoSession) return
+    const pyg = parseInt(fondoPyg.replace(/\D/g, "") || "0", 10)
+    const brl = parseFloat(fondoBrl.replace(/,/g, ".") || "0")
+    const usd = parseFloat(fondoUsd.replace(/,/g, ".") || "0")
+
+    setSubmittingFondo(true)
+    try {
+      await api.caja.sessions.updateFondo(editingFondoSession.id, {
+        monto_apertura: pyg,
+        monto_apertura_brl: brl,
+        monto_apertura_usd: usd,
+        motivo: fondoMotivo.trim() || undefined,
+      })
+      emitSound("positivo")
+      toast.success(
+        "Fondo Inicial Actualizado",
+        `Fondo de ${editingFondoSession.cajero_nombre || "Caja"} ajustado a ₲ ${pyg.toLocaleString("es-PY")}${brl > 0 ? ` · R$ ${brl}` : ""}${usd > 0 ? ` · US$ ${usd}` : ""}.`
+      )
+      setEditingFondoSession(null)
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error al actualizar fondo", e?.message || "No se pudo actualizar.")
+    } finally {
+      setSubmittingFondo(false)
+    }
+  }
 
   // ── REMESAS DE SOBRES A TESORERÍA ──
   const [pendingSobres, setPendingSobres] = useState<any[]>([])
@@ -1816,6 +1855,32 @@ try {
                             />
                           </div>
                         </div>
+
+                        {/* Fondo Inicial Asignado y Botón de Corrección */}
+                        <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2 text-[11px]">
+                          <div className="min-w-0">
+                            <span className="font-bold text-slate-500 dark:text-slate-400">Fondo Inicial: </span>
+                            <span className="font-mono font-bold text-slate-900 dark:text-white">
+                              {formatPYG(s.monto_apertura || 0)}
+                              {!!s.monto_apertura_brl && s.monto_apertura_brl > 0 ? ` · R$ ${s.monto_apertura_brl}` : ""}
+                              {!!s.monto_apertura_usd && s.monto_apertura_usd > 0 ? ` · US$ ${s.monto_apertura_usd}` : ""}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFondoSession(s)
+                              setFondoPyg(String(s.monto_apertura || 500000))
+                              setFondoBrl(String(s.monto_apertura_brl || 300))
+                              setFondoUsd(String(s.monto_apertura_usd || 0))
+                              setFondoMotivo("")
+                            }}
+                            className="px-2.5 py-1 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-[10px] flex items-center gap-1 cursor-pointer transition border border-amber-500/20 shrink-0 active:scale-95"
+                          >
+                            <Pencil className="w-3 h-3" />
+                            <span>Corregir Fondo</span>
+                          </button>
+                        </div>
                       </div>
                     )
                   })}
@@ -2027,6 +2092,133 @@ try {
           })}
         </div>
       </div>
+
+      {/* ── MODAL DE AJUSTE / ASIGNACIÓN DE FONDO INICIAL POR SUPERVISOR ── */}
+      {editingFondoSession && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] max-h-[88vh] overflow-y-auto animate-fade-in">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
+                    Asignar / Corregir Fondo Inicial
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {editingFondoSession.cajero_nombre || "Caja"} · Boca {editingFondoSession.register_id?.slice(-3) || ""}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setEditingFondoSession(null)} className="text-slate-400 p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              Establezca el fondo fijo en caja con el que arrancó el turno para que el arqueo de cierre cuadre exactamente.
+            </p>
+
+            {/* Acceso Rápido al Estándar */}
+            <div className="mb-3.5 p-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2">
+              <div>
+                <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 block">
+                  Estándar de Tienda
+                </span>
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  ₲ 500.000 + R$ 300
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setFondoPyg("500000")
+                  setFondoBrl("300")
+                  setFondoUsd("0")
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs hover:bg-amber-400 cursor-pointer shadow-xs active:scale-95 transition"
+              >
+                Cargar Estándar
+              </button>
+            </div>
+
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">
+                  Fondo Inicial en Guaraníes (₲):
+                </label>
+                <input
+                  type="text"
+                  value={fondoPyg ? Number(fondoPyg).toLocaleString("es-PY") : ""}
+                  onChange={(e) => setFondoPyg(e.target.value.replace(/\D/g, ""))}
+                  placeholder="500.000"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono font-bold text-sm text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">
+                    Fondo en Reales (R$):
+                  </label>
+                  <input
+                    type="text"
+                    value={fondoBrl}
+                    onChange={(e) => setFondoBrl(e.target.value)}
+                    placeholder="300"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono font-bold text-sm text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">
+                    Fondo en Dólares (US$):
+                  </label>
+                  <input
+                    type="text"
+                    value={fondoUsd}
+                    onChange={(e) => setFondoUsd(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono font-bold text-sm text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wide text-slate-500 block mb-1">
+                  Motivo / Observación (Opcional):
+                </label>
+                <input
+                  type="text"
+                  value={fondoMotivo}
+                  onChange={(e) => setFondoMotivo(e.target.value)}
+                  placeholder="Ej: Corrección por turno reanudado sin carga inicial"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingFondoSession(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleUpdateFondo}
+                disabled={submittingFondo}
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs hover:bg-amber-400 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/25 active:scale-95 transition"
+              >
+                {submittingFondo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>Guardar Fondo</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL DE SANGRÍA DIRECTA (DROP CASH POR SUPERVISORA) ── */}
       {requestingDropSession && (

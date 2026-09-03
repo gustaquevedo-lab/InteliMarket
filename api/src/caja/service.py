@@ -3,7 +3,7 @@
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
 import uuid
 
@@ -151,6 +151,20 @@ async def get_active_user_session(db: AsyncSession, user_id: str) -> dict | None
         return None
 
     session_obj = row[0]
+
+    # Blindaje contra turnos huérfanos o de jornadas anteriores:
+    # Si la sesión fue abierta hace más de 16 horas, se considera expirada de la jornada anterior.
+    ahora_utc = datetime.now(timezone.utc)
+    apertura_utc = session_obj.fecha_apertura
+    if apertura_utc.tzinfo is None:
+        apertura_utc = apertura_utc.replace(tzinfo=timezone.utc)
+    if (ahora_utc - apertura_utc) > timedelta(hours=16):
+        session_obj.estado = "cerrada"
+        session_obj.fecha_cierre = ahora_utc
+        session_obj.observaciones = (session_obj.observaciones or "") + " [Cierre automático por vencimiento de jornada anterior (>16h)]"
+        await db.commit()
+        return None
+
     sales_res = await db.execute(
         select(
             func.count(Sale.id).label("total_ventas"),
@@ -551,6 +565,8 @@ async def list_sessions_with_totals(
             "fecha_apertura": s.fecha_apertura.isoformat(),
             "fecha_cierre": s.fecha_cierre.isoformat() if s.fecha_cierre else None,
             "monto_apertura": float(s.monto_apertura),
+            "monto_apertura_brl": float(s.monto_apertura_brl or 0),
+            "monto_apertura_usd": float(s.monto_apertura_usd or 0),
             "monto_cierre": float(s.monto_cierre) if s.monto_cierre is not None else None,
             "monto_cierre_esperado": monto_cierre_esperado,
             "diferencia": diferencia,
@@ -1904,4 +1920,43 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         "payments_breakdown": breakdown,
         "cash_drops": drops_list,
     }
+
+
+async def update_session_fondo_inicial(
+    db: AsyncSession,
+    session_id: str,
+    company_id: str,
+    monto_pyg: Decimal,
+    monto_brl: Decimal,
+    monto_usd: Decimal,
+    motivo: str | None,
+    supervisor_user: dict,
+) -> CashSession:
+    res = await db.execute(
+        select(CashSession)
+        .join(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(CashSession.id == uuid.UUID(session_id), CashRegister.company_id == uuid.UUID(company_id))
+    )
+    session_obj = res.scalar_one_or_none()
+    if not session_obj:
+        raise ValueError("Sesión de caja no encontrada")
+
+    old_pyg = float(session_obj.monto_apertura or 0)
+    old_brl = float(session_obj.monto_apertura_brl or 0)
+    old_usd = float(session_obj.monto_apertura_usd or 0)
+
+    session_obj.monto_apertura = monto_pyg
+    session_obj.monto_apertura_brl = monto_brl
+    session_obj.monto_apertura_usd = monto_usd
+
+    sup_nombre = supervisor_user.get("user_nombre") or supervisor_user.get("user_email") or "Supervisor"
+    nota = f" [Fondo ajustado por {sup_nombre}: ₲ {old_pyg:,.0f} -> ₲ {float(monto_pyg):,.0f}, R$ {old_brl} -> R$ {float(monto_brl)}, US$ {old_usd} -> US$ {float(monto_usd)}]"
+    if motivo:
+        nota += f" (Motivo: {motivo})"
+    session_obj.observaciones = (session_obj.observaciones or "") + nota
+
+    await db.commit()
+    await db.refresh(session_obj)
+    return session_obj
+
 

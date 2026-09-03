@@ -12,7 +12,7 @@ from api.src.auth.middleware import require_auth
 from api.src.caja.schemas import (
     CashRegisterCreate, CashRegisterUpdate, CashRegisterResponse,
     CashSessionCreate, CashSessionClose, CashSessionResponse, CashDropCreate,
-    CashSessionPause, CashSessionResume,
+    CashSessionPause, CashSessionResume, CashSessionFondoUpdate,
     ConfirmHandoffRequest, DepositVaultEntriesRequest, RejectVaultDepositRequest,
     ConfirmCashDropRequest, RejectCashDropRequest, VoidCashDropRequest,
     CreateTreasuryRemittanceRequest, ReceiveTreasuryRemittanceRequest,
@@ -126,6 +126,34 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     if not result:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     return result
+
+
+@router.patch("/cash-sessions/{session_id}/fondo-inicial", response_model=CashSessionResponse)
+async def update_session_fondo(
+    session_id: str,
+    body: CashSessionFondoUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("supervisor", "admin", "superadmin", "gerente"):
+        raise HTTPException(status_code=403, detail="Solo supervisores o administradores pueden ajustar el fondo inicial de caja")
+
+    try:
+        updated = await service.update_session_fondo_inicial(
+            db=db,
+            session_id=session_id,
+            company_id=user["company_id"],
+            monto_pyg=body.monto_apertura,
+            monto_brl=body.monto_apertura_brl,
+            monto_usd=body.monto_apertura_usd,
+            motivo=body.motivo,
+            supervisor_user=user,
+        )
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 
 
 @router.post("/cash-sessions", response_model=CashSessionResponse, status_code=status.HTTP_201_CREATED)
