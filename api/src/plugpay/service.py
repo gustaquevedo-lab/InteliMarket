@@ -145,6 +145,7 @@ async def create_pix(db: AsyncSession, company_id: str, monto: float, moneda: st
     return await _authed_request(db, company_id, "POST", "/transactionPix/create", {
         "originCurrencie": moneda,
         "value": monto,
+        "customerCPF": customer_cpf,
         "customerCPFCNPJ": customer_cpf,
         "documentMerchant": document_merchant,
     })

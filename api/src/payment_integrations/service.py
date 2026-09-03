@@ -53,6 +53,16 @@ async def upsert_config(db: AsyncSession, company_id: str, provider: str, data: 
         # remanda "password" porque no lo tiene), se preserva la guardada --
         # evita que guardar el resto del formulario borre la credencial.
         merged = dict(existing.config or {})
+        # Si cambia el entorno (sandbox/production) o las credenciales (client_id/password),
+        # invalidar tokens en caché para forzar un nuevo login con las credenciales nuevas.
+        env_changed = existing.environment != data.environment
+        client_changed = bool(data.config and data.config.get("client_id") and data.config.get("client_id") != (existing.config or {}).get("client_id"))
+        pass_changed = bool(data.config and data.config.get("password"))
+        if env_changed or client_changed or pass_changed:
+            merged.pop("cached_token", None)
+            merged.pop("cached_refresh_token", None)
+            merged.pop("cached_token_expires_at", None)
+
         merged.update(data.config or {})
         existing.environment = data.environment
         existing.enabled = data.enabled
