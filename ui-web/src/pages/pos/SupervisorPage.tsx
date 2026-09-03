@@ -1165,38 +1165,38 @@ try {
   const firstName = (user.nombre || "").split(" ")[0]
 
   const tabs: { key: Tab; label: string; icon: typeof Home; badge?: number }[] = [
-    { key: "inicio", label: "Autorización", icon: ShieldAlert, badge: totalPendientes },
-    { key: "cajas", label: "Radar Cajas", icon: Wallet, badge: cashDropAlerts.length },
-    { key: "aprobaciones", label: "Aprobar", icon: ListChecks, badge: creditApprovals.length },
-    { key: "boveda", label: "Bóveda & Sobres", icon: Landmark, badge: pendingSobres.length },
+    { key: "inicio", label: "Autorizar", icon: ShieldAlert, badge: totalPendientes },
+    { key: "cajas", label: "Radar", icon: Wallet, badge: cashDropAlerts.length },
+    { key: "aprobaciones", label: "Créditos", icon: ListChecks, badge: creditApprovals.length },
+    { key: "boveda", label: "Bóveda", icon: Landmark, badge: pendingSobres.length },
     { key: "stock", label: "Stock", icon: Boxes, badge: lowStock.length },
-    { key: "equipo", label: "Cajeras", icon: Users },
+    { key: "equipo", label: "Equipo", icon: Users },
   ]
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white pb-24 transition-colors">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white pb-24 transition-colors">
       
       {/* ── HEADER SUPERVISOR PREMIUM ── */}
-      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800/80 px-4 pt-[env(safe-area-inset-top)] shadow-xs">
-        <div className="flex items-center justify-between py-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-slate-950 font-black shrink-0 shadow-md shadow-amber-500/25">
+      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800/80 px-3 sm:px-4 pt-[env(safe-area-inset-top)] shadow-xs">
+        <div className="flex items-center justify-between py-2.5 sm:py-3 gap-2">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-slate-950 font-black shrink-0 shadow-md shadow-amber-500/25">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="font-black text-sm truncate" style={displayFont}>
                   {firstName}
                 </span>
-                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                <span className="text-[8.5px] font-black uppercase px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
                   Supervisor
                 </span>
               </div>
-              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                <span className={`w-1.5 h-1.5 rounded-full ${syncError ? "bg-rose-500" : "bg-emerald-500"} animate-pulse`} />
-                <span>{syncError ? "Sin Conexión" : "Turno Activo · Piso"}</span>
-                <span className="text-slate-400 dark:text-slate-500 font-mono">
-                  · {now.toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${syncError ? "bg-rose-500" : "bg-emerald-500"} animate-pulse`} />
+                <span className="truncate">{syncError ? "Sin Conexión" : "Turno Activo"}</span>
+                <span className="text-slate-400 dark:text-slate-500 font-mono hidden sm:inline shrink-0">
+                  · {now.toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}
                 </span>
               </div>
             </div>
@@ -1207,10 +1207,10 @@ try {
               href={`http://${typeof window !== "undefined" ? window.location.hostname : "192.168.0.10"}:8080/extra-supervisor.apk`}
               download="extra-supervisor.apk"
               title="Descargar APK Nativo Android"
-              className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition cursor-pointer flex items-center gap-1 text-[11px] font-bold"
+              className="px-2 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition cursor-pointer flex items-center gap-1 text-[10px] font-black"
             >
-              <Download className="w-4 h-4" />
-              <span className="text-[10px] uppercase font-black tracking-wider">APK</span>
+              <Download className="w-3.5 h-3.5" />
+              <span>APK</span>
             </a>
             {installPrompt && !isInstalled && (
               <button
@@ -2240,7 +2240,7 @@ try {
 
       {/* ── BARRA INFERIOR DE NAVEGACIÓN TÁCTIL ── */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800/80 pb-[env(safe-area-inset-bottom)] shadow-lg">
-        <div className="flex overflow-x-auto no-scrollbar max-w-xl mx-auto">
+        <div className="grid grid-cols-6 w-full max-w-lg mx-auto px-1 py-1">
           {tabs.map((t) => {
             const Icon = t.icon
             const active = tab === t.key
@@ -2248,20 +2248,20 @@ try {
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
-                className={`flex flex-col items-center gap-1 py-2.5 px-3.5 min-w-[68px] flex-1 relative cursor-pointer transition ${
-                  active ? "text-amber-500 font-bold" : "text-slate-400 dark:text-slate-500 hover:text-slate-600"
+                className={`flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-xl transition-all cursor-pointer relative ${
+                  active ? "text-amber-500 font-bold bg-amber-500/10" : "text-slate-400 dark:text-slate-500 hover:text-slate-600"
                 }`}
               >
                 <div className="relative">
                   <Icon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
                   {!!t.badge && t.badge > 0 && (
-                    <span className="absolute -top-1.5 -right-2 text-[9px] font-black bg-rose-500 text-white w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                    <span className="absolute -top-1 -right-2 text-[8.5px] font-black bg-rose-500 text-white min-w-3.5 h-3.5 px-0.5 rounded-full flex items-center justify-center animate-pulse">
                       {t.badge > 99 ? "99+" : t.badge}
                     </span>
                   )}
                 </div>
-                <span className="text-[10px] tracking-tight whitespace-nowrap">{t.label}</span>
-                {active && <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-amber-500" />}
+                <span className="text-[9.5px] tracking-tight truncate w-full text-center">{t.label}</span>
+                {active && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-amber-500" />}
               </button>
             )
           })}
@@ -2271,7 +2271,7 @@ try {
       {/* ── MODAL DE SANGRÍA DIRECTA (DROP CASH POR SUPERVISORA) ── */}
       {requestingDropSession && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] animate-fade-in">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] max-h-[88vh] overflow-y-auto animate-fade-in">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
@@ -2369,7 +2369,7 @@ try {
       {/* ── MODAL DE CONFIRMACIÓN / RECUENTO ── */}
       {confirmingItem && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] animate-fade-in">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] max-h-[88vh] overflow-y-auto animate-fade-in">
             <div className="flex items-center justify-between mb-3">
               <div className="font-black text-sm" style={displayFont}>
                 {confirmingItem.kind === "handoff" ? "Confirmar Recepción de Cierre" : "Confirmar Retiro Drop Cash"}
@@ -2474,7 +2474,7 @@ try {
       {/* ── MODAL RECHAZAR RETIRO ── */}
       {rejectingRetiro && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] animate-fade-in">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] max-h-[88vh] overflow-y-auto animate-fade-in">
             <div className="flex items-center justify-between mb-3">
               <div className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>Rechazar Retiro</div>
               <button onClick={() => setRejectingRetiro(null)} className="text-slate-400 cursor-pointer"><X className="w-5 h-5" /></button>
@@ -2505,7 +2505,7 @@ try {
       {/* ── MODAL RECHAZAR DEPÓSITO BÓVEDA ── */}
       {rejectingVault && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] animate-fade-in">
+          <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] max-h-[88vh] overflow-y-auto animate-fade-in">
             <div className="flex items-center justify-between mb-3">
               <div className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>Rechazar Depósito</div>
               <button onClick={() => setRejectingVault(null)} className="text-slate-400 cursor-pointer"><X className="w-5 h-5" /></button>
