@@ -13,6 +13,15 @@ from api.src.credit_accounts.schemas import CreditAccountCreate, CreditAccountUp
 from api.src.customers.models import Customer
 
 
+async def _sync_credito_usado(db: AsyncSession, company_id, customer_id, saldo_utilizado: Decimal) -> None:
+    result = await db.execute(
+        select(Customer).where(Customer.company_id == company_id, Customer.id == uuid.UUID(str(customer_id)))
+    )
+    customer = result.scalar_one_or_none()
+    if customer:
+        customer.credito_usado = saldo_utilizado
+
+
 async def create_credit_account(db: AsyncSession, data: CreditAccountCreate) -> CreditAccount:
     account = CreditAccount(
         company_id=data.company_id,
@@ -195,6 +204,7 @@ async def process_purchase(
         referencia_id=sale_id,
     )
     db.add(movement)
+    await _sync_credito_usado(db, company_id, customer_id, account.saldo_utilizado)
     await db.flush()
     await db.refresh(account)
     return {"success": True, "account": account}
@@ -332,6 +342,34 @@ async def process_payment(db: AsyncSession, company_id: str, customer_id: str, d
         observaciones=data.observaciones,
     )
     db.add(movement)
+    await _sync_credito_usado(db, company_id, customer_id, account.saldo_utilizado)
+
+    docs_result = await db.execute(
+        text("""
+            SELECT id, saldo_pendiente FROM accounts_receivable
+            WHERE company_id = :company_id AND customer_id = :customer_id AND estado = 'pendiente'
+            ORDER BY fecha_vencimiento ASC
+        """),
+        {"company_id": str(company_id), "customer_id": str(customer_id)},
+    )
+    restante = pago_aplicado
+    for doc in docs_result.fetchall():
+        if restante <= 0:
+            break
+        saldo_doc = Decimal(str(doc.saldo_pendiente))
+        aplicado_doc = min(restante, saldo_doc)
+        nuevo_saldo_doc = saldo_doc - aplicado_doc
+        nuevo_estado_doc = "pagado" if nuevo_saldo_doc <= 0 else "pendiente"
+        await db.execute(
+            text("""
+                UPDATE accounts_receivable
+                SET saldo_pendiente = :saldo, estado = :estado, ultimo_pago = NOW()
+                WHERE id = :id
+            """),
+            {"saldo": float(nuevo_saldo_doc), "estado": nuevo_estado_doc, "id": str(doc.id)},
+        )
+        restante -= aplicado_doc
+
     await db.commit()
     await db.refresh(account)
     return {"success": True, "account": account, "pago_aplicado": float(pago_aplicado)}

@@ -374,6 +374,26 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
         )
         aplicados.append({"accounts_receivable_id": str(alloc.accounts_receivable_id), "monto": float(alloc.monto), "nuevo_saldo": float(max(Decimal('0'), nuevo_saldo)), "nuevo_estado": nuevo_estado})
 
+    await db.execute(
+        text("""
+            UPDATE credit_accounts
+            SET saldo_utilizado = GREATEST(0, saldo_utilizado - :monto),
+                saldo_disponible = LEAST(limite_credito, saldo_disponible + :monto)
+            WHERE company_id = :company_id AND customer_id = :customer_id
+        """),
+        {"monto": float(data.monto_total), "company_id": company_id, "customer_id": str(data.customer_id)},
+    )
+    nuevo_saldo_utilizado = await db.execute(
+        text("SELECT saldo_utilizado FROM credit_accounts WHERE company_id = :company_id AND customer_id = :customer_id"),
+        {"company_id": company_id, "customer_id": str(data.customer_id)},
+    )
+    row = nuevo_saldo_utilizado.first()
+    if row is not None:
+        await db.execute(
+            text("UPDATE customers SET credito_usado = :monto WHERE id = :customer_id"),
+            {"monto": float(row.saldo_utilizado), "customer_id": str(data.customer_id)},
+        )
+
     await db.flush()
     return {"id": str(payment_id), "monto_total": float(data.monto_total), "allocations": aplicados}
 
