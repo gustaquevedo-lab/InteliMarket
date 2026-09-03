@@ -4,6 +4,7 @@ from datetime import date
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api.src.label_printing.models import LabelPrinterConfig, LabelTemplate
 from api.src.label_printing.schemas import (
@@ -12,6 +13,8 @@ from api.src.label_printing.schemas import (
 from api.src.products.models import Product
 from api.src.purchases.models import PurchaseReceipt, PurchaseReceiptItem, Supplier
 from api.src.smart_pricing.models import TieredPrice
+
+MAX_LABELS_POR_PROVEEDOR = 500  # sin esto, un proveedor con miles de productos activos generaba un lote sin tope
 
 
 # ── Config de impresoras ──────────────────────────────────────────────────
@@ -87,6 +90,7 @@ def _to_resolved(product: Product, cantidad: int, costo_unitario=None, proveedor
     return ResolvedLabelItem(
         product_id=product.id,
         nombre=product.nombre,
+        categoria_nombre=product.categoria.nombre if product.categoria else None,
         sku=product.sku,
         codigo_barra=product.codigo_barra,
         precio_venta=product.precio_venta or 0,
@@ -103,7 +107,7 @@ async def resolve_label_items(db: AsyncSession, company_id: str, filtro: LabelSo
 
     if filtro.producto_ids:
         ids = [item.product_id for item in filtro.producto_ids]
-        result = await db.execute(select(Product).where(Product.id.in_(ids), Product.company_id == cid))
+        result = await db.execute(select(Product).options(selectinload(Product.categoria)).where(Product.id.in_(ids), Product.company_id == cid))
         products = {p.id: p for p in result.scalars().all()}
         items = [
             _to_resolved(products[item.product_id], item.cantidad)
@@ -115,6 +119,7 @@ async def resolve_label_items(db: AsyncSession, company_id: str, filtro: LabelSo
         result = await db.execute(
             select(PurchaseReceiptItem, Product, PurchaseReceipt, Supplier)
             .join(Product, Product.id == PurchaseReceiptItem.product_id)
+            .options(selectinload(Product.categoria))
             .join(PurchaseReceipt, PurchaseReceipt.id == PurchaseReceiptItem.receipt_id)
             .outerjoin(Supplier, Supplier.id == PurchaseReceipt.supplier_id)
             .where(PurchaseReceiptItem.receipt_id == filtro.receipt_id, PurchaseReceipt.company_id == cid)
@@ -147,7 +152,9 @@ async def resolve_label_items(db: AsyncSession, company_id: str, filtro: LabelSo
         result = await db.execute(
             select(Product, latest_costo.c.costo_unitario)
             .join(latest_costo, latest_costo.c.product_id == Product.id)
+            .options(selectinload(Product.categoria))
             .where(Product.company_id == cid, Product.activo.is_(True))
+            .limit(MAX_LABELS_POR_PROVEEDOR)
         )
         items = [
             _to_resolved(product, filtro.cantidad_default, costo_unitario=costo, proveedor_nombre=supplier.razon_social if supplier else None)
@@ -156,7 +163,7 @@ async def resolve_label_items(db: AsyncSession, company_id: str, filtro: LabelSo
 
     elif filtro.categoria_id:
         result = await db.execute(
-            select(Product).where(
+            select(Product).options(selectinload(Product.categoria)).where(
                 Product.company_id == cid,
                 Product.categoria_id == filtro.categoria_id,
                 Product.activo.is_(True),
