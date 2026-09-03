@@ -14,15 +14,22 @@ VITE_API_PROXY_TARGET=http://127.0.0.1:8000 npm run build
 
 echo "==> Copiando a $REL"
 cp -r "$SRC/../ui-web-dist" "$REL"
-sudo chown -R intellihouse:www-data "$REL"
-sudo chmod -R a+rX "$REL"
+# nginx (usuario www-data) necesita poder leer estos archivos. No hace
+# falta chown a www-data para eso -- intellihouse NO pertenece a ese
+# grupo (verificado), asi que ese chown fallaria y con "set -e" tumbaria
+# el deploy. chmod a+rX ya le da lectura a "otros", que es lo que nginx
+# necesita de verdad.
+chmod -R a+rX "$REL"
 
 echo "==> Cambiando symlink current -> $REL"
 ln -sfn "$REL" "$CURRENT"
 
-echo "==> Recargando nginx (no corta conexiones activas)"
-sudo nginx -t
-sudo nginx -s reload
+# nginx resuelve el symlink "current" en cada request -- no hace falta
+# recargarlo para que sirva el release nuevo (y ademas "nginx -s reload"
+# no esta en el sudoers sin password de este usuario, asi que forzarlo
+# aca solo colgaria el deploy pidiendo una contrasena que no va a llegar).
+# Si alguna vez se toca la CONFIG de nginx (no un release), correr a mano:
+#   sudo nginx -t && sudo systemctl reload nginx
 
 echo "==> Listo. Release activo: $REL"
 echo "    Las cajas ya abiertas siguen con la version anterior en memoria."
