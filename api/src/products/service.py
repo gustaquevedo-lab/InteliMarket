@@ -276,14 +276,64 @@ async def get_products_stats(db: AsyncSession, company_id: str) -> dict:
     )
     val_row = val_q.first()
 
+    # stock_bajo / quiebres eran constantes hardcodeadas (42 / 3051) --
+    # calculadas de verdad ahora: stock total por producto (sumando todos
+    # los depositos), comparado contra stock_minimo. "Quiebre" = 0 o menos
+    # en algun deposito donde ya existe una fila de stock; "stock_bajo" =
+    # por debajo del minimo configurado pero todavia con algo.
+    stock_por_producto = (
+        select(Stock.product_id, func.sum(Stock.cantidad).label("total_stock"))
+        .group_by(Stock.product_id)
+        .subquery()
+    )
+    quiebres_q = await db.execute(
+        select(func.count()).select_from(Product)
+        .join(stock_por_producto, stock_por_producto.c.product_id == Product.id)
+        .where(Product.company_id == c_uuid, Product.activo == True, stock_por_producto.c.total_stock <= 0)
+    )
+    quiebres = quiebres_q.scalar() or 0
+
+    stock_bajo_q = await db.execute(
+        select(func.count()).select_from(Product)
+        .join(stock_por_producto, stock_por_producto.c.product_id == Product.id)
+        .where(
+            Product.company_id == c_uuid, Product.activo == True, Product.stock_minimo > 0,
+            stock_por_producto.c.total_stock > 0, stock_por_producto.c.total_stock <= Product.stock_minimo,
+        )
+    )
+    stock_bajo = stock_bajo_q.scalar() or 0
+
+    pesables_q = await db.execute(
+        select(func.count(Product.id)).where(Product.company_id == c_uuid, Product.activo == True, Product.unidad_medida == "KG")
+    )
+    total_pesables = pesables_q.scalar() or 0
+
+    valorizado_q = await db.execute(
+        select(func.sum(Stock.cantidad * func.coalesce(Stock.costo_unitario, 0)))
+        .select_from(Stock).join(Product, Product.id == Stock.product_id)
+        .where(Product.company_id == c_uuid)
+    )
+    total_valorizado_costo = float(valorizado_q.scalar() or 0)
+
+    margen_q = await db.execute(
+        select(func.avg((Product.precio_venta - Product.costo_promedio) / Product.precio_venta * 100))
+        .where(Product.company_id == c_uuid, Product.activo == True, Product.precio_venta > 0)
+    )
+    margen_promedio_pct = round(float(margen_q.scalar() or 0), 1)
+
     return {
         "total_productos": total_productos,
         "activos": activos,
         "inactivos": total_productos - activos,
         "total_categorias": total_categorias,
         "precio_promedio": float(val_row[1] or 0) if val_row else 0.0,
-        "stock_bajo": 42,
-        "quiebres": 3051,
+        "stock_bajo": stock_bajo,
+        "quiebres": quiebres,
+        "total_pesables": total_pesables,
+        "total_valorizado_costo": total_valorizado_costo,
+        "margen_promedio_pct": margen_promedio_pct,
+        "total_quiebres": quiebres,
+        "total_bajos": stock_bajo,
     }
 
 

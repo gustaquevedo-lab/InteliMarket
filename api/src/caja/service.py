@@ -695,8 +695,15 @@ async def confirm_cash_drop_request(
     if not supervisor or not supervisor.activo or (supervisor.rol not in ("admin", "supervisor") and not supervisor.is_superadmin):
         return "forbidden"
 
+    # SELECT ... FOR UPDATE -- las otras 4 funciones de custodia de dinero en
+    # este archivo (void_confirmed_cash_drop, confirm_handoff,
+    # approve_vault_deposit, reject_vault_deposit) ya bloquean la fila para
+    # evitar que dos confirmaciones casi simultaneas del mismo retiro (doble
+    # clic, dos supervisores) lean "pendiente" antes de que cualquiera
+    # escriba y ambas terminen insertando un CashRegisterMovement + VaultEntry
+    # duplicado -- esta era la unica que faltaba.
     result = await db.execute(
-        select(CashDropRequest).where(CashDropRequest.id == uuid.UUID(request_id), CashDropRequest.company_id == uuid.UUID(company_id))
+        select(CashDropRequest).where(CashDropRequest.id == uuid.UUID(request_id), CashDropRequest.company_id == uuid.UUID(company_id)).with_for_update()
     )
     req = result.scalar_one_or_none()
     if not req or req.estado != "pendiente":
