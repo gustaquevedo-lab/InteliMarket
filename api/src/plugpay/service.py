@@ -152,7 +152,15 @@ async def create_pix(db: AsyncSession, company_id: str, monto: float, moneda: st
 
 
 async def get_pix_status(db: AsyncSession, company_id: str, referencia_interna: str) -> dict:
-    return await _authed_request(db, company_id, "GET", f"/transactionPix/status/{referencia_interna}")
+    res = await _authed_request(db, company_id, "GET", f"/transactionPix/qrcode/{referencia_interna}")
+    if isinstance(res, dict) and "transaction" in res:
+        tx = dict(res["transaction"])
+        if "status" not in tx and "Status" in tx:
+            tx["status"] = tx["Status"]
+        if "referenciaInterna" not in tx and "SerialNumber" in tx:
+            tx["referenciaInterna"] = tx["SerialNumber"]
+        return tx
+    return res
 
 
 async def get_pix_qrcode(db: AsyncSession, company_id: str, referencia_interna: str) -> dict:

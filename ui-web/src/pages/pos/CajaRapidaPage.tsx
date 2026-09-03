@@ -1022,10 +1022,10 @@ export default function POSPage() {
       }
       setPlugpayBrlValue(valBrlNum)
 
-      console.log(`[PLUGPAY-TRACE] Creando PIX de R$ ${valBrlNum} para CPF ${cleanCpf}`)
+      console.log(`[PLUGPAY-TRACE] Creando PIX de Gs. ${montoPyg} para CPF ${cleanCpf}`)
       const pixRes = await api.plugpay.createPix({
-        monto: valBrlNum,
-        moneda: "BRL",
+        monto: montoPyg,
+        moneda: "PYG",
         customer_cpf: cleanCpf,
       })
 
@@ -1034,6 +1034,9 @@ export default function POSPage() {
       }
 
       setPlugpayResult(pixRes.data)
+      if (pixRes.data?.valueBRL) {
+        setPlugpayBrlValue(parseFloat(pixRes.data.valueBRL))
+      }
       const refInterna = pixRes.data.referenciaInterna
 
       plugpayPollIntervalRef.current = setInterval(async () => {
