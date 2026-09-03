@@ -96,33 +96,30 @@ export default function ProductsPage() {
   })
   const [kitSelectedComponentId, setKitSelectedComponentId] = useState<string>("")
   const [kitComponentQty, setKitComponentQty] = useState<number>(1)
-  const [kitsSaved, setKitsSaved] = useState<any[]>([
-    {
-      id: "kit-1",
-      nombre: "Combo Parrillero Fin de Semana",
-      sku: "KIT-ASADO-01",
-      precio_venta: 185000,
-      costo_total: 142000,
-      margen_pct: 23.2,
-      componentes: [
-        { nombre: "Costilla de Primera (Kg)", cantidad: 2, costo: 45000 },
-        { nombre: "Carbón Vegetal 5kg", cantidad: 1, costo: 22000 },
-        { nombre: "Coca Cola 2L Descartable", cantidad: 2, costo: 15000 },
-      ]
-    },
-    {
-      id: "kit-2",
-      nombre: "Pack Desayuno Familiar",
-      sku: "KIT-DESAYUNO-02",
-      precio_venta: 58000,
-      costo_total: 44000,
-      margen_pct: 24.1,
-      componentes: [
-        { nombre: "Café Molido 500g", cantidad: 1, costo: 24000 },
-        { nombre: "Leche Entera 1L", cantidad: 2, costo: 10000 },
-      ]
+  const [kitsSaved, setKitsSaved] = useState<any[]>([])
+  const [loadingKits, setLoadingKits] = useState(false)
+
+  const loadKits = useCallback(async () => {
+    setLoadingKits(true)
+    try {
+      const kits = await api.kits.list()
+      setKitsSaved((kits || []).map((k: any) => ({
+        id: k.id,
+        nombre: k.nombre,
+        descripcion: k.descripcion || "",
+        precio_venta: k.precio_venta || 0,
+        costo_total: k.costo_total || 0,
+        margen_pct: k.margen_pct != null ? Number(k.margen_pct).toFixed(1) : "0.0",
+        componentes: (k.items || []).map((i: any) => ({ nombre: i.nombre || "Producto", cantidad: i.cantidad, costo: i.costo_unitario })),
+      })))
+    } catch (e: any) {
+      toast.error("Error", "No se pudieron cargar los kits.")
+    } finally {
+      setLoadingKits(false)
     }
-  ])
+  }, [toast])
+
+  useEffect(() => { loadKits() }, [loadKits])
 
   // Carga de Datos
   const loadStats = useCallback(async () => {
@@ -394,26 +391,31 @@ export default function ProductsPage() {
   const kitMargenMonto = Number(kitForm.precio_venta || 0) - kitCostoAcumulado
   const kitMargenPct = Number(kitForm.precio_venta || 0) > 0 ? (kitMargenMonto / Number(kitForm.precio_venta)) * 100 : 0
 
-  const handleSaveKit = (e: React.FormEvent) => {
+  const [savingKit, setSavingKit] = useState(false)
+
+  const handleSaveKit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!kitForm.nombre || kitForm.items.length < 2 || !kitForm.precio_venta) {
       toast.error("Kit incompleto", "El kit debe tener un nombre, al menos 2 componentes y un precio de venta.")
       return
     }
 
-    const newKit = {
-      id: `kit-${Date.now()}`,
-      nombre: kitForm.nombre,
-      sku: kitForm.sku || `KIT-${Date.now().toString().slice(-4)}`,
-      precio_venta: Number(kitForm.precio_venta),
-      costo_total: kitCostoAcumulado,
-      margen_pct: Number(kitMargenPct.toFixed(1)),
-      componentes: kitForm.items.map(i => ({ nombre: i.product_nombre, cantidad: i.cantidad, costo: i.costo_unitario }))
+    setSavingKit(true)
+    try {
+      await api.kits.create({
+        nombre: kitForm.nombre,
+        descripcion: kitForm.sku || undefined,
+        precio_venta: Number(kitForm.precio_venta),
+        items: kitForm.items.map(i => ({ product_id: i.product_id, cantidad: i.cantidad })),
+      })
+      toast.success("Kit Promocional Creado", `${kitForm.nombre} registrado con éxito.`)
+      setKitForm({ nombre: "", sku: "", precio_venta: 0, items: [] })
+      await loadKits()
+    } catch (e: any) {
+      toast.error("Error al crear el kit", e?.message || "No se pudo guardar el kit.")
+    } finally {
+      setSavingKit(false)
     }
-
-    setKitsSaved(prev => [newKit, ...prev])
-    toast.success("Kit Promocional Creado", `${kitForm.nombre} registrado con éxito.`)
-    setKitForm({ nombre: "", sku: "", precio_venta: 0, items: [] })
   }
 
   return (
@@ -1189,16 +1191,17 @@ export default function ProductsPage() {
 
                 <button
                   type="submit"
-                  className="btn-primary w-full text-xs py-2.5 font-bold shadow-md bg-purple-600 hover:bg-purple-700"
+                  disabled={savingKit}
+                  className="btn-primary w-full text-xs py-2.5 font-bold shadow-md bg-purple-600 hover:bg-purple-700 disabled:opacity-60"
                 >
-                  Guardar Kit / Combo
+                  {savingKit ? "Guardando..." : "Guardar Kit / Combo"}
                 </button>
               </form>
             </div>
 
             {/* Kits Guardados */}
             <div className="lg:col-span-7 space-y-4">
-              <h3 className="text-sm font-black text-slate-900 dark:text-white">Kits & Combos Activos ({kitsSaved.length})</h3>
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">Kits & Combos Activos ({kitsSaved.length}){loadingKits ? " -- cargando..." : ""}</h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {kitsSaved.map((kit) => (
@@ -1214,7 +1217,7 @@ export default function ProductsPage() {
 
                     <div>
                       <h4 className="font-bold text-slate-900 dark:text-white text-sm">{kit.nombre}</h4>
-                      <p className="text-[11px] text-slate-400 font-mono mt-0.5">SKU: {kit.sku}</p>
+                      {kit.descripcion && <p className="text-[11px] text-slate-400 mt-0.5">{kit.descripcion}</p>}
                     </div>
 
                     <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 space-y-1">
