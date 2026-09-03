@@ -46,20 +46,35 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
   }
 
   const branches = [
-    { id: "b1", name: "Sucursal Central (Av. Eusebio Ayala)", time: "Abierto hasta 22:00" },
-    { id: "b2", name: "Sucursal Shopping (Av. Mcal. López)", time: "Abierto hasta 23:00" },
-    { id: "b3", name: "Sucursal Centro (Calle Palma)", time: "Abierto hasta 21:00" },
+    { id: "b1", name: "Casa Central (Pedro Juan Caballero)", time: "Lunes a Domingo 07:30 a 21:00" },
+    { id: "b2", name: "Retiro en Salón / Pick-up Mayorista", time: "Lunes a Domingo 07:30 a 21:00" },
   ]
 
+  const [isDark, setIsDark] = useState(() => {
+    return document.documentElement.classList.contains("dark") || localStorage.getItem("theme") === "dark"
+  })
+
+  const toggleTheme = () => {
+    if (document.documentElement.classList.contains("dark")) {
+      document.documentElement.classList.remove("dark")
+      localStorage.setItem("theme", "light")
+      setIsDark(false)
+    } else {
+      document.documentElement.classList.add("dark")
+      localStorage.setItem("theme", "dark")
+      setIsDark(true)
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col font-sans text-gray-900 dark:text-gray-100 selection:bg-red-500 selection:text-white">
-      {/* ── TOPBAR SUPER EXTRA ──────────────────────────────────────────────── */}
-      <div className="bg-red-700 text-white text-[11px] font-semibold py-1.5 px-4 shadow-xs">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col font-sans text-gray-900 dark:text-gray-100 selection:bg-brandOrange selection:text-white">
+      {/* ── TOPBAR EXTRA SUPERMERCADO ────────────────────────────────────────── */}
+      <div className="bg-gradient-to-r from-orange-600 via-brandOrange to-brandRed text-white text-[11px] font-semibold py-1.5 px-4 shadow-xs">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-6">
             <span className="flex items-center gap-1.5">
               <Truck className="w-3.5 h-3.5 text-yellow-300" />
-              <span>Envíos express en el día en Gran Asunción</span>
+              <span>Envíos express y retiro en Pedro Juan Caballero & Ponta Porã</span>
             </span>
             <span className="hidden md:flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-green-300" />
@@ -69,14 +84,14 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
 
           <div className="flex items-center gap-4">
             <a
-              href="https://wa.me/595981000000"
+              href="https://wa.me/595992052200?text=Hola%20Extra%20Supermercado,%20quisiera%20hacer%20un%20pedido%20online"
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-1 hover:text-yellow-200 transition-colors"
             >
-              <MessageCircle className="w-3.5 h-3.5 text-green-400" />
+              <MessageCircle className="w-3.5 h-3.5 text-green-300" />
               <span className="hidden sm:inline">Pedidos WhatsApp:</span>
-              <span className="font-bold font-mono">0981 123 456</span>
+              <span className="font-bold font-mono">+595 992 052 200</span>
             </a>
             <span className="hidden lg:inline text-white/40">|</span>
             <Link to="/tienda/pedidos" className="hidden lg:inline hover:underline text-white/90">
@@ -86,25 +101,22 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
         </div>
       </div>
 
-      {/* ── MAIN HEADER SUPER EXTRA ────────────────────────────────────────── */}
+      {/* ── MAIN HEADER EXTRA SUPERMERCADO ─────────────────────────────────── */}
       <header className="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 sticky top-0 z-40 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 py-3.5">
           <div className="flex items-center justify-between gap-4">
-            {/* LOGO SUPER EXTRA */}
-            <Link to="/tienda" className="flex items-center gap-2.5 shrink-0 group">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-red-600 to-red-500 flex items-center justify-center text-white shadow-md shadow-red-500/20 group-hover:scale-105 transition-transform">
-                <Store className="w-5 h-5" />
+            {/* LOGO OFICIAL EXTRA SUPERMERCADO */}
+            <Link to="/tienda" className="flex items-center gap-3 shrink-0 group">
+              <div className="bg-white p-1 rounded-xl border border-gray-200 dark:border-white/10 shadow-xs group-hover:scale-105 transition-transform">
+                <img src="/logo_extra.png" alt="Extra Supermercado Mayorista" className="h-9 sm:h-11 w-auto object-contain" />
               </div>
               <div className="flex flex-col">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xl font-black tracking-tight text-gray-900 dark:text-white uppercase leading-none">
-                    SUPER <span className="text-red-600">EXTRA</span>
-                  </span>
-                  <span className="px-1.5 py-0.5 rounded-md bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 text-[9px] font-black uppercase tracking-wider">
-                    ONLINE
+                  <span className="px-1.5 py-0.5 rounded-md bg-orange-100 dark:bg-orange-950/60 text-brandOrange dark:text-orange-400 text-[10px] font-black uppercase tracking-wider">
+                    TIENDA ONLINE
                   </span>
                 </div>
-                <span className="text-[10px] text-gray-400 font-medium">Supermercado & Frescos</span>
+                <span className="text-[10px] text-gray-400 font-medium">Pedro Juan Caballero</span>
               </div>
             </Link>
 
@@ -114,10 +126,10 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
                 onClick={() => setShowBranchModal(!showBranchModal)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/80 hover:bg-gray-100 text-left text-xs transition-colors"
               >
-                <MapPin className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                <MapPin className="w-3.5 h-3.5 text-brandOrange shrink-0" />
                 <div>
                   <p className="text-[9px] uppercase font-black text-gray-400 leading-none">Retiro / Envío desde</p>
-                  <p className="font-bold text-gray-800 dark:text-gray-200 truncate max-w-[180px]">{selectedBranch}</p>
+                  <p className="font-bold text-gray-800 dark:text-gray-200 truncate max-w-[190px]">{selectedBranch}</p>
                 </div>
                 <ChevronDown className="w-3 h-3 text-gray-400" />
               </button>
@@ -192,10 +204,28 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
                 </div>
               ) : null}
 
+              {/* BOTÓN EXTRA CLUB */}
+              <a
+                href="https://club.superextra.com.py"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-50 dark:bg-orange-950/40 text-brandOrange border border-orange-200 dark:border-orange-900/40 text-xs font-bold hover:bg-orange-100 transition"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Extra Club</span>
+              </a>
+
+              {/* BOTÓN TOGGLE TEMA */}
+              <button
+                onClick={toggleTheme}
+                className="p-2 text-gray-500 dark:text-gray-400 hover:text-brandOrange dark:hover:text-brandOrange rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/80 transition"
+                title="Cambiar Tema"
+              >
+                {isDark ? <span className="text-amber-400 text-sm">🌙</span> : <span className="text-amber-500 text-sm">☀️</span>}
+              </button>
+
               {/* BOTÓN CARRITO DE COMPRAS */}
               <Link
                 to="/tienda/carrito"
-                className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-3.5 py-2 rounded-xl shadow-md shadow-red-600/20 font-bold text-xs transition-all active:scale-95"
+                className="flex items-center gap-2.5 bg-gradient-to-r from-brandOrange to-brandRed hover:from-orange-600 hover:to-red-600 text-white px-3.5 py-2 rounded-xl shadow-md shadow-brandOrange/25 font-bold text-xs transition-all active:scale-95"
               >
                 <div className="relative">
                   <ShoppingCart className="w-4 h-4" />
@@ -206,7 +236,7 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
                   )}
                 </div>
                 <div className="hidden sm:flex flex-col text-left leading-none">
-                  <span className="text-[9px] text-red-200 uppercase font-black">Mi Carrito</span>
+                  <span className="text-[9px] text-orange-100 uppercase font-black">Mi Carrito</span>
                   <span className="font-mono text-xs font-black">
                     {cartTotal > 0 ? formatPYG(cartTotal) : "Gs. 0"}
                   </span>
@@ -293,18 +323,19 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             {/* COL 1: INFO & BRAND */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-red-600 flex items-center justify-center text-white font-bold">
-                  <Store className="w-4 h-4" />
+              <div className="flex items-center gap-3">
+                <div className="bg-white p-1 rounded-xl shadow-xs">
+                  <img src="/logo_extra.png" alt="Extra Supermercado" className="h-8 w-auto object-contain" />
                 </div>
-                <span className="text-lg font-black tracking-tight text-white uppercase">
-                  SUPER <span className="text-red-500">EXTRA</span>
-                </span>
+                <div>
+                  <p className="font-extrabold text-white text-sm">Extra Supermercado Mayorista</p>
+                  <p className="text-[10px] text-gray-400">Grupo Santa Teresa E.A.S. • RUC: 80150377-9</p>
+                </div>
               </div>
               <p className="text-gray-400 text-xs leading-relaxed">
-                Supermercado líder en calidad, frescura y precios convenientes. Hacé tus compras online y recibí en tu casa o retirá en sucursal.
+                Supermercado líder en calidad, carnes premium, importados y los mejores precios mayoristas y minoristas de la frontera.
               </p>
-              <div className="pt-2 flex items-center gap-3 text-gray-400">
+              <div className="pt-1 flex items-center gap-2 text-gray-400">
                 <ShieldCheck className="w-4 h-4 text-green-400" />
                 <span className="text-[11px]">Compra 100% Segura & Factura Legal</span>
               </div>
@@ -312,12 +343,12 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
 
             {/* COL 2: SUCURSALES & ATENCIÓN */}
             <div className="space-y-3">
-              <h4 className="font-extrabold text-white text-xs uppercase tracking-wider">Nuestras Sucursales</h4>
+              <h4 className="font-extrabold text-white text-xs uppercase tracking-wider">Atención y Sucursal</h4>
               <ul className="space-y-2 text-gray-400 text-xs">
-                <li>📍 <strong>Central:</strong> Av. Eusebio Ayala km 4.5</li>
-                <li>📍 <strong>Shopping:</strong> Av. Mcal. López y San Martín</li>
-                <li>📍 <strong>Centro:</strong> Calle Palma y 14 de Mayo</li>
-                <li className="pt-1">🕒 <strong>Horario:</strong> Lunes a Domingo 07:00 a 22:00</li>
+                <li>📍 <strong>Ubicación:</strong> Pedro Juan Caballero, Amambay</li>
+                <li>📍 <strong>Frontera:</strong> Cobertura en PJC y Ponta Porã</li>
+                <li className="pt-1">🕒 <strong>Horario:</strong> Lunes a Domingos 07:30 a 21:00 hs.</li>
+                <li>📱 <strong>WhatsApp Oficial:</strong> +595 992 052 200</li>
               </ul>
             </div>
 
@@ -325,9 +356,10 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
             <div className="space-y-3">
               <h4 className="font-extrabold text-white text-xs uppercase tracking-wider">Atención al Cliente</h4>
               <ul className="space-y-2 text-gray-400 text-xs">
-                <li><Link to="/tienda" className="hover:text-white transition">Ofertas de la Semana</Link></li>
+                <li><Link to="/tienda" className="hover:text-white transition">Catálogo Online</Link></li>
+                <li><a href="https://club.superextra.com.py" className="hover:text-amber-400 transition text-brandOrange font-bold">Extra Club & Beneficios</a></li>
                 <li><Link to="/tienda/pedidos" className="hover:text-white transition">Estado de mi Pedido</Link></li>
-                <li><a href="https://wa.me/595981000000" target="_blank" rel="noreferrer" className="hover:text-white transition">Soporte WhatsApp</a></li>
+                <li><a href="https://wa.me/595992052200" target="_blank" rel="noreferrer" className="hover:text-white transition">Soporte WhatsApp</a></li>
                 <li><Link to="/tienda/login" className="hover:text-white transition">Mi Cuenta</Link></li>
               </ul>
             </div>
@@ -336,12 +368,12 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
             <div className="space-y-3">
               <h4 className="font-extrabold text-white text-xs uppercase tracking-wider">Medios de Pago Aceptados</h4>
               <p className="text-gray-400 text-xs">
-                Aceptamos todas las tarjetas de crédito y débito, transferencias SIPAP, QR Pix y pago contra entrega (Efectivo o POS inalámbrico).
+                Aceptamos Guaraníes (PYG), Reales (BRL), Dólares (USD), Tarjetas de crédito/débito, QR Pix y pago contra entrega.
               </p>
               <div className="flex flex-wrap gap-2 pt-2">
                 <span className="px-2 py-1 rounded bg-slate-800 text-gray-300 font-mono text-[10px] font-bold">💳 Bancard vPOS</span>
                 <span className="px-2 py-1 rounded bg-slate-800 text-gray-300 font-mono text-[10px] font-bold">📲 QR Pix / Simple</span>
-                <span className="px-2 py-1 rounded bg-slate-800 text-gray-300 font-mono text-[10px] font-bold">💵 Efectivo</span>
+                <span className="px-2 py-1 rounded bg-slate-800 text-gray-300 font-mono text-[10px] font-bold">💵 Efectivo PYG/BRL</span>
               </div>
             </div>
           </div>

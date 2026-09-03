@@ -30,7 +30,7 @@ export default function EcommerceCheckout() {
   const [nombre, setNombre] = useState("")
   const [telefono, setTelefono] = useState("")
   const [direccion, setDireccion] = useState("")
-  const [ciudad, setCiudad] = useState("Asunción")
+  const [ciudad, setCiudad] = useState("Pedro Juan Caballero")
   const [notas, setNotas] = useState("")
   const [rucCi, setRucCi] = useState("")
   const [razonSocial, setRazonSocial] = useState("")
@@ -171,13 +171,13 @@ export default function EcommerceCheckout() {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
             <a
-              href="https://wa.me/595981000000"
+              href="https://wa.me/595992052200?text=Hola%20Extra%20Supermercado,%20acabo%20de%20realizar%20un%20pedido%20online"
               target="_blank"
               rel="noreferrer"
               className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs uppercase flex items-center justify-center gap-2 shadow-md transition"
             >
               <MessageCircle className="w-4 h-4" />
-              <span>Consultar por WhatsApp</span>
+              <span>Consultar por WhatsApp Oficial</span>
             </a>
 
             <Link

@@ -232,13 +232,13 @@ export default function EcommerceCatalog() {
           </div>
         </div>
 
-        {/* ── BARRA DE BENEFICIOS SUPER EXTRA ──────────────────────────────── */}
+        {/* ── BARRA DE BENEFICIOS EXTRA SUPERMERCADO ───────────────────────── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { icon: Truck, title: "Envío en el Día", desc: "Gran Asunción y alrededores", color: "text-blue-600 bg-blue-50 dark:bg-blue-950/40" },
+            { icon: Truck, title: "Envío en el Día", desc: "Pedro Juan Caballero & Ponta Porã", color: "text-orange-600 bg-orange-50 dark:bg-orange-950/40" },
             { icon: ShieldCheck, title: "Cadena de Frío", desc: "Carnes y frescos garantizados", color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40" },
-            { icon: Zap, title: "Pickup en Auto", desc: "Retiro sin bajarte de tu vehículo", color: "text-amber-600 bg-amber-50 dark:bg-amber-950/40" },
-            { icon: Tag, title: "Precios de Salón", desc: "Las mismas ofertas que en tienda", color: "text-purple-600 bg-purple-50 dark:bg-purple-950/40" },
+            { icon: Zap, title: "Pick-up en Local", desc: "Retirá rápido sin filas en caja", color: "text-amber-600 bg-amber-50 dark:bg-amber-950/40" },
+            { icon: Tag, title: "Precios Mayoristas", desc: "Escalas por unidad y fardo cerrado", color: "text-blue-600 bg-blue-50 dark:bg-blue-950/40" },
           ].map((b, idx) => (
             <div key={idx} className="p-3.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl flex items-center gap-3 shadow-xs">
               <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${b.color}`}>
@@ -411,9 +411,17 @@ export default function EcommerceCatalog() {
                             {formatPYG(precio)}
                           </span>
                         ) : null}
-                        <span className="text-sm font-black font-mono text-red-600 dark:text-red-400">
+                        <span className="text-sm font-black font-mono text-brandOrange dark:text-orange-400">
                           {formatPYG(precioOferta)}
                         </span>
+                        
+                        {/* ESTRUCTURA PLANIFICADA FASE 3: PRECIO SOCIO EXTRA CLUB (SIN EFECTO AÚN) */}
+                        {p.precio_extra_club && (
+                          <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 font-bold bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900/40">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            <span>Extra Club: {formatPYG(p.precio_extra_club)}</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* SELECTOR DE CANTIDAD & BOTÓN */}
@@ -438,7 +446,7 @@ export default function EcommerceCatalog() {
                           <button
                             onClick={() => handleAddToCart(p)}
                             disabled={addingId === p.id}
-                            className="w-full py-2 bg-red-600 hover:bg-red-700 text-white font-extrabold text-[11px] rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 active:scale-95"
+                            className="w-full py-2 bg-gradient-to-r from-brandOrange to-brandRed hover:from-orange-600 hover:to-red-600 text-white font-extrabold text-[11px] rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 active:scale-95"
                           >
                             <ShoppingCart className="w-3.5 h-3.5" />
                             <span>Agregar</span>
