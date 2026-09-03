@@ -61,6 +61,7 @@ from api.src.logistics.router import router as logistics_router
 from api.src.imports.router import router as imports_router
 from api.src.email.router import router as email_router
 from api.src.variants.router import router as variants_router
+from api.src.pack_barcodes.router import router as pack_barcodes_router, company_router as pack_barcodes_company_router
 from api.src.crm.router import router as crm_router
 from api.src.verticals.router import router as verticals_router
 from api.src.price_lists.router import router as price_lists_router
@@ -319,6 +320,8 @@ app.include_router(logistics_router)
 app.include_router(imports_router)
 app.include_router(email_router)
 app.include_router(variants_router)
+app.include_router(pack_barcodes_router)
+app.include_router(pack_barcodes_company_router)
 app.include_router(verticals_router)
 app.include_router(crm_router)
 app.include_router(price_lists_router)

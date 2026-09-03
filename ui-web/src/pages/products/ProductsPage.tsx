@@ -12,6 +12,7 @@ import {
   type Product,
   type Category,
   type ProductVariant,
+  type PackBarcode,
   type ProductsStatsResponse,
   type Product360Response,
 } from "../../api"
@@ -24,15 +25,17 @@ export default function ProductsPage() {
   const confirm = useConfirm()
 
   // Pestaña Principal
-  const [mainTab, setMainTab] = useState<"catalogo" | "variantes" | "kits" | "guia">("catalogo")
+  const [mainTab, setMainTab] = useState<"catalogo" | "variantes" | "packs" | "kits" | "guia">("catalogo")
 
   // Datos principales
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [variantsList, setVariantsList] = useState<ProductVariant[]>([])
+  const [packBarcodesList, setPackBarcodesList] = useState<PackBarcode[]>([])
   const [stats, setStats] = useState<ProductsStatsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingVariants, setLoadingVariants] = useState(false)
+  const [loadingPackBarcodes, setLoadingPackBarcodes] = useState(false)
   const [loadingStats, setLoadingStats] = useState(true)
 
   // Filtros y Búsqueda
@@ -85,6 +88,17 @@ export default function ProductsPage() {
     codigo_barra: "",
     precio_extra: 0,
     stock: 0,
+  })
+
+  // Módulo de Códigos de Pack/Caja (1 codigo = N unidades del mismo producto)
+  const [selectedPackParentProductId, setSelectedPackParentProductId] = useState<string>("")
+  const [showPackBarcodeModal, setShowPackBarcodeModal] = useState(false)
+  const [savingPackBarcode, setSavingPackBarcode] = useState(false)
+  const [editingPackBarcode, setEditingPackBarcode] = useState<PackBarcode | null>(null)
+  const [packBarcodeForm, setPackBarcodeForm] = useState({
+    codigo_barra: "",
+    etiqueta: "",
+    unidades_por_paquete: 1,
   })
 
   // Módulo de Kits / Combos
@@ -177,6 +191,18 @@ export default function ProductsPage() {
     }
   }, [selectedParentProductId])
 
+  const loadPackBarcodes = useCallback(async () => {
+    setLoadingPackBarcodes(true)
+    try {
+      const v = await api.products.packBarcodes.list(selectedPackParentProductId || undefined)
+      setPackBarcodesList(v)
+    } catch (e: any) {
+      // fallback
+    } finally {
+      setLoadingPackBarcodes(false)
+    }
+  }, [selectedPackParentProductId])
+
   useEffect(() => {
     loadStats()
     fetchData()
@@ -187,6 +213,12 @@ export default function ProductsPage() {
       loadVariants()
     }
   }, [mainTab, loadVariants])
+
+  useEffect(() => {
+    if (mainTab === "packs") {
+      loadPackBarcodes()
+    }
+  }, [mainTab, loadPackBarcodes])
 
   // Abrir Ficha 360°
   const openProduct360 = async (prodId: string) => {
@@ -349,6 +381,72 @@ export default function ProductsPage() {
       await api.products.variants.delete(v.id)
       toast.success("Variante eliminada", "")
       loadVariants()
+    } catch (e: any) {
+      toast.error("Error", e.message)
+    }
+  }
+
+  // Guardar Código de Pack/Caja
+  const handleSavePackBarcode = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedPackParentProductId || !packBarcodeForm.codigo_barra.trim() || !packBarcodeForm.etiqueta.trim()) {
+      toast.error("Datos requeridos", "Seleccioná el producto, y completá el código de barra y la etiqueta (ej. \"Caja x24\").")
+      return
+    }
+    if (Number(packBarcodeForm.unidades_por_paquete) <= 0) {
+      toast.error("Cantidad inválida", "Las unidades por paquete deben ser mayores a cero.")
+      return
+    }
+    setSavingPackBarcode(true)
+    try {
+      if (editingPackBarcode) {
+        await api.products.packBarcodes.update(selectedPackParentProductId, editingPackBarcode.id, {
+          codigo_barra: packBarcodeForm.codigo_barra.trim(),
+          etiqueta: packBarcodeForm.etiqueta.trim(),
+          unidades_por_paquete: Number(packBarcodeForm.unidades_por_paquete),
+        })
+        toast.success("Código de Pack Actualizado", `"${packBarcodeForm.etiqueta}" guardado correctamente.`)
+      } else {
+        await api.products.packBarcodes.create(selectedPackParentProductId, {
+          codigo_barra: packBarcodeForm.codigo_barra.trim(),
+          etiqueta: packBarcodeForm.etiqueta.trim(),
+          unidades_por_paquete: Number(packBarcodeForm.unidades_por_paquete),
+        })
+        toast.success("Código de Pack Creado", `"${packBarcodeForm.etiqueta}" agregado al producto.`)
+      }
+      setShowPackBarcodeModal(false)
+      setEditingPackBarcode(null)
+      setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
+      loadPackBarcodes()
+    } catch (e: any) {
+      toast.error("Error al guardar código de pack", e.message)
+    } finally {
+      setSavingPackBarcode(false)
+    }
+  }
+
+  const handleEditPackBarcodeClick = (pb: PackBarcode) => {
+    setEditingPackBarcode(pb)
+    setSelectedPackParentProductId(pb.product_id)
+    setPackBarcodeForm({
+      codigo_barra: pb.codigo_barra,
+      etiqueta: pb.etiqueta,
+      unidades_por_paquete: Number(pb.unidades_por_paquete),
+    })
+    setShowPackBarcodeModal(true)
+  }
+
+  const handleDeletePackBarcode = async (pb: PackBarcode) => {
+    const ok = await confirm({
+      title: "Eliminar Código de Pack",
+      message: `¿Desea eliminar el código de pack "${pb.etiqueta}" (${pb.codigo_barra})?`,
+      confirmText: "Eliminar",
+    })
+    if (!ok) return
+    try {
+      await api.products.packBarcodes.delete(pb.product_id, pb.id)
+      toast.success("Código de pack eliminado", "")
+      loadPackBarcodes()
     } catch (e: any) {
       toast.error("Error", e.message)
     }
@@ -571,7 +669,8 @@ export default function ProductsPage() {
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { key: "catalogo", label: "Catálogo General", icon: Package, count: products.length },
-          { key: "variantes", label: "Variantes (Talles / Sabores / Packs)", icon: Palette, count: variantsList.length },
+          { key: "variantes", label: "Variantes (Talles / Sabores)", icon: Palette, count: variantsList.length },
+          { key: "packs", label: "Códigos de Pack / Caja", icon: Box, count: packBarcodesList.length },
           { key: "kits", label: "Kits & Combos Promocionales", icon: Gift, count: kitsSaved.length },
           { key: "guia", label: "Manual Operativo & Ayuda", icon: BookOpen },
         ].map((tab) => {
@@ -1033,6 +1132,138 @@ export default function ProductsPage() {
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
+          PESTAÑA: CÓDIGOS DE PACK / CAJA
+      ────────────────────────────────────────────────────────────────────────── */}
+      {mainTab === "packs" && (
+        <div className="space-y-6">
+          {/* BANNER EDUCATIVO E INSTRUCCIONES */}
+          <div className="card p-5 bg-gradient-to-r from-amber-50/80 via-white to-orange-50/60 dark:from-slate-900 dark:via-slate-900 dark:to-amber-950/30 border border-amber-200/80 dark:border-amber-900/60 rounded-3xl space-y-3">
+            <div className="flex items-start gap-3.5">
+              <div className="p-2.5 rounded-2xl bg-amber-600 text-white shadow-md shrink-0">
+                <Box className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  ¿Para qué sirve esto? Códigos de Pack / Caja
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Muchos productos llegan en cajas o packs cerrados con un <strong>código de barras propio, distinto</strong> al del producto suelto.
+                  Registrá acá ese código y cuántas unidades trae — el stock siempre queda expresado en unidades sueltas, esto es solo
+                  una forma más rápida de cargarlo. (Próximamente: al escanear ese código en Caja, se van a agregar automáticamente
+                  esas unidades al carrito.)
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-amber-600 dark:text-amber-400 block font-mono">1. Producto Base</strong>
+                    Elegí el producto suelto que ya está cargado (ej. "Coca Cola 500ml").
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-amber-600 dark:text-amber-400 block font-mono">2. Código de la Caja</strong>
+                    Escaneá o tipeá el código impreso en la caja/pack (no el del producto suelto).
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                    <strong className="text-amber-600 dark:text-amber-400 block font-mono">3. Unidades por Paquete</strong>
+                    Cuántas unidades sueltas trae esa caja/pack (ej. 24).
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Panel de Control */}
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="w-full sm:w-96">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                Filtrar por Producto:
+              </label>
+              <select
+                value={selectedPackParentProductId}
+                onChange={(e) => setSelectedPackParentProductId(e.target.value)}
+                className="input-field w-full text-xs font-bold py-2"
+              >
+                <option value="">Todos los productos con códigos de pack...</option>
+                {products.slice(0, 100).map(p => (
+                  <option key={p.id} value={p.id}>{p.nombre} (SKU: {p.sku})</option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={() => {
+                setEditingPackBarcode(null)
+                setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
+                setShowPackBarcodeModal(true)
+              }}
+              className="btn-primary text-xs px-4 py-2.5 flex items-center gap-1.5 shadow-md self-end sm:self-auto"
+            >
+              <Plus className="w-4 h-4" /> + Nuevo Código de Pack
+            </button>
+          </div>
+
+          {/* Tabla de Códigos de Pack */}
+          <div className="card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl overflow-hidden">
+            {loadingPackBarcodes ? (
+              <div className="p-16 text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-amber-600 mx-auto mb-3" />
+                <p className="text-xs font-semibold text-slate-500">Cargando códigos de pack...</p>
+              </div>
+            ) : packBarcodesList.length === 0 ? (
+              <div className="p-16 text-center text-slate-400 space-y-2">
+                <Box className="w-10 h-10 mx-auto opacity-40 text-amber-500" />
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-300">No hay códigos de pack registrados</p>
+                <p className="text-xs">Hacé clic en "+ Nuevo Código de Pack" para registrar el código de una caja o pack.</p>
+              </div>
+            ) : (
+              <table className="w-full text-left text-xs min-w-[700px]">
+                <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-3.5">Producto Base</th>
+                    <th className="p-3.5">Etiqueta</th>
+                    <th className="p-3.5">Código de Barras (Caja/Pack)</th>
+                    <th className="p-3.5 text-right">Unidades por Paquete</th>
+                    <th className="p-3.5 text-right pr-4">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                  {packBarcodesList.map((pb) => (
+                    <tr key={pb.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="p-3.5 font-bold text-slate-900 dark:text-white">
+                        {pb.product_nombre || "Producto Base"}
+                        {pb.product_sku && <span className="block text-[10px] font-mono text-slate-400 font-normal">SKU: {pb.product_sku}</span>}
+                      </td>
+                      <td className="p-3.5 font-black text-amber-600 dark:text-amber-400 text-sm">
+                        {pb.etiqueta}
+                      </td>
+                      <td className="p-3.5 font-mono text-slate-600">{pb.codigo_barra}</td>
+                      <td className="p-3.5 text-right font-mono font-bold text-slate-900 dark:text-white">
+                        {Number(pb.unidades_por_paquete)}
+                      </td>
+                      <td className="p-3.5 text-right pr-4">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => handleEditPackBarcodeClick(pb)}
+                            className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeletePackBarcode(pb)}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
           PESTAÑA 3: KITS & COMBOS PROMOCIONALES
       ────────────────────────────────────────────────────────────────────────── */}
       {mainTab === "kits" && (
@@ -1297,6 +1528,103 @@ export default function ProductsPage() {
                 </p>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: ALTA / EDICIÓN DE CÓDIGO DE PACK
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showPackBarcodeModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col">
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-amber-50/50 dark:bg-amber-950/20">
+              <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <Box className="w-5 h-5 text-amber-600" /> {editingPackBarcode ? "Editar Código de Pack" : "Nuevo Código de Pack / Caja"}
+              </h3>
+              <button
+                onClick={() => { setShowPackBarcodeModal(false); setEditingPackBarcode(null) }}
+                className="p-1 text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePackBarcode} className="p-6 space-y-4">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Producto Base *</label>
+                <select
+                  required
+                  disabled={!!editingPackBarcode}
+                  value={selectedPackParentProductId}
+                  onChange={(e) => setSelectedPackParentProductId(e.target.value)}
+                  className="input-field w-full text-xs font-bold disabled:opacity-60"
+                >
+                  <option value="">Seleccionar Producto...</option>
+                  {products.slice(0, 150).map(p => (
+                    <option key={p.id} value={p.id}>{p.nombre} (SKU: {p.sku})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Código de Barras de la Caja/Pack *</label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="Escaneá o tipeá el código impreso en la caja"
+                  value={packBarcodeForm.codigo_barra}
+                  onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, codigo_barra: e.target.value })}
+                  className="input-field w-full text-xs font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Etiqueta *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. Caja x24, Fardo x12"
+                    value={packBarcodeForm.etiqueta}
+                    onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, etiqueta: e.target.value })}
+                    className="input-field w-full text-xs font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Unidades por Paquete *</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    step="1"
+                    value={packBarcodeForm.unidades_por_paquete}
+                    onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, unidades_por_paquete: Number(e.target.value) })}
+                    className="input-field w-full text-xs font-mono font-bold text-amber-600"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowPackBarcodeModal(false); setEditingPackBarcode(null) }}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPackBarcode}
+                  className="btn-primary text-xs px-5 py-2.5 flex items-center gap-1.5 shadow-md disabled:opacity-60"
+                >
+                  {savingPackBarcode ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {editingPackBarcode ? "Guardar Cambios" : "Crear Código de Pack"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

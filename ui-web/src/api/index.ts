@@ -269,6 +269,7 @@ export interface ReturnItem { id?: string; devolucion_id?: string; producto_id?:
 export interface SalesOrder { id: string; company_id?: string; customer_id?: string; customer?: Customer; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; prioridad?: string; subtotal?: number; total_iva?: number; total?: number; observaciones?: string; condicion?: string; moneda?: string; iva_10?: number; iva_5?: number; descuento_total?: number; fecha_entrega_solicitada?: string; fecha_entrega_estimada?: string; direccion_entrega?: string; items?: SalesOrderItem[]; created_at?: string; updated_at?: string }
 export interface SalesOrderItem { id?: string; pedido_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; descuento?: number; total?: number; entregado?: number; pendiente?: number; created_at?: string }
 export interface ProductVariant { id: string; product_id?: string; producto?: Product; tipo?: string; valor?: string; sku_variante?: string; codigo_barra?: string; precio_extra?: number; stock?: number; activo?: boolean; created_at?: string }
+export interface PackBarcode { id: string; product_id: string; company_id: string; codigo_barra: string; etiqueta: string; unidades_por_paquete: number; activo: boolean; created_at?: string; updated_at?: string; product_nombre?: string; product_sku?: string }
 export interface SupermerRecipe { id: string; area?: string; nombre?: string; descripcion?: string; producto_terminado_id?: string; producto_terminado_nombre?: string; cantidad_esperada?: number; unidad_medida?: string; rendimiento_esperado?: number; activa?: boolean; items?: SupermerRecipeItem[]; created_at?: string }
 export interface SupermerRecipeItem { id?: string; receta_id?: string; producto_id?: string; producto_nombre?: string; cantidad?: number; unidad_medida?: string; es_opcional?: boolean }
 export interface SupermerOrder { id: string; area?: string; receta_id?: string; receta_nombre?: string; cantidad_objetivo?: number; estado?: string; fecha_inicio?: string; fecha_fin?: string; fecha_vencimiento?: string; responsable_id?: string; responsable_nombre?: string; notas?: string; insumos_usados?: any; producto_obtenido?: number; rendimiento_real?: number; created_at?: string }
@@ -764,6 +765,14 @@ export const api = {
       create: (productId: string, data: { tipo: string; valor: string; sku_variante?: string; codigo_barra?: string; precio_extra?: number; stock?: number }) =>
         client.post<ProductVariant>(`/v1/products/${productId}/variants`, { ...data, company_id: COMPANY_ID }),
       delete: (variantId: string) => client.delete<void>(`/v1/variants/${variantId}`),
+    },
+    packBarcodes: {
+      list: (productId?: string) => client.get<PackBarcode[]>(`/v1/companies/${COMPANY_ID}/pack-barcodes`, { product_id: productId } as any),
+      create: (productId: string, data: { codigo_barra: string; etiqueta: string; unidades_por_paquete: number }) =>
+        client.post<PackBarcode>(`/v1/products/${productId}/pack-barcodes`, data),
+      update: (productId: string, packId: string, data: Partial<{ codigo_barra: string; etiqueta: string; unidades_por_paquete: number; activo: boolean }>) =>
+        client.patch<PackBarcode>(`/v1/products/${productId}/pack-barcodes/${packId}`, data),
+      delete: (productId: string, packId: string) => client.delete<void>(`/v1/products/${productId}/pack-barcodes/${packId}`),
     },
   },
   inventory: {

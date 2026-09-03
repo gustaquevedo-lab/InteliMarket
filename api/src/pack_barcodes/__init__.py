@@ -1,0 +1,1 @@
+"""Product pack barcodes module"""
