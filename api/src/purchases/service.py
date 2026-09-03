@@ -725,6 +725,25 @@ async def list_receipts(db: AsyncSession, company_id: str) -> list[PurchaseRecei
     return receipts
 
 
+async def _attach_product_names(db: AsyncSession, items: list) -> None:
+    # ReceiptItemResponse espera nombre/sku del producto embebidos (asi lo
+    # consume el frontend), pero PurchaseReceiptItem.product_id no tiene FK
+    # real a products -- se busca y se pega como atributo simple, en un solo
+    # select por lote en vez de un select por item (mismo patron que
+    # _attach_suppliers).
+    from api.src.products.models import Product
+
+    ids = {i.product_id for i in items if getattr(i, "product_id", None)}
+    if not ids:
+        return
+    result = await db.execute(select(Product.id, Product.nombre, Product.sku).where(Product.id.in_(ids)))
+    by_id = {row.id: row for row in result.all()}
+    for i in items:
+        row = by_id.get(i.product_id)
+        i.producto_nombre = row.nombre if row else None
+        i.producto_sku = row.sku if row else None
+
+
 async def get_receipt(db: AsyncSession, receipt_id: str) -> PurchaseReceipt | None:
     result = await db.execute(
         select(PurchaseReceipt)
@@ -734,6 +753,7 @@ async def get_receipt(db: AsyncSession, receipt_id: str) -> PurchaseReceipt | No
     receipt = result.scalar_one_or_none()
     if receipt:
         await _attach_suppliers(db, [receipt])
+        await _attach_product_names(db, receipt.items)
     return receipt
 
 
@@ -741,7 +761,9 @@ async def get_receipt_items(db: AsyncSession, receipt_id: str) -> list[PurchaseR
     result = await db.execute(
         select(PurchaseReceiptItem).where(PurchaseReceiptItem.receipt_id == uuid.UUID(receipt_id))
     )
-    return list(result.scalars().all())
+    items = list(result.scalars().all())
+    await _attach_product_names(db, items)
+    return items
 
 
 # ── Requisitions ──────────────────────────────────────────────────────────────

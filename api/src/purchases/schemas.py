@@ -288,6 +288,8 @@ class ReceiptItemResponse(BaseModel):
     id: UUID
     receipt_id: UUID
     product_id: UUID
+    producto_nombre: Optional[str] = None
+    producto_sku: Optional[str] = None
     variant_id: Optional[UUID] = None
     cantidad_ordenada: Optional[Decimal] = None
     cantidad_recibida: Decimal
