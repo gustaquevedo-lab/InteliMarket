@@ -162,7 +162,7 @@ function timeSince(iso: string) {
 const displayFont = { fontFamily: "'Archivo Expanded', system-ui, sans-serif" }
 const monoFont = { fontFamily: "'IBM Plex Mono', 'SF Mono', monospace" }
 
-type Tab = "inicio" | "cajas" | "aprobaciones" | "boveda" | "stock" | "equipo"
+type Tab = "inicio" | "cajas" | "boveda" | "stock" | "equipo"
 
 type PendingItem =
   | { kind: "auth"; id: string; created_at: string; data: AuthRequest }
@@ -1161,13 +1161,12 @@ try {
     ...vaultApprovals.map((v) => ({ kind: "vault" as const, id: v.id, created_at: v.created_at, data: v })),
   ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
-  const totalPendientes = pendingItems.length + retiros.length
+  const totalPendientes = pendingItems.length + retiros.length + creditApprovals.length
   const firstName = (user.nombre || "").split(" ")[0]
 
   const tabs: { key: Tab; label: string; icon: typeof Home; badge?: number }[] = [
     { key: "inicio", label: "Autorizar", icon: ShieldAlert, badge: totalPendientes },
     { key: "cajas", label: "Radar", icon: Wallet, badge: cashDropAlerts.length },
-    { key: "aprobaciones", label: "Créditos", icon: ListChecks, badge: creditApprovals.length },
     { key: "boveda", label: "Bóveda", icon: Landmark, badge: pendingSobres.length },
     { key: "stock", label: "Stock", icon: Boxes, badge: lowStock.length },
     { key: "equipo", label: "Equipo", icon: Users },
@@ -1464,6 +1463,67 @@ try {
               </div>
             )}
 
+            {/* Solicitudes de Crédito / Sobregiro de Clientes en Caja */}
+            {creditApprovals.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-[11px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-1.5" style={displayFont}>
+                    <CreditCard className="w-3.5 h-3.5" /> Solicitudes de Crédito en Espera ({creditApprovals.length})
+                  </h2>
+                </div>
+
+                <div className="space-y-2.5">
+                  {creditApprovals.map((c) => (
+                    <div key={c.id} className="rounded-2xl border-2 border-blue-400 bg-blue-50/50 dark:bg-blue-950/20 p-4 shadow-sm animate-fade-in">
+                      <div className="flex items-start justify-between gap-3 mb-2.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                            {c.aprobado_gerente_id ? "Requiere firma final" : "Línea / Sobregiro"}
+                          </div>
+                          <div className="font-bold text-sm text-slate-900 dark:text-white mt-0.5 truncate">
+                            {c.cliente_nombre || "Cliente en Caja"}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {c.solicitado_por_nombre ? `Por ${c.solicitado_por_nombre} · ` : ""}{timeSince(c.created_at)}
+                          </div>
+                          {c.motivo && (
+                            <div className="text-xs bg-white/80 dark:bg-slate-900/80 p-2 rounded-xl mt-2 text-slate-700 dark:text-slate-300 border border-blue-200 dark:border-blue-800">
+                              {c.motivo}
+                            </div>
+                          )}
+                        </div>
+                        {c.monto != null && (
+                          <div className="text-right shrink-0">
+                            <div className="font-black text-base text-blue-600 dark:text-blue-400" style={monoFont}>
+                              {formatPYG(c.monto)}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          onClick={() => resolveCreditApproval(c.id, false)}
+                          disabled={resolvingId === `cred-${c.id}`}
+                          className="py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer hover:bg-rose-50 disabled:opacity-50 transition"
+                        >
+                          <X className="w-4 h-4" /> Rechazar
+                        </button>
+                        <button
+                          onClick={() => resolveCreditApproval(c.id, true)}
+                          disabled={resolvingId === `cred-${c.id}`}
+                          className="py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50 transition active:scale-[0.98]"
+                        >
+                          {resolvingId === `cred-${c.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                          Aprobar Crédito
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Cola de Autorizaciones de Piso */}
             <div>
               <div className="flex items-center justify-between mb-2.5">
@@ -1615,96 +1675,6 @@ try {
           </div>
         )}
 
-        {/* ══════════════════════ TAB 2.5: APROBACIONES EXTRA (CRÉDITO) ══════════════════════ */}
-        {tab === "aprobaciones" && (
-          <div className="space-y-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
-                  <CreditCard className="w-4 h-4" />
-                </div>
-                <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400" style={displayFont}>
-                  Aprobaciones de Crédito
-                </h2>
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 pl-10">
-                Clientes esperando línea de crédito o ampliación de límite.
-              </p>
-            </div>
-
-            {creditApprovals.length === 0 ? (
-              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center shadow-xs">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3">
-                  <CheckCircle2 className="w-6 h-6" />
-                </div>
-                <div className="font-black text-sm text-slate-900 dark:text-white">Sin solicitudes de crédito</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  No hay líneas de crédito en espera de su aprobación.
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {creditApprovals.map((c) => (
-                  <div key={c.id} className="rounded-3xl border-2 border-blue-400 bg-white dark:bg-slate-900 p-4 shadow-xl shadow-blue-500/10 animate-fade-in">
-                    <div className="flex items-start gap-3 mb-3">
-                      <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
-                        <ClipboardCheck className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
-                          {c.aprobado_gerente_id ? "Requiere su firma final" : "Solicitud de Crédito"}
-                        </div>
-                        <div className="font-bold text-sm text-slate-900 dark:text-white mt-0.5">
-                          {c.cliente_nombre || c.motivo || "Cliente"}
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                          {c.solicitado_por_nombre ? `Por ${c.solicitado_por_nombre} · ` : ""}{timeSince(c.created_at)}
-                        </div>
-                        {c.motivo && (
-                          <div className="text-xs bg-slate-100 dark:bg-slate-800 p-2 rounded-xl mt-2 text-slate-700 dark:text-slate-300">
-                            {c.motivo}
-                          </div>
-                        )}
-                      </div>
-                      {c.monto != null && (
-                        <div className="text-right shrink-0">
-                          <div className="font-black text-base text-blue-600 dark:text-blue-400" style={monoFont}>
-                            {formatPYG(c.monto)}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      <button
-                        onClick={() => resolveCreditApproval(c.id, false)}
-                        disabled={resolvingId === `cred-${c.id}`}
-                        className="py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer disabled:opacity-50 transition"
-                      >
-                        <X className="w-4 h-4" /> Rechazar
-                      </button>
-                      <button
-                        onClick={() => resolveCreditApproval(c.id, true)}
-                        disabled={resolvingId === `cred-${c.id}`}
-                        className="py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50 transition active:scale-[0.98]"
-                      >
-                        {resolvingId === `cred-${c.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                        Aprobar Crédito
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-3.5 flex items-start gap-2.5">
-              <Radio className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-                Las cuentas por cobrar, bajas y créditos sin aprobar se revisan automáticamente cada 15 segundos. Si aparece una solicitud nueva, sonará una alerta.
-              </p>
-            </div>
-          </div>
-        )}
 
         {/* ══════════════════════ TAB 2: RADAR DE CAJAS & DROP CASH ══════════════════════ */}
         {tab === "cajas" && (
@@ -2238,9 +2208,9 @@ try {
 
       </div>
 
-      {/* ── BARRA INFERIOR DE NAVEGACIÓN TÁCTIL ── */}
+      {/* ── BARRA INFERIOR DE NAVEGACIÓN TÁCTIL (5 PESTAÑAS) ── */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800/80 pb-[env(safe-area-inset-bottom)] shadow-lg">
-        <div className="grid grid-cols-6 w-full max-w-lg mx-auto px-1 py-1">
+        <div className="grid grid-cols-5 w-full max-w-lg mx-auto px-1 py-1">
           {tabs.map((t) => {
             const Icon = t.icon
             const active = tab === t.key

@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'Extra Supervisor',
   webDir: '../ui-web-dist',
   server: {
-    url: 'http://192.168.0.10/pos/supervisor',
+    url: 'http://192.168.0.10:5173/pos/supervisor',
     cleartext: true,
     androidScheme: 'http',
   },
