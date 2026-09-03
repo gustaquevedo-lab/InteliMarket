@@ -20,6 +20,7 @@ import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
 import { offlineDB } from "../../utils/offlineDB"
 import { syncPendingSales } from "../../utils/syncManager"
+import QRCode from "qrcode"
 
 
 // ── BANDERAS VECTORIALES SVG PARA COMPATIBILIDAD TOTAL EN WINDOWS / ELECTRON ─
@@ -1049,6 +1050,7 @@ export default function POSPage() {
   const [plugpayPhone, setPlugpayPhone] = useState("")
   const [plugpayCuotas, setPlugpayCuotas] = useState(3)
   const [plugpayBrlValue, setPlugpayBrlValue] = useState<number | null>(null)
+  const [plugpayQrImageUrl, setPlugpayQrImageUrl] = useState<string>("")
   const plugpayPollIntervalRef = useRef<any>(null)
 
   const clearPlugpayPoll = () => {
@@ -1102,6 +1104,12 @@ export default function POSPage() {
       setPlugpayResult(pixRes.data)
       if (pixRes.data?.valueBRL) {
         setPlugpayBrlValue(parseFloat(pixRes.data.valueBRL))
+      }
+      setPlugpayQrImageUrl("")
+      if (pixRes.data?.qrCodeCopiaCola) {
+        QRCode.toDataURL(pixRes.data.qrCodeCopiaCola, { margin: 1, width: 320 })
+          .then(setPlugpayQrImageUrl)
+          .catch(() => {})
       }
       const refInterna = pixRes.data.referenciaInterna
 
@@ -1243,7 +1251,7 @@ export default function POSPage() {
   const resetBancardFlow = () => {
     setBancardTxnState("idle"); setBancardTxnResult(null); setBancardTxnError(""); setShowBancardManualFallback(false); setBancardTxnLogId(null); setPosCardCuotas(1)
     setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null); setShowBancardQrManualFallback(false); setPosQrCupon(""); setPosQrAuth("")
-    setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); clearPlugpayPoll()
+    setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); setPlugpayQrImageUrl(""); clearPlugpayPoll()
     setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
     setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf("")
     if (bancardCloudPollRef.current) { clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null }
@@ -9083,10 +9091,10 @@ export default function POSPage() {
                                 </div>
 
                                 <div className="flex items-center gap-3.5">
-                                  {plugpayResult?.qrCodeStringImage && (
+                                  {(plugpayQrImageUrl || plugpayResult?.qrCodeStringImage) && (
                                     <div className="p-2 bg-white rounded-xl shadow-xs border border-orange-300 shrink-0">
                                       <img
-                                        src={`data:image/png;base64,${plugpayResult.qrCodeStringImage}`}
+                                        src={plugpayQrImageUrl || `data:image/png;base64,${plugpayResult.qrCodeStringImage}`}
                                         className="w-48 h-48 sm:w-52 sm:h-52 object-contain rounded-md"
                                         alt="PIX QR Code Brasil"
                                       />
