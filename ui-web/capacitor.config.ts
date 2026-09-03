@@ -1,11 +1,11 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.intelimarket.extrasalon',
-  appName: 'Extra Salón',
+  appId: 'com.intelimarket.supervisor',
+  appName: 'Extra Supervisor',
   webDir: '../ui-web-dist',
   server: {
-    url: 'http://192.168.0.10:5173/operaciones-salon',
+    url: 'http://192.168.0.10:5173/supervisor',
     cleartext: true,
     androidScheme: 'http',
   },

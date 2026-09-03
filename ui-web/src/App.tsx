@@ -198,6 +198,7 @@ function AppRoutes() {
       <Route path="/operaciones-salon" element={<Suspense fallback={<PageLoader />}><SalonOperacionesPwaPage /></Suspense>} />
       <Route path="/pos" element={<ProtectedRoute><Suspense fallback={<PageLoader />}><POSPage /></Suspense></ProtectedRoute>} />
       <Route path="/supervisor" element={<Suspense fallback={<PageLoader />}><SupervisorPage /></Suspense>} />
+      <Route path="/pos/supervisor" element={<Navigate to="/supervisor" replace />} />
       <Route
         path="/"
         element={
