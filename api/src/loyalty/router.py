@@ -72,3 +72,32 @@ async def delete_reward(reward_id: str, db: AsyncSession = Depends(get_db), user
     deleted = await service.delete_reward(db, reward_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Recompensa no encontrada")
+
+
+@router.get("/solicitudes-tarjetas")
+async def list_solicitudes_tarjetas(user=Depends(require_auth)):
+    """Obtiene las solicitudes de tarjetas registradas en cPanel y en cola Zebra"""
+    import urllib.request, json
+    try:
+        url = "https://club.superextra.com.py/api.php?action=zebra_cola"
+        req = urllib.request.Request(url, headers={"User-Agent": "Intelimarket-Backend/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data
+    except Exception as e:
+        return {"cola": [], "error": str(e)}
+
+
+@router.post("/solicitudes-tarjetas/{cola_id}/imprimir")
+async def marcar_tarjeta_impresa(cola_id: int, user=Depends(require_auth)):
+    """Marca la tarjeta como impresa en la cola de la Zebra ZC300"""
+    import urllib.request, json
+    try:
+        url = "https://club.superextra.com.py/api.php?action=zebra_confirmar"
+        payload = json.dumps({"cola_id": cola_id}).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json", "User-Agent": "Intelimarket-Backend/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

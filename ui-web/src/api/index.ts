@@ -1603,6 +1603,8 @@ export const api = {
     createReward: (data: { company_id: string; nombre: string; puntos_requeridos: number; tipo_recompensa: string; descripcion?: string; valor_recompensa?: number; stock?: number; imagen_url?: string }) => client.post<LoyaltyReward>("/v1/loyalty/rewards", data),
     updateReward: (rewardId: string, data: Partial<LoyaltyReward>) => client.put<LoyaltyReward>(`/v1/loyalty/rewards/${rewardId}`, data),
     deleteReward: (rewardId: string) => client.delete<void>(`/v1/loyalty/rewards/${rewardId}`),
+    solicitudesTarjetas: () => client.get<{ cola: any[] }>("/v1/loyalty/solicitudes-tarjetas"),
+    marcarImpresa: (colaId: number) => client.post<any>(`/v1/loyalty/solicitudes-tarjetas/${colaId}/imprimir`),
   },
   imports: {
     templates: () => client.get<ImportTemplate[]>("/v1/imports/templates"),

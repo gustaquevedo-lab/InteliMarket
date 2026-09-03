@@ -12,7 +12,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate } from "../../utils/format"
 
-type CrmTab = "miembros" | "rfm" | "premios" | "reglas"
+type CrmTab = "miembros" | "solicitudes" | "rfm" | "premios" | "reglas"
 
 const TIER_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   vip: { bg: "bg-purple-100 dark:bg-purple-950/60", text: "text-purple-700 dark:text-purple-300", border: "border-purple-200 dark:border-purple-900/50" },
@@ -28,6 +28,11 @@ export default function CrmPage() {
 
   const [tab, setTab] = useState<CrmTab>("miembros")
   const [loading, setLoading] = useState(true)
+
+  // Solicitudes Web de Tarjetas PVC
+  const [solicitudes, setSolicitudes] = useState<any[]>([])
+  const [loadingSolicitudes, setLoadingSolicitudes] = useState(false)
+  const [printingId, setPrintingId] = useState<number | null>(null)
 
   // Datos reales
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -79,7 +84,35 @@ export default function CrmPage() {
     }
   }, [companyId])
 
-  useEffect(() => { loadData() }, [loadData])
+  const loadSolicitudes = useCallback(async () => {
+    setLoadingSolicitudes(true)
+    try {
+      const res = await api.loyalty.solicitudesTarjetas()
+      setSolicitudes(Array.isArray((res as any)?.cola) ? (res as any).cola : [])
+    } catch {
+      setSolicitudes([])
+    } finally {
+      setLoadingSolicitudes(false)
+    }
+  }, [])
+
+  useEffect(() => { 
+    loadData()
+    loadSolicitudes()
+  }, [loadData, loadSolicitudes])
+
+  const handleMarcarImpresa = async (colaId: number, nombre: string) => {
+    setPrintingId(colaId)
+    try {
+      await api.loyalty.marcarImpresa(colaId)
+      toast.success("Tarjeta Impresa", `Se marcó como lista la tarjeta de ${nombre}`)
+      await loadSolicitudes()
+    } catch (e: any) {
+      toast.error("Error al marcar tarjeta", e.message)
+    } finally {
+      setPrintingId(null)
+    }
+  }
 
   // Filtrar solo clientes reales (excluyendo proveedores B2B como 3SV Aguaray, 40 Comercial, etc.)
   const retailCustomers = useMemo(() => {
@@ -318,6 +351,7 @@ export default function CrmPage() {
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { id: "miembros", label: `Socios ExtraClub (${customers.length || 4864})`, icon: Users },
+          { id: "solicitudes", label: `Solicitudes de Tarjetas (${solicitudes.length})`, icon: CreditCard },
           { id: "rfm", label: "Segmentación RFM (126.345 Ventas)", icon: BarChart2 },
           { id: "premios", label: `Catálogo de Premios (${rewards.length || 6})`, icon: Gift },
           { id: "reglas", label: "Reglas & Multiplicadores", icon: Settings },
@@ -336,10 +370,109 @@ export default function CrmPage() {
             >
               <Icon className="w-4 h-4" />
               <span>{t.label}</span>
+              {t.id === "solicitudes" && solicitudes.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500 text-white font-black">
+                  {solicitudes.length}
+                </span>
+              )}
             </button>
           )
         })}
       </div>
+
+      {/* TAB SOLICITUDES DE TARJETAS (WEB / QR / TICKET) */}
+      {tab === "solicitudes" && (
+        <div className="space-y-4">
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-purple-600" />
+                Solicitudes de Tarjetas Extra Club (Web & QR Tickets)
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Clientes registrados desde <code>club.superextra.com.py/registro</code> con nombre oficial validado en el TSJE.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={loadSolicitudes} disabled={loadingSolicitudes} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5">
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingSolicitudes ? "animate-spin" : ""}`} />
+                Actualizar Lista
+              </button>
+            </div>
+          </div>
+
+          <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+            {loadingSolicitudes ? (
+              <div className="flex items-center justify-center py-16 text-gray-400 text-xs gap-2">
+                <Loader2 className="w-5 h-5 animate-spin" /> Cargando solicitudes y cola de tarjetas...
+              </div>
+            ) : solicitudes.length === 0 ? (
+              <div className="text-center py-16 text-gray-400 text-xs">
+                <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-emerald-500 opacity-60" />
+                <p className="font-bold text-sm text-gray-700 dark:text-gray-200">No hay tarjetas pendientes de impresión</p>
+                <p className="mt-1 text-slate-400">Las nuevas solicitudes que los clientes hagan por la web o QR aparecerán aquí automáticamente.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[850px]">
+                  <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+                    <tr>
+                      <th className="p-3.5 text-left">Socio / Nombre TSJE</th>
+                      <th className="p-3.5 text-left">Documento</th>
+                      <th className="p-3.5 text-left">N° Socio</th>
+                      <th className="p-3.5 text-left">WhatsApp</th>
+                      <th className="p-3.5 text-left">Ubicación</th>
+                      <th className="p-3.5 text-center">Estado Impresión</th>
+                      <th className="p-3.5 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
+                    {solicitudes.map((s) => (
+                      <tr key={s.cola_id || s.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                        <td className="p-3.5">
+                          <p className="font-black text-gray-900 dark:text-white uppercase">{s.nombre}</p>
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Validado por TSJE ({s.fuente_normalizacion || "Padrón Nacional"})
+                          </span>
+                        </td>
+                        <td className="p-3.5 font-mono font-bold text-gray-700 dark:text-gray-200">
+                          {s.documento}
+                        </td>
+                        <td className="p-3.5 font-mono text-purple-600 dark:text-purple-400 font-extrabold">
+                          {s.numero_socio}
+                        </td>
+                        <td className="p-3.5 font-mono">
+                          <a href={`https://wa.me/${(s.telefono || "").replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline flex items-center gap-1">
+                            <Phone className="w-3 h-3" /> +{s.telefono}
+                          </a>
+                        </td>
+                        <td className="p-3.5 text-slate-500">
+                          {s.barrio || "Centro"}, {s.ciudad || "Pedro Juan Caballero"}
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                            {s.estado || "PENDIENTE"}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <button
+                            onClick={() => handleMarcarImpresa(s.cola_id, s.nombre)}
+                            disabled={printingId === s.cola_id}
+                            className="btn-primary text-[10px] px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 font-bold flex items-center gap-1.5 ml-auto"
+                          >
+                            {printingId === s.cola_id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                            Marcar Impresa
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* TAB MIEMBROS */}
       {tab === "miembros" && (
