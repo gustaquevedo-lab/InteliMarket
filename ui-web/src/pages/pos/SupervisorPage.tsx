@@ -162,7 +162,7 @@ function timeSince(iso: string) {
 const displayFont = { fontFamily: "'Archivo Expanded', system-ui, sans-serif" }
 const monoFont = { fontFamily: "'IBM Plex Mono', 'SF Mono', monospace" }
 
-type Tab = "inicio" | "cajas" | "boveda" | "stock" | "equipo"
+type Tab = "inicio" | "cajas" | "stock" | "equipo"
 
 type PendingItem =
   | { kind: "auth"; id: string; created_at: string; data: AuthRequest }
@@ -657,19 +657,11 @@ export default function SupervisorPage() {
     }
   }, [isAuthorized, fetchPending, fetchData])
 
-  // ── DATOS SECUNDARIOS (BÓVEDA Y EQUIPO) ──────────────────────────────────
+  // ── DATOS SECUNDARIOS (EQUIPO) ──────────────────────────────────
   const fetchVaultAndTeam = useCallback(async () => {
     try {
-      const [vd, perf, sobres, remList] = await Promise.all([
-        api.vault.dashboard(),
-        api.caja.cajeros.performance(),
-        api.caja.treasuryRemittances.pendingSobres(),
-        api.caja.treasuryRemittances.list(),
-      ])
-      setVaultDashboard(vd as any)
+      const perf = await api.caja.cajeros.performance()
       setCajeroPerf((perf as any) || [])
-      setPendingSobres(sobres || [])
-      setSupervisorRemittances(remList || [])
     } catch {}
   }, [])
 
@@ -970,7 +962,7 @@ try {
   // ── ESTADO: SIN SESIÓN (LOGIN TÁCTIL PREMIUM) ───────────────────────────
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-between p-6 relative select-none">
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-between p-6 relative select-none pt-[max(env(safe-area-inset-top),32px)] pb-[max(env(safe-area-inset-bottom),24px)]">
         {/* Glow ambient background */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-72 h-72 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
 
@@ -1167,16 +1159,15 @@ try {
   const tabs: { key: Tab; label: string; icon: typeof Home; badge?: number }[] = [
     { key: "inicio", label: "Autorizar", icon: ShieldAlert, badge: totalPendientes },
     { key: "cajas", label: "Radar", icon: Wallet, badge: cashDropAlerts.length },
-    { key: "boveda", label: "Bóveda", icon: Landmark, badge: pendingSobres.length },
     { key: "stock", label: "Stock", icon: Boxes, badge: lowStock.length },
     { key: "equipo", label: "Equipo", icon: Users },
   ]
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white pb-24 transition-colors">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white pb-36 transition-colors">
       
       {/* ── HEADER SUPERVISOR PREMIUM ── */}
-      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800/80 px-3 sm:px-4 pt-[env(safe-area-inset-top)] shadow-xs">
+      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800/80 px-3 sm:px-4 pt-[max(env(safe-area-inset-top),32px)] shadow-xs">
         <div className="flex items-center justify-between py-2.5 sm:py-3 gap-2">
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-slate-950 font-black shrink-0 shadow-md shadow-amber-500/25">
@@ -1873,208 +1864,7 @@ try {
           </div>
         )}
 
-        {/* ══════════════════════ TAB 3: BÓVEDA & CAJA FUERTE ══════════════════════ */}
-        {tab === "boveda" && (
-          <div className="space-y-4">
-            {/* ── SECCIÓN 1: SOBRES EN CUSTODIA (PENDIENTES DE ENVIAR A TESORERÍA) ── */}
-            <div className="rounded-3xl border border-amber-300 dark:border-amber-800/80 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-sm shadow-amber-500/30">
-                    <PackageCheck className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-sm text-slate-900 dark:text-white" style={displayFont}>
-                      Sobres en Custodia de Piso
-                    </h3>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Efectivo recibido de cajeras listo para entregar a Tesorería
-                    </p>
-                  </div>
-                </div>
-                <span className="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-xs">
-                  {pendingSobres.length} sobre(s)
-                </span>
-              </div>
-
-              {pendingSobres.length === 0 ? (
-                <div className="py-5 text-center text-xs text-slate-400 dark:text-slate-500">
-                  ✓ No tenés sobres de caja pendientes de entrega a Tesorería.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
-                    {pendingSobres.map((s) => (
-                      <div
-                        key={s.id}
-                        className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 flex items-center justify-between gap-3 shadow-2xs"
-                      >
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                            <span>{s.caja_nombre || `Caja ${s.caja_codigo || ""}`}</span>
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                              {s.cajero_nombre || "Cajera"}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                            {s.tipo_sobre === "cierre_turno" ? "Cierre de Turno" : "Sangría (Drop Cash)"} · {timeSince(s.fecha)}
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="font-black text-xs text-slate-900 dark:text-white" style={monoFont}>
-                            {formatPYG(s.monto_pyg)}
-                          </div>
-                          {(s.monto_usd > 0 || s.monto_brl > 0) && (
-                            <div className="text-[9px] font-mono text-slate-500">
-                              {s.monto_usd > 0 ? `US$ ${s.monto_usd} ` : ""}
-                              {s.monto_brl > 0 ? `· R$ ${s.monto_brl}` : ""}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/40 flex items-center justify-between gap-3">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase text-slate-400 block">Total a Entregar</span>
-                      <span className="text-sm font-black font-mono text-slate-900 dark:text-white">
-                        {formatPYG(pendingSobres.reduce((sum, s) => sum + Number(s.monto_pyg || 0), 0))}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCreateTreasuryRemittance}
-                      disabled={submittingRemesa}
-                      className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-450 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition"
-                    >
-                      {submittingRemesa ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                      <span>Enviar a Tesorería</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* ── SECCIÓN 2: HISTORIAL DE REMESAS ENVIADAS A TESORERÍA ── */}
-            {supervisorRemittances.length > 0 && (
-              <div>
-                <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5" style={displayFont}>
-                  Remesas Enviadas a Tesorería
-                </h2>
-                <div className="space-y-2">
-                  {supervisorRemittances.slice(0, 5).map((r) => {
-                    const isPending = r.estado === "en_transito"
-                    return (
-                      <div
-                        key={r.id}
-                        className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 flex items-center justify-between gap-2 shadow-2xs"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono font-bold text-xs text-slate-900 dark:text-white">
-                              {r.numero}
-                            </span>
-                            <span
-                              className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
-                                isPending
-                                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 animate-pulse"
-                                  : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                              }`}
-                            >
-                              {isPending ? "En Tránsito" : "Recibido"}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                            {r.total_sobres} sobre(s) · {formatDateTime(r.fecha_envio || r.created_at)}
-                            {r.tesorero_nombre ? ` · Recibió: ${r.tesorero_nombre}` : ""}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-black text-xs font-mono text-emerald-600 dark:text-emerald-400">
-                            {formatPYG(r.total_pyg)}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadRemitoPdf(r.id, r.numero)}
-                            title="Descargar Remito Oficial PDF"
-                            className="p-1.5 rounded-lg border border-blue-200 dark:border-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                          >
-                            <FileText className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {!vaultDashboard ? (
-              <div className="flex items-center justify-center py-10">
-                <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
-              </div>
-            ) : (
-              <>
-                <div className="rounded-3xl bg-gradient-to-tr from-blue-700 to-indigo-600 text-white p-6 shadow-xl shadow-blue-500/20">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-blue-200 flex items-center gap-1.5">
-                    <Landmark className="w-4 h-4" /> Saldo Consolidado en Bóveda
-                  </div>
-                  <div className="font-black text-3xl mt-1 mb-3" style={monoFont}>
-                    {formatPYG(vaultDashboard.saldo_en_boveda_pyg)}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 pt-3 border-t border-blue-400/30 text-xs text-blue-100">
-                    <div>
-                      <span className="opacity-80">Reales: </span>
-                      <span className="font-bold" style={monoFont}>{formatBRL(vaultDashboard.saldo_en_boveda_brl)}</span>
-                    </div>
-                    <div>
-                      <span className="opacity-80">Dólares: </span>
-                      <span className="font-bold" style={monoFont}>{formatUSD(vaultDashboard.saldo_en_boveda_usd)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <h2 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5" style={displayFont}>
-                    Movimientos Recientes en Bóveda
-                  </h2>
-                  {vaultDashboard.movimientos_recientes.length === 0 ? (
-                    <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center text-slate-500 text-sm">
-                      Sin movimientos de bóveda registrados hoy.
-                    </div>
-                  ) : (
-                    <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden shadow-xs">
-                      {vaultDashboard.movimientos_recientes.map((m) => (
-                        <div key={m.id} className="p-3.5 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-8 h-8 rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                              <ArrowDownToLine className="w-4 h-4" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                                {ORIGEN_LABEL[m.origen] || m.origen}
-                              </div>
-                              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                                {m.estado === "depositado" ? "Depositado en banco" : "En resguardo de bóveda"} · {timeSince(m.created_at)}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="font-black text-xs text-slate-900 dark:text-white shrink-0" style={monoFont}>
-                            {formatPYG(m.monto_pyg)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ══════════════════════ TAB 3.5: STOCK CRÍTICO & CONSULTA ══════════════════════ */}
+        {/* ══════════════════════ TAB 3: STOCK CRÍTICO & CONSULTA ══════════════════════ */}
         {tab === "stock" && (
           <div className="space-y-4">
             <div>
@@ -2208,9 +1998,9 @@ try {
 
       </div>
 
-      {/* ── BARRA INFERIOR DE NAVEGACIÓN TÁCTIL (5 PESTAÑAS) ── */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800/80 pb-[env(safe-area-inset-bottom)] shadow-lg">
-        <div className="grid grid-cols-5 w-full max-w-lg mx-auto px-1 py-1">
+      {/* ── BARRA INFERIOR DE NAVEGACIÓN TÁCTIL (4 PESTAÑAS) ── */}
+      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800/80 pt-2 pb-[max(env(safe-area-inset-bottom),24px)] shadow-lg">
+        <div className="grid grid-cols-4 w-full max-w-lg mx-auto px-1 py-1">
           {tabs.map((t) => {
             const Icon = t.icon
             const active = tab === t.key
