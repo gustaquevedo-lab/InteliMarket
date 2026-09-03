@@ -9,6 +9,18 @@
 
 ---
 
+## 📦 SESIÓN 2026-09-03 (tarde) — Códigos de pack/caja (Fase 1: alta en Productos)
+
+Feature nueva pedida por el cliente: muchos productos se venden/reciben en cajas o packs sellados con un código de barra **distinto** al del producto suelto. Plan completo en `/Users/gustaquevedo/.claude/plans/flickering-leaping-rossum.md` (4 fases). **Esta sesión implementó solo la Fase 1** (a pedido explícito del cliente: "no tenemos esos productos registrados, empecemos por el alta").
+
+- Backend nuevo `api/src/pack_barcodes/` (mismo esqueleto que `api/src/variants/`): tabla `product_pack_barcodes` (`codigo_barra`, `etiqueta`, `unidades_por_paquete`), CRUD por producto + listado global por empresa filtrable. Valida colisión contra `products.codigo_barra`/`sku`, `product_variants.codigo_barra` y otros `product_pack_barcodes` -- crítico para que un futuro escaneo en caja nunca sea ambiguo.
+- Frontend: pestaña nueva "Códigos de Pack / Caja" en `ProductsPage.tsx`, junto a Variantes/Kits. Se renombró la pestaña "Variantes (Talles / Sabores / Packs)" a solo "Variantes (Talles / Sabores)" porque el "Packs" ahí era engañoso -- una variante tiene stock propio separado, no es lo mismo que "N unidades del mismo producto base".
+- **El stock sigue siendo una sola fuente de verdad en unidades sueltas** -- esto es solo una forma más rápida de cargar el dato. No se tocó ningún punto de escritura de `stock.cantidad` (hay 12 repartidos en 6 archivos, sin choke-point único, ver el plan para el detalle).
+- **Pendiente (Fases 2-4, no implementadas todavía)**: usar estos códigos en el escaneo real de Caja/CajaRapida (auto-agregar N unidades al carrito), en la recepción de compras (elegir presentación al recibir), y en el conteo de inventario (contar en cajas/packs). El plan tiene el diseño completo de las 3.
+- Commit `b85bd31`. Verificado con script directo contra la DB real (crear, listar global, listar filtrado, colisión con producto/variante/otro pack, editar, borrar) -- no se probó todavía clickeando la UI en el navegador.
+
+---
+
 ## 💳 SESIÓN 2026-09-03 — Integración QR Bancard (API HTTPS) + webhook público real con dominio propio
 
 Nueva forma de pago: **QR Bancard "en pantalla"** (pestaña nueva en el selector QR del POS, junto a QR Zimple/PIX/Dinelco que ya existían). Distinta de QR Zimple: esta usa la API HTTPS directa de Bancard (`generate-qr-express`/`revert`), no el terminal físico. Doc fuente: "Qr en API de Comercios v1.2 Vuelto QR" (Bancard/GlobalSI).
