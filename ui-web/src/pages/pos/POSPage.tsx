@@ -919,7 +919,18 @@ export default function POSPage() {
     if (shouldReset) resetBancardFlow()
   }
   
-  const [qrSubMethod, setQrSubMethod] = useState<"zimple" | "pix" | "dinelco">("zimple")
+  const [qrSubMethod, setQrSubMethod] = useState<"zimple" | "pix" | "dinelco" | "bancard_cloud">("zimple")
+  // QR Bancard "en pantalla" -- API HTTPS directa (generate-qr-express /
+  // revert) segun spec "Qr en API de Comercios v1.2", distinto del QR
+  // Zimple de arriba (que lo genera el propio terminal fisico en SU
+  // pantalla via electronAPI.bancardCall). Este QR se muestra en la
+  // pantalla del Electron y el pago se confirma por webhook al backend,
+  // por eso hace polling contra nuestra propia API en vez de esperar una
+  // respuesta directa del terminal.
+  const [bancardCloudQrState, setBancardCloudQrState] = useState<"idle" | "generando" | "esperando" | "aprobada" | "error">("idle")
+  const [bancardCloudQrError, setBancardCloudQrError] = useState("")
+  const [bancardCloudQrData, setBancardCloudQrData] = useState<{ hookAlias: string; qrUrl: string; qrData: string; amount: number } | null>(null)
+  const bancardCloudPollRef = useRef<any>(null)
   const [dinelcoQrState, setDinelcoQrState] = useState<"idle" | "esperando" | "aprobada" | "error_rechazo" | "error_conexion">("idle")
   const [dinelcoQrError, setDinelcoQrError] = useState<string>("")
   const [dinelcoQrMode, setDinelcoQrMode] = useState<"qr" | "pix">("qr")
@@ -1226,6 +1237,54 @@ export default function POSPage() {
     setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); clearPlugpayPoll()
     setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
     setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf("")
+    if (bancardCloudPollRef.current) { clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null }
+    setBancardCloudQrState("idle"); setBancardCloudQrError(""); setBancardCloudQrData(null)
+  }
+
+  const handleGenerateBancardCloudQr = async () => {
+    const monto = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    if (monto <= 0) {
+      toast.warning("Monto inválido", "Cargá el monto a cobrar por QR antes de continuar.")
+      return
+    }
+    setBancardCloudQrState("generando")
+    setBancardCloudQrError("")
+    setBancardCloudQrData(null)
+    try {
+      const res = await api.bancardQr.generate({ amount: monto, description: `Venta Caja ${puntoEmision}`, punto_emision: puntoEmision })
+      setBancardCloudQrData({ hookAlias: res.hook_alias, qrUrl: res.qr_url || "", qrData: res.qr_data || "", amount: res.amount })
+      setBancardCloudQrState("esperando")
+      if (bancardCloudPollRef.current) clearInterval(bancardCloudPollRef.current)
+      bancardCloudPollRef.current = setInterval(async () => {
+        try {
+          const st = await api.bancardQr.status(res.hook_alias)
+          if (st.status === "confirmed") {
+            setBancardCloudQrState("aprobada")
+            clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null
+          } else if (st.status === "failed" || st.status === "reverted") {
+            setBancardCloudQrState("error")
+            setBancardCloudQrError(st.response_description || "El pago no se pudo confirmar.")
+            clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null
+          }
+        } catch { /* red caida en un tick -- se reintenta solo en el proximo */ }
+      }, 3000)
+    } catch (e: any) {
+      setBancardCloudQrState("error")
+      setBancardCloudQrError(e instanceof Error ? e.message : "No se pudo generar el QR con Bancard.")
+    }
+  }
+
+  const handleCancelBancardCloudQr = async () => {
+    if (!bancardCloudQrData) return
+    if (bancardCloudPollRef.current) { clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null }
+    try {
+      await api.bancardQr.revert(bancardCloudQrData.hookAlias)
+    } catch (e: any) {
+      toast.warning("No se pudo reversar en Bancard", e instanceof Error ? e.message : "El QR puede seguir activo del lado de Bancard -- verificá antes de generar uno nuevo.")
+    }
+    setBancardCloudQrState("idle")
+    setBancardCloudQrData(null)
+    setBancardCloudQrError("")
   }
 
   // El terminal Bancard no tiene forma via API de forzar la limpieza de una
@@ -8766,6 +8825,17 @@ export default function POSPage() {
                           >
                             <QrCode className="w-3.5 h-3.5" /> <span>QR Dinelco</span>
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => setQrSubMethod("bancard_cloud")}
+                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              qrSubMethod === "bancard_cloud"
+                                ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-300 shadow-xs"
+                                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                            }`}
+                          >
+                            <QrCode className="w-3.5 h-3.5" /> <span>QR Bancard</span>
+                          </button>
                         </div>
 
                         {isMultiPayment && (
@@ -9108,6 +9178,71 @@ export default function POSPage() {
                             )}
                           </div>
                         )}
+
+                        {/* SUB-PANEL 4: QR BANCARD EN PANTALLA (API HTTPS directa) */}
+                        {qrSubMethod === "bancard_cloud" && (
+                          <div className="flex flex-col items-center text-center space-y-2.5 w-full">
+                            <div className="flex items-center gap-2">
+                              <QrCode className="w-7 h-7 text-blue-600" />
+                              <div className="text-left">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white">QR Bancard (pantalla)</div>
+                                {!isMultiPayment && (
+                                  <div className="text-xs font-posMono tabular-nums font-black text-blue-600 dark:text-blue-400">
+                                    {formatPYG(totalPyg)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {bancardCloudQrState === "idle" && (
+                              <button
+                                type="button"
+                                onClick={handleGenerateBancardCloudQr}
+                                className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-500 text-white cursor-pointer shadow-sm shadow-blue-600/20"
+                              >
+                                <QrCode className="w-4 h-4" />
+                                <span>Generar QR Bancard</span>
+                              </button>
+                            )}
+
+                            {bancardCloudQrState === "generando" && (
+                              <div className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                                <Loader2 className="w-4 h-4 animate-spin" /> Generando QR con Bancard...
+                              </div>
+                            )}
+
+                            {bancardCloudQrState === "esperando" && bancardCloudQrData && (
+                              <div className="w-full max-w-sm flex flex-col items-center gap-2">
+                                {bancardCloudQrData.qrUrl && (
+                                  <img src={bancardCloudQrData.qrUrl} alt="QR Bancard" className="w-48 h-48 rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-2" />
+                                )}
+                                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Esperando el pago del cliente...
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={handleCancelBancardCloudQr}
+                                  className="text-[11px] font-bold text-rose-500 hover:text-rose-600 underline cursor-pointer"
+                                >
+                                  Cancelar QR
+                                </button>
+                              </div>
+                            )}
+
+                            {bancardCloudQrState === "aprobada" && (
+                              <div className="w-full max-w-sm p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
+                                <div className="font-black">✓ Pago QR Bancard confirmado</div>
+                              </div>
+                            )}
+
+                            {bancardCloudQrState === "error" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                                <div className="font-black">✕ {bancardCloudQrError}</div>
+                                <button type="button" onClick={handleGenerateBancardCloudQr} className="text-xs font-bold underline cursor-pointer">Generar QR nuevamente</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -9392,7 +9527,8 @@ export default function POSPage() {
                       const qrConfirmado =
                         (qrSubMethod === "zimple" && bancardQrState === "aprobada") ||
                         (qrSubMethod === "pix" && plugpayState === "aprobada") ||
-                        (qrSubMethod === "dinelco" && dinelcoQrState === "aprobada")
+                        (qrSubMethod === "dinelco" && dinelcoQrState === "aprobada") ||
+                        (qrSubMethod === "bancard_cloud" && bancardCloudQrState === "aprobada")
                       if (!qrConfirmado) {
                         toast.warning("QR sin confirmar", "Generá el QR y esperá el pago, o marcá que ya cobraste por fuera del sistema.")
                         return

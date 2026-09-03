@@ -8,7 +8,7 @@ from api.src.payment_integrations.schemas import PaymentIntegrationConfigUpsert
 # Campos que nunca deben salir en una respuesta al frontend, sin importar el
 # proveedor -- password/tokens de PlugPay son las unicas credenciales reales
 # que este modulo guarda hoy.
-SENSITIVE_CONFIG_KEYS = {"password", "cached_token", "cached_refresh_token", "cached_token_expires_at"}
+SENSITIVE_CONFIG_KEYS = {"password", "cached_token", "cached_refresh_token", "cached_token_expires_at", "private_key", "callback_password"}
 
 
 def sanitize_config(config: dict | None) -> dict | None:

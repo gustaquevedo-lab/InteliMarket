@@ -75,6 +75,7 @@ from api.src.bancard.router import router as bancard_router
 from api.src.spi.router import router as spi_router
 from api.src.spi.public_router import router as spi_public_router
 from api.src.dinelco.router import router as dinelco_router
+from api.src.bancard_qr.router import router as bancard_qr_router
 from api.src.loyalty.router import router as loyalty_router
 from api.src.quotes.router import router as quotes_router
 from api.src.sales_orders.router import router as sales_orders_router
@@ -311,6 +312,7 @@ app.include_router(bancard_router)
 app.include_router(spi_router)
 app.include_router(spi_public_router)
 app.include_router(dinelco_router)
+app.include_router(bancard_qr_router)
 app.include_router(loyalty_router)
 app.include_router(quotes_router)
 app.include_router(sales_orders_router)

@@ -1392,9 +1392,23 @@ export const api = {
     update: (id: string, data: Partial<PosTerminalTransaction>) => client.patch<PosTerminalTransaction>(`/v1/pos-terminal-transactions/${id}`, data),
   },
   paymentIntegrations: {
-    get: (provider: "bancard" | "plugpay" | "dinelco") => client.get<PaymentIntegrationConfig | null>(`/v1/payment-integrations/${provider}`),
-    update: (provider: "bancard" | "plugpay" | "dinelco", data: { environment?: string; enabled?: boolean; config?: Record<string, any> }) =>
+    get: (provider: "bancard" | "plugpay" | "dinelco" | "bancard_qr") => client.get<PaymentIntegrationConfig | null>(`/v1/payment-integrations/${provider}`),
+    update: (provider: "bancard" | "plugpay" | "dinelco" | "bancard_qr", data: { environment?: string; enabled?: boolean; config?: Record<string, any> }) =>
       client.put<PaymentIntegrationConfig>(`/v1/payment-integrations/${provider}`, data),
+  },
+  bancardQr: {
+    generate: (data: { amount: number; description?: string; punto_emision?: string }) =>
+      client.post<{ hook_alias: string; amount: number; description?: string; qr_url?: string; qr_data?: string; status: string; created_at: string }>("/v1/bancard-qr/generate", data),
+    status: (hookAlias: string) =>
+      client.get<{
+        hook_alias: string; status: string; amount: number
+        response_code?: string; response_description?: string
+        ticket_number?: string; authorization_code?: string
+        account_type?: string; card_last_numbers?: string
+        payer_name?: string; payer_lastname?: string; confirmed_at?: string
+      }>(`/v1/bancard-qr/status/${hookAlias}`),
+    revert: (hookAlias: string) =>
+      client.put<{ hook_alias: string; status: string; response_code?: string; response_description?: string }>(`/v1/bancard-qr/revert/${hookAlias}`, {}),
   },
   labelPrinting: {
     getPrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl") => client.get<any | null>(`/v1/label-printing/printer-config/${tipo}`),
