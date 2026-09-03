@@ -3,7 +3,7 @@ import {
   Banknote, ShieldAlert, ShieldCheck, History, RefreshCw, Loader2,
   TrendingDown, TrendingUp, AlertTriangle, Clock, Landmark, CheckCircle,
   XCircle, FileText, Lock, KeyRound, DollarSign, ArrowUpRight, ArrowDownRight,
-  ChevronRight, Building2, Store, Activity, Layers, Download, Check, Sparkles
+  ChevronRight, Building2, Store, Activity, Layers, Download, Check, Sparkles, X
 } from "lucide-react"
 import { api, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -124,25 +124,54 @@ export default function BovedaPage() {
     setSelectedEntries(prev => (prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]))
   }
 
-  const handleDeposit = async () => {
+  const [showDepositModal, setShowDepositModal] = useState(false)
+  const [depositBankId, setDepositBankId] = useState("")
+  const [depositBoleta, setDepositBoleta] = useState("")
+  const [depositTransportadora, setDepositTransportadora] = useState("Prosegur")
+  const [depositFecha, setDepositFecha] = useState(new Date().toISOString().slice(0, 10))
+  const [depositObservaciones, setDepositObservaciones] = useState("")
+  const [submittingDepositToBank, setSubmittingDepositToBank] = useState(false)
+
+  const handleOpenDepositModal = () => {
     if (selectedEntries.length === 0) return
-    setDepositing(true)
+    if (banks.length > 0 && !depositBankId) {
+      setDepositBankId(banks[0].id)
+    }
+    setShowDepositModal(true)
+  }
+
+  const handleSubmitDepositToBank = async () => {
+    if (!depositBankId) {
+      toast.warning("Seleccione una cuenta", "Debe elegir la cuenta bancaria de destino.")
+      return
+    }
+    if (!depositBoleta.trim()) {
+      toast.warning("Falta número de boleta", "Ingrese el número de boleta o comprobante bancario.")
+      return
+    }
+    setSubmittingDepositToBank(true)
     try {
-      const result = await api.vault.deposit({ entry_ids: selectedEntries })
-      if (result.pending_approval) {
-        toast.success(
-          "Remesa pendiente de doble aprobación",
-          `Monto ${formatPYG(result.monto_total_pyg || 0)} supera el umbral de seguridad — requiere autorización de Supervisor y Gerente`
-        )
-      } else {
-        toast.success("Depósito a banco registrado", `${result.depositadas} remesa(s) transferidas a cuenta bancaria`)
-      }
+      await api.vault.depositToBank({
+        entry_ids: selectedEntries,
+        bank_account_id: depositBankId,
+        numero_boleta: depositBoleta.trim(),
+        transportadora: depositTransportadora,
+        fecha_deposito: depositFecha,
+        observaciones: depositObservaciones.trim() || undefined,
+      })
+      toast.success(
+        "Depósito Bancario Registrado",
+        `Boleta #${depositBoleta.trim()} registrada y acreditada en cuenta bancaria.`
+      )
+      setShowDepositModal(false)
       setSelectedEntries([])
+      setDepositBoleta("")
+      setDepositObservaciones("")
       load()
-    } catch {
-      toast.error("Error", "No se pudo registrar el depósito")
+    } catch (e: any) {
+      toast.error("Error al registrar depósito", e?.message || "Verifique los datos de la remesa.")
     } finally {
-      setDepositing(false)
+      setSubmittingDepositToBank(false)
     }
   }
 
@@ -455,11 +484,10 @@ export default function BovedaPage() {
                     {selectedEntries.length} seleccionada(s)
                   </span>
                   <button
-                    onClick={handleDeposit}
-                    disabled={depositing}
+                    onClick={handleOpenDepositModal}
                     className="btn-primary !bg-indigo-600 hover:!bg-indigo-500 text-xs flex items-center gap-1.5"
                   >
-                    {depositing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Landmark className="w-3.5 h-3.5" />}
+                    <Landmark className="w-3.5 h-3.5" />
                     Preparar Remesa a Banco
                   </button>
                 </div>
@@ -730,6 +758,154 @@ export default function BovedaPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL FORMAL: PREPARAR REMESA Y DEPÓSITO A BANCO ── */}
+      {showDepositModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="card max-w-lg w-full p-6 space-y-4 shadow-2xl animate-fade-in-up border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Landmark className="w-5 h-5 text-indigo-600" />
+                Registrar Remesa Bancaria
+              </h3>
+              <button
+                onClick={() => setShowDepositModal(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Complete los datos del comprobante y transportadora de caudales para transferir formalmente las remesas de bóveda a la cuenta bancaria de Extra Supermercado.
+            </p>
+
+            {/* Resumen del Lote de Remesas Seleccionadas */}
+            <div className="bg-slate-50 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Total a Depositar</span>
+                <span className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  {formatPYG(
+                    vaultEntries
+                      .filter((e) => selectedEntries.includes(e.id))
+                      .reduce((sum, e) => sum + Number(e.monto_pyg || 0), 0)
+                  )}
+                </span>
+              </div>
+              <span className="px-2.5 py-1 rounded-lg bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-200 dark:border-indigo-800/50">
+                {selectedEntries.length} entrega(s) de caja
+              </span>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              {/* Selector de Cuenta Bancaria */}
+              <div>
+                <label className="input-label font-bold text-slate-700 dark:text-slate-300 mb-1 block">
+                  Cuenta Bancaria Destino *
+                </label>
+                <select
+                  value={depositBankId}
+                  onChange={(e) => setDepositBankId(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white outline-none focus:border-indigo-500 font-medium"
+                >
+                  {banks.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.banco} — {b.numero_cuenta || "Sin número"} ({b.moneda || "PYG"}) · Saldo: {formatPYG(b.saldo_actual || 0)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Número de Boleta de Depósito */}
+              <div>
+                <label className="input-label font-bold text-slate-700 dark:text-slate-300 mb-1 block">
+                  Número de Boleta / Comprobante Bancario *
+                </label>
+                <input
+                  type="text"
+                  value={depositBoleta}
+                  onChange={(e) => setDepositBoleta(e.target.value)}
+                  placeholder="Ej: 10849201"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              {/* Transportadora de Caudales */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="input-label font-bold text-slate-700 dark:text-slate-300 mb-1 block">
+                    Transportadora / Canal
+                  </label>
+                  <select
+                    value={depositTransportadora}
+                    onChange={(e) => setDepositTransportadora(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white outline-none focus:border-indigo-500"
+                  >
+                    <option value="Prosegur">Prosegur</option>
+                    <option value="Yrendagüe">Yrendagüe</option>
+                    <option value="Depósito en Ventanilla">Depósito Directo en Ventanilla</option>
+                    <option value="Otro">Otro medio</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="input-label font-bold text-slate-700 dark:text-slate-300 mb-1 block">
+                    Fecha de Depósito
+                  </label>
+                  <input
+                    type="date"
+                    value={depositFecha}
+                    onChange={(e) => setDepositFecha(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs font-mono text-slate-900 dark:text-white outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Observaciones */}
+              <div>
+                <label className="input-label font-bold text-slate-700 dark:text-slate-300 mb-1 block">
+                  Observaciones (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={depositObservaciones}
+                  onChange={(e) => setDepositObservaciones(e.target.value)}
+                  placeholder="Ej: Remesa cierre de fin de semana turno tarde"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-xs text-slate-900 dark:text-white outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setShowDepositModal(false)}
+                disabled={submittingDepositToBank}
+                className="btn-outline text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitDepositToBank}
+                disabled={submittingDepositToBank}
+                className="btn-primary !bg-indigo-600 hover:!bg-indigo-500 text-xs flex items-center gap-1.5"
+              >
+                {submittingDepositToBank ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Registrando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Confirmar Depósito a Banco</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
