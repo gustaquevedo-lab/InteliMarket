@@ -249,6 +249,27 @@ async def download_pos_windows():
     return {"error": "Archivo no encontrado"}
 
 
+@app.get("/download/apk")
+@app.get("/download/supervisor-apk")
+@app.get("/download/extra-supervisor.apk")
+async def download_supervisor_apk():
+    candidate_paths = [
+        Path("/home/intellihouse/intelimarket/downloads/extra-supervisor.apk"),
+        Path("/home/intellihouse/intelimarket/ui-web-dist/downloads/extra-supervisor.apk"),
+        Path("/home/intellihouse/intelimarket/ui-web/public/downloads/extra-supervisor.apk"),
+    ]
+    for cp in candidate_paths:
+        if cp.exists():
+            return FileResponse(
+                path=str(cp),
+                filename="extra-supervisor.apk",
+                media_type="application/vnd.android.package-archive",
+                headers={"Content-Disposition": "attachment; filename=extra-supervisor.apk"}
+            )
+    return {"error": "APK no encontrado"}
+
+
+
 _UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
 _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")

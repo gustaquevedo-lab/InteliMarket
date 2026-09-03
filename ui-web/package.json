@@ -13,6 +13,8 @@
   },
   "main": "../electron/main.cjs",
   "dependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
     "@hookform/resolvers": "^3.9.0",
     "@tanstack/react-query": "^5.50.0",
     "@tanstack/react-table": "^8.19.0",
@@ -34,6 +36,7 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.1",
     "@eslint/js": "^9.7.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
