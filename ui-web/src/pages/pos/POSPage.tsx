@@ -577,6 +577,11 @@ export default function POSPage() {
 
   // ── 2. ESTADOS GENERALES Y CATÁLOGO ───────────────────────────────────────
   const [products, setProducts] = useState<Product[]>([])
+  // Codigos de barra de pack/caja (1 codigo = N unidades del producto base,
+  // ver Productos > "Codigos de Pack / Caja"). Se indexa por codigo de barra
+  // para que el escaneo lo resuelva en memoria, igual que el resto del
+  // catalogo -- no pega al backend por cada escaneo.
+  const [packBarcodeMap, setPackBarcodeMap] = useState<Map<string, { productId: string; etiqueta: string; unidadesPorPaquete: number }>>(new Map())
   const [stockMap, setStockMap] = useState<Record<string, number>>({})
   const [searchResults, setSearchResults] = useState<Product[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -1683,13 +1688,14 @@ export default function POSPage() {
 
       // 2. Consulta en segundo plano al servidor central
       try {
-        const [prodData, custData, whData, staffData, topData, stockData] = await Promise.allSettled([
+        const [prodData, custData, whData, staffData, topData, stockData, packBarcodeData] = await Promise.allSettled([
           api.products.list({ limit: 15000 }),
           api.customers.list({ limit: 10000 }),
           api.warehouses.list(),
           api.auth.posAuthorizers(),
           api.reports.salesByProduct({ limit: 100 }),
           api.inventory.getStockMap(),
+          api.products.packBarcodes.list(),
         ])
 
         let freshProds: Product[] = []
@@ -1731,6 +1737,18 @@ export default function POSPage() {
 
         if (stockData.status === "fulfilled" && isMounted) {
           setStockMap(stockData.value || {})
+        }
+
+        if (packBarcodeData.status === "fulfilled" && isMounted) {
+          const map = new Map<string, { productId: string; etiqueta: string; unidadesPorPaquete: number }>()
+          for (const pb of packBarcodeData.value || []) {
+            map.set(pb.codigo_barra, {
+              productId: pb.product_id,
+              etiqueta: pb.etiqueta,
+              unidadesPorPaquete: Number(pb.unidades_por_paquete),
+            })
+          }
+          setPackBarcodeMap(map)
         }
 
         // 3. Persistir catálogo completo indexado en IndexedDB
@@ -3920,6 +3938,22 @@ export default function POSPage() {
       setSearch("")
       searchInputRef.current?.focus()
       return
+    }
+
+    // 2.5 Código de pack/caja -- 1 código impreso en la caja = N unidades del
+    // producto base (ver Productos > "Códigos de Pack / Caja"). Se resuelve
+    // en memoria, igual que el match de arriba, antes de caer al backend.
+    const packMatch = packBarcodeMap.get(cleanCode)
+    if (packMatch) {
+      const baseProduct = products.find((p) => p.id === packMatch.productId)
+      if (baseProduct) {
+        const totalUnidades = (qtyPrefix ?? 1) * packMatch.unidadesPorPaquete
+        addToCart(baseProduct, totalUnidades)
+        setSearch("")
+        searchInputRef.current?.focus()
+        toast.success(`${packMatch.etiqueta} detectado`, `Se agregaron ${totalUnidades} unidades de ${baseProduct.nombre}.`)
+        return
+      }
     }
 
     // 3. Consulta al backend por código exacto
