@@ -1203,6 +1203,15 @@ try {
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <a
+              href={`http://${typeof window !== "undefined" ? window.location.hostname : "192.168.0.10"}:8080/extra-supervisor.apk`}
+              download="extra-supervisor.apk"
+              title="Descargar APK Nativo Android"
+              className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition cursor-pointer flex items-center gap-1 text-[11px] font-bold"
+            >
+              <Download className="w-4 h-4" />
+              <span className="text-[10px] uppercase font-black tracking-wider">APK</span>
+            </a>
             {installPrompt && !isInstalled && (
               <button
                 onClick={installApp}
