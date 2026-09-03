@@ -9,6 +9,28 @@
 
 ---
 
+## 💳 SESIÓN 2026-09-03 — Integración QR Bancard (API HTTPS) + webhook público real con dominio propio
+
+Nueva forma de pago: **QR Bancard "en pantalla"** (pestaña nueva en el selector QR del POS, junto a QR Zimple/PIX/Dinelco que ya existían). Distinta de QR Zimple: esta usa la API HTTPS directa de Bancard (`generate-qr-express`/`revert`), no el terminal físico. Doc fuente: "Qr en API de Comercios v1.2 Vuelto QR" (Bancard/GlobalSI).
+
+**Código**: `api/src/bancard_qr/` (models/schemas/service/router) + tab nueva en `POSPage.tsx` (buscar `bancard_cloud` en `qrSubMethod`). Credenciales en `payment_integration_configs`, provider=`bancard_qr` (público/privado/commerce_code/branch_code/credenciales del callback -- todo en el `config` JSON, `private_key` y `callback_password` quedan redactados al leer por API por estar en `SENSITIVE_CONFIG_KEYS`).
+
+### El webhook público -- infraestructura nueva, reemplaza un parche de Tailscale Funnel
+
+Bancard necesita poder llamarnos (`POST /api/v1/bancard-qr/callback`) para avisar el resultado del pago -- es obligatorio, sin esto no hay forma de saber si el QR se pagó. Se armó infraestructura real en vez de improvisar:
+
+1. **nginx + certbot instalados** en la VM (no existían). Config en `/etc/nginx/sites-available/webhooks_superextra.conf` -- **expone ÚNICAMENTE** `/api/v1/bancard-qr/callback` (proxy a `127.0.0.1:8000`), cualquier otra ruta devuelve 404. El resto del sistema (POS, panel admin, todo) sigue sin exposición pública, solo LAN/Tailscale.
+2. **DNS**: `webhooks.superextra.com.py` → `181.1.154.150` (IP pública fija del local, agregado en el cPanel del dominio).
+3. **Port-forward** en el Omada SDN Controller: puertos 80 y 443 TCP → `192.168.0.10` (IP LAN de la VM).
+4. **Certificado real** de Let's Encrypt vía certbot (`certbot --nginx -d webhooks.superextra.com.py`), renovación automática ya configurada.
+5. URL final del callback: `https://webhooks.superextra.com.py/api/v1/bancard-qr/callback`.
+
+**Se desactivó el Tailscale Funnel** (`tailscale funnel off`) que estaba usando el puerto 443 -- ese Funnel exponía `https://intelimarket-ia.tail84df2b.ts.net` (proxy a la UI en :5173) y competía por el puerto con nginx (`bind() to 0.0.0.0:443 failed`). No lo usaba nada en producción real (los kiosks/POS físicos usan IPs LAN directas, nunca ese dominio de Tailscale) -- si algo vuelve a necesitar salir a internet vía Tailscale en el futuro, usar un puerto distinto a 443 o coordinar con nginx.
+
+**Estado real al cierre de la sesión**: todo el lado nuestro está probado end-to-end (request a Bancard sale bien formado, callback público responde y autentica bien, formato de respuesta exacto según spec). **El ambiente de sandbox de Bancard/GlobalSI (`desa.infonet.com.py:8035`) está caído** (502 Bad Gateway de Cloudflare en su propio origen, confirmado repetidas veces a lo largo de ~2 horas) -- no se pudo probar el flujo real de principio a fin todavía. Pendiente: avisarle a Melissa Acosta (GlobalSI) que su sandbox está caído y pasarle la URL nueva del callback para que la configuren de su lado.
+
+---
+
 ## Secuencias fiscales por punto de emisión — estado 31/8
 
 El legacy (ConceptoComercial/FlexPDV, MySQL `comercial_extra_py` en
