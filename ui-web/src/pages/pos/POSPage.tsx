@@ -4478,61 +4478,27 @@ export default function POSPage() {
       return Math.round(n).toLocaleString("es-PY")
     }
 
-    let companyData: any = {}
-    try {
-      const comps = await api.companies.list()
-      if (Array.isArray(comps) && comps.length > 0) companyData = comps[0]
-    } catch (e) {}
-
-    const fantasia = companyData.nombre_fantasia || companyData.nombre || "Extra Supermercado Mayorista"
-    const razon = companyData.razon_social || "GRUPO SANTA TERESA E.A.S."
-    const rucEmpresa = companyData.ruc || "80150377-9"
     const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
-
-    const showLogo = tpl.mostrar_logo !== false && (companyData.logo_url || tpl.logo_url)
-    const rawLogoUrl = companyData.logo_url || tpl.logo_url || ""
-    let logoUrl = localStorage.getItem("pos_logo_data_url") || ""
-    if (showLogo && !logoUrl && rawLogoUrl) {
-      logoUrl = rawLogoUrl.startsWith("http") ? rawLogoUrl : `${API_ORIGIN}${rawLogoUrl}`
-    }
-
     const W = ESCPOS_LINE_WIDTH
+
+    // Documento interno (no fiscal, no va al cliente) -- sin logo ni datos
+    // de la empresa, al minimo de renglones posible para ahorrar papel.
     let t = ESCPOS_INIT
     t += ESCPOS_ALIGN_CENTER
-
-    let logoImpreso = false
-    if (showLogo && logoUrl) {
-      try {
-        const logoCmd = await escposLogoFromDataUrl(logoUrl)
-        if (logoCmd) { t += logoCmd + '\n'; logoImpreso = true }
-      } catch (e) {}
-    }
-
-    if (!logoImpreso) t += ESCPOS_BOLD_ON + escposStripAccents(fantasia) + '\n' + ESCPOS_BOLD_OFF
-    t += escposStripAccents(razon) + '\n'
-    t += `RUC: ${escposStripAccents(rucEmpresa)}\n`
-    t += escposDashes(W) + '\n'
-    t += ESCPOS_DOUBLE_ON + ESCPOS_BOLD_ON + 'COMPROBANTE PIX' + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
-    t += 'Pago QR PlugPay (Brasil)\n'
+    t += ESCPOS_BOLD_ON + 'COMPROBANTE PIX (interno)' + ESCPOS_BOLD_OFF + '\n'
     t += ESCPOS_ALIGN_LEFT
     t += escposDashes(W) + '\n'
-    t += `Fecha/Hora: ${escposFormatDateTime(new Date())}\n`
-    t += `Cajero: ${escposStripAccents(user?.nombre || '')} (${puntoEmision})\n`
-    t += `CPF Cliente: ${cpf}\n`
+    t += `${escposFormatDateTime(new Date())} - ${escposStripAccents(user?.nombre || '')} (${puntoEmision})\n`
+    t += `CPF: ${cpf}\n`
+    t += `ID: ${pixData?.IdTransacao ?? '-'} Ref: ${pixData?.referenciaInterna ?? '-'}\n`
     t += escposDashes(W) + '\n'
-    t += `ID Transaccion: ${pixData?.IdTransacao ?? '-'}\n`
-    t += `Referencia: ${pixData?.referenciaInterna ?? '-'}\n`
-    t += escposDashes(W) + '\n'
-    t += escposTwoCol('Monto (Gs.):', fmtGs(montoPyg), W) + '\n'
-    t += escposTwoCol('Monto (R$):', pixData?.valueBRL ? Number(pixData.valueBRL).toFixed(2) : '-', W) + '\n'
+    t += escposTwoCol('Gs.', fmtGs(montoPyg), W) + '\n'
+    t += escposTwoCol('R$', pixData?.valueBRL ? Number(pixData.valueBRL).toFixed(2) : '-', W) + '\n'
     t += escposDashes(W) + '\n'
     t += ESCPOS_ALIGN_CENTER
-    t += ESCPOS_BOLD_ON + ESCPOS_DOUBLE_ON + 'PAGO APROBADO' + ESCPOS_DOUBLE_OFF + ESCPOS_BOLD_OFF + '\n'
-    t += escposDashes(W) + '\n'
-    t += 'Documento autoimpresor\n'
-    t += 'Comprobante de pago PIX via PlugPay\n'
+    t += ESCPOS_BOLD_ON + 'APROBADO' + ESCPOS_BOLD_OFF + '\n'
 
-    t += '\n'.repeat(4)
+    t += '\n'.repeat(2)
     t += GS + 'V' + '\x01'
 
     try {
