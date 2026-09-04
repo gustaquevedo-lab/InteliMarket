@@ -100,7 +100,8 @@ const navGroups: NavGroup[] = [
       { icon: Landmark, label: "Cuentas Bancarias", path: "/bancos" },
       { icon: CreditCard, label: "Gestión de Cheques", path: "/cheques" },
       { icon: DollarSign, label: "Cuentas por Cobrar", path: "/accounts-receivable" },
-      { icon: ShieldCheck, label: "Scoring de Crédito", path: "/credit-scoring" },
+      // DESACTIVADO 2026-09-04: el modulo hoy es una maqueta -- 0 datos reales, el frontend rellena con clientes inventados si la API real da vacio (que es siempre). No lo usa este tenant. Ver auditoria de sidebar.
+      // { icon: ShieldCheck, label: "Scoring de Crédito", path: "/credit-scoring" },
       { icon: CreditCard, label: "Cuentas por Pagar (AP)", path: "/payments" },
       { icon: ReceiptText, label: "Gastos Operativos", path: "/gastos" },
       { icon: DollarSign, label: "PyG Diario por Depto.", path: "/pyg-diario" },
