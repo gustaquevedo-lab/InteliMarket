@@ -1999,7 +1999,7 @@ async def get_budget_summary(db: AsyncSession, company_id: str, year: int) -> li
 
 # ── Payment Runs ───────────────────────────────────────────────────────────────
 
-async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: str | None, hasta: date | None) -> list[dict]:
+async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: str | None = None, hasta: date | None = None) -> list[dict]:
     """Candidatas para armar un lote de pago a mano (Cuentas por Pagar Fase
     2) -- no crea nada, solo lista. Reemplaza la auto-seleccion ciega que
     tenia create_payment_run (agarraba TODAS las vencidas de una, sin que
