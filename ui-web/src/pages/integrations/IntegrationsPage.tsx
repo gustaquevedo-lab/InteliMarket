@@ -21,15 +21,16 @@ type Tab = "bancard" | "dinelco" | "cierres_lote" | "qr_pix" | "hardware" | "con
 // Mismo listado que PUNTOS_EMISION en POSPage.tsx/CajaRapidaPage.tsx --
 // duplicado a propósito, mismo patrón que esos dos archivos ya usan entre sí.
 const PUNTOS_EMISION = [
-  { id: "001-012", nombre: "Caja 01 · Salón Central (Boca 012)" },
-  { id: "001-013", nombre: "Caja 02 · Salón Central (Boca 013)" },
-  { id: "001-014", nombre: "Caja 03 · Salón Central (Boca 014)" },
-  { id: "001-015", nombre: "Caja 04 · Salón Central (Boca 015)" },
-  { id: "001-016", nombre: "Caja 05 · Salón Central (Boca 016)" },
-  { id: "001-017", nombre: "Caja 06 · Salón Central (Boca 017)" },
-  { id: "001-018", nombre: "Caja 07 · Línea de Caja (Boca 018)" },
-  { id: "001-019", nombre: "Caja Especial Mayorista / Administración (Boca 019)" },
-  { id: "001-020", nombre: "Caja Auxiliar / Refuerzo (Boca 020)" },
+  { id: "001-011", nombre: "Caja 01 · Salón Central (Boca 011)" },
+  { id: "001-012", nombre: "Caja 02 · Salón Central (Boca 012)" },
+  { id: "001-013", nombre: "Caja 03 · Salón Central (Boca 013)" },
+  { id: "001-014", nombre: "Caja 04 · Salón Central (Boca 014)" },
+  { id: "001-015", nombre: "Caja 05 · Salón Central (Boca 015)" },
+  { id: "001-016", nombre: "Caja 06 · Salón Central (Boca 016)" },
+  { id: "001-017", nombre: "Caja 07 · Línea de Caja (Boca 017)" },
+  { id: "001-018", nombre: "Caja 08 · Mayorista (Boca 018)" },
+  { id: "001-019", nombre: "Caja 09 · Esquina / Administración (Boca 019)" },
+  { id: "001-020", nombre: "Caja 10 · Esquina / Refuerzo (Boca 020)" },
 ]
 
 export default function IntegrationsPage() {
