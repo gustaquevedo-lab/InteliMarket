@@ -1,6 +1,10 @@
 """Sales service"""
 
 import logging
+import base64
+import os
+import re
+import unicodedata
 from sqlalchemy import select, update, func, cast, Integer, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
@@ -15,6 +19,53 @@ from api.src.inventory.models import Stock, StockLot, InventoryMovement
 from api.src.fiscal import service as fiscal_service
 
 logger = logging.getLogger(__name__)
+
+_CACHED_LOGO_BYTES: bytes | None = None
+
+
+def get_escpos_logo_bytes(max_width_px: int = 384) -> bytes:
+    """Genera la trama monocroma ESC/POS (GS v 0) del logo oficial para tickets térmicos de 80mm."""
+    global _CACHED_LOGO_BYTES
+    if _CACHED_LOGO_BYTES is not None:
+        return _CACHED_LOGO_BYTES
+
+    candidate_paths = [
+        "/home/intellihouse/intelimarket/ui-web/public/logo_extra.png",
+        "/home/intellihouse/intelimarket/ui-web-dist/logo_extra.png",
+        os.path.join(os.path.dirname(__file__), "../../../ui-web/public/logo_extra.png"),
+        os.path.join(os.path.dirname(__file__), "../../../ui-web-dist/logo_extra.png"),
+    ]
+    logo_file = next((p for p in candidate_paths if os.path.exists(p)), None)
+    if not logo_file:
+        _CACHED_LOGO_BYTES = b""
+        return b""
+
+    try:
+        from PIL import Image
+        im = Image.open(logo_file).convert("RGBA")
+        scale = min(1.0, max_width_px / im.width)
+        w = max(1, round(im.width * scale))
+        h = max(1, round(im.height * scale))
+        w_bytes = (w + 7) // 8
+        canvas_w = w_bytes * 8
+
+        bg = Image.new("RGB", (canvas_w, h), (255, 255, 255))
+        bg.paste(im, (0, 0), im)
+        gray = bg.convert("L")
+        mono = gray.point(lambda p: 255 if p < 160 else 0, "1")
+        bits = mono.tobytes()
+
+        xl = w_bytes & 0xFF
+        xh = (w_bytes >> 8) & 0xFF
+        yl = h & 0xFF
+        yh = (h >> 8) & 0xFF
+        _CACHED_LOGO_BYTES = b"\x1dv0\x00" + bytes([xl, xh, yl, yh]) + bits
+        return _CACHED_LOGO_BYTES
+    except Exception as e:
+        logger.warning("No se pudo generar bitmap ESC/POS del logo: %s", e)
+        _CACHED_LOGO_BYTES = b""
+        return b""
+
 
 
 def calculate_taxes(item: dict) -> dict:
@@ -645,11 +696,58 @@ async def reopen_sale_customer(
     nota = f"[{datetime.now(timezone.utc).isoformat()}] Identificacion agregada por {autorizado_por_nombre} | Cliente: {c_name} (Doc: {c_doc})"
     sale.observaciones = f"{sale.observaciones}\n{nota}" if sale.observaciones else nota
 
-    # Regenerar fielmente el ticket térmico ESC/POS y HTML con el nuevo titular/cliente
-    ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, cust_override=cust)
-    if ticket_b64:
-        sale.recibo_escpos_b64 = ticket_b64
-        sale.recibo_html = ticket_text
+    # Preservar el ticket térmico ESC/POS original intacto (logo bitmap, fuentes, márgenes, items, cortes)
+    # y únicamente parchar las líneas de identificación del cliente.
+    patched = False
+    clean_name = unicodedata.normalize("NFKD", c_name).encode("ascii", "ignore").decode("ascii")[:32].strip()
+    clean_doc = unicodedata.normalize("NFKD", c_doc).encode("ascii", "ignore").decode("ascii")[:20].strip()
+
+    if sale.recibo_escpos_b64:
+        try:
+            raw_bytes = base64.b64decode(sale.recibo_escpos_b64)
+            # Decodificar latin-1 para preservar 1-a-1 los bytes binarios de ESC/POS (como el logo GS v 0)
+            raw_text = raw_bytes.decode("latin-1")
+
+            if re.search(r'(?i)Cliente\s*:\s*[^\r\n]+', raw_text):
+                raw_text = re.sub(r'(?i)(Cliente\s*:\s*)[^\r\n]+', rf'\g<1>{clean_name}', raw_text)
+                if re.search(r'(?i)RUC(?:\s*/\s*CI)?\s*:\s*[^\r\n]+', raw_text):
+                    raw_text = re.sub(r'(?i)(RUC(?:\s*/\s*CI)?\s*:\s*)[^\r\n]+', rf'\g<1>{clean_doc}', raw_text)
+                else:
+                    raw_text = re.sub(r'((?i)Cliente\s*:\s*[^\r\n]+\n)', rf'\1RUC/CI: {clean_doc}\n', raw_text)
+
+                # Manejar empresa vinculada si existe
+                if cust and getattr(cust, "empresa_vinculada_nombre", None):
+                    emp = cust.empresa_vinculada_nombre.strip()
+                    if getattr(cust, "empresa_vinculada_ruc", None):
+                        emp += f" ({cust.empresa_vinculada_ruc})"
+                    emp_clean = unicodedata.normalize("NFKD", emp).encode("ascii", "ignore").decode("ascii")[:32]
+                    if re.search(r'(?i)Empresa\s*:\s*[^\r\n]+', raw_text):
+                        raw_text = re.sub(r'(?i)(Empresa\s*:\s*)[^\r\n]+', rf'\g<1>{emp_clean}', raw_text)
+                    else:
+                        raw_text = re.sub(r'((?i)RUC(?:\s*/\s*CI)?\s*:\s*[^\r\n]+\n)', rf'\1Empresa: {emp_clean}\n', raw_text)
+
+                sale.recibo_escpos_b64 = base64.b64encode(raw_text.encode("latin-1")).decode("ascii")
+                patched = True
+        except Exception as e:
+            logger.warning("Error parchando recibo_escpos_b64 de venta %s: %s", sale.id, e)
+
+    # Parchar también el HTML si está guardado
+    if sale.recibo_html:
+        try:
+            h = sale.recibo_html
+            h = re.sub(r'(?i)(<strong>\s*CLIENTE\s*:\s*</strong>\s*)[^<]+', rf'\g<1>{c_name}', h)
+            h = re.sub(r'(?i)(<strong>\s*RUC\s*(?:/\s*CI)?\s*:\s*</strong>\s*)[^<]+', rf'\g<1>{c_doc}', h)
+            sale.recibo_html = h
+        except Exception as e:
+            logger.warning("Error parchando recibo_html de venta %s: %s", sale.id, e)
+
+    # Si no existía recibo previo (ventas históricas muy viejas), generar fallback completo
+    if not patched and not sale.recibo_escpos_b64:
+        ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, cust_override=cust)
+        if ticket_b64:
+            sale.recibo_escpos_b64 = ticket_b64
+            if not sale.recibo_html:
+                sale.recibo_html = ticket_text
 
     await db.commit()
     await db.refresh(sale)
@@ -842,6 +940,15 @@ async def build_sale_receipt_escpos(
     GS = b"\x1d"
     b_stream = bytearray()
     b_stream.extend(ESC + b"@")
+    b_stream.extend(GS + b"L\x00\x00")  # Margen izquierdo (0 puntos)
+    b_stream.extend(ESC + b"3\x22")     # Interlineado (34 puntos)
+    b_stream.extend(ESC + b"a\x01")     # Centrado cabecera
+
+    logo_bytes = get_escpos_logo_bytes()
+    if logo_bytes:
+        b_stream.extend(logo_bytes + b"\n")
+
+    b_stream.extend(ESC + b"a\x00")     # Alineación izquierda
     b_stream.extend(ESC + b"t\x00")
     for l in lines:
         if any(w in l for w in ["EXTRA SUPERMERCADO", "TOTAL", "FACTURA", "Firma", "GRACIAS"]):
@@ -850,7 +957,7 @@ async def build_sale_receipt_escpos(
             b_stream.extend(ESC + b"E\x00")
         else:
             b_stream.extend(l.encode("latin1", errors="replace") + b"\n")
-    b_stream.extend(b"\n\n\n\n")
+    b_stream.extend(b"\n\n\n\n\n\n")
     b_stream.extend(GS + b"V\x01")
 
     b64 = base64.b64encode(b_stream).decode("ascii")
@@ -962,11 +1069,37 @@ async def reopen_sale_payment(
         else nota_auditoria
     )
 
-    # Regenerar fielmente el ticket térmico ESC/POS y HTML con la nueva forma de pago y socio
-    ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, nueva_forma_pago.upper(), cust_obj)
-    if ticket_b64:
-        sale.recibo_escpos_b64 = ticket_b64
-        sale.recibo_html = ticket_text
+    # Preservar el ticket térmico ESC/POS original intacto (logo bitmap, fuentes, márgenes, items, cortes)
+    # y únicamente parchar la condición, medio de pago y datos del socio.
+    patched = False
+    if sale.recibo_escpos_b64:
+        try:
+            raw_bytes = base64.b64decode(sale.recibo_escpos_b64)
+            raw_text = raw_bytes.decode("latin-1")
+
+            nueva_cond = "CREDITO" if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO") else "CONTADO"
+            raw_text = re.sub(r'(?i)(Condicion\s*:\s*)[^\r\n]+', rf'\g<1>{nueva_cond}', raw_text)
+
+            if socio_nombre:
+                clean_socio = unicodedata.normalize("NFKD", socio_nombre).encode("ascii", "ignore").decode("ascii")[:32].strip()
+                raw_text = re.sub(r'(?i)(Cliente\s*:\s*)[^\r\n]+', rf'\g<1>{clean_socio}', raw_text)
+                if cust_obj:
+                    socio_doc = (cust_obj.ruc or cust_obj.ci or "").strip()
+                    if socio_doc:
+                        clean_doc = unicodedata.normalize("NFKD", socio_doc).encode("ascii", "ignore").decode("ascii")[:20].strip()
+                        raw_text = re.sub(r'(?i)(RUC(?:\s*/\s*CI)?\s*:\s*)[^\r\n]+', rf'\g<1>{clean_doc}', raw_text)
+
+            sale.recibo_escpos_b64 = base64.b64encode(raw_text.encode("latin-1")).decode("ascii")
+            patched = True
+        except Exception as e:
+            logger.warning("Error parchando recibo_escpos_b64 en reopen_sale_payment: %s", e)
+
+    if not patched and not sale.recibo_escpos_b64:
+        ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, nueva_forma_pago.upper(), cust_obj)
+        if ticket_b64:
+            sale.recibo_escpos_b64 = ticket_b64
+            if not sale.recibo_html:
+                sale.recibo_html = ticket_text
 
     await db.commit()
     await db.refresh(sale)

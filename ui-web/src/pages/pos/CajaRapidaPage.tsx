@@ -131,6 +131,24 @@ function escposStripAccents(s: string): string {
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^\x20-\x7E\n]/g, '')
 }
+function patchEscposTicketCustomer(b64: string, name: string, doc: string): string {
+  if (!b64) return b64
+  try {
+    let raw = atob(b64)
+    const cleanName = escposStripAccents(name || 'CONSUMIDOR FINAL').slice(0, 32)
+    const cleanDoc = escposStripAccents(doc || '44444401-7').slice(0, 20)
+    if (/(Cliente:\s*)[^\r\n]+/i.test(raw)) {
+      raw = raw.replace(/(Cliente:\s*)[^\r\n]+/i, `$1${cleanName}`)
+      if (/(RUC(?:\s*\/\s*CI)?:\s*)[^\r\n]+/i.test(raw)) {
+        raw = raw.replace(/(RUC(?:\s*\/\s*CI)?:\s*)[^\r\n]+/i, `$1${cleanDoc}`)
+      }
+      return btoa(raw)
+    }
+  } catch (e) {
+    console.warn('No se pudo parchar ticket ESC/POS en frontend:', e)
+  }
+  return b64
+}
 function escposPadRight(s: string, n: number): string {
   s = escposStripAccents(s)
   return s.length >= n ? s.slice(0, n) : s + ' '.repeat(n - s.length)
@@ -3249,6 +3267,11 @@ export default function POSPage() {
         autorizado_por_id: resolverId,
         autorizado_por_nombre: resolverNombre,
       })
+      const baseTicket = updated.recibo_escpos_b64 || sale.recibo_escpos_b64
+      const patchedB64 = baseTicket
+        ? patchEscposTicketCustomer(baseTicket, selected.nombre || selected.razon_social || "", (selected.ruc || selected.ci) || "")
+        : baseTicket
+
       const saleActualizada = {
         ...sale,
         customer_id: updated.customer_id ?? String(selected.id),
@@ -3257,7 +3280,7 @@ export default function POSPage() {
         customer_doc: (selected.ruc || selected.ci) || sale.customer_doc,
         customer_extra_club: (selected as any).extra_club_numero || sale.customer_extra_club,
         observaciones: updated.observaciones || sale.observaciones,
-        recibo_escpos_b64: updated.recibo_escpos_b64 || sale.recibo_escpos_b64,
+        recibo_escpos_b64: patchedB64,
         recibo_html: updated.recibo_html || sale.recibo_html,
       } as Sale
       setReimprimirSales(prev => prev.map(s => s.id === sale.id ? saleActualizada : s))
