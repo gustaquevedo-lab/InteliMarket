@@ -638,7 +638,12 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
     updated_count = 0
 
     with conn.cursor() as cursor:
-        cursor.execute("SELECT * FROM ven_promocao ORDER BY ID_PROMOCAO DESC LIMIT 1000")
+        cursor.execute("""
+            SELECT * FROM ven_promocao 
+            WHERE DT_FIM_PROMOCAO >= CURDATE() - INTERVAL 30 DAY 
+               OR ID_PROMOCAO >= (SELECT MAX(ID_PROMOCAO) - 1500 FROM ven_promocao)
+            ORDER BY ID_PROMOCAO DESC
+        """)
         rows = cursor.fetchall()
 
     for r in rows:
@@ -713,6 +718,7 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
             updated_count += 1
 
     await db.flush()
+    await db.commit()
     return {"importados": imported_count, "actualizados": updated_count, "total_evaluados": len(rows)}
 
 
