@@ -77,6 +77,7 @@ const PanaderiaRotiseriaPage = lazy(() => import("./pages/operations/PanaderiaRo
 const HaccpPage = lazy(() => import("./pages/operations/HaccpPage"))
 const EquipmentPage = lazy(() => import("./pages/operations/EquipmentPage"))
 const SalonOperacionesPwaPage = lazy(() => import("./pages/operations/SalonOperacionesPwaPage"))
+const DepositoRecepcionPage = lazy(() => import("./pages/operations/DepositoRecepcionPage"))
 const CarniceriaTvDigitalPage = lazy(() => import("./pages/kiosk/CarniceriaTvDigitalPage"))
 const DsdPage = lazy(() => import("./pages/operations/DsdPage"))
 const EslPage = lazy(() => import("./pages/operations/EslPage"))
@@ -196,6 +197,8 @@ function AppRoutes() {
       <Route path="/consulta-precios" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
       <Route path="/tv/carniceria" element={<Suspense fallback={<PageLoader />}><CarniceriaTvDigitalPage /></Suspense>} />
       <Route path="/operaciones-salon" element={<Suspense fallback={<PageLoader />}><SalonOperacionesPwaPage /></Suspense>} />
+      <Route path="/deposito" element={<Suspense fallback={<PageLoader />}><DepositoRecepcionPage /></Suspense>} />
+      <Route path="/dock" element={<Navigate to="/deposito" replace />} />
       <Route path="/pos" element={<ProtectedRoute><Suspense fallback={<PageLoader />}><POSPage /></Suspense></ProtectedRoute>} />
       <Route path="/supervisor" element={<Suspense fallback={<PageLoader />}><SupervisorPage /></Suspense>} />
       <Route path="/pos/supervisor" element={<Navigate to="/supervisor" replace />} />
@@ -281,6 +284,7 @@ function AppRoutes() {
         <Route path="servicios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="servicios"><ServiciosPage /></FeatureRoute></Suspense>} />
         <Route path="supermer" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SupermerPage /></FeatureRoute></Suspense>} />
         <Route path="operaciones-salon" element={<Suspense fallback={<PageLoader />}><SalonOperacionesPwaPage /></Suspense>} />
+        <Route path="deposito" element={<Suspense fallback={<PageLoader />}><DepositoRecepcionPage /></Suspense>} />
         <Route path="desposte" element={<Suspense fallback={<PageLoader />}><CarniceriaDespostePage /></Suspense>} />
         <Route path="frescos" element={<Suspense fallback={<PageLoader />}><VerduleriaFrescosPage /></Suspense>} />
         <Route path="panaderia-rotiseria" element={<Suspense fallback={<PageLoader />}><PanaderiaRotiseriaPage /></Suspense>} />

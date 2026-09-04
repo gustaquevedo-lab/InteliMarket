@@ -1,11 +1,14 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
+const target = process.env.CAPACITOR_TARGET || 'deposito';
+const isDeposito = target === 'deposito';
+
 const config: CapacitorConfig = {
-  appId: 'com.intelimarket.supervisor',
-  appName: 'Extra Supervisor',
+  appId: isDeposito ? 'com.intelimarket.deposito' : 'com.intelimarket.supervisor',
+  appName: isDeposito ? 'Extra Depósito' : 'Extra Supervisor',
   webDir: '../ui-web-dist',
   server: {
-    url: 'http://192.168.0.10:5173/supervisor',
+    url: isDeposito ? 'http://192.168.0.10:5173/deposito' : 'http://192.168.0.10:5173/supervisor',
     cleartext: true,
     androidScheme: 'http',
   },
@@ -17,3 +20,4 @@ const config: CapacitorConfig = {
 };
 
 export default config;
+
