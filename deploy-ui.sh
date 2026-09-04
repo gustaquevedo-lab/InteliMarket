@@ -37,4 +37,4 @@ echo "    Toman la nueva recien cuando cierren sesion / reinicien la app."
 
 # Limpieza: dejar solo los ultimos 5 releases
 cd "$RELEASES"
-ls -1t | tail -n +6 | xargs -r rm -rf
+ls -1t | tail -n +6 | xargs -r rm -rf 2>/dev/null || true
