@@ -230,6 +230,15 @@ async def perform_3way_match(
 
     await db.commit()
 
+    solicitud_nc_dict = {
+        "id": str(nc_request_obj.id),
+        "numero_solicitud": nc_request_obj.numero_solicitud,
+        "monto_reclamado": float(nc_request_obj.monto_reclamado),
+        "estado": nc_request_obj.estado,
+    } if nc_request_obj else None
+
+    mensaje = "Conciliación exitosa (Match 100%). Factura habilitada para Tesorería." if estado_match == "conciliado_100" else f"Discrepancia de {total_discrepancia_monto:,.0f} Gs. detectada. Solicitud de NC emitida."
+
     return {
         "invoice_id": str(invoice.id),
         "numero_factura": invoice.numero_factura,
@@ -240,19 +249,21 @@ async def perform_3way_match(
         "receipt_id": str(receipt.id) if receipt else None,
         "receipt_numero": receipt.numero if receipt else None,
         "estado_match": estado_match,
+        "estado_matching": "match_perfecto" if estado_match == "conciliado_100" else "discrepancia_detectada",
+        "mensaje": mensaje,
         "bloqueada_para_pago": invoice.bloqueada_para_pago,
         "motivo_bloqueo": invoice.motivo_bloqueo,
         "total_facturado": float(total_facturado),
+        "total_factura": float(total_facturado),
         "total_recibido_val": float(total_recibido_val),
+        "total_calculado_recepcion": float(total_recibido_val),
         "total_discrepancia_monto": float(total_discrepancia_monto),
+        "diferencia_total": float(total_discrepancia_monto),
         "monto_neto_a_pagar": float(max(Decimal("0"), total_facturado - total_discrepancia_monto)),
-        "solicitud_nc": {
-            "id": str(nc_request_obj.id),
-            "numero_solicitud": nc_request_obj.numero_solicitud,
-            "monto_reclamado": float(nc_request_obj.monto_reclamado),
-            "estado": nc_request_obj.estado,
-        } if nc_request_obj else None,
+        "solicitud_nc": solicitud_nc_dict,
+        "nc_request_generada": solicitud_nc_dict,
         "items": discrepancias_lines,
+        "discrepancias": discrepancias_lines,
     }
 
 
