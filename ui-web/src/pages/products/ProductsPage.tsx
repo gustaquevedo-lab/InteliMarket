@@ -1110,6 +1110,17 @@ export default function ProductsPage() {
                           <td className="p-3.5 text-right pr-4">
                             <div className="flex items-center justify-end gap-1.5">
                               <button
+                                onClick={() => {
+                                  setMainTab("packs")
+                                  setPackFilterProductId(p.id)
+                                  setPackFilterProduct(p)
+                                }}
+                                className="p-1.5 rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors"
+                                title="Ver o gestionar Códigos de Pack / Caja de este producto"
+                              >
+                                <Box className="w-4 h-4" />
+                              </button>
+                              <button
                                 onClick={() => openProduct360(p.id)}
                                 className="p-1.5 rounded-lg text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors"
                                 title="Ver Ficha 360° del Producto"
