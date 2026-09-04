@@ -210,6 +210,19 @@ async def session_pre_close_summary(session_id: str, db: AsyncSession = Depends(
     return result
 
 
+@router.get("/cash-sessions/{session_id}/ticket-escpos")
+async def get_session_ticket_escpos(session_id: str, db: AsyncSession = Depends(get_db)):
+    result = await service.get_session_reconciliation_data(db, session_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    return {
+        "session_id": result["session_id"],
+        "ticket_text": result["ticket_text"],
+        "ticket_escpos_b64": result["ticket_escpos_b64"],
+        "reconciliation": result,
+    }
+
+
 @router.get("/cash-sessions/{session_id}/export/cierre.pdf")
 async def export_cierre_sesion_pdf(
     session_id: str,

@@ -6,6 +6,7 @@ from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
 import uuid
+import base64
 
 from api.src.caja.models import (
     CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff,
@@ -276,21 +277,409 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
     return session_obj
 
 
-async def _efectivo_esperado_por_moneda(db: AsyncSession, session_id, moneda: str) -> Decimal:
-    """Efectivo recibido en una moneda durante la sesion (sin conversion — el
-    legado tampoco convierte, cada moneda de caja se cuenta por separado)."""
-    result = await db.execute(
-        select(func.coalesce(func.sum(SalePayment.monto), 0))
-        .select_from(SalePayment)
-        .join(Sale, Sale.id == SalePayment.sale_id)
-        .where(
-            Sale.session_id == session_id,
-            func.upper(SalePayment.forma_pago) == "EFECTIVO",
-            SalePayment.moneda == moneda,
+async def get_effective_exchange_rates_for_session(db: AsyncSession, session_id: uuid.UUID, fecha_apertura: datetime) -> tuple[Decimal, Decimal]:
+    """Retorna (tasa_brl, tasa_usd) para la sesión.
+    Usa la tasa con la que operó el POS en esa sesión (ventas con pago BRL/USD),
+    o la cotización oficial de exchange_rates del día, con fallback seguro."""
+    # 1. Tasa BRL de las ventas de la sesión
+    rate_b = await db.execute(
+        text("""
+            SELECT round((s.total / NULLIF(sp.monto, 0))::numeric, 0) as tasa, count(*) as cnt
+            FROM sales s
+            JOIN sale_payments sp ON s.id = sp.sale_id
+            WHERE s.session_id = :sid AND sp.moneda = 'BRL' AND sp.monto > 0 AND (s.total / sp.monto) BETWEEN 900 AND 1500
+            GROUP BY round((s.total / NULLIF(sp.monto, 0))::numeric, 0)
+            ORDER BY count(*) DESC
+            LIMIT 1
+        """),
+        {"sid": session_id}
+    )
+    rb = rate_b.first()
+    if rb and rb[0]:
+        tasa_brl = Decimal(str(rb[0]))
+    else:
+        er_b = await db.execute(
+            text("""
+                SELECT tasa_venta FROM exchange_rates
+                WHERE moneda = 'BRL' AND fecha <= :f_ape
+                ORDER BY fecha DESC, created_at DESC
+                LIMIT 1
+            """),
+            {"f_ape": fecha_apertura.date()}
+        )
+        erb = er_b.first()
+        tasa_brl = Decimal(str(erb[0])) if erb and erb[0] else Decimal("1105.00")
+
+    # 2. Tasa USD
+    rate_u = await db.execute(
+        text("""
+            SELECT round((s.total / NULLIF(sp.monto, 0))::numeric, 0) as tasa, count(*) as cnt
+            FROM sales s
+            JOIN sale_payments sp ON s.id = sp.sale_id
+            WHERE s.session_id = :sid AND sp.moneda = 'USD' AND sp.monto > 0 AND (s.total / sp.monto) BETWEEN 5000 AND 9000
+            GROUP BY round((s.total / NULLIF(sp.monto, 0))::numeric, 0)
+            ORDER BY count(*) DESC
+            LIMIT 1
+        """),
+        {"sid": session_id}
+    )
+    ru = rate_u.first()
+    if ru and ru[0]:
+        tasa_usd = Decimal(str(ru[0]))
+    else:
+        er_u = await db.execute(
+            text("""
+                SELECT tasa_venta FROM exchange_rates
+                WHERE moneda = 'USD' AND fecha <= :f_ape
+                ORDER BY fecha DESC, created_at DESC
+                LIMIT 1
+            """),
+            {"f_ape": fecha_apertura.date()}
+        )
+        eru = er_u.first()
+        tasa_usd = Decimal(str(eru[0])) if eru and eru[0] else Decimal("5840.00")
+
+    return tasa_brl, tasa_usd
+
+
+def _format_two_col(left: str, right: str, width: int = 42) -> str:
+    space = width - len(left) - len(right)
+    if space < 1:
+        left = left[:max(1, width - len(right) - 1)]
+        space = 1
+    return left + (" " * space) + right
+
+
+def generate_cierre_escpos(recon: dict) -> dict:
+    """Genera texto formateado y comandos binarios ESC/POS para impresión térmica de arqueo."""
+    W = 42
+    lines = []
+    
+    # Header
+    lines.append("=" * W)
+    lines.append("EXTRA SUPERMERCADO MAYORISTA".center(W))
+    lines.append("GRUPO SANTA TERESA E.A.S.".center(W))
+    lines.append("RUC: 80150377-9".center(W))
+    lines.append("TIMBRADO: 18545636".center(W))
+    lines.append("=" * W)
+    lines.append("REIMPRESION DE ARQUEO / CIERRE".center(W))
+    lines.append("-" * W)
+    
+    # Metadata
+    lines.append(f"Cajero/a:   {recon['cajero_nombre']}")
+    lines.append(f"Caja:       {recon['register_nombre']}")
+    lines.append(f"Turno ID:   {recon['session_id'][:8].upper()}")
+    lines.append(f"Apertura:   {recon['fecha_apertura_str']}")
+    lines.append(f"Cierre:     {recon['fecha_cierre_str']}")
+    lines.append(f"Cotiz. BRL: 1 R$ = {recon['tasa_brl']:,.0f} Gs.")
+    lines.append(f"Cotiz. USD: 1 U$ = {recon['tasa_usd']:,.0f} Gs.")
+    lines.append("-" * W)
+    
+    # Medios de pago
+    lines.append("[DESGLOSE DE MEDIOS DE PAGO]")
+    for item in recon["medios_pago_detallados"]:
+        lines.append(_format_two_col(f"  {item['label']}:", item['monto_formateado'], W))
+    lines.append("-" * W)
+    lines.append(_format_two_col("TOTAL VENTAS COBRADAS:", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
+    lines.append("-" * W)
+    
+    # Conciliación
+    lines.append("[CONCILIACION EN GUARANIES]")
+    lines.append(_format_two_col("  Fondo Inicial Gs.:", f"{recon['fondo_pyg']:,.0f} Gs.", W))
+    if recon['fondo_brl'] > 0:
+        lines.append(_format_two_col("  Fondo Inicial R$:", f"R$ {recon['fondo_brl']:,.2f} ({recon['fondo_brl_gs']:,.0f} Gs.)", W))
+    if recon['fondo_usd'] > 0:
+        lines.append(_format_two_col("  Fondo Inicial US$:", f"US$ {recon['fondo_usd']:,.2f} ({recon['fondo_usd_gs']:,.0f} Gs.)", W))
+    lines.append(_format_two_col("  TOTAL APERTURA GS:", f"{recon['fondo_total_gs']:,.0f} Gs.", W))
+    lines.append(_format_two_col("  (+) Ventas Efectivo:", f"{recon['ventas_ef_total_gs']:,.0f} Gs.", W))
+    if recon['total_drops_gs'] > 0:
+        lines.append(_format_two_col("  (-) Retiros / Drops:", f"-{recon['total_drops_gs']:,.0f} Gs.", W))
+    lines.append("-" * W)
+    lines.append(_format_two_col("TOTAL ESPERADO EN GAVETA:", f"{recon['esperado_total_gs']:,.0f} Gs.", W))
+    lines.append("-" * W)
+    
+    # Arqueo Gaveta
+    lines.append("[ARQUEO REAL EN GAVETA]")
+    lines.append(_format_two_col("  Contado Gs.:", f"{recon['contado_pyg']:,.0f} Gs.", W))
+    if recon['contado_brl'] > 0 or recon['fondo_brl'] > 0:
+        lines.append(_format_two_col("  Contado R$:", f"R$ {recon['contado_brl']:,.2f} ({recon['contado_brl_gs']:,.0f} Gs.)", W))
+    if recon['contado_usd'] > 0 or recon['fondo_usd'] > 0:
+        lines.append(_format_two_col("  Contado US$:", f"US$ {recon['contado_usd']:,.2f} ({recon['contado_usd_gs']:,.0f} Gs.)", W))
+    lines.append(_format_two_col("TOTAL CONTADO GAVETA GS:", f"{recon['contado_total_gs']:,.0f} Gs.", W))
+    lines.append("=" * W)
+    
+    dif = recon['diferencia_consolidada_gs']
+    signo = "+" if dif > 0 else ""
+    lines.append(_format_two_col("DIFERENCIA CONSOLIDADA GS:", f"{signo}{dif:,.0f} Gs.", W))
+    estado_cuadre = "CUADRADO" if abs(dif) < 5000 else ("SOBRANTE" if dif > 0 else "FALTANTE")
+    lines.append(f"ESTADO: {estado_cuadre}".center(W))
+    lines.append("=" * W)
+    lines.append("")
+    lines.append("")
+    lines.append("Firma Cajero/a: _________________________")
+    lines.append("")
+    lines.append("Firma Supervisora: ______________________")
+    lines.append("")
+    lines.append("")
+    
+    ticket_text = "\n".join(lines)
+    
+    # Binario ESC/POS
+    ESC = b"\x1b"
+    GS = b"\x1d"
+    escpos_bytes = bytearray()
+    escpos_bytes.extend(ESC + b"@")  # Init
+    escpos_bytes.extend(ESC + b"t\x00")  # Code table PC437
+    
+    for l in lines:
+        if "=" in l or "EXTRA SUPERMERCADO" in l or "DIFERENCIA" in l or "TOTAL" in l or "ESTADO:" in l:
+            escpos_bytes.extend(ESC + b"E\x01")  # Bold on
+            escpos_bytes.extend(l.encode("latin1", errors="replace") + b"\n")
+            escpos_bytes.extend(ESC + b"E\x00")  # Bold off
+        else:
+            escpos_bytes.extend(l.encode("latin1", errors="replace") + b"\n")
+            
+    escpos_bytes.extend(b"\n\n\n\n")
+    escpos_bytes.extend(GS + b"V\x01")  # Partial cut
+    
+    b64 = base64.b64encode(escpos_bytes).decode("ascii")
+    return {
+        "ticket_text": ticket_text,
+        "ticket_escpos_b64": b64,
+    }
+
+
+async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uuid.UUID) -> dict | None:
+    """Calcula la conciliación y arqueo unificado en Guaraníes para una sesión de caja."""
+    s_uuid = uuid.UUID(str(session_id))
+    result = await db.execute(select(CashSession).where(CashSession.id == s_uuid))
+    session_obj = result.scalar_one_or_none()
+    if not session_obj:
+        return None
+
+    # Datos de caja
+    reg_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
+    register_obj = reg_result.scalar_one_or_none()
+
+    # Arqueo existente
+    count_result = await db.execute(
+        select(CashCount).where(CashCount.session_id == session_obj.id).order_by(CashCount.created_at.desc()).limit(1)
+    )
+    count_obj = count_result.scalar_one_or_none()
+
+    # Tasas efectivas
+    tasa_brl, tasa_usd = await get_effective_exchange_rates_for_session(db, session_obj.id, session_obj.fecha_apertura)
+
+    # Ventas totales
+    sales_res = await db.execute(
+        select(
+            func.count(Sale.id).label("total_ventas"),
+            func.coalesce(func.sum(Sale.total), 0).label("total_cobrado"),
+            func.coalesce(func.sum(Sale.monto_donacion), 0).label("total_donaciones"),
+        ).where(
+            Sale.session_id == session_obj.id,
             Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
         )
     )
-    return Decimal(str(result.scalar() or 0))
+    sales_row = sales_res.first()
+
+    # Formas de pago
+    payments_res = await db.execute(
+        select(
+            SalePayment.forma_pago,
+            SalePayment.moneda,
+            func.count().label("cantidad"),
+            func.coalesce(func.sum(SalePayment.monto), 0).label("monto"),
+        )
+        .select_from(SalePayment)
+        .join(Sale, Sale.id == SalePayment.sale_id)
+        .where(
+            Sale.session_id == session_obj.id,
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+        )
+        .group_by(SalePayment.forma_pago, SalePayment.moneda)
+        .order_by(func.sum(SalePayment.monto).desc())
+    )
+    payments_rows = payments_res.all()
+
+    # Clasificación individualizada
+    efectivo_pyg = Decimal("0")
+    efectivo_brl = Decimal("0")
+    efectivo_usd = Decimal("0")
+    
+    medios_individuales = {
+        "TARJETA_BANCARD": {"label": "Bancard Tarjeta", "cantidad": 0, "monto_gs": Decimal("0")},
+        "TARJETA_DINELCO": {"label": "Dinelco Tarjeta", "cantidad": 0, "monto_gs": Decimal("0")},
+        "BANCARD_QR": {"label": "Bancard QR", "cantidad": 0, "monto_gs": Decimal("0")},
+        "DINELCO_QR": {"label": "Dinelco QR", "cantidad": 0, "monto_gs": Decimal("0")},
+        "PIX": {"label": "PIX Brasil", "cantidad": 0, "monto_gs": Decimal("0")},
+        "EXTRA_CLUB": {"label": "Extra Club (Crédito)", "cantidad": 0, "monto_gs": Decimal("0")},
+        "VALES": {"label": "Vales / Cheques", "cantidad": 0, "monto_gs": Decimal("0")},
+        "TRANSFERENCIA": {"label": "Transferencia Bancaria", "cantidad": 0, "monto_gs": Decimal("0")},
+        "OTROS": {"label": "Otros Medios", "cantidad": 0, "monto_gs": Decimal("0")},
+    }
+
+    desglose_detallado = []
+
+    for fp_raw, mon, cant, m in payments_rows:
+        fp_upper = (fp_raw or "").upper()
+        m_dec = Decimal(str(m))
+
+        if fp_upper == "EFECTIVO":
+            if mon == "PYG":
+                efectivo_pyg += m_dec
+            elif mon == "BRL":
+                efectivo_brl += m_dec
+            elif mon == "USD":
+                efectivo_usd += m_dec
+            continue
+
+        # Convertir a Gs si el medio estuviera en divisa
+        m_gs = m_dec * tasa_brl if mon == "BRL" else (m_dec * tasa_usd if mon == "USD" else m_dec)
+
+        if "DINELCO" in fp_upper and ("QR" in fp_upper):
+            medios_individuales["DINELCO_QR"]["cantidad"] += cant
+            medios_individuales["DINELCO_QR"]["monto_gs"] += m_gs
+        elif "QR" in fp_upper:
+            medios_individuales["BANCARD_QR"]["cantidad"] += cant
+            medios_individuales["BANCARD_QR"]["monto_gs"] += m_gs
+        elif "DINELCO" in fp_upper:
+            medios_individuales["TARJETA_DINELCO"]["cantidad"] += cant
+            medios_individuales["TARJETA_DINELCO"]["monto_gs"] += m_gs
+        elif "BANCARD" in fp_upper or "TARJETA" in fp_upper or "DEBITO" in fp_upper or "CREDITO" in fp_upper:
+            medios_individuales["TARJETA_BANCARD"]["cantidad"] += cant
+            medios_individuales["TARJETA_BANCARD"]["monto_gs"] += m_gs
+        elif "PIX" in fp_upper:
+            medios_individuales["PIX"]["cantidad"] += cant
+            medios_individuales["PIX"]["monto_gs"] += m_gs
+        elif "EXTRA_CLUB" in fp_upper:
+            medios_individuales["EXTRA_CLUB"]["cantidad"] += cant
+            medios_individuales["EXTRA_CLUB"]["monto_gs"] += m_gs
+        elif "VALE" in fp_upper or "CHEQUE" in fp_upper:
+            medios_individuales["VALES"]["cantidad"] += cant
+            medios_individuales["VALES"]["monto_gs"] += m_gs
+        elif "TRANSFERENCIA" in fp_upper:
+            medios_individuales["TRANSFERENCIA"]["cantidad"] += cant
+            medios_individuales["TRANSFERENCIA"]["monto_gs"] += m_gs
+        else:
+            medios_individuales["OTROS"]["cantidad"] += cant
+            medios_individuales["OTROS"]["monto_gs"] += m_gs
+
+    # Agregar efectivo a la lista de presentación
+    desglose_detallado.append({
+        "clave": "EFECTIVO_PYG",
+        "label": "Efectivo Gs.",
+        "monto_formateado": f"{efectivo_pyg:,.0f} Gs.",
+        "monto_gs": float(efectivo_pyg),
+    })
+    if efectivo_brl > 0:
+        brl_gs = efectivo_brl * tasa_brl
+        desglose_detallado.append({
+            "clave": "EFECTIVO_BRL",
+            "label": "Efectivo R$",
+            "monto_formateado": f"R$ {efectivo_brl:,.2f} ({brl_gs:,.0f} Gs.)",
+            "monto_gs": float(brl_gs),
+        })
+    if efectivo_usd > 0:
+        usd_gs = efectivo_usd * tasa_usd
+        desglose_detallado.append({
+            "clave": "EFECTIVO_USD",
+            "label": "Efectivo US$",
+            "monto_formateado": f"US$ {efectivo_usd:,.2f} ({usd_gs:,.0f} Gs.)",
+            "monto_gs": float(usd_gs),
+        })
+
+    for k, v in medios_individuales.items():
+        if v["monto_gs"] > 0 or v["cantidad"] > 0:
+            desglose_detallado.append({
+                "clave": k,
+                "label": f"{v['label']} ({v['cantidad']})",
+                "monto_formateado": f"{v['monto_gs']:,.0f} Gs.",
+                "monto_gs": float(v["monto_gs"]),
+            })
+
+    # Drops confirmados
+    drops_res = await db.execute(
+        select(CashDropRequest).where(CashDropRequest.session_id == session_obj.id)
+    )
+    drops = list(drops_res.scalars().all())
+    d_pyg = sum(Decimal(str(d.monto_confirmado_pyg or d.monto_pyg or 0)) for d in drops if d.estado == "confirmado")
+    d_brl = sum(Decimal(str(d.monto_confirmado_brl or d.monto_brl or 0)) for d in drops if d.estado == "confirmado")
+    d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops if d.estado == "confirmado")
+    total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
+
+    # Fondos iniciales
+    fondo_pyg = Decimal(str(session_obj.monto_apertura or 0))
+    fondo_brl = Decimal(str(session_obj.monto_apertura_brl or 0))
+    fondo_usd = Decimal(str(session_obj.monto_apertura_usd or 0))
+    fondo_brl_gs = fondo_brl * tasa_brl
+    fondo_usd_gs = fondo_usd * tasa_usd
+    fondo_total_gs = fondo_pyg + fondo_brl_gs + fondo_usd_gs
+
+    # Ventas en efectivo consolidadas
+    ventas_ef_total_gs = efectivo_pyg + (efectivo_brl * tasa_brl) + (efectivo_usd * tasa_usd)
+
+    # Total esperado en gaveta
+    esperado_total_gs = fondo_total_gs + ventas_ef_total_gs - total_drops_gs
+
+    # Arqueo contado
+    if count_obj:
+        contado_pyg = Decimal(str(count_obj.monto_efectivo if count_obj.monto_efectivo is not None else (session_obj.monto_cierre or 0)))
+        contado_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
+        contado_usd = Decimal(str(count_obj.monto_efectivo_usd or 0))
+    else:
+        contado_pyg = Decimal(str(session_obj.monto_cierre or 0))
+        contado_brl = Decimal("0")
+        contado_usd = Decimal("0")
+
+    contado_brl_gs = contado_brl * tasa_brl
+    contado_usd_gs = contado_usd * tasa_usd
+    contado_total_gs = contado_pyg + contado_brl_gs + contado_usd_gs
+
+    # Diferencia Consolidada
+    diferencia_consolidada_gs = contado_total_gs - esperado_total_gs
+
+    fecha_ap_str = session_obj.fecha_apertura.strftime("%d/%m/%Y %H:%M") if session_obj.fecha_apertura else "-"
+    fecha_ci_str = session_obj.fecha_cierre.strftime("%d/%m/%Y %H:%M") if session_obj.fecha_cierre else "EN CURSO"
+
+    recon_data = {
+        "session_id": str(session_obj.id),
+        "register_id": str(session_obj.register_id),
+        "register_nombre": register_obj.nombre if register_obj else "Caja",
+        "cajero_nombre": session_obj.cajero_nombre or "—",
+        "fecha_apertura_str": fecha_ap_str,
+        "fecha_cierre_str": fecha_ci_str,
+        "estado": session_obj.estado,
+        "tasa_brl": float(tasa_brl),
+        "tasa_usd": float(tasa_usd),
+        "fondo_pyg": float(fondo_pyg),
+        "fondo_brl": float(fondo_brl),
+        "fondo_usd": float(fondo_usd),
+        "fondo_brl_gs": float(fondo_brl_gs),
+        "fondo_usd_gs": float(fondo_usd_gs),
+        "fondo_total_gs": float(fondo_total_gs),
+        "efectivo_pyg": float(efectivo_pyg),
+        "efectivo_brl": float(efectivo_brl),
+        "efectivo_usd": float(efectivo_usd),
+        "ventas_ef_total_gs": float(ventas_ef_total_gs),
+        "total_drops_gs": float(total_drops_gs),
+        "esperado_total_gs": float(esperado_total_gs),
+        "contado_pyg": float(contado_pyg),
+        "contado_brl": float(contado_brl),
+        "contado_usd": float(contado_usd),
+        "contado_brl_gs": float(contado_brl_gs),
+        "contado_usd_gs": float(contado_usd_gs),
+        "contado_total_gs": float(contado_total_gs),
+        "diferencia_consolidada_gs": float(diferencia_consolidada_gs),
+        "total_ventas_count": sales_row.total_ventas if sales_row else 0,
+        "total_cobrado_gs": float(sales_row.total_cobrado if sales_row else 0),
+        "medios_pago_detallados": desglose_detallado,
+    }
+
+    escpos = generate_cierre_escpos(recon_data)
+    recon_data["ticket_text"] = escpos["ticket_text"]
+    recon_data["ticket_escpos_b64"] = escpos["ticket_escpos_b64"]
+    return recon_data
 
 
 async def close_session(
@@ -309,81 +698,71 @@ async def close_session(
     if not session_obj or session_obj.estado != "abierta":
         return None
 
-    sales_result = await db.execute(
-        select(func.coalesce(func.sum(Sale.total), 0)).where(
-            Sale.session_id == session_obj.id,
-            Sale.fecha >= session_obj.fecha_apertura,
-            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
-        )
-    )
-    total_cobrado = sales_result.scalar() or 0
-
-    monto_apertura_pyg = Decimal(str(session_obj.monto_apertura or 0))
-    monto_apertura_usd = Decimal(str(session_obj.monto_apertura_usd or 0))
-    monto_apertura_brl = Decimal(str(session_obj.monto_apertura_brl or 0))
-
-    efectivo_pyg_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "PYG")
-    monto_cierre_esperado = monto_apertura_pyg + efectivo_pyg_esperado
-    diferencia = Decimal(str(monto_cierre_real)) - monto_cierre_esperado
-
-    efectivo_usd_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "USD")
-    efectivo_brl_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "BRL")
-    
-    monto_cierre_esperado_usd = monto_apertura_usd + efectivo_usd_esperado
-    monto_cierre_esperado_brl = monto_apertura_brl + efectivo_brl_esperado
-
-    diferencia_usd = monto_cierre_usd - monto_cierre_esperado_usd
-    diferencia_brl = monto_cierre_brl - monto_cierre_esperado_brl
-
-
-    # Desglose de TODAS las formas de pago del turno (no solo efectivo) --
-    # antes el cierre no mostraba nada de esto, asi que la cajera/supervisora
-    # no tenia forma de ver de un vistazo cuanto se cobro por tarjeta, QR o
-    # Extra Club durante el turno.
-    payments_result = await db.execute(
-        select(SalePayment.forma_pago, SalePayment.moneda, func.coalesce(func.sum(SalePayment.monto), 0))
-        .select_from(SalePayment)
-        .join(Sale, Sale.id == SalePayment.sale_id)
-        .where(Sale.session_id == session_obj.id, Sale.estado == "confirmado")
-        .group_by(SalePayment.forma_pago, SalePayment.moneda)
-    )
-    desglose_formas_pago = [
-        {"forma_pago": fp, "moneda": mon, "monto": Decimal(str(monto))}
-        for fp, mon, monto in payments_result.all()
-    ]
-
-    register_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
-    register = register_result.scalar_one_or_none()
-    requiere_revision = bool(
-        register and register.diferencia_maxima_tolerada is not None
-        and abs(diferencia) > register.diferencia_maxima_tolerada
-    )
-
+    # Registrar el cierre
     session_obj.fecha_cierre = datetime.now(timezone.utc)
     session_obj.monto_cierre = monto_cierre_real
     session_obj.observaciones = observaciones
     session_obj.estado = "cerrada"
     await db.flush()
 
+    # Obtener cotizaciones de la sesión
+    tasa_brl, tasa_usd = await get_effective_exchange_rates_for_session(db, session_obj.id, session_obj.fecha_apertura)
+
+    # Calcular ventas efectivas
+    efectivo_pyg_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "PYG")
+    efectivo_usd_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "USD")
+    efectivo_brl_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "BRL")
+
+    # Retiros / Drops confirmados
+    cd_res = await db.execute(
+        select(CashDropRequest).where(CashDropRequest.session_id == session_obj.id, CashDropRequest.estado == "confirmado")
+    )
+    drops = list(cd_res.scalars().all())
+    d_pyg = sum(Decimal(str(d.monto_confirmado_pyg or d.monto_pyg or 0)) for d in drops)
+    d_brl = sum(Decimal(str(d.monto_confirmado_brl or d.monto_brl or 0)) for d in drops)
+    d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops)
+    total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
+
+    # Fondos iniciales consolidados
+    monto_apertura_pyg = Decimal(str(session_obj.monto_apertura or 0))
+    monto_apertura_usd = Decimal(str(session_obj.monto_apertura_usd or 0))
+    monto_apertura_brl = Decimal(str(session_obj.monto_apertura_brl or 0))
+    fondo_total_gs = monto_apertura_pyg + (monto_apertura_brl * tasa_brl) + (monto_apertura_usd * tasa_usd)
+
+    # Ventas en efectivo consolidadas
+    ventas_ef_total_gs = efectivo_pyg_esperado + (efectivo_brl_esperado * tasa_brl) + (efectivo_usd_esperado * tasa_usd)
+
+    # Monto de cierre esperado consolidado
+    monto_cierre_esperado_total_gs = fondo_total_gs + ventas_ef_total_gs - total_drops_gs
+
+    # Total contado declarado consolidado
+    contado_total_gs = Decimal(str(monto_cierre_real)) + (Decimal(str(monto_cierre_brl)) * tasa_brl) + (Decimal(str(monto_cierre_usd)) * tasa_usd)
+
+    # Diferencia unificada en Guaraníes
+    diferencia_consolidada = contado_total_gs - monto_cierre_esperado_total_gs
+
+    register_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
+    register = register_result.scalar_one_or_none()
+    requiere_revision = bool(
+        register and register.diferencia_maxima_tolerada is not None
+        and abs(diferencia_consolidada) > register.diferencia_maxima_tolerada
+    )
+
     count = CashCount(
         session_id=session_obj.id,
         monto_efectivo=monto_cierre_real,
-        monto_total=monto_cierre_real,
-        diferencia=diferencia,
+        monto_total=contado_total_gs,
+        diferencia=diferencia_consolidada,
         monto_efectivo_usd=monto_cierre_usd,
         monto_efectivo_brl=monto_cierre_brl,
-        diferencia_usd=diferencia_usd,
-        diferencia_brl=diferencia_brl,
+        diferencia_usd=Decimal("0"),
+        diferencia_brl=Decimal("0"),
         requiere_revision=requiere_revision,
     )
     db.add(count)
     await db.flush()
     await db.refresh(count)
 
-    # Punto de custodia: la sesión se cierra igual (no se bloquea por diferencia,
-    # segun lo definido con el cliente), pero el efectivo contado queda "pendiente"
-    # bajo responsabilidad de la cajera hasta que un supervisor confirme que lo
-    # recibio — antes esto no existia, el cierre era un callejon sin salida.
     handoff = CashHandoff(
         company_id=register.company_id if register else None,
         session_id=session_obj.id,
@@ -401,37 +780,39 @@ async def close_session(
     await db.refresh(session_obj)
 
     if requiere_revision and tenant_id:
-        # Antes esta alerta se calculaba y se descartaba sin avisar a nadie —
-        # ahora dispara una notificacion real a quienes pueden actuar (rol
-        # Administrador, hasta que exista un rol dedicado de Supervisor).
         try:
             from api.src.notifications import service as notifications_service
             await notifications_service.create_notification_for_role(
                 db, uuid.UUID(tenant_id), "Administrador",
                 title="Descuadre de caja requiere revisión",
-                body=f"{session_obj.cajero_nombre or 'Un cajero'} cerró con una diferencia de {diferencia:,.0f} Gs. que supera la tolerancia configurada.",
+                body=f"{session_obj.cajero_nombre or 'Un cajero'} cerró con una diferencia de {diferencia_consolidada:,.0f} Gs. que supera la tolerancia configurada.",
                 tipo="alerta_caja",
                 link="/caja",
             )
         except Exception:
             pass
 
+    # Obtener reconciliación completa para el ticket de cierre inmediato
+    recon = await get_session_reconciliation_data(db, session_obj.id)
+
     return {
         "session": session_obj,
-        "monto_apertura": Decimal(str(session_obj.monto_apertura or 0)),
-        "monto_apertura_usd": Decimal(str(session_obj.monto_apertura_usd or 0)),
-        "monto_apertura_brl": Decimal(str(session_obj.monto_apertura_brl or 0)),
-        "monto_cierre_esperado": monto_cierre_esperado,
-        "monto_cierre_esperado_usd": monto_cierre_esperado_usd,
-        "monto_cierre_esperado_brl": monto_cierre_esperado_brl,
-        "diferencia": diferencia,
-        "diferencia_usd": diferencia_usd,
-        "diferencia_brl": diferencia_brl,
+        "monto_apertura": monto_apertura_pyg,
+        "monto_apertura_usd": monto_apertura_usd,
+        "monto_apertura_brl": monto_apertura_brl,
+        "monto_cierre_esperado": monto_cierre_esperado_total_gs,
+        "monto_cierre_esperado_usd": monto_apertura_usd,
+        "monto_cierre_esperado_brl": monto_apertura_brl,
+        "diferencia": diferencia_consolidada,
+        "diferencia_usd": Decimal("0"),
+        "diferencia_brl": Decimal("0"),
         "requiere_revision": requiere_revision,
         "handoff_id": handoff.id,
-        "total_cobrado": Decimal(str(total_cobrado)),
-        "desglose_formas_pago": desglose_formas_pago,
+        "reconciliation": recon,
+        "ticket_text": recon.get("ticket_text") if recon else None,
+        "ticket_escpos_b64": recon.get("ticket_escpos_b64") if recon else None,
     }
+
 
 
 
@@ -1709,56 +2090,13 @@ async def get_cajero_performance(db: AsyncSession, company_id: str) -> list[dict
 async def get_session_pre_close_summary(db: AsyncSession, session_id: str) -> dict | None:
     """Resumen previo al cierre para que el cajero pueda visualizar los totales
     por medio de pago, donaciones y retiros antes de ingresar el conteo final."""
-    result = await db.execute(
-        select(CashSession).where(CashSession.id == uuid.UUID(session_id))
-    )
-    session_obj = result.scalar_one_or_none()
-    if not session_obj:
+    recon = await get_session_reconciliation_data(db, session_id)
+    if not recon:
         return None
 
-    # 1. Total ventas y donaciones
-    sales_res = await db.execute(
-        select(
-            func.count(Sale.id).label("total_ventas"),
-            func.coalesce(func.sum(Sale.total), 0).label("total_cobrado"),
-            func.coalesce(func.sum(Sale.monto_donacion), 0).label("total_donaciones"),
-        ).where(
-            Sale.session_id == session_obj.id,
-            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
-        )
-    )
-    sales_row = sales_res.first()
-
-    # 2. Efectivo esperado por moneda
-    efectivo_pyg = await _efectivo_esperado_por_moneda(db, session_obj.id, "PYG")
-    efectivo_usd = await _efectivo_esperado_por_moneda(db, session_obj.id, "USD")
-    efectivo_brl = await _efectivo_esperado_por_moneda(db, session_obj.id, "BRL")
-
-    # 3. Desglose formas de pago
-    payments_res = await db.execute(
-        select(
-            SalePayment.forma_pago,
-            SalePayment.moneda,
-            func.count().label("cantidad"),
-            func.coalesce(func.sum(SalePayment.monto), 0).label("monto"),
-        )
-        .select_from(SalePayment)
-        .join(Sale, Sale.id == SalePayment.sale_id)
-        .where(
-            Sale.session_id == session_obj.id,
-            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
-        )
-        .group_by(SalePayment.forma_pago, SalePayment.moneda)
-        .order_by(func.sum(SalePayment.monto).desc())
-    )
-    payments_breakdown = [
-        {"forma_pago": fp, "moneda": mon, "cantidad": cant, "monto": float(monto)}
-        for fp, mon, cant, monto in payments_res.all()
-    ]
-
-    # 4. Retiros (Cash Drops) de esta sesión
+    # Drops detallados para UI
     cd_res = await db.execute(
-        select(CashDropRequest).where(CashDropRequest.session_id == session_obj.id).order_by(CashDropRequest.created_at.asc())
+        select(CashDropRequest).where(CashDropRequest.session_id == uuid.UUID(session_id)).order_by(CashDropRequest.created_at.asc())
     )
     drops = list(cd_res.scalars().all())
     drops_list = [
@@ -1777,58 +2115,56 @@ async def get_session_pre_close_summary(db: AsyncSession, session_id: str) -> di
         for d in drops
     ]
 
-    total_drops_confirmados_pyg = sum(float(d.monto_confirmado_pyg or d.monto_pyg or 0) for d in drops if d.estado == "confirmado")
-    total_drops_confirmados_usd = sum(float(d.monto_confirmado_usd or d.monto_usd or 0) for d in drops if d.estado == "confirmado")
-    total_drops_confirmados_brl = sum(float(d.monto_confirmado_brl or d.monto_brl or 0) for d in drops if d.estado == "confirmado")
-
-    monto_apertura = float(session_obj.monto_apertura or 0)
-    monto_apertura_usd = float(session_obj.monto_apertura_usd or 0)
-    monto_apertura_brl = float(session_obj.monto_apertura_brl or 0)
-
-    efectivo_en_gaveta_esperado_pyg = monto_apertura + float(efectivo_pyg) - total_drops_confirmados_pyg
-    efectivo_en_gaveta_esperado_usd = monto_apertura_usd + float(efectivo_usd) - total_drops_confirmados_usd
-    efectivo_en_gaveta_esperado_brl = monto_apertura_brl + float(efectivo_brl) - total_drops_confirmados_brl
-
+    # Medios no efectivo
     medios_no_efectivo = [
         {
-            "forma_pago": p["forma_pago"],
-            "moneda": p["moneda"],
-            "cantidad": p["cantidad"],
-            "monto": p["monto"],
-            "total": p["monto"],
+            "forma_pago": m["label"],
+            "moneda": "PYG",
+            "cantidad": 0,
+            "monto": m["monto_gs"],
+            "total": m["monto_gs"],
         }
-        for p in payments_breakdown
-        if p["forma_pago"].upper() != "EFECTIVO"
+        for m in recon["medios_pago_detallados"]
+        if "EFECTIVO" not in m.get("clave", "")
     ]
 
     return {
-        "session_id": str(session_obj.id),
-        "cajero_nombre": session_obj.cajero_nombre,
-        "fecha_apertura": session_obj.fecha_apertura.isoformat(),
-        "monto_apertura": monto_apertura,
-        "monto_apertura_pyg": monto_apertura,
-        "monto_apertura_usd": monto_apertura_usd,
-        "monto_apertura_brl": monto_apertura_brl,
-        "ventas_count": sales_row.total_ventas if sales_row else 0,
-        "total_ventas_count": sales_row.total_ventas if sales_row else 0,
-        "total_cobrado_pyg": float(sales_row.total_cobrado if sales_row else 0),
-        "total_donaciones_pyg": float(sales_row.total_donaciones if sales_row else 0),
-        "efectivo_pyg_esperado": float(efectivo_pyg),
-        "efectivo_usd_esperado": float(efectivo_usd),
-        "efectivo_brl_esperado": float(efectivo_brl),
-        "monto_cierre_esperado_pyg": monto_apertura + float(efectivo_pyg),
-        "monto_cierre_esperado_usd": monto_apertura_usd + float(efectivo_usd),
-        "monto_cierre_esperado_brl": monto_apertura_brl + float(efectivo_brl),
-        "efectivo_en_gaveta_esperado_pyg": efectivo_en_gaveta_esperado_pyg,
-        "efectivo_en_gaveta_esperado_usd": efectivo_en_gaveta_esperado_usd,
-        "efectivo_en_gaveta_esperado_brl": efectivo_en_gaveta_esperado_brl,
-        "desglose_formas_pago": payments_breakdown,
+        "session_id": recon["session_id"],
+        "cajero_nombre": recon["cajero_nombre"],
+        "register_nombre": recon["register_nombre"],
+        "fecha_apertura": recon["fecha_apertura_str"],
+        "fecha_cierre": recon["fecha_cierre_str"],
+        "monto_apertura": recon["fondo_pyg"],
+        "monto_apertura_pyg": recon["fondo_pyg"],
+        "monto_apertura_usd": recon["fondo_usd"],
+        "monto_apertura_brl": recon["fondo_brl"],
+        "fondo_total_gs": recon["fondo_total_gs"],
+        "tasa_brl": recon["tasa_brl"],
+        "tasa_usd": recon["tasa_usd"],
+        "ventas_count": recon["total_ventas_count"],
+        "total_ventas_count": recon["total_ventas_count"],
+        "total_cobrado_pyg": recon["total_cobrado_gs"],
+        "total_donaciones_pyg": 0.0,
+        "efectivo_pyg_esperado": recon["efectivo_pyg"],
+        "efectivo_usd_esperado": recon["efectivo_usd"],
+        "efectivo_brl_esperado": recon["efectivo_brl"],
+        "ventas_ef_total_gs": recon["ventas_ef_total_gs"],
+        "monto_cierre_esperado_pyg": recon["esperado_total_gs"],
+        "monto_cierre_esperado_usd": recon["fondo_usd"],
+        "monto_cierre_esperado_brl": recon["fondo_brl"],
+        "efectivo_en_gaveta_esperado_pyg": recon["esperado_total_gs"],
+        "efectivo_en_gaveta_esperado_usd": recon["fondo_usd"],
+        "efectivo_en_gaveta_esperado_brl": recon["fondo_brl"],
+        "desglose_formas_pago": recon["medios_pago_detallados"],
         "medios_no_efectivo": medios_no_efectivo,
         "cash_drops": drops_list,
-        "total_cash_drops_pyg": total_drops_confirmados_pyg,
-        "total_drops_confirmados_pyg": total_drops_confirmados_pyg,
-        "total_drops_confirmados_usd": total_drops_confirmados_usd,
-        "total_drops_confirmados_brl": total_drops_confirmados_brl,
+        "total_cash_drops_pyg": recon["total_drops_gs"],
+        "total_drops_confirmados_pyg": recon["total_drops_gs"],
+        "total_drops_confirmados_usd": 0.0,
+        "total_drops_confirmados_brl": 0.0,
+        "reconciliation": recon,
+        "ticket_text": recon["ticket_text"],
+        "ticket_escpos_b64": recon["ticket_escpos_b64"],
     }
 
 

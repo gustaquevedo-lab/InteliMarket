@@ -824,7 +824,8 @@ export default function POSPage() {
   const [donacionActiva, setDonacionActiva] = useState(false)
   const [montoDonacionManual, setMontoDonacionManual] = useState<number | null>(null)
   const [campanaActivaDonacion, setCampanaActivaDonacion] = useState<any>(null)
-
+  // Calculadora de Vuelto Mixto (R$ + Gs.)
+  const [vueltoMixtoBrl, setVueltoMixtoBrl] = useState<string>("")
   // Metodos de cobro activos -- reemplaza el viejo "paymentTab" de
   // seleccion unica (+ una pestana "Pago Mixto" que duplicaba cada campo).
   // Ahora cada metodo es un boton que se prende/apaga: con uno solo activo
@@ -3422,69 +3423,43 @@ export default function POSPage() {
 
   const handleReimprimirCierreEscPos = async (sessionSummary: any) => {
     try {
-      const summary = await api.caja.sessions.preCloseSummary(sessionSummary.id)
+      const data = await api.caja.sessions.ticketEscpos(sessionSummary.id)
       const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
-      const comp = JSON.parse(localStorage.getItem("pos_company_data") || "{}")
-      const W = 42
+      const b64 = data.ticket_escpos_b64
 
-      let t = ESCPOS_INIT
-      t += ESCPOS_ALIGN_CENTER
-      t += ESCPOS_BOLD_ON + (comp?.nombre_fantasia || comp?.razon_social || "EXTRA SUPERMERCADO MAYORISTA") + "\n" + ESCPOS_BOLD_OFF
-      if (comp?.ruc) t += `RUC: ${comp.ruc}\n`
-      t += "REIMPRESION DE ARQUEO / CIERRE\n"
-      t += escposDashes(W) + "\n"
-      t += ESCPOS_ALIGN_LEFT
-      t += `Cajero/a: ${sessionSummary.cajero_nombre || "-"}\n`
-      t += `Caja: ${sessionSummary.register_nombre || "Caja"}\n`
-      t += `Turno ID: ${sessionSummary.id.slice(0, 8).toUpperCase()}\n`
-      t += `Fecha Apertura: ${sessionSummary.fecha_apertura ? new Date(sessionSummary.fecha_apertura).toLocaleString("es-PY") : "-"}\n`
-      t += `Fecha Cierre:   ${sessionSummary.fecha_cierre ? new Date(sessionSummary.fecha_cierre).toLocaleString("es-PY") : "-"}\n`
-      t += escposDashes(W) + "\n"
-
-      t += ESCPOS_BOLD_ON + "[RESUMEN POR FORMA DE PAGO]\n" + ESCPOS_BOLD_OFF
-      if (summary?.desglose_formas_pago && summary.desglose_formas_pago.length > 0) {
-        for (const dp of summary.desglose_formas_pago) {
-          const lbl = (FORMA_PAGO_LABEL[dp.forma_pago] || dp.forma_pago) + (dp.moneda && dp.moneda !== "PYG" ? ` (${dp.moneda})` : "")
-          const val = dp.moneda === "PYG" ? `${formatPYG(dp.monto)}` : `${dp.moneda} ${Number(dp.monto).toFixed(2)}`
-          t += escposTwoCol(`  ${lbl} (${dp.cantidad || 0}):`, val, W) + "\n"
-        }
-      }
-
-      t += escposDashes(W) + "\n"
-      t += ESCPOS_BOLD_ON + "[CONCILIACION EN GUARANIES]\n" + ESCPOS_BOLD_OFF
-      t += escposTwoCol("  Fondo Apertura Gs:", formatPYG(sessionSummary.monto_apertura || 0), W) + "\n"
-      t += escposTwoCol("  Ventas Efectivo Gs:", formatPYG(summary?.efectivo_pyg_esperado || 0), W) + "\n"
-      t += escposTwoCol("  Total Esperado Gs:", formatPYG(sessionSummary.monto_cierre_esperado || (sessionSummary.monto_apertura + (summary?.efectivo_pyg_esperado || 0))), W) + "\n"
-      t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado en Gaveta:", formatPYG(sessionSummary.monto_cierre || 0), W) + ESCPOS_BOLD_OFF + "\n"
-      const difPyg = sessionSummary.diferencia || 0
-      t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA GS:", `${difPyg >= 0 ? "+" : ""}${formatPYG(difPyg)}`, W) + ESCPOS_BOLD_OFF + "\n"
-
-      if (sessionSummary.monto_apertura_brl > 0 || sessionSummary.diferencia_brl !== null) {
-        t += "\n" + ESCPOS_BOLD_ON + "[CONCILIACION EN REALES (R$)]\n" + ESCPOS_BOLD_OFF
-        t += escposTwoCol("  Fondo Inicial R$:", `R$ ${Number(sessionSummary.monto_apertura_brl || 0).toFixed(2)}`, W) + "\n"
-        t += escposTwoCol("  Ventas Efectivo R$:", `R$ ${Number(summary?.efectivo_brl_esperado || 0).toFixed(2)}`, W) + "\n"
-        const difBrl = sessionSummary.diferencia_brl || 0
-        t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA R$:", `${difBrl >= 0 ? "+" : ""}R$ ${Number(difBrl).toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
-      }
-
-      t += escposDashes(W) + "\n\n"
-      t += "Firma Cajero/a: _________________________\n\n"
-      t += "Firma Supervisora: ______________________\n\n\n\n\n\n"
-      t += GS + 'V' + '\x01'
-
-      const b64 = btoa(unescape(encodeURIComponent(t)))
       if ((window as any).electronAPI?.printEscPos) {
         const res = await (window as any).electronAPI.printEscPos(b64, tpl.nombre_impresora_windows || "ZKP8008")
         if (!res?.success) {
           toast.warning("No se pudo imprimir", res?.error || "Revise la impresora.")
           return
         }
+      } else {
+        const printWindow = window.open("", "_blank")
+        if (printWindow) {
+          printWindow.document.write(`
+            <html>
+              <head>
+                <title>Arqueo de Caja - InteliMarket</title>
+                <style>
+                  body { font-family: monospace; font-size: 12px; white-space: pre; margin: 0; padding: 10px; width: 300px; }
+                  @media print { @page { margin: 0; size: 80mm auto; } body { width: 100%; } }
+                </style>
+              </head>
+              <body>${data.ticket_text}</body>
+            </html>
+          `)
+          printWindow.document.close()
+          printWindow.focus()
+          printWindow.print()
+          printWindow.close()
+        }
       }
-      toast.success("Cierre Reimpreso", `Arqueo del turno ${sessionSummary.id.slice(0, 8)} enviado a la impresora ZKP8008.`)
+      toast.success("Cierre Reimpreso", `Arqueo del turno ${sessionSummary.id.slice(0, 8)} enviado a la impresora.`)
     } catch (e: any) {
       toast.warning("Error al reimprimir", e?.message || "Verifique la conexión.")
     }
   }
+
 
 
   // ── PRODUCTOS FALTANTES (DEMANDA PERDIDA) -> COMPRAS ────────────────────────
@@ -5133,6 +5108,7 @@ export default function POSPage() {
     resetBancardFlow()
     setDonacionActiva(false)
     setMontoDonacionManual(null)
+    setVueltoMixtoBrl("")
     setShowPaymentModal(true)
   }
 
@@ -8074,7 +8050,7 @@ export default function POSPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="p-3.5 rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-center shadow-sm space-y-1">
+                  <div className="p-3.5 rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-center shadow-sm space-y-2">
                     <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
                       {donacionActiva && montoDonacionEfectiva > 0 ? "Vuelto Limpio a Entregar" : "Vuelto a Entregar"}
                     </span>
@@ -8089,7 +8065,62 @@ export default function POSPage() {
                         US$ {(vueltoFinalPyg / rates.USD).toFixed(2)}
                       </span>
                     </div>
+
+                    {/* Calculadora de Vuelto Mixto (R$ + Gs.) */}
+                    {vueltoFinalPyg > 0 && rates.BRL > 0 && (
+                      <div className="mt-2 pt-2 border-t border-emerald-500/30 text-left space-y-1.5 bg-white/70 dark:bg-slate-900/70 p-2.5 rounded-xl">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          <span>💱 Vuelto Mixto (R$ + Gs.):</span>
+                          {vueltoMixtoBrl && (
+                            <button
+                              type="button"
+                              onClick={() => setVueltoMixtoBrl("")}
+                              className="text-[10px] text-slate-400 hover:text-rose-500 underline"
+                            >
+                              Limpiar
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-amber-600 dark:text-amber-400">R$</span>
+                          <input
+                            type="number"
+                            step="any"
+                            value={vueltoMixtoBrl}
+                            onChange={e => setVueltoMixtoBrl(e.target.value)}
+                            placeholder="¿Cuánto entregás en R$?"
+                            className="w-full text-xs font-mono font-bold px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                          />
+                        </div>
+                        {parseFloat(vueltoMixtoBrl) > 0 && (() => {
+                          const brlEntregado = parseFloat(vueltoMixtoBrl) || 0
+                          const brlEnGs = Math.round(brlEntregado * rates.BRL)
+                          const saldoGs = vueltoFinalPyg - brlEnGs
+                          if (saldoGs < 0) {
+                            return (
+                              <div className="text-[11px] text-rose-500 font-bold">
+                                ⚠️ Supera el vuelto total (sobran R$ {Math.abs(saldoGs / rates.BRL).toFixed(2)})
+                              </div>
+                            )
+                          }
+                          return (
+                            <div className="p-2 rounded-lg bg-emerald-100/70 dark:bg-emerald-950/60 border border-emerald-500/40 text-xs">
+                              <span className="text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold block">
+                                Saldo a entregar en Guaraníes:
+                              </span>
+                              <span className="text-base font-black font-posMono text-emerald-800 dark:text-emerald-200">
+                                {formatPYG(saldoGs)}
+                              </span>
+                              <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5 font-medium">
+                                👉 Entregar: <strong>R$ {brlEntregado.toFixed(2)}</strong> + <strong>{formatPYG(saldoGs)}</strong>
+                              </div>
+                            </div>
+                          )
+                        })()}
+                      </div>
+                    )}
                   </div>
+
                 )}
 
                 {/* Cliente Seleccionado Card */}

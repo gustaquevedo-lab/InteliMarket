@@ -180,6 +180,59 @@ export default function CajaPage() {
   const [cashDropMonto, setCashDropMonto] = useState("0")
   const [cashDropObs, setCashDropObs] = useState("")
 
+  // Reimpresión Térmica ESC/POS
+  const [escposModalOpen, setEscposModalOpen] = useState(false)
+  const [escposLoading, setEscposLoading] = useState(false)
+  const [escposTicketData, setEscposTicketData] = useState<{ session_id: string; ticket_text: string; ticket_escpos_b64: string; reconciliation: any } | null>(null)
+
+  const handleOpenEscposTicket = async (sessionId: string) => {
+    try {
+      setEscposLoading(true)
+      setEscposModalOpen(true)
+      const data = await api.caja.sessions.ticketEscpos(sessionId)
+      setEscposTicketData(data)
+    } catch (err: any) {
+      toast.error("Error al cargar ticket", err?.message || "No se pudo obtener el arqueo térmico.")
+      setEscposModalOpen(false)
+    } finally {
+      setEscposLoading(false)
+    }
+  }
+
+  const handlePrintEscpos = async () => {
+    if (!escposTicketData) return
+    try {
+      if ((window as any).electronAPI?.printEscPos) {
+        const res = await (window as any).electronAPI.printEscPos(escposTicketData.ticket_escpos_b64, "ZKP8008")
+        if (res?.success) {
+          toast.success("Imprimiendo", "Ticket enviado a la impresora térmica ZKP8008.")
+          return
+        }
+      }
+      const printWindow = window.open("", "_blank")
+      if (printWindow) {
+        printWindow.document.write(`
+          <html>
+            <head>
+              <title>Arqueo de Caja - InteliMarket</title>
+              <style>
+                body { font-family: monospace; font-size: 12px; white-space: pre; margin: 0; padding: 10px; width: 300px; }
+                @media print { @page { margin: 0; size: 80mm auto; } body { width: 100%; } }
+              </style>
+            </head>
+            <body>${escposTicketData.ticket_text}</body>
+          </html>
+        `)
+        printWindow.document.close()
+        printWindow.focus()
+        printWindow.print()
+        printWindow.close()
+      }
+    } catch (err: any) {
+      toast.error("Error al imprimir", err?.message || "Revise la impresora.")
+    }
+  }
+
   // Calculadora de Billetes
   const [conteoBilletes, setConteoBilletes] = useState<Record<number, number>>({})
 
@@ -1091,22 +1144,33 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           </span>
                         </td>
                         <td className="p-3.5 text-center">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await downloadPdf(`/v1/cash-sessions/${s.id}/export/cierre.pdf`, `cierre_caja_${s.id.slice(0, 8)}.pdf`)
-                                toast.success("Acta descargada", `Cierre ${s.id.slice(0, 8)} descargado.`)
-                              } catch {
-                                toast.error("Error", "No se pudo generar el PDF del cierre.")
-                              }
-                            }}
-                            title="Descargar Acta Oficial en PDF"
-                            className="p-1.5 rounded-lg border border-blue-200 dark:border-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 inline-flex items-center gap-1 font-bold text-[11px]"
-                          >
-                            <FileText className="w-3.5 h-3.5" />
-                            PDF
-                          </button>
+                          <div className="inline-flex items-center gap-1.5 justify-center">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEscposTicket(s.id)}
+                              title="Reimprimir Arqueo Térmico ESC/POS (80mm)"
+                              className="p-1.5 rounded-lg border border-amber-300 dark:border-amber-700/50 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              ESC/POS
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await downloadPdf(`/v1/cash-sessions/${s.id}/export/cierre.pdf`, `cierre_caja_${s.id.slice(0, 8)}.pdf`)
+                                  toast.success("Acta descargada", `Cierre ${s.id.slice(0, 8)} descargado.`)
+                                } catch {
+                                  toast.error("Error", "No se pudo generar el PDF del cierre.")
+                                }
+                              }}
+                              title="Descargar Acta Oficial en PDF"
+                              className="p-1.5 rounded-lg border border-blue-200 dark:border-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 inline-flex items-center gap-1 font-bold text-[11px]"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              PDF
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -2438,6 +2502,96 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
             <div className="text-center text-[10px] text-slate-400 pt-4 border-t border-slate-100">
               Conocé más y auditá las obras de la campaña en: <strong className="text-blue-600">www.centroamoresperanza.org</strong>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REIMPRESIÓN TÉRMICA ESC/POS */}
+      {escposModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                  <Printer className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">Reimpresión de Arqueo Térmico</h3>
+                  <p className="text-xs text-slate-400 font-mono">Formato ESC/POS 80mm · Consolidación en Guaraníes</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEscposModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {escposLoading ? (
+              <div className="py-16 text-center space-y-3">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-amber-400" />
+                <p className="text-xs text-slate-400">Generando reconciliación y ticket térmico...</p>
+              </div>
+            ) : escposTicketData ? (
+              <div className="space-y-4">
+                {/* Visualizador del ticket estilo papel térmico */}
+                <div className="bg-amber-50 dark:bg-slate-950 p-4 rounded-xl border border-amber-200/60 dark:border-slate-800 font-mono text-[11px] leading-relaxed text-slate-800 dark:text-amber-100 shadow-inner max-h-[420px] overflow-y-auto whitespace-pre selection:bg-amber-300 selection:text-slate-900">
+                  {escposTicketData.ticket_text}
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(escposTicketData.ticket_text)
+                        toast.success("Copiado", "Texto del ticket copiado al portapapeles.")
+                      }}
+                      className="btn-ghost text-xs text-slate-300 hover:text-white"
+                    >
+                      Copiar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const blob = new Blob([escposTicketData.ticket_text], { type: "text/plain;charset=utf-8" })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement("a")
+                        a.href = url
+                        a.download = `cierre_caja_${escposTicketData.session_id.slice(0, 8)}.txt`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                      className="btn-ghost text-xs text-slate-300 hover:text-white"
+                    >
+                      Descargar .txt
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEscposModalOpen(false)}
+                      className="btn-ghost text-xs text-slate-400 hover:text-white"
+                    >
+                      Cerrar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePrintEscpos}
+                      className="btn-primary text-xs !bg-amber-500 hover:!bg-amber-600 !text-slate-950 font-bold flex items-center gap-1.5 shadow-lg shadow-amber-500/20"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Imprimir Ticket
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="py-12 text-center text-slate-400 text-xs">
+                No se pudo cargar el ticket térmico.
+              </div>
+            )}
           </div>
         </div>
       )}
