@@ -3315,6 +3315,8 @@ export default function POSPage() {
         customer_id: updated.customer_id ?? (selectedCustomer?.id ? String(selectedCustomer.id) : sale.customer_id),
         customer: selectedCustomer || sale.customer,
         observaciones: updated.observaciones,
+        recibo_escpos_b64: updated.recibo_escpos_b64 || sale.recibo_escpos_b64,
+        recibo_html: updated.recibo_html || sale.recibo_html,
       } as Sale
       setReimprimirSales(prev => prev.map(s => s.id === sale.id ? saleActualizada : s))
       setReabrirPagoSaleId(null)

@@ -602,6 +602,185 @@ async def reopen_sale_customer(
     return sale
 
 
+async def build_sale_receipt_escpos(
+    db: AsyncSession,
+    sale_id: uuid.UUID,
+    nueva_forma_pago: str | None = None,
+    cust_override = None,
+) -> tuple[str, str]:
+    """Genera el texto plano y el payload binario base64 ESC/POS de un ticket de venta.
+    Refleja fielmente la condición, forma de pago, cliente/socio y talón de pagaré si es Extra Club.
+    """
+    import base64
+    from api.src.customers.models import Customer
+    from api.src.products.models import Product
+    from api.src.caja.models import CashSession
+
+    s_res = await db.execute(select(Sale).where(Sale.id == sale_id))
+    sale = s_res.scalar_one_or_none()
+    if not sale:
+        return "", ""
+
+    cust = cust_override
+    if not cust and sale.customer_id:
+        c_res = await db.execute(select(Customer).where(Customer.id == sale.customer_id))
+        cust = c_res.scalar_one_or_none()
+
+    cajero_nombre = "Cajero"
+    if sale.session_id:
+        cs_res = await db.execute(select(CashSession).where(CashSession.id == sale.session_id))
+        cs = cs_res.scalar_one_or_none()
+        if cs and cs.cajero_nombre:
+            cajero_nombre = cs.cajero_nombre
+
+    # Items
+    items_res = await db.execute(
+        select(SaleItem, Product)
+        .outerjoin(Product, Product.id == SaleItem.product_id)
+        .where(SaleItem.sale_id == sale.id)
+        .order_by(SaleItem.id.asc())
+    )
+    items_data = items_res.all()
+
+    # Pagos
+    pm_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
+    payments = list(pm_res.scalars().all())
+
+    W = 42
+    def pad_two_col(left, right, width=W):
+        l = str(left)
+        r = str(right)
+        spaces = max(1, width - len(l) - len(r))
+        return l + (" " * spaces) + r
+
+    def dashes(width=W):
+        return "-" * width
+
+    def fmt_gs(val):
+        return f"{int(round(float(val or 0))):,}".replace(",", ".")
+
+    forma_pago_efectiva = (nueva_forma_pago or (payments[0].forma_pago if payments else "EFECTIVO")).upper()
+    is_credito = (
+        (sale.condicion or "").lower() == "credito"
+        or forma_pago_efectiva in ("EXTRA_CLUB", "CREDITO")
+        or any(p.forma_pago in ("EXTRA_CLUB", "CREDITO") for p in payments)
+    )
+    tipo_doc = "FACTURA CREDITO" if is_credito else "FACTURA CONTADO"
+
+    lines = []
+    lines.append("EXTRA SUPERMERCADO MAYORISTA".center(W))
+    lines.append("GRUPO SANTA TERESA E.A.S.".center(W))
+    lines.append("RUC: 80150377-9".center(W))
+    lines.append("Avda. San Blas e/ Avda. Mons. Rodriguez".center(W))
+    lines.append("Ciudad del Este - Paraguay".center(W))
+    lines.append("Tel: 0983 500 000".center(W))
+    lines.append("Timbrado No: 18545636 - Valido: 31/12/2026".center(W))
+    lines.append(dashes())
+    lines.append(f"{tipo_doc} No: {sale.numero or ''}")
+    if sale.numero_interno:
+        lines.append(f"No Venta: {sale.numero_interno}")
+    fecha_str = sale.fecha.strftime("%d/%m/%Y %H:%M") if sale.fecha else datetime.now().strftime("%d/%m/%Y %H:%M")
+    lines.append(f"Fecha/Hora: {fecha_str}")
+    lines.append(f"Condicion: {'CREDITO' if is_credito else 'CONTADO'}")
+    lines.append(f"Cajero: {cajero_nombre}")
+
+    cliente_nombre = "CONSUMIDOR FINAL"
+    cliente_doc = "4444444-3"
+    empresa_vinculada = ""
+    if cust:
+        cliente_nombre = cust.razon_social or cust.nombre_fantasia or "CONSUMIDOR FINAL"
+        cliente_doc = cust.ci or cust.ruc or "-"
+        if cust.empresa_vinculada_nombre:
+            empresa_vinculada = cust.empresa_vinculada_nombre.strip()
+            if cust.empresa_vinculada_ruc:
+                empresa_vinculada += f" ({cust.empresa_vinculada_ruc})"
+
+    lines.append(f"Cliente: {cliente_nombre[:32]}")
+    lines.append(f"RUC/CI: {cliente_doc}")
+    if empresa_vinculada:
+        lines.append(f"Empresa: {empresa_vinculada[:32]}")
+    lines.append(dashes())
+    lines.append(pad_two_col("DESCRIPCION / DETALLE", "TOTAL (GS)"))
+    lines.append(dashes())
+
+    for row in items_data:
+        si = row[0]
+        prod = row[1]
+        p_name = prod.nombre if prod and prod.nombre else (si.descripcion or "PRODUCTO")
+        p_code = prod.codigo_barra if prod and prod.codigo_barra else (prod.sku if prod else "")
+        cant = float(si.cantidad or 0)
+        pu = float(si.precio_unitario or 0)
+        tot = float(si.total or 0)
+        cant_str = f"{cant:.3f} KG" if cant % 1 != 0 else f"{int(cant)} UN"
+        cod_str = f" [{p_code}]" if p_code else ""
+        lines.append(p_name[:W])
+        lines.append(pad_two_col(f"  {cant_str} x {fmt_gs(pu)}{cod_str}", fmt_gs(tot)))
+
+    lines.append(dashes())
+    lines.append(pad_two_col("TOTAL A PAGAR:", f"GS. {fmt_gs(sale.total)}"))
+    if sale.descuento_total and float(sale.descuento_total) > 0:
+        lines.append(pad_two_col("AHORRO TOTAL PROMOS:", f"-GS. {fmt_gs(sale.descuento_total)}"))
+
+    lines.append(dashes())
+    lines.append("Medios de Pago Utilizados:")
+    if nueva_forma_pago:
+        lines.append(pad_two_col(f"  {nueva_forma_pago.upper()}:", f"GS. {fmt_gs(sale.total)}"))
+    elif payments:
+        for p in payments:
+            fp = p.forma_pago or "EFECTIVO"
+            m = float(p.monto or 0)
+            if p.moneda == "BRL":
+                m_str = f"R$ {m:.2f}"
+            elif p.moneda == "USD":
+                m_str = f"US$ {m:.2f}"
+            else:
+                m_str = f"GS. {fmt_gs(m)}"
+            lines.append(pad_two_col(f"  {fp}:", m_str))
+    else:
+        fp = "EXTRA_CLUB" if is_credito else "EFECTIVO"
+        lines.append(pad_two_col(f"  {fp}:", f"GS. {fmt_gs(sale.total)}"))
+
+    if is_credito:
+        lines.append(dashes())
+        lines.append(f"Cliente: {cliente_nombre.upper()[:32]}")
+        lines.append(f"C.I./RUC: {cliente_doc}")
+        if empresa_vinculada:
+            lines.append(f"Empresa: {empresa_vinculada[:32]}")
+        lines.append("")
+        lines.append("")
+        lines.append("----------------------------".center(W))
+        lines.append("Firma del cliente".center(W))
+        lines.append("Factura a credito Extra Club".center(W))
+        lines.append("Documento con valor para cobro".center(W))
+
+    lines.append("")
+    lines.append("GRACIAS POR SU PREFERENCIA".center(W))
+    lines.append("EXTRA SUPERMERCADO MAYORISTA".center(W))
+    lines.append("")
+    lines.append("")
+
+    ticket_text = "\n".join(lines)
+
+    # Binario ESC/POS
+    ESC = b"\x1b"
+    GS = b"\x1d"
+    b_stream = bytearray()
+    b_stream.extend(ESC + b"@")
+    b_stream.extend(ESC + b"t\x00")
+    for l in lines:
+        if any(w in l for w in ["EXTRA SUPERMERCADO", "TOTAL", "FACTURA", "Firma", "GRACIAS"]):
+            b_stream.extend(ESC + b"E\x01")
+            b_stream.extend(l.encode("latin1", errors="replace") + b"\n")
+            b_stream.extend(ESC + b"E\x00")
+        else:
+            b_stream.extend(l.encode("latin1", errors="replace") + b"\n")
+    b_stream.extend(b"\n\n\n\n")
+    b_stream.extend(GS + b"V\x01")
+
+    b64 = base64.b64encode(b_stream).decode("ascii")
+    return ticket_text, b64
+
+
 async def reopen_sale_payment(
     db: AsyncSession,
     sale_id: str,
@@ -614,10 +793,13 @@ async def reopen_sale_payment(
     """Cambia la forma de pago de una venta ya cerrada y opcionalmente vincula al socio cliente.
 
     Esta es una operación de alto riesgo contable:
-    - Solo debe ejecutarse en ventas del turno activo (validado en frontend).
+    - Solo debe ejecutarse en ventas del turno activo o autorizadas por supervisor.
     - Requiere autorización de supervisor y motivo descriptivo.
     - Deja trazabilidad completa en `observaciones` (no borra el dato anterior).
     - Actualiza `customer_id` (si se provee), `condicion` y los registros en `sale_payments`.
+    - Regenera fielmente el ticket térmico ESC/POS con el nuevo medio y cliente.
+    - Si la caja del cajero ya está cerrada, reajusta automáticamente `cash_counts.diferencia`.
+    - Actualiza la línea de crédito (`credito_usado`) del socio.
     """
     from .schemas import FORMAS_PAGO_VALIDAS
     if nueva_forma_pago.upper() not in FORMAS_PAGO_VALIDAS:
@@ -636,6 +818,7 @@ async def reopen_sale_payment(
     )
 
     socio_nombre = ""
+    cust_obj = None
     if customer_id:
         sale.customer_id = uuid.UUID(customer_id)
         from api.src.customers.models import Customer
@@ -666,6 +849,29 @@ async def reopen_sale_payment(
             fecha=sale.fecha or datetime.now(timezone.utc),
         ))
 
+    # Actualizar crédito del socio si corresponde
+    if cust_obj:
+        if nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO") and forma_pago_anterior not in ("EXTRA_CLUB", "CREDITO"):
+            cust_obj.credito_usado = (cust_obj.credito_usado or Decimal("0")) + (sale.total or Decimal("0"))
+        elif forma_pago_anterior in ("EXTRA_CLUB", "CREDITO") and nueva_forma_pago.upper() not in ("EXTRA_CLUB", "CREDITO"):
+            cust_obj.credito_usado = max(Decimal("0"), (cust_obj.credito_usado or Decimal("0")) - (sale.total or Decimal("0")))
+
+    # Reconciliar o ajustar CashCount si la sesión ya fue cerrada
+    if sale.session_id:
+        from api.src.caja.models import CashCount
+        cc_res = await db.execute(
+            select(CashCount)
+            .where(CashCount.session_id == sale.session_id)
+            .order_by(CashCount.created_at.desc())
+        )
+        cc = cc_res.scalars().first()
+        if cc:
+            monto_cambio = Decimal(str(sale.total or 0))
+            if forma_pago_anterior == "EFECTIVO" and nueva_forma_pago.upper() != "EFECTIVO":
+                cc.diferencia = (cc.diferencia or Decimal("0")) + monto_cambio
+            elif forma_pago_anterior != "EFECTIVO" and nueva_forma_pago.upper() == "EFECTIVO":
+                cc.diferencia = (cc.diferencia or Decimal("0")) - monto_cambio
+
     ts = datetime.now(timezone.utc).isoformat()
     socio_txt = f" | Socio: {socio_nombre} (ID: {customer_id})" if customer_id else ""
     nota_auditoria = (
@@ -679,12 +885,20 @@ async def reopen_sale_payment(
         if sale.observaciones
         else nota_auditoria
     )
+
+    # Regenerar fielmente el ticket térmico ESC/POS y HTML con la nueva forma de pago y socio
+    ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, nueva_forma_pago.upper(), cust_obj)
+    if ticket_b64:
+        sale.recibo_escpos_b64 = ticket_b64
+        sale.recibo_html = ticket_text
+
     await db.commit()
     await db.refresh(sale)
     setattr(sale, "forma_pago", nueva_forma_pago.upper())
     if socio_nombre:
         setattr(sale, "customer_nombre", socio_nombre)
     return sale
+
 
 
 async def list_sales(
