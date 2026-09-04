@@ -167,7 +167,8 @@ const navGroups: NavGroup[] = [
       { icon: Fingerprint, label: "Auditoría & Riesgos", path: "/audit" },
       { icon: Settings, label: "Configuración", path: "/settings" },
       { icon: Building, label: "Sucursales", path: "/branches" },
-      { icon: ShieldCheck, label: "Usuarios & Permisos (RBAC)", path: "/rbac" },
+      { icon: Users, label: "Gestión de Usuarios", path: "/usuarios" },
+      { icon: ShieldCheck, label: "Permisos & Roles (RBAC)", path: "/rbac" },
     ]
   },
 ]
