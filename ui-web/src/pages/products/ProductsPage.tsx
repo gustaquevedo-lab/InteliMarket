@@ -5,7 +5,7 @@ import {
   TrendingUp, TrendingDown, Percent, Sparkles, Building2, ShoppingCart,
   ArrowUpDown, CheckCircle2, ShieldAlert, Scale, ChevronDown, ChevronRight,
   Filter, Calendar, Clock, RefreshCw, Box, ExternalLink, ArrowRight,
-  HelpCircle, Info, BookOpen, Gift, Check, Palette, Cpu
+  HelpCircle, Info, BookOpen, Gift, Check, Palette, Cpu, Zap, Copy
 } from "lucide-react"
 import {
   api,
@@ -19,6 +19,18 @@ import {
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG } from "../../utils/format"
+
+// Presets rápidos para carga veloz de códigos de pack/caja
+const PACK_PRESETS = [
+  { label: "Pack x6", unidades: 6, tag: "Pack x6" },
+  { label: "Pack x12", unidades: 12, tag: "Pack x12" },
+  { label: "Fardo x12", unidades: 12, tag: "Fardo x12" },
+  { label: "Caja x24", unidades: 24, tag: "Caja x24" },
+  { label: "Caja x48", unidades: 48, tag: "Caja x48" },
+  { label: "Display x12", unidades: 12, tag: "Display x12" },
+  { label: "Six-Pack", unidades: 6, tag: "Six-Pack" },
+  { label: "Pack x4", unidades: 4, tag: "Pack x4" },
+]
 
 // Buscador de productos con autocompletado por código de barra / SKU / nombre,
 // para reemplazar los <select> que intentaban listar los ~11.000 productos de
@@ -74,7 +86,7 @@ function ProductSearchPicker({
           type="button"
           disabled={disabled}
           onClick={() => { setQuery(""); setOpen(true) }}
-          className="input-field w-full text-xs font-bold flex items-center justify-between disabled:opacity-60"
+          className="input-field w-full text-xs font-bold flex items-center justify-between disabled:opacity-60 bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800"
         >
           <span className="truncate text-left">{selectedProduct.nombre} <span className="font-mono text-slate-400 font-normal">(SKU: {selectedProduct.sku})</span></span>
           {!disabled && (
@@ -94,7 +106,7 @@ function ProductSearchPicker({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => setOpen(true)}
-            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onBlur={() => setTimeout(() => setOpen(false), 200)}
             placeholder={placeholder}
             className="input-field w-full text-xs font-bold pl-8"
           />
@@ -102,23 +114,33 @@ function ProductSearchPicker({
       )}
 
       {open && query.trim().length >= 2 && (
-        <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg">
+        <div className="absolute z-[100] mt-1 w-full max-h-72 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl">
           {loading ? (
-            <div className="p-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando...
+            <div className="p-3.5 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" /> Buscando productos...
             </div>
           ) : results.length === 0 ? (
-            <div className="p-3 text-center text-xs text-slate-400">Sin resultados para "{query}"</div>
+            <div className="p-3.5 text-center text-xs text-slate-400">Sin resultados para "{query}"</div>
           ) : (
             results.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 onMouseDown={(e) => { e.preventDefault(); onSelect(p); setQuery(""); setOpen(false) }}
-                className="w-full text-left px-3 py-2 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-b border-slate-100 dark:border-slate-700/60 last:border-0"
+                className="w-full text-left px-3.5 py-2.5 hover:bg-amber-50 dark:hover:bg-amber-950/40 border-b border-slate-100 dark:border-slate-700/60 last:border-0 flex items-center justify-between gap-3 transition-colors"
               >
-                <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{p.nombre}</div>
-                <div className="text-[10px] font-mono text-slate-400">SKU: {p.sku || "—"} · Cod: {p.codigo_barra || "—"}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{p.nombre}</div>
+                  <div className="text-[10px] font-mono text-slate-400 flex items-center gap-2 mt-0.5">
+                    {p.codigo_barra && <span>Cod: <strong className="text-slate-600 dark:text-slate-300">{p.codigo_barra}</strong></span>}
+                    {p.sku && <span>SKU: {p.sku}</span>}
+                  </div>
+                </div>
+                {p.precio_venta != null && (
+                  <span className="text-[11px] font-mono font-bold text-amber-600 dark:text-amber-400 shrink-0">
+                    Gs. {Number(p.precio_venta).toLocaleString("es-PY")}
+                  </span>
+                )}
               </button>
             ))
           )}
@@ -200,8 +222,14 @@ export default function ProductsPage() {
   })
 
   // Módulo de Códigos de Pack/Caja (1 codigo = N unidades del mismo producto)
-  const [selectedPackParentProductId, setSelectedPackParentProductId] = useState<string>("")
-  const [selectedPackProduct, setSelectedPackProduct] = useState<Product | null>(null)
+  // Estado del Filtro de la Tabla:
+  const [packFilterProductId, setPackFilterProductId] = useState<string>("")
+  const [packFilterProduct, setPackFilterProduct] = useState<Product | null>(null)
+  const [packSearchQuery, setPackSearchQuery] = useState<string>("")
+
+  // Estado del Modal de Creación / Edición:
+  const [packModalProductId, setPackModalProductId] = useState<string>("")
+  const [packModalProduct, setPackModalProduct] = useState<Product | null>(null)
   const [showPackBarcodeModal, setShowPackBarcodeModal] = useState(false)
   const [savingPackBarcode, setSavingPackBarcode] = useState(false)
   const [editingPackBarcode, setEditingPackBarcode] = useState<PackBarcode | null>(null)
@@ -306,14 +334,14 @@ export default function ProductsPage() {
   const loadPackBarcodes = useCallback(async () => {
     setLoadingPackBarcodes(true)
     try {
-      const v = await api.products.packBarcodes.list(selectedPackParentProductId || undefined)
-      setPackBarcodesList(v)
+      const v = await api.products.packBarcodes.list(packFilterProductId || undefined)
+      setPackBarcodesList(v || [])
     } catch (e: any) {
       // fallback
     } finally {
       setLoadingPackBarcodes(false)
     }
-  }, [selectedPackParentProductId])
+  }, [packFilterProductId])
 
   useEffect(() => {
     loadStats()
@@ -498,11 +526,21 @@ export default function ProductsPage() {
     }
   }
 
-  // Guardar Código de Pack/Caja
-  const handleSavePackBarcode = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedPackParentProductId || !packBarcodeForm.codigo_barra.trim() || !packBarcodeForm.etiqueta.trim()) {
-      toast.error("Datos requeridos", "Seleccioná el producto, y completá el código de barra y la etiqueta (ej. \"Caja x24\").")
+  // Abrir Modal de Alta de Pack (opcionalmente con producto pre-cargado)
+  const handleOpenCreatePackModal = (preselected?: Product | null) => {
+    setEditingPackBarcode(null)
+    setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
+    const prod = preselected !== undefined ? preselected : (packFilterProduct || null)
+    setPackModalProduct(prod)
+    setPackModalProductId(prod?.id || "")
+    setShowPackBarcodeModal(true)
+  }
+
+  // Guardar Código de Pack/Caja (soporta modo normal y modo "guardar y añadir otro")
+  const handleSavePackBarcode = async (e?: React.FormEvent, keepProduct = false) => {
+    if (e) e.preventDefault()
+    if (!packModalProductId || !packBarcodeForm.codigo_barra.trim() || !packBarcodeForm.etiqueta.trim()) {
+      toast.error("Datos requeridos", "Seleccioná el producto base y completá el código de barras y la etiqueta.")
       return
     }
     if (Number(packBarcodeForm.unidades_por_paquete) <= 0) {
@@ -512,24 +550,34 @@ export default function ProductsPage() {
     setSavingPackBarcode(true)
     try {
       if (editingPackBarcode) {
-        await api.products.packBarcodes.update(selectedPackParentProductId, editingPackBarcode.id, {
+        await api.products.packBarcodes.update(packModalProductId, editingPackBarcode.id, {
           codigo_barra: packBarcodeForm.codigo_barra.trim(),
           etiqueta: packBarcodeForm.etiqueta.trim(),
           unidades_por_paquete: Number(packBarcodeForm.unidades_por_paquete),
         })
         toast.success("Código de Pack Actualizado", `"${packBarcodeForm.etiqueta}" guardado correctamente.`)
       } else {
-        await api.products.packBarcodes.create(selectedPackParentProductId, {
+        await api.products.packBarcodes.create(packModalProductId, {
           codigo_barra: packBarcodeForm.codigo_barra.trim(),
           etiqueta: packBarcodeForm.etiqueta.trim(),
           unidades_por_paquete: Number(packBarcodeForm.unidades_por_paquete),
         })
         toast.success("Código de Pack Creado", `"${packBarcodeForm.etiqueta}" agregado al producto.`)
       }
-      setShowPackBarcodeModal(false)
-      setEditingPackBarcode(null)
-      setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
-      loadPackBarcodes()
+
+      await loadPackBarcodes()
+
+      if (keepProduct && !editingPackBarcode) {
+        // Mantiene el producto base seleccionado y resetea solo los datos del pack para el siguiente
+        setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
+        toast.info("Listo para el siguiente", `Podés escanear o cargar la siguiente presentación para "${packModalProduct?.nombre || 'este producto'}".`)
+      } else {
+        setShowPackBarcodeModal(false)
+        setEditingPackBarcode(null)
+        setPackModalProductId("")
+        setPackModalProduct(null)
+        setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
+      }
     } catch (e: any) {
       toast.error("Error al guardar código de pack", e.message)
     } finally {
@@ -539,8 +587,13 @@ export default function ProductsPage() {
 
   const handleEditPackBarcodeClick = (pb: PackBarcode) => {
     setEditingPackBarcode(pb)
-    setSelectedPackParentProductId(pb.product_id)
-    setSelectedPackProduct({ id: pb.product_id, nombre: pb.product_nombre || "Producto", sku: pb.product_sku || "" } as Product)
+    setPackModalProductId(pb.product_id)
+    setPackModalProduct({
+      id: pb.product_id,
+      nombre: pb.product_nombre || "Producto Base",
+      sku: pb.product_sku || "",
+      codigo_barra: (pb as any).product_codigo_barra || "",
+    } as Product)
     setPackBarcodeForm({
       codigo_barra: pb.codigo_barra,
       etiqueta: pb.etiqueta,
@@ -552,7 +605,7 @@ export default function ProductsPage() {
   const handleDeletePackBarcode = async (pb: PackBarcode) => {
     const ok = await confirm({
       title: "Eliminar Código de Pack",
-      message: `¿Desea eliminar el código de pack "${pb.etiqueta}" (${pb.codigo_barra})?`,
+      message: `¿Desea eliminar el código de pack "${pb.etiqueta}" (${pb.codigo_barra}) de "${pb.product_nombre || 'Producto'}"?`,
       confirmText: "Eliminar",
     })
     if (!ok) return
@@ -1280,27 +1333,49 @@ export default function ProductsPage() {
             </div>
           </div>
 
-          {/* Panel de Control */}
-          <div className="card p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="w-full sm:w-96">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                Filtrar por Producto:
-              </label>
-              <ProductSearchPicker
-                selectedProduct={selectedPackProduct}
-                onSelect={(p) => { setSelectedPackParentProductId(p.id); setSelectedPackProduct(p) }}
-                onClear={() => { setSelectedPackParentProductId(""); setSelectedPackProduct(null) }}
-                placeholder="Todos los productos con códigos de pack... (buscar por código, SKU o nombre)"
-              />
+          {/* Panel de Control y Filtros */}
+          <div className="card p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto flex-1">
+              <div className="w-full sm:w-80">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                  Filtrar por Producto Base:
+                </label>
+                <ProductSearchPicker
+                  selectedProduct={packFilterProduct}
+                  onSelect={(p) => { setPackFilterProductId(p.id); setPackFilterProduct(p) }}
+                  onClear={() => { setPackFilterProductId(""); setPackFilterProduct(null) }}
+                  placeholder="Todos los productos... (código, SKU o nombre)"
+                />
+              </div>
+
+              <div className="w-full sm:w-64">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                  Buscar en la lista:
+                </label>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={packSearchQuery}
+                    onChange={(e) => setPackSearchQuery(e.target.value)}
+                    placeholder="Filtrar por etiqueta o código..."
+                    className="input-field w-full text-xs pl-8 py-2"
+                  />
+                  {packSearchQuery && (
+                    <button
+                      onClick={() => setPackSearchQuery("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             <button
-              onClick={() => {
-                setEditingPackBarcode(null)
-                setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
-                setShowPackBarcodeModal(true)
-              }}
-              className="btn-primary text-xs px-4 py-2.5 flex items-center gap-1.5 shadow-md self-end sm:self-auto"
+              onClick={() => handleOpenCreatePackModal()}
+              className="btn-primary text-xs px-4 py-2.5 flex items-center gap-2 shadow-md shrink-0 w-full sm:w-auto justify-center"
             >
               <Plus className="w-4 h-4" /> + Nuevo Código de Pack
             </button>
@@ -1314,56 +1389,107 @@ export default function ProductsPage() {
                 <p className="text-xs font-semibold text-slate-500">Cargando códigos de pack...</p>
               </div>
             ) : packBarcodesList.length === 0 ? (
-              <div className="p-16 text-center text-slate-400 space-y-2">
-                <Box className="w-10 h-10 mx-auto opacity-40 text-amber-500" />
-                <p className="text-sm font-bold text-slate-700 dark:text-slate-300">No hay códigos de pack registrados</p>
-                <p className="text-xs">Hacé clic en "+ Nuevo Código de Pack" para registrar el código de una caja o pack.</p>
+              <div className="p-16 text-center text-slate-400 space-y-3">
+                <div className="w-14 h-14 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center mx-auto shadow-inner">
+                  <Box className="w-7 h-7" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-700 dark:text-slate-200">No hay códigos de pack registrados</p>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+                    {packFilterProduct
+                      ? `No hay presentaciones registradas para "${packFilterProduct.nombre}". Podés crear la primera ahora.`
+                      : "Hacé clic en \"+ Nuevo Código de Pack\" para registrar cajas, packs o fardos asociados a productos sueltos."}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleOpenCreatePackModal()}
+                  className="btn-primary text-xs px-4 py-2 inline-flex items-center gap-1.5 shadow"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Crear presentación
+                </button>
               </div>
             ) : (
-              <table className="w-full text-left text-xs min-w-[700px]">
-                <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-800">
-                  <tr>
-                    <th className="p-3.5">Producto Base</th>
-                    <th className="p-3.5">Etiqueta</th>
-                    <th className="p-3.5">Código de Barras (Caja/Pack)</th>
-                    <th className="p-3.5 text-right">Unidades por Paquete</th>
-                    <th className="p-3.5 text-right pr-4">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                  {packBarcodesList.map((pb) => (
-                    <tr key={pb.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="p-3.5 font-bold text-slate-900 dark:text-white">
-                        {pb.product_nombre || "Producto Base"}
-                        {pb.product_sku && <span className="block text-[10px] font-mono text-slate-400 font-normal">SKU: {pb.product_sku}</span>}
-                      </td>
-                      <td className="p-3.5 font-black text-amber-600 dark:text-amber-400 text-sm">
-                        {pb.etiqueta}
-                      </td>
-                      <td className="p-3.5 font-mono text-slate-600">{pb.codigo_barra}</td>
-                      <td className="p-3.5 text-right font-mono font-bold text-slate-900 dark:text-white">
-                        {Number(pb.unidades_por_paquete)}
-                      </td>
-                      <td className="p-3.5 text-right pr-4">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => handleEditPackBarcodeClick(pb)}
-                            className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeletePackBarcode(pb)}
-                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[700px]">
+                  <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="p-3.5">Producto Base</th>
+                      <th className="p-3.5">Presentación / Etiqueta</th>
+                      <th className="p-3.5 text-center">Multiplicador</th>
+                      <th className="p-3.5">Código de Barras (Caja/Pack)</th>
+                      <th className="p-3.5 text-right pr-4">Acciones</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                    {packBarcodesList
+                      .filter((pb) => {
+                        if (!packSearchQuery.trim()) return true
+                        const q = packSearchQuery.trim().toLowerCase()
+                        return (
+                          (pb.product_nombre || "").toLowerCase().includes(q) ||
+                          (pb.product_sku || "").toLowerCase().includes(q) ||
+                          (pb.codigo_barra || "").toLowerCase().includes(q) ||
+                          (pb.etiqueta || "").toLowerCase().includes(q)
+                        )
+                      })
+                      .map((pb) => (
+                        <tr key={pb.id} className="hover:bg-amber-50/30 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3.5 font-bold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate max-w-xs">{pb.product_nombre || "Producto Base"}</span>
+                            </div>
+                            {pb.product_sku && (
+                              <span className="block text-[10px] font-mono text-slate-400 font-normal mt-0.5">
+                                SKU: {pb.product_sku}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3.5">
+                            <span className="inline-flex items-center gap-1.5 font-black text-amber-700 dark:text-amber-300 text-xs bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-200/60 dark:border-amber-900/50">
+                              <Box className="w-3.5 h-3.5 text-amber-500" />
+                              {pb.etiqueta}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-center">
+                            <span className="inline-flex items-center font-mono font-black text-xs px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+                              × {Number(pb.unidades_por_paquete)} un.
+                            </span>
+                          </td>
+                          <td className="p-3.5">
+                            <span className="font-mono text-xs text-slate-700 dark:text-slate-300 font-semibold bg-slate-100/80 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">
+                              {pb.codigo_barra}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right pr-4">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleOpenCreatePackModal({ id: pb.product_id, nombre: pb.product_nombre || "Producto", sku: pb.product_sku || "" } as Product)}
+                                className="px-2 py-1 text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50 rounded-lg transition-colors flex items-center gap-1 shadow-sm border border-amber-200/50 dark:border-amber-900/40"
+                                title="Agregar otra presentación (pack/caja) a este mismo producto"
+                              >
+                                <Plus className="w-3.5 h-3.5" /> + Pack
+                              </button>
+                              <button
+                                onClick={() => handleEditPackBarcodeClick(pb)}
+                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                title="Editar"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeletePackBarcode(pb)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                title="Eliminar"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>
@@ -1639,53 +1765,140 @@ export default function ProductsPage() {
       {/* ──────────────────────────────────────────────────────────────────────────
           MODAL: ALTA / EDICIÓN DE CÓDIGO DE PACK
       ────────────────────────────────────────────────────────────────────────── */}
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: ALTA / EDICIÓN DE CÓDIGO DE PACK
+      ────────────────────────────────────────────────────────────────────────── */}
       {showPackBarcodeModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col">
-            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-amber-50/50 dark:bg-amber-950/20">
-              <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <Box className="w-5 h-5 text-amber-600" /> {editingPackBarcode ? "Editar Código de Pack" : "Nuevo Código de Pack / Caja"}
-              </h3>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-xl w-full flex flex-col my-8">
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-amber-50/50 dark:bg-amber-950/20 rounded-t-3xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-600 text-white flex items-center justify-center shadow-md">
+                  <Box className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    {editingPackBarcode ? "Editar Código de Pack" : "Nuevo Código de Pack / Caja"}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Asignar código de barra a una presentación por cantidad (ej. Six-Pack, Caja x24)
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={() => { setShowPackBarcodeModal(false); setEditingPackBarcode(null) }}
-                className="p-1 text-slate-400 hover:text-slate-700"
+                onClick={() => {
+                  setShowPackBarcodeModal(false)
+                  setEditingPackBarcode(null)
+                  setPackModalProductId("")
+                  setPackModalProduct(null)
+                }}
+                className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSavePackBarcode} className="p-6 space-y-4">
+            <form onSubmit={(e) => handleSavePackBarcode(e, false)} className="p-6 space-y-5">
+              {/* Selector o Ficha del Producto Base */}
               <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Producto Base *</label>
-                <ProductSearchPicker
-                  selectedProduct={selectedPackProduct}
-                  onSelect={(p) => { setSelectedPackParentProductId(p.id); setSelectedPackProduct(p) }}
-                  onClear={() => { setSelectedPackParentProductId(""); setSelectedPackProduct(null) }}
-                  disabled={!!editingPackBarcode}
-                  placeholder="Buscar producto por código de barra, SKU o nombre..."
-                />
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Producto Base *
+                </label>
+                {packModalProduct ? (
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0 font-bold text-xs">
+                        <Package className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-black text-slate-900 dark:text-white truncate">
+                          {packModalProduct.nombre}
+                        </p>
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 mt-0.5">
+                          {packModalProduct.codigo_barra && (
+                            <span>
+                              Cod: <strong className="text-slate-600 dark:text-slate-300">{packModalProduct.codigo_barra}</strong>
+                            </span>
+                          )}
+                          {packModalProduct.sku && <span>SKU: {packModalProduct.sku}</span>}
+                        </div>
+                      </div>
+                    </div>
+                    {!editingPackBarcode && (
+                      <button
+                        type="button"
+                        onClick={() => { setPackModalProduct(null); setPackModalProductId("") }}
+                        className="text-[11px] font-bold text-amber-600 hover:text-amber-700 hover:underline shrink-0"
+                      >
+                        Cambiar
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <ProductSearchPicker
+                    selectedProduct={packModalProduct}
+                    onSelect={(p) => { setPackModalProductId(p.id); setPackModalProduct(p) }}
+                    onClear={() => { setPackModalProductId(""); setPackModalProduct(null) }}
+                    disabled={!!editingPackBarcode}
+                    placeholder="Buscar producto por código de barra, SKU o nombre..."
+                  />
+                )}
               </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Código de Barras de la Caja/Pack *</label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="Escaneá o tipeá el código impreso en la caja"
-                  value={packBarcodeForm.codigo_barra}
-                  onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, codigo_barra: e.target.value })}
-                  className="input-field w-full text-xs font-mono"
-                />
+              {/* Presets Rápidos */}
+              <div className="bg-amber-50/40 dark:bg-amber-950/20 p-3.5 rounded-2xl border border-amber-200/50 dark:border-amber-900/40 space-y-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                  <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" /> Atajos de Presentación Frecuentes:
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {PACK_PRESETS.map((pr) => (
+                    <button
+                      key={pr.label}
+                      type="button"
+                      onClick={() => {
+                        setPackBarcodeForm(prev => ({
+                          ...prev,
+                          etiqueta: pr.tag,
+                          unidades_por_paquete: pr.unidades,
+                        }))
+                      }}
+                      className="px-2.5 py-1 text-[11px] font-bold bg-white dark:bg-slate-800 hover:bg-amber-500 hover:text-white dark:hover:bg-amber-600 text-slate-700 dark:text-slate-200 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm transition-all"
+                    >
+                      {pr.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Etiqueta *</label>
+              {/* Código de Barras de la Caja */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                  Código de Barras de la Caja/Pack *
+                </label>
+                <div className="relative">
+                  <Barcode className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     required
-                    placeholder="Ej. Caja x24, Fardo x12"
+                    autoFocus
+                    placeholder="Escaneá con la lectora o tipeá el código impreso en la caja"
+                    value={packBarcodeForm.codigo_barra}
+                    onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, codigo_barra: e.target.value })}
+                    className="input-field w-full text-xs font-mono font-bold pl-9 py-2.5"
+                  />
+                </div>
+              </div>
+
+              {/* Etiqueta y Unidades */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    Etiqueta Descriptiva *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. Caja x24, Six-Pack, Fardo x12"
                     value={packBarcodeForm.etiqueta}
                     onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, etiqueta: e.target.value })}
                     className="input-field w-full text-xs font-bold"
@@ -1693,35 +1906,63 @@ export default function ProductsPage() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Unidades por Paquete *</label>
-                  <input
-                    type="number"
-                    required
-                    min="1"
-                    step="1"
-                    value={packBarcodeForm.unidades_por_paquete}
-                    onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, unidades_por_paquete: Number(e.target.value) })}
-                    className="input-field w-full text-xs font-mono font-bold text-amber-600"
-                  />
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    Unidades sueltas contenidas *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      step="1"
+                      value={packBarcodeForm.unidades_por_paquete}
+                      onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, unidades_por_paquete: Number(e.target.value) })}
+                      className="input-field w-full text-xs font-mono font-black text-amber-600 dark:text-amber-400 text-right pr-14"
+                    />
+                    <span className="text-[10px] font-bold text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      unidades
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              {/* Botonera de Acciones */}
+              <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => { setShowPackBarcodeModal(false); setEditingPackBarcode(null) }}
-                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  onClick={() => {
+                    setShowPackBarcodeModal(false)
+                    setEditingPackBarcode(null)
+                    setPackModalProductId("")
+                    setPackModalProduct(null)
+                  }}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   Cancelar
                 </button>
-                <button
-                  type="submit"
-                  disabled={savingPackBarcode}
-                  className="btn-primary text-xs px-5 py-2.5 flex items-center gap-1.5 shadow-md disabled:opacity-60"
-                >
-                  {savingPackBarcode ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  {editingPackBarcode ? "Guardar Cambios" : "Crear Código de Pack"}
-                </button>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  {!editingPackBarcode && (
+                    <button
+                      type="button"
+                      disabled={savingPackBarcode}
+                      onClick={() => handleSavePackBarcode(undefined, true)}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-60"
+                      title="Guarda este pack y deja el producto listo para agregar la siguiente presentación"
+                    >
+                      {savingPackBarcode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                      Guardar y agregar otro pack
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={savingPackBarcode}
+                    className="btn-primary text-xs px-5 py-2.5 flex items-center gap-1.5 shadow-md disabled:opacity-60"
+                  >
+                    {savingPackBarcode ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    {editingPackBarcode ? "Guardar Cambios" : "Guardar y Cerrar"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
