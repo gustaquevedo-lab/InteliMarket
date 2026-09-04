@@ -33,13 +33,37 @@ class SupplierInvoice(Base):
     tipo_comprobante = Column(String(20), default="factura")
     estado = Column(String(20), nullable=False, default="pendiente")
     concepto = Column(String(300))
-    notas = Column(Text)
+    bloqueada_para_pago = Column(Boolean, default=False)
+    motivo_bloqueo = Column(Text)
+    monto_retenido_nc = Column(Numeric(15, 0), default=0)
+    requiere_nc = Column(Boolean, default=False)
+    xml_sifen_url = Column(Text)
     created_by = Column(UUID(as_uuid=True))
     approved_by = Column(UUID(as_uuid=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     payments = relationship("SupplierInvoicePayment", back_populates="invoice", cascade="all, delete-orphan")
+    items = relationship("SupplierInvoiceItem", back_populates="invoice", cascade="all, delete-orphan")
+
+
+class SupplierInvoiceItem(Base):
+    __tablename__ = "supplier_invoice_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id"), nullable=False, index=True)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=True, index=True)
+    codigo_proveedor = Column(String(50))
+    descripcion = Column(String(300), nullable=False)
+    cantidad = Column(Numeric(12, 3), nullable=False)
+    precio_unitario = Column(Numeric(15, 2), nullable=False)
+    descuento = Column(Numeric(15, 2), default=0)
+    iva_tasa = Column(Numeric(5, 2), default=10)
+    total = Column(Numeric(15, 2), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    invoice = relationship("SupplierInvoice", back_populates="items")
+
 
 
 class SupplierInvoicePayment(Base):

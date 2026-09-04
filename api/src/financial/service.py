@@ -2006,7 +2006,8 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
     nadie eligiera nada)."""
     query = select(SupplierInvoice).where(
         SupplierInvoice.company_id == uuid.UUID(company_id),
-        SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
+        SupplierInvoice.estado.in_(["aprobada", "parcial"]),
+        SupplierInvoice.bloqueada_para_pago == False,
         SupplierInvoice.saldo_pendiente > 0,
     )
     if supplier_id:
@@ -2041,22 +2042,21 @@ async def get_payable_invoices(db: AsyncSession, company_id: str, supplier_id: s
 
 async def create_payment_run(db: AsyncSession, data: PaymentRunCreate) -> PaymentRun | dict:
     """Crea un lote de pago SOLO con las facturas que el usuario eligio a
-    mano (data.invoice_ids) -- antes agarraba automaticamente todas las
-    vencidas al o antes de la fecha programada sin revision, lo que en
-    produccion hubiera metido las 546 facturas vencidas reales en un solo
-    lote listo para pagar de un click. 0 lotes se crearon nunca, casi
-    seguro por eso."""
+    mano (data.invoice_ids) y que estén estrictamente APROBADAS y NO bloqueadas
+    por falta de Nota de Crédito o discrepancias en muelle."""
     invoices_result = await db.execute(
         select(SupplierInvoice).where(
             SupplierInvoice.id.in_(data.invoice_ids),
             SupplierInvoice.company_id == data.company_id,
-            SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
+            SupplierInvoice.estado.in_(["aprobada", "parcial"]),
+            SupplierInvoice.bloqueada_para_pago == False,
             SupplierInvoice.saldo_pendiente > 0,
         )
     )
     invoices = list(invoices_result.scalars().all())
     if not invoices:
-        return {"error": "Ninguna de las facturas seleccionadas es valida (ya pagada, cancelada, o de otra empresa)"}
+        return {"error": "Ninguna de las facturas seleccionadas es válida para pago (deben estar APROBADAS por 3-Way Match y sin retenciones de NC pendientes)."}
+
 
     run = PaymentRun(
         company_id=data.company_id,

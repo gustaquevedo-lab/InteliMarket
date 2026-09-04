@@ -169,6 +169,9 @@ class PurchaseReceiptItem(Base):
     batch_id = Column(UUID(as_uuid=True))
     cantidad_rechazada = Column(Numeric(10, 3))
     motivo_rechazo = Column(Text)
+    es_extraordinario = Column(Boolean, default=False)
+    autorizado_por = Column(UUID(as_uuid=True))
+    autorizacion_motivo = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     receipt = relationship("PurchaseReceipt", back_populates="items")
@@ -485,3 +488,47 @@ class CustomerLostDemand(Base):
     orden_compra_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PurchaseInboxConfig(Base):
+    __tablename__ = "purchase_inbox_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
+    imap_host = Column(String(100), nullable=False)
+    imap_port = Column(Integer, nullable=False, default=993)
+    imap_user = Column(String(150), nullable=False)
+    imap_password = Column(String(255), nullable=False)
+    imap_ssl = Column(Boolean, default=True)
+    imap_folder = Column(String(50), default="INBOX")
+    activo = Column(Boolean, default=True)
+    ultimo_sync = Column(DateTime(timezone=True))
+    ultimo_error = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SupplierNcRequest(Base):
+    __tablename__ = "supplier_nc_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False, index=True)
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("supplier_invoices.id"), nullable=False, index=True)
+    receipt_id = Column(UUID(as_uuid=True), ForeignKey("purchase_receipts.id"), nullable=True)
+    purchase_order_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.id"), nullable=True)
+    numero_solicitud = Column(String(30), nullable=False, unique=True)
+    tipo_motivo = Column(String(50), nullable=False)  # faltante_fisico, diferencia_precio, producto_danado, acuerdo_promocional, otro
+    monto_reclamado = Column(Numeric(15, 0), nullable=False)
+    estado = Column(String(30), nullable=False, default="pendiente_entrega")  # pendiente_entrega, entregada_parcial, resuelta, rechazada
+    nc_recibida_numero = Column(String(50))
+    nc_recibida_timbrado = Column(String(20))
+    nc_recibida_cdc = Column(String(64))
+    nc_recibida_monto = Column(Numeric(15, 0))
+    nc_recibida_fecha = Column(Date)
+    observaciones = Column(Text)
+    created_by = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    resolved_at = Column(DateTime(timezone=True))
+

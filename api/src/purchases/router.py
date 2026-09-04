@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,8 +25,16 @@ from api.src.purchases.schemas import (
     RfqCreate, RfqResponse, RfqWithDetail, RfqResponseSubmit, RfqAwardRequest,
     SmartReplenishmentRequest, SmartReplenishmentResponse, CreatePOFromReplenishmentRequest,
     LostDemandCreate, LostDemandResponse, LostDemandUpdate,
+    PurchaseInboxConfigCreate, PurchaseInboxConfigUpdate, PurchaseInboxConfigResponse,
+    SyncInboxResponse, UploadXmlResponse,
+    Perform3WayMatchRequest, Perform3WayMatchResponse,
+    SupplierNcRequestResponse, ResolveSupplierNcRequest,
 )
 from api.src.purchases import service
+from api.src.purchases import imap_service
+from api.src.purchases import matching_service
+from api.src.purchases import sifen_xml_parser
+
 
 router = APIRouter(prefix="/api/v1", tags=["purchases"])
 
@@ -585,3 +593,168 @@ async def update_lost_demand(
     if not result:
         raise HTTPException(status_code=404, detail="Demanda no encontrada")
     return result
+
+
+# ── INBOX IMAP (cPanel) Y FACTURAS ELECTRÓNICAS SIFEN ────────────────────────
+
+@router.get("/companies/{company_id}/purchase-inbox-config", response_model=Optional[PurchaseInboxConfigResponse])
+async def get_inbox_config(company_id: str, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import select
+    from api.src.purchases.models import PurchaseInboxConfig
+    import uuid
+    res = await db.execute(select(PurchaseInboxConfig).where(PurchaseInboxConfig.company_id == uuid.UUID(company_id)))
+    return res.scalar_one_or_none()
+
+
+@router.post("/companies/{company_id}/purchase-inbox-config", response_model=PurchaseInboxConfigResponse)
+async def save_inbox_config(company_id: str, body: PurchaseInboxConfigCreate, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import select
+    from api.src.purchases.models import PurchaseInboxConfig
+    import uuid
+    cid = uuid.UUID(company_id)
+    res = await db.execute(select(PurchaseInboxConfig).where(PurchaseInboxConfig.company_id == cid))
+    cfg = res.scalar_one_or_none()
+    if cfg:
+        cfg.imap_host = body.imap_host
+        cfg.imap_port = body.imap_port
+        cfg.imap_user = body.imap_user
+        if body.imap_password and body.imap_password.strip():
+            cfg.imap_password = body.imap_password
+        cfg.imap_ssl = body.imap_ssl
+        cfg.imap_folder = body.imap_folder
+        cfg.activo = body.activo
+    else:
+        cfg = PurchaseInboxConfig(
+            company_id=cid,
+            imap_host=body.imap_host,
+            imap_port=body.imap_port,
+            imap_user=body.imap_user,
+            imap_password=body.imap_password,
+            imap_ssl=body.imap_ssl,
+            imap_folder=body.imap_folder,
+            activo=body.activo
+        )
+        db.add(cfg)
+    await db.commit()
+    await db.refresh(cfg)
+    return cfg
+
+
+@router.post("/companies/{company_id}/purchase-inbox/sync", response_model=SyncInboxResponse)
+async def sync_inbox(company_id: str, max_emails: int = 30, only_unseen: bool = False, db: AsyncSession = Depends(get_db)):
+    res = await imap_service.sync_inbox_emails(db, company_id, max_emails=max_emails, only_unseen=only_unseen)
+    return res
+
+
+@router.post("/companies/{company_id}/purchase-inbox/upload-xml", response_model=UploadXmlResponse)
+async def upload_invoice_xml(
+    company_id: str,
+    file: UploadFile = File(...),
+    user_id: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        content = await file.read()
+        dte_data = sifen_xml_parser.parse_sifen_xml(content)
+        xml_str = content.decode("utf-8", errors="replace")
+        res = await imap_service.ingest_parsed_dte(
+            db=db,
+            company_id=company_id,
+            dte_data=dte_data,
+            xml_raw=xml_str,
+            origen="upload_manual",
+            origen_info=f"Archivo: {file.filename}",
+            user_id=user_id
+        )
+        await db.commit()
+        return {
+            "success": True,
+            "factura_id": res.get("id"),
+            "numero_factura": res.get("numero_factura"),
+            "timbrado": res.get("timbrado"),
+            "cdc": res.get("cdc"),
+            "supplier_id": res.get("supplier_id"),
+            "supplier_nombre": res.get("supplier_nombre"),
+            "total": res.get("total"),
+            "items_count": res.get("items_count", 0),
+            "items_mapeados": res.get("items_mapeados", 0),
+            "purchase_order_id": res.get("purchase_order_id"),
+            "purchase_order_numero": res.get("purchase_order_numero"),
+            "mensaje": res.get("mensaje") or "Factura electrónica y sus ítems procesados exitosamente."
+        }
+    except Exception as e:
+        logger.error(f"Error al procesar XML de factura: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# ── 3-WAY MATCHING Y CONCILIACIÓN ─────────────────────────────────────────────
+
+@router.post("/purchases/matching/reconcile", response_model=Perform3WayMatchResponse)
+async def reconcile_invoice(body: Perform3WayMatchRequest, db: AsyncSession = Depends(get_db)):
+    try:
+        return await matching_service.perform_3way_match(
+            db=db,
+            invoice_id=str(body.invoice_id),
+            user_id=str(body.user_id) if body.user_id else None
+        )
+    except Exception as e:
+        logger.error(f"Error en 3-Way Match: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/purchases/invoices/{invoice_id}/3way-match", response_model=Perform3WayMatchResponse)
+async def get_invoice_match(invoice_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await matching_service.perform_3way_match(db=db, invoice_id=invoice_id)
+    except Exception as e:
+        logger.error(f"Error al consultar 3-Way Match: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── SOLICITUDES Y RESOLUCIÓN DE NOTAS DE CRÉDITO ("Sin NC no hay pago") ───────
+
+@router.get("/companies/{company_id}/supplier-nc-requests", response_model=list[SupplierNcRequestResponse])
+async def list_supplier_nc_requests(
+    company_id: str,
+    estado: Optional[str] = Query(None),
+    supplier_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select
+    from api.src.purchases.models import SupplierNcRequest
+    import uuid
+    q = select(SupplierNcRequest).where(SupplierNcRequest.company_id == uuid.UUID(company_id))
+    if estado and estado != "todos":
+        q = q.where(SupplierNcRequest.estado == estado)
+    if supplier_id:
+        q = q.where(SupplierNcRequest.supplier_id == uuid.UUID(supplier_id))
+    q = q.order_by(SupplierNcRequest.created_at.desc())
+    res = await db.execute(q)
+    return list(res.scalars().all())
+
+
+@router.post("/purchases/supplier-nc-requests/{request_id}/resolve")
+async def resolve_supplier_nc_request(
+    request_id: str,
+    body: ResolveSupplierNcRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        return await matching_service.resolve_supplier_nc(
+            db=db,
+            request_id=request_id,
+            nc_recibida_numero=body.nc_recibida_numero,
+            nc_recibida_timbrado=body.nc_recibida_timbrado,
+            nc_recibida_monto=body.nc_recibida_monto,
+            nc_recibida_fecha=body.nc_recibida_fecha,
+            nc_recibida_cdc=body.nc_recibida_cdc,
+            observaciones=body.observaciones,
+            user_id=str(body.user_id) if body.user_id else None
+        )
+    except Exception as e:
+        logger.error(f"Error al registrar NC del proveedor: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+

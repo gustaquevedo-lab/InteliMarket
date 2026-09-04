@@ -507,6 +507,11 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 )
         if item_data.cantidad_rechazada:
             review_reasons.append(f"Rechazo parcial de {item_data.cantidad_rechazada} unidades de {item_data.product_id}: {item_data.motivo_rechazo or 'sin motivo especificado'}")
+        if getattr(item_data, "es_extraordinario", False):
+            review_reasons.append(
+                f"Adición extraordinaria en muelle de {qty} unidades de {item_data.product_id} "
+                f"(Motivo: {getattr(item_data, 'autorizacion_motivo', None) or 'Sin motivo especificado'})"
+            )
 
         receipt_item = PurchaseReceiptItem(
             receipt_id=receipt.id,
@@ -517,9 +522,12 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             precio_unitario=cost,
             costo_unitario=cost,
             total=(cost * item_data.cantidad_recibida).quantize(Decimal("1")),
-            batch_id=item_data.batch_id,
+            batch_id=getattr(item_data, "batch_id", None),
             cantidad_rechazada=item_data.cantidad_rechazada,
             motivo_rechazo=item_data.motivo_rechazo,
+            es_extraordinario=getattr(item_data, "es_extraordinario", False),
+            autorizado_por=getattr(item_data, "autorizado_por", None),
+            autorizacion_motivo=getattr(item_data, "autorizacion_motivo", None),
         )
         db.add(receipt_item)
 

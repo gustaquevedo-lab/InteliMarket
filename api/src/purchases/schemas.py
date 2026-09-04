@@ -241,11 +241,15 @@ class ReceiptItemInput(BaseModel):
     cantidad_ordenada: Optional[Decimal] = None
     cantidad_recibida: Decimal = Field(ge=Decimal("0.001"))
     costo_unitario: Decimal = Field(ge=0)
-    batch_id: Optional[UUID] = None
     lote: Optional[str] = None
     fecha_vencimiento: Optional[datetime] = None
     cantidad_rechazada: Optional[Decimal] = None
     motivo_rechazo: Optional[str] = None
+    batch_id: Optional[UUID] = None
+    es_extraordinario: bool = False
+    autorizado_por: Optional[UUID] = None
+    autorizacion_motivo: Optional[str] = None
+
 
 
 class ReceiptCreate(BaseModel):
@@ -963,3 +967,153 @@ class LostDemandResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ── INBOX IMAP Y FACTURAS SIFEN ───────────────────────────────────────────────
+
+class PurchaseInboxConfigCreate(BaseModel):
+    company_id: UUID
+    imap_host: str
+    imap_port: int = 993
+    imap_user: str
+    imap_password: str
+    imap_ssl: bool = True
+    imap_folder: str = "INBOX"
+    activo: bool = True
+
+
+class PurchaseInboxConfigUpdate(BaseModel):
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    imap_user: Optional[str] = None
+    imap_password: Optional[str] = None
+    imap_ssl: Optional[bool] = None
+    imap_folder: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class PurchaseInboxConfigResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    imap_host: str
+    imap_port: int
+    imap_user: str
+    imap_ssl: bool
+    imap_folder: str
+    activo: bool
+    ultimo_sync: Optional[datetime] = None
+    ultimo_error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SyncInboxResponse(BaseModel):
+    success: bool
+    emails_procesados: int = 0
+    facturas_nuevas: int = 0
+    facturas_existentes: int = 0
+    errores: list[str] = []
+    facturas: list[dict] = []
+    error: Optional[str] = None
+
+
+class UploadXmlResponse(BaseModel):
+    success: bool
+    factura_id: Optional[str] = None
+    numero_factura: Optional[str] = None
+    timbrado: Optional[str] = None
+    cdc: Optional[str] = None
+    supplier_id: Optional[str] = None
+    supplier_nombre: Optional[str] = None
+    total: Optional[float] = None
+    items_count: int = 0
+    items_mapeados: int = 0
+    purchase_order_id: Optional[str] = None
+    purchase_order_numero: Optional[str] = None
+    mensaje: Optional[str] = None
+    error: Optional[str] = None
+
+
+# ── 3-WAY MATCH Y DISCREPANCIAS ───────────────────────────────────────────────
+
+class Perform3WayMatchRequest(BaseModel):
+    invoice_id: UUID
+    user_id: Optional[UUID] = None
+
+
+class MatchItemLine(BaseModel):
+    product_id: Optional[str] = None
+    descripcion: str
+    codigo_proveedor: Optional[str] = None
+    cantidad_ordenada: Optional[float] = None
+    cantidad_recibida: float
+    cantidad_rechazada: float = 0
+    cantidad_facturada: float
+    precio_orden: float
+    precio_facturado: float
+    diferencia_cantidad: float
+    diferencia_precio: float
+    diferencia_monto: float
+    estado: str
+    motivos: str
+
+
+class Perform3WayMatchResponse(BaseModel):
+    invoice_id: str
+    numero_factura: str
+    timbrado: Optional[str] = None
+    cdc: Optional[str] = None
+    purchase_order_id: Optional[str] = None
+    purchase_order_numero: Optional[str] = None
+    receipt_id: Optional[str] = None
+    receipt_numero: Optional[str] = None
+    estado_match: str  # conciliado_100, discrepancia_detectada, pendiente_recepcion
+    bloqueada_para_pago: bool
+    motivo_bloqueo: Optional[str] = None
+    total_facturado: float
+    total_recibido_val: float
+    total_discrepancia_monto: float
+    monto_neto_a_pagar: float
+    solicitud_nc: Optional[dict] = None
+    items: list[dict]
+
+
+# ── SOLICITUDES Y RESOLUCIÓN DE NOTAS DE CRÉDITO ──────────────────────────────
+
+class SupplierNcRequestResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    supplier_id: UUID
+    invoice_id: UUID
+    receipt_id: Optional[UUID] = None
+    purchase_order_id: Optional[UUID] = None
+    numero_solicitud: str
+    tipo_motivo: str
+    monto_reclamado: Decimal
+    estado: str  # pendiente_entrega, entregada_parcial, resuelta, rechazada
+    nc_recibida_numero: Optional[str] = None
+    nc_recibida_timbrado: Optional[str] = None
+    nc_recibida_cdc: Optional[str] = None
+    nc_recibida_monto: Optional[Decimal] = None
+    nc_recibida_fecha: Optional[date] = None
+    observaciones: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    resolved_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ResolveSupplierNcRequest(BaseModel):
+    nc_recibida_numero: str
+    nc_recibida_timbrado: str
+    nc_recibida_monto: Decimal
+    nc_recibida_fecha: date
+    nc_recibida_cdc: Optional[str] = None
+    observaciones: Optional[str] = None
+    user_id: Optional[UUID] = None
+

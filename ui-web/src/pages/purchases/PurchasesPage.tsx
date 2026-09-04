@@ -8,7 +8,8 @@ import {
   MessageSquare, Calendar, Hash, Percent, Printer, Link2, Check, Save, ExternalLink,
   Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle,
   HelpCircle, AlertCircle, Box, Layers, Building2, Phone, Mail, MapPin, SlidersHorizontal,
-  ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star
+  ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star,
+  Lock, Unlock, FileCheck
 } from "lucide-react"
 import {
   api,
@@ -130,6 +131,58 @@ export default function PurchasesPage() {
   const [poDetailItems, setPoDetailItems] = useState<PurchaseOrderItem[]>([])
   const [loadingPODetail, setLoadingPODetail] = useState(false)
 
+  // Estados para Creación Manual de Orden de Compra
+  const [showManualPOModal, setShowManualPOModal] = useState(false)
+  const [manualPOSupplierId, setManualPOSupplierId] = useState("")
+  const [manualPOFechaEntrega, setManualPOFechaEntrega] = useState("")
+  const [manualPOPrioridad, setManualPOPrioridad] = useState("normal")
+  const [manualPOCondiciones, setManualPOCondiciones] = useState("30 Días")
+  const [manualPOObservaciones, setManualPOObservaciones] = useState("")
+  const [manualPOItems, setManualPOItems] = useState<any[]>([])
+  const [searchProductPO, setSearchProductPO] = useState("")
+  const [productSearchResultsPO, setProductSearchResultsPO] = useState<Product[]>([])
+  const [searchingProductsPO, setSearchingProductsPO] = useState(false)
+  const [savingManualPO, setSavingManualPO] = useState(false)
+
+  // Estados para Inbox IMAP cPanel y Facturas SIFEN
+  const [showInboxConfigModal, setShowInboxConfigModal] = useState(false)
+  const [inboxConfig, setInboxConfig] = useState<any>(null)
+  const [inboxConfigForm, setInboxConfigForm] = useState({
+    imap_host: "mail.superextra.com.py",
+    imap_port: 993,
+    imap_user: "facturaelectronica@superextra.com.py",
+    imap_password: "",
+    imap_ssl: true,
+    imap_folder: "INBOX",
+    activo: true,
+  })
+  const [savingInboxConfig, setSavingInboxConfig] = useState(false)
+  const [syncingInbox, setSyncingInbox] = useState(false)
+  const [uploadingXml, setUploadingXml] = useState(false)
+  const [dragOverXml, setDragOverXml] = useState(false)
+
+  // Estados para 3-Way Match y Solicitudes de NC ("Sin NC no hay pago")
+  const [supplierNcRequests, setSupplierNcRequests] = useState<any[]>([])
+  const [showMatchModal, setShowMatchModal] = useState(false)
+  const [matchResult, setMatchResult] = useState<any>(null)
+  const [performingMatch, setPerformingMatch] = useState(false)
+  const [showResolveNcModal, setShowResolveNcModal] = useState(false)
+  const [selectedNcRequestForResolve, setSelectedNcRequestForResolve] = useState<any>(null)
+  const [resolveNcForm, setResolveNcForm] = useState({
+    nc_recibida_numero: "",
+    nc_recibida_timbrado: "",
+    nc_recibida_monto: 0,
+    nc_recibida_fecha: new Date().toISOString().split("T")[0],
+    nc_recibida_cdc: "",
+    observaciones: "",
+  })
+  const [resolvingNc, setResolvingNc] = useState(false)
+
+  // Adición extraordinaria en recepción
+  const [extraordinarySearch, setExtraordinarySearch] = useState("")
+  const [extraordinaryResults, setExtraordinaryResults] = useState<Product[]>([])
+  const [searchingExtraordinary, setSearchingExtraordinary] = useState(false)
+
   // Paginación y Filtros de Proveedores
   const [searchSupplier, setSearchSupplier] = useState("")
   const [pageSupplier, setPageSupplier] = useState(1)
@@ -191,6 +244,9 @@ export default function PurchasesPage() {
       fecha_vencimiento: string
       cantidad_rechazada: number
       motivo_rechazo: string
+      es_extraordinario?: boolean
+      autorizado_por?: string
+      autorizacion_motivo?: string
     }[]
   }>({
     purchase_order_id: "",
@@ -236,13 +292,15 @@ export default function PurchasesPage() {
         varianceRes,
         returnsRes,
         creditNotesRes,
+        ncRequestsRes,
+        inboxConfigRes,
       ] = await Promise.allSettled([
         api.purchases.listPOs(),
-          api.purchases.lostDemand.list(),
+        api.purchases.lostDemand.list(),
         api.purchases.listReceipts(),
         api.purchases.listSuppliers(),
         api.purchases.reports.kpis(),
-        api.financial.payableInvoices(),
+        api.financial.invoices.list({ limit: 300 }),
         api.purchases.requisitions.list(),
         api.purchases.rfqs.list(),
         api.purchases.budgets.list(),
@@ -252,6 +310,8 @@ export default function PurchasesPage() {
         api.purchases.reports.priceVariance(),
         api.financial.supplierReturns(),
         api.financial.creditNotes(),
+        api.purchases.listSupplierNcRequests(),
+        api.purchases.getInboxConfig(),
       ])
 
       if (ordersRes.status === "fulfilled") setOrders(ordersRes.value || [])
@@ -272,6 +332,19 @@ export default function PurchasesPage() {
       if (varianceRes.status === "fulfilled") setPriceVariance(varianceRes.value || [])
       if (returnsRes.status === "fulfilled") setSupplierReturns(returnsRes.value || [])
       if (creditNotesRes.status === "fulfilled") setSupplierCreditNotes(creditNotesRes.value || [])
+      if (ncRequestsRes.status === "fulfilled") setSupplierNcRequests(ncRequestsRes.value || [])
+      if (inboxConfigRes.status === "fulfilled" && inboxConfigRes.value) {
+        setInboxConfig(inboxConfigRes.value)
+        setInboxConfigForm({
+          imap_host: inboxConfigRes.value.imap_host || "mail.superextra.com.py",
+          imap_port: inboxConfigRes.value.imap_port || 993,
+          imap_user: inboxConfigRes.value.imap_user || "facturaelectronica@superextra.com.py",
+          imap_password: "",
+          imap_ssl: inboxConfigRes.value.imap_ssl ?? true,
+          imap_folder: inboxConfigRes.value.imap_folder || "INBOX",
+          activo: inboxConfigRes.value.activo ?? true,
+        })
+      }
     } catch (e: any) {
       toast.error("Error al sincronizar datos de compras", e.message)
     } finally {
@@ -596,6 +669,13 @@ export default function PurchasesPage() {
       return
     }
 
+    // Auditoría de ítems extraordinarios: motivo obligatorio
+    const extraordinaryWithoutReason = validItems.find(it => it.es_extraordinario && !it.autorizacion_motivo?.trim())
+    if (extraordinaryWithoutReason) {
+      toast.error("Motivo obligatorio", `El producto ${extraordinaryWithoutReason.nombre} ingresa fuera de OC. Indique el motivo de autorización.`)
+      return
+    }
+
     setSavingReceipt(true)
     try {
       const created = await api.purchases.createReceipt({
@@ -610,6 +690,9 @@ export default function PurchasesPage() {
           motivo_rechazo: it.motivo_rechazo || undefined,
           lote: it.lote || undefined,
           fecha_vencimiento: it.fecha_vencimiento ? `${it.fecha_vencimiento}T00:00:00Z` : undefined,
+          es_extraordinario: it.es_extraordinario || false,
+          autorizado_por: it.autorizado_por || undefined,
+          autorizacion_motivo: it.autorizacion_motivo || undefined,
         })) as any,
       })
       toast.success("¡Mercadería Recibida en Muelle!", "Se actualizó el stock físico y se registraron los lotes.")
@@ -622,6 +705,280 @@ export default function PurchasesPage() {
       setSavingReceipt(false)
     }
   }
+
+  const handleSearchExtraordinary = async (q: string) => {
+    setExtraordinarySearch(q)
+    if (!q.trim() || q.trim().length < 2) {
+      setExtraordinaryResults([])
+      return
+    }
+    setSearchingExtraordinary(true)
+    try {
+      const res = await api.products.list({ search: q.trim(), limit: 8 } as any)
+      setExtraordinaryResults(Array.isArray(res) ? res : (res as any)?.items || [])
+    } catch {
+      setExtraordinaryResults([])
+    } finally {
+      setSearchingExtraordinary(false)
+    }
+  }
+
+  const handleAddExtraordinaryItem = (product: Product) => {
+    const exists = receiptForm.items.find(it => it.product_id === product.id)
+    if (exists) {
+      toast.info("Producto ya presente", "Ya está en la lista de recepción.")
+      return
+    }
+    const cost = Number(product.costo_unitario || (product as any).precio_costo || 0)
+    setReceiptForm(prev => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        {
+          product_id: product.id,
+          nombre: product.nombre,
+          sku: product.sku || "",
+          cantidad_ordenada: 0,
+          cantidad_recibir: 1,
+          presentacion_id: "",
+          cantidad_presentacion: 1,
+          precio_unitario: cost,
+          lote: "",
+          fecha_vencimiento: "",
+          cantidad_rechazada: 0,
+          motivo_rechazo: "",
+          es_extraordinario: true,
+          autorizado_por: user?.id,
+          autorizacion_motivo: "Adición extraordinaria aprobada en muelle",
+        },
+      ],
+    }))
+    setExtraordinarySearch("")
+    setExtraordinaryResults([])
+    toast.success("Ítem Extraordinario Agregado", `${product.nombre} añadido para recepción extraordinaria.`)
+  }
+
+  // ── Handlers Creación Manual de Orden de Compra ─────────────────────────────
+  const handleOpenManualPOModal = () => {
+    setManualPOSupplierId(suppliers[0]?.id || "")
+    const defDate = new Date()
+    defDate.setDate(defDate.getDate() + 3)
+    setManualPOFechaEntrega(defDate.toISOString().split("T")[0])
+    setManualPOPrioridad("normal")
+    setManualPOCondiciones("30 Días")
+    setManualPOObservaciones("")
+    setManualPOItems([])
+    setSearchProductPO("")
+    setProductSearchResultsPO([])
+    setShowManualPOModal(true)
+  }
+
+  const handleSearchProductsPO = async (q: string) => {
+    setSearchProductPO(q)
+    if (!q.trim() || q.trim().length < 2) {
+      setProductSearchResultsPO([])
+      return
+    }
+    setSearchingProductsPO(true)
+    try {
+      const res = await api.products.list({ search: q.trim(), limit: 12 } as any)
+      setProductSearchResultsPO(Array.isArray(res) ? res : (res as any)?.items || [])
+    } catch {
+      setProductSearchResultsPO([])
+    } finally {
+      setSearchingProductsPO(false)
+    }
+  }
+
+  const handleAddProductToManualPO = (p: Product) => {
+    const exists = manualPOItems.find(it => it.product_id === p.id)
+    if (exists) {
+      toast.info("Producto ya agregado", "Modifique la cantidad en la tabla.")
+      return
+    }
+    const cost = Number(p.costo_unitario || (p as any).precio_costo || 0)
+    setManualPOItems(prev => [
+      ...prev,
+      {
+        product_id: p.id,
+        nombre: p.nombre,
+        sku: p.sku || "",
+        codigo_barra: p.codigo_barra || "",
+        cantidad: 10,
+        precio_unitario: cost,
+        iva_tasa: 10,
+        subtotal: 10 * cost,
+      }
+    ])
+    setSearchProductPO("")
+    setProductSearchResultsPO([])
+  }
+
+  const handleRemoveItemFromManualPO = (idx: number) => {
+    setManualPOItems(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const handleManualPOItemChange = (idx: number, field: string, value: any) => {
+    setManualPOItems(prev => {
+      const copy = [...prev]
+      const item = { ...copy[idx], [field]: value }
+      item.subtotal = Number(item.cantidad || 0) * Number(item.precio_unitario || 0)
+      copy[idx] = item
+      return copy
+    })
+  }
+
+  const handleSaveManualPO = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manualPOSupplierId) {
+      toast.error("Seleccione un proveedor")
+      return
+    }
+    if (manualPOItems.length === 0) {
+      toast.error("Debe agregar al menos un producto a la orden.")
+      return
+    }
+
+    setSavingManualPO(true)
+    try {
+      const created = await api.purchases.createOrder({
+        supplier_id: manualPOSupplierId as any,
+        fecha_entrega_estimada: manualPOFechaEntrega ? manualPOFechaEntrega as any : undefined,
+        prioridad: manualPOPrioridad,
+        condiciones_pago: manualPOCondiciones,
+        observaciones: manualPOObservaciones || undefined,
+        user_id: user?.id as any,
+        created_by_name: user?.nombre || "Comprador",
+        items: manualPOItems.map(it => ({
+          product_id: it.product_id,
+          descripcion: it.nombre,
+          cantidad: Number(it.cantidad),
+          precio_unitario: Number(it.precio_unitario),
+          iva_tasa: Number(it.iva_tasa || 10),
+          total: Number(it.subtotal),
+        })) as any,
+      })
+      toast.success("¡Orden de Compra Emitida!", `Se creó la OC N° ${created.numero} con ${manualPOItems.length} ítems.`)
+      setShowManualPOModal(false)
+      fetchAll()
+      setTab("ordenes")
+      handleViewPO(created)
+    } catch (e: any) {
+      toast.error("Error al emitir orden de compra", e.message)
+    } finally {
+      setSavingManualPO(false)
+    }
+  }
+
+  // ── Handlers Inbox IMAP cPanel y XML SIFEN ──────────────────────────────────
+  const handleSaveInboxConfig = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingInboxConfig(true)
+    try {
+      const saved = await api.purchases.saveInboxConfig(inboxConfigForm)
+      setInboxConfig(saved)
+      toast.success("Configuración Guardada", "Los datos de conexión IMAP de cPanel fueron actualizados.")
+      setShowInboxConfigModal(false)
+    } catch (e: any) {
+      toast.error("Error al guardar configuración de correo", e.message)
+    } finally {
+      setSavingInboxConfig(false)
+    }
+  }
+
+  const handleSyncInboxNow = async () => {
+    setSyncingInbox(true)
+    try {
+      const res = await api.purchases.syncInbox({ max_emails: 50, only_unseen: false })
+      if (res.success) {
+        toast.success(
+          "¡Sincronización Completada!",
+          `Procesados: ${res.emails_procesados} correos. Nuevas facturas: ${res.facturas_nuevas}. Existentes: ${res.facturas_existentes}.`
+        )
+        fetchAll()
+      } else {
+        toast.error("Fallo al conectar al correo", res.error || "Verifique las credenciales IMAP.")
+      }
+    } catch (e: any) {
+      toast.error("Error al sincronizar correo", e.message)
+    } finally {
+      setSyncingInbox(false)
+    }
+  }
+
+  const handleUploadXmlFile = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".xml")) {
+      toast.error("Archivo no soportado", "Por favor seleccione un archivo XML de Factura Electrónica SIFEN.")
+      return
+    }
+    setUploadingXml(true)
+    try {
+      const res = await api.purchases.uploadInvoiceXml(file, user?.id)
+      if (res.success) {
+        toast.success(
+          "¡Factura XML Procesada!",
+          `Factura N° ${res.numero_factura} de ${res.supplier_nombre}. Total: ${formatPYG(res.total || 0)} (${res.items_count} ítems).`
+        )
+        fetchAll()
+      } else {
+        toast.error("Error al procesar XML", res.error || "No se pudo interpretar el archivo.")
+      }
+    } catch (e: any) {
+      toast.error("Error al subir XML", e.message)
+    } finally {
+      setUploadingXml(false)
+    }
+  }
+
+  // ── Handlers 3-Way Match y Solicitudes de NC ────────────────────────────────
+  const handleOpen3WayMatch = async (invoiceId: string) => {
+    setPerformingMatch(true)
+    setShowMatchModal(true)
+    setMatchResult(null)
+    try {
+      const result = await api.purchases.reconcile3WayMatch(invoiceId, user?.id)
+      setMatchResult(result)
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al conciliar 3-Way Match", e.message)
+      setShowMatchModal(false)
+    } finally {
+      setPerformingMatch(false)
+    }
+  }
+
+  const handleOpenResolveNc = (ncReq: any) => {
+    setSelectedNcRequestForResolve(ncReq)
+    setResolveNcForm({
+      nc_recibida_numero: "",
+      nc_recibida_timbrado: "",
+      nc_recibida_monto: Number(ncReq.monto_reclamado || 0),
+      nc_recibida_fecha: new Date().toISOString().split("T")[0],
+      nc_recibida_cdc: "",
+      observaciones: "",
+    })
+    setShowResolveNcModal(true)
+  }
+
+  const handleSaveResolveNc = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedNcRequestForResolve) return
+    setResolvingNc(true)
+    try {
+      const res = await api.purchases.resolveSupplierNcRequest(selectedNcRequestForResolve.id, {
+        ...resolveNcForm,
+        user_id: user?.id,
+      })
+      toast.success("Nota de Crédito Aplicada", res.mensaje || "Se actualizó el saldo y se liberó la factura para Tesorería.")
+      setShowResolveNcModal(false)
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al aplicar Nota de Crédito", e.message)
+    } finally {
+      setResolvingNc(false)
+    }
+  }
+
 
   const handleSaveRequisition = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1723,12 +2080,20 @@ export default function PurchasesPage() {
               </select>
             </div>
 
-            <button
-              onClick={() => setTab("asistente_ia")}
-              className="btn-primary text-xs flex items-center gap-1.5 px-3.5 py-2 shrink-0"
-            >
-              <Plus className="w-4 h-4" /> Nueva Orden (Asistente IA)
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleOpenManualPOModal}
+                className="btn-primary text-xs flex items-center gap-1.5 px-3.5 py-2 shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+              >
+                <Plus className="w-4 h-4" /> Crear Orden Manual
+              </button>
+              <button
+                onClick={() => setTab("asistente_ia")}
+                className="btn-secondary text-xs flex items-center gap-1.5 px-3.5 py-2 shrink-0"
+              >
+                <Sparkles className="w-4 h-4 text-amber-500" /> Con Asistente IA
+              </button>
+            </div>
           </div>
 
           <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
@@ -1977,14 +2342,112 @@ export default function PurchasesPage() {
       ────────────────────────────────────────────────────────────────────────── */}
       {tab === "facturas_p2p" && (
         <div className="space-y-5">
-          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          {/* BANNER DE INGESTA AUTOMÁTICA DE FACTURAS ELECTRÓNICAS SIFEN */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Panel de Conexión de Correo IMAP (cPanel) */}
+            <div className="card p-4 bg-gradient-to-br from-indigo-900/10 via-white dark:via-slate-800 to-indigo-900/5 border-indigo-200 dark:border-indigo-800/60 lg:col-span-2 flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md">
+                    <Mail className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      Buzón IMAP cPanel: {inboxConfig?.imap_user || "facturaelectronica@superextra.com.py"}
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        inboxConfig?.activo ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "bg-slate-100 text-slate-600"
+                      }`}>
+                        {inboxConfig?.activo ? "Activo" : "Sin configurar"}
+                      </span>
+                    </h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      Ingesta automática y periódica de Facturas Electrónicas XML (SIFEN Paraguay) recibidas desde proveedores.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowInboxConfigModal(true)}
+                  className="btn-secondary text-xs px-3 py-1.5 shrink-0 flex items-center gap-1.5"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" /> Ajustes IMAP
+                </button>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-200/80 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-[11px] text-gray-500 flex items-center gap-2 font-mono">
+                  <span>Último sync: {inboxConfig?.ultimo_sync ? formatDate(inboxConfig.ultimo_sync) : "Nunca"}</span>
+                  {inboxConfig?.ultimo_error && (
+                    <span className="text-red-500 truncate max-w-xs" title={inboxConfig.ultimo_error}>
+                      ⚠️ Error: {inboxConfig.ultimo_error}
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSyncInboxNow}
+                  disabled={syncingInbox}
+                  className="btn-primary text-xs px-4 py-2 flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncingInbox ? "animate-spin" : ""}`} />
+                  {syncingInbox ? "Sincronizando Correo..." : "Sincronizar Correo Ahora"}
+                </button>
+              </div>
+            </div>
+
+            {/* Zona de Carga Manual Drag & Drop de XML */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOverXml(true); }}
+              onDragLeave={() => setDragOverXml(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragOverXml(false)
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                  handleUploadXmlFile(e.dataTransfer.files[0])
+                }
+              }}
+              className={`card p-4 border-2 border-dashed flex flex-col items-center justify-center text-center transition-all ${
+                dragOverXml
+                  ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40"
+                  : "border-slate-300 dark:border-slate-700 hover:border-indigo-400 bg-white dark:bg-slate-800/90"
+              }`}
+            >
+              <label className="cursor-pointer w-full h-full flex flex-col items-center justify-center p-2">
+                <input
+                  type="file"
+                  accept=".xml"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleUploadXmlFile(e.target.files[0])
+                    }
+                  }}
+                  disabled={uploadingXml}
+                />
+                <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-2 text-indigo-600">
+                  {uploadingXml ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileText className="w-5 h-5" />}
+                </div>
+                <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                  {uploadingXml ? "Procesando DTE..." : "Cargar Factura XML"}
+                </span>
+                <span className="text-[10px] text-gray-400 mt-0.5">
+                  Arrastra tu archivo XML aquí o haz click para explorar
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* BARRA DE BÚSQUEDA Y FILTROS */}
+          <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-indigo-500" />
                 Cartera de Facturas de Proveedores — Procure-to-Pay ({allSupplierInvoices.length} Facturas)
               </h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Seguimiento del ciclo P2P: comprobantes recibidos, fechas de vencimiento y estado de pago en tesorería.
+                Seguimiento del ciclo P2P: comprobantes recibidos, control estricto de Notas de Crédito y autorización de pago.
               </p>
             </div>
 
@@ -2006,13 +2469,15 @@ export default function PurchasesPage() {
                 className="input-field text-xs font-semibold"
               >
                 <option value="todos">Todos los Estados</option>
-                <option value="pendiente">Pendientes</option>
+                <option value="aprobada">Aprobadas para Pago</option>
+                <option value="retenida_discrepancia">Retenidas por Discrepancia</option>
+                <option value="pendiente">Pendientes de Conciliación</option>
                 <option value="pagada">Pagadas</option>
-                <option value="vencida">Vencidas</option>
               </select>
             </div>
           </div>
 
+          {/* TABLA DE FACTURAS CON SEMÁFORO Y 3-WAY MATCH */}
           <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
             {paginatedInvoicesP2P.length === 0 ? (
               <div className="p-12 text-center text-xs text-gray-400">
@@ -2021,26 +2486,34 @@ export default function PurchasesPage() {
               </div>
             ) : (
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-left text-xs min-w-[850px]">
+                <table className="w-full text-left text-xs min-w-[950px]">
                   <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60">
                     <tr>
-                      <th className="p-3">N° Factura</th>
+                      <th className="p-3">N° Factura Fiscal</th>
                       <th className="p-3">Proveedor</th>
                       <th className="p-3">Emisión</th>
                       <th className="p-3">Vencimiento</th>
                       <th className="p-3 text-right">Total Factura</th>
-                      <th className="p-3 text-right">Saldo Pendiente</th>
-                      <th className="p-3 text-center">Condición</th>
-                      <th className="p-3 text-center">Estado</th>
+                      <th className="p-3 text-right">Saldo a Pagar</th>
+                      <th className="p-3 text-center">Control Tesorería</th>
+                      <th className="p-3 text-center">Estado Fiscal</th>
+                      <th className="p-3 text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                    {paginatedInvoicesP2P.map((inv) => (
+                    {paginatedInvoicesP2P.map((inv: any) => (
                       <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3 font-mono font-bold text-gray-900 dark:text-white">
-                          {inv.numero_factura || "S/N"}
+                        <td className="p-3">
+                          <div className="font-mono font-bold text-gray-900 dark:text-white">
+                            {inv.numero_factura || "S/N"}
+                          </div>
+                          {inv.cdc && (
+                            <div className="text-[9px] font-mono text-indigo-500 truncate max-w-[140px]" title={inv.cdc}>
+                              CDC: {inv.cdc}
+                            </div>
+                          )}
                         </td>
-                        <td className="p-3 font-medium text-gray-700 dark:text-gray-300 line-clamp-1 max-w-[200px]" title={inv.supplier_nombre}>
+                        <td className="p-3 font-medium text-gray-700 dark:text-gray-300 line-clamp-1 max-w-[180px]" title={inv.supplier_nombre}>
                           {inv.supplier_nombre || "Proveedor"}
                         </td>
                         <td className="p-3 text-gray-500 font-mono">
@@ -2054,20 +2527,50 @@ export default function PurchasesPage() {
                         </td>
                         <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400">
                           {formatPYG(inv.saldo_pendiente || 0)}
-                        </td>
-                        <td className="p-3 text-center capitalize text-slate-500">
-                          {inv.condicion || "Crédito"}
+                          {inv.monto_retenido_nc > 0 && (
+                            <div className="text-[10px] text-red-500 font-normal">
+                              Retenido NC: -{formatPYG(inv.monto_retenido_nc)}
+                            </div>
+                          )}
                         </td>
                         <td className="p-3 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          {inv.bloqueada_para_pago || inv.estado === "retenida_discrepancia" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300" title={inv.motivo_bloqueo || "Sin NC no hay pago"}>
+                              <ShieldAlert className="w-3 h-3 text-red-600 shrink-0" /> Bloqueada (Falta NC)
+                            </span>
+                          ) : inv.estado === "aprobada" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                              <CheckCircle className="w-3 h-3 text-emerald-600 shrink-0" /> Aprobada para Pago
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                              <Clock className="w-3 h-3 text-amber-600 shrink-0" /> Pendiente 3-Way
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${
                             inv.estado === "pagada"
                               ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                              : inv.estado === "vencida"
+                              : inv.estado === "retenida_discrepancia"
                               ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                              : inv.estado === "aprobada"
+                              ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
                               : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
                           }`}>
                             {inv.estado || "pendiente"}
                           </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleOpen3WayMatch(inv.id)}
+                            className="btn-secondary text-xs px-2.5 py-1 inline-flex items-center gap-1 hover:text-indigo-600"
+                            title="Auditar Orden vs Muelle vs Factura"
+                          >
+                            <Scale className="w-3.5 h-3.5 text-indigo-500" />
+                            3-Way Match
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -2223,26 +2726,163 @@ export default function PurchasesPage() {
           TAB 4: 3-WAY MATCHING
       ────────────────────────────────────────────────────────────────────────── */}
       {tab === "matching" && (
-        <div className="space-y-5">
-          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
-            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
-              <Scale className="w-5 h-5 text-indigo-500" />
-              3-Way Matching: Conciliación Triple de Compras
-            </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              Auditoría cruzada automática entre la <strong>Orden de Compra emitida</strong>, la <strong>Recepción Física en Muelle</strong> y la <strong>Factura Fiscal del Proveedor</strong>.
-            </p>
+        <div className="space-y-6">
+          {/* Header Card con Política de Blindaje */}
+          <div className="card p-5 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Scale className="w-5 h-5 text-indigo-500" />
+                3-Way Matching: Conciliación Triple de Compras & Control de Pagos
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Auditoría cruzada matemática: <strong>Orden de Compra</strong> vs. <strong>Recepción en Muelle</strong> vs. <strong>Factura DTE SIFEN</strong>.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50">
+                <ShieldAlert className="w-4 h-4 text-amber-600" />
+                Regla Fiscal: Sin NC no hay pago
+              </span>
+            </div>
           </div>
 
+          {/* KPIs Hero de Matching */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Facturas Bloqueadas / Discrepancia</span>
+              <p className="text-xl font-black font-mono text-red-600 mt-1 flex items-center gap-2">
+                <Lock className="w-4 h-4" />
+                {allSupplierInvoices.filter(i => (i as any).bloqueada_para_pago || i.estado === "retenida_discrepancia").length}
+              </p>
+              <span className="text-[10px] text-gray-400">Excluidas de órdenes de pago</span>
+            </div>
+
+            <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Solicitudes de NC Pendientes</span>
+              <p className="text-xl font-black font-mono text-amber-600 mt-1 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                {supplierNcRequests.filter(r => r.estado === "pendiente").length}
+              </p>
+              <span className="text-[10px] text-gray-400">Esperando emisión del proveedor</span>
+            </div>
+
+            <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Monto Total Reclamado en NC</span>
+              <p className="text-xl font-black font-mono text-indigo-600 mt-1">
+                {formatPYG(supplierNcRequests.filter(r => r.estado === "pendiente").reduce((acc, r) => acc + Number(r.monto_reclamado || 0), 0))}
+              </p>
+              <span className="text-[10px] text-gray-400">Retenido en Tesorería</span>
+            </div>
+
+            <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Facturas Aprobadas (Sin Traba)</span>
+              <p className="text-xl font-black font-mono text-emerald-600 mt-1 flex items-center gap-2">
+                <Unlock className="w-4 h-4" />
+                {allSupplierInvoices.filter(i => !(i as any).bloqueada_para_pago && i.estado === "aprobada").length}
+              </p>
+              <span className="text-[10px] text-gray-400">Habilitadas para Tesorería</span>
+            </div>
+          </div>
+
+          {/* TABLA: SOLICITUDES DE NOTA DE CRÉDITO PENDIENTES */}
+          <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-amber-500" />
+                  Solicitudes de Nota de Crédito Emitidas a Proveedores ({supplierNcRequests.length})
+                </h4>
+                <p className="text-[11px] text-gray-500">
+                  Seguimiento de reclamos por faltante físico, roturas o sobreprecio facturado.
+                </p>
+              </div>
+            </div>
+
+            {supplierNcRequests.length === 0 ? (
+              <div className="p-8 text-center text-xs text-gray-400">
+                <CheckCircle className="w-8 h-8 mx-auto mb-2 text-emerald-400 opacity-60" />
+                No hay solicitudes de Nota de Crédito pendientes ni discrepancias registradas.
+              </div>
+            ) : (
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-left text-xs min-w-[800px]">
+                  <thead className="bg-slate-100/70 dark:bg-slate-900/40 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-3">N° Solicitud</th>
+                      <th className="p-3">Proveedor</th>
+                      <th className="p-3">Factura Relacionada</th>
+                      <th className="p-3">Motivo Reclamo</th>
+                      <th className="p-3 text-right">Monto Reclamado</th>
+                      <th className="p-3">Estado</th>
+                      <th className="p-3 text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {supplierNcRequests.map(req => (
+                      <tr key={req.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          {req.numero_solicitud}
+                        </td>
+                        <td className="p-3 font-bold text-gray-900 dark:text-white">
+                          {req.supplier?.razon_social || req.supplier?.nombre_fantasia || "Proveedor"}
+                        </td>
+                        <td className="p-3 font-mono text-gray-600 dark:text-gray-300">
+                          {req.invoice?.numero_factura || "—"}
+                        </td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                            {req.tipo_motivo?.replace("_", " ").toUpperCase()}
+                          </span>
+                          {req.observaciones && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 truncate max-w-xs">{req.observaciones}</p>
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-mono font-black text-red-600 dark:text-red-400">
+                          {formatPYG(req.monto_reclamado || 0)}
+                        </td>
+                        <td className="p-3">
+                          {req.estado === "recibida_aplicada" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                              <CheckCircle className="w-3 h-3 text-emerald-500" /> NC Recibida & Aplicada
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                              <Clock className="w-3 h-3 text-rose-500" /> Pendiente NC Proveedor
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right">
+                          {req.estado === "pendiente" ? (
+                            <button
+                              onClick={() => handleOpenResolveNc(req)}
+                              className="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 ml-auto shadow-sm"
+                            >
+                              <FileCheck className="w-3.5 h-3.5" /> Registrar NC Recibida
+                            </button>
+                          ) : (
+                            <span className="text-[11px] font-mono text-gray-400">
+                              NC N° {req.nc_recibida_numero || "—"}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* TABLA: FACTURAS FISCALES Y ESTADO 3-WAY MATCH */}
           <div className="card overflow-hidden bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 shadow-sm">
             <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-700/60 flex justify-between items-center">
               <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
-                Facturas de Proveedores vs Recepciones ({invoices.length} Comprobantes Registrados)
+                Auditoría Cruzada de Facturas ({allSupplierInvoices.length} Comprobantes Registrados)
               </h4>
             </div>
 
             <div className="overflow-x-auto w-full">
-              <table className="w-full text-left text-xs min-w-[750px]">
+              <table className="w-full text-left text-xs min-w-[850px]">
                 <thead className="bg-slate-100/70 dark:bg-slate-900/40 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
                   <tr>
                     <th className="p-3">N° Factura Fiscal</th>
@@ -2250,42 +2890,70 @@ export default function PurchasesPage() {
                     <th className="p-3">Fecha Emisión</th>
                     <th className="p-3 text-right">Total Factura</th>
                     <th className="p-3 text-right">Saldo Pendiente</th>
-                    <th className="p-3">Estado Fiscal</th>
-                    <th className="p-3 text-center">3-Way Match</th>
+                    <th className="p-3">Control de Tesorería</th>
+                    <th className="p-3 text-center">Acción 3-Way Match</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                  {invoices.slice(0, 15).map(inv => (
-                    <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
-                      <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                        {inv.numero_factura}
-                      </td>
-                      <td className="p-3 font-bold text-gray-900 dark:text-white">
-                        {inv.supplier_nombre || "Proveedor"}
-                      </td>
-                      <td className="p-3 text-gray-500">
-                        {inv.fecha_emision ? formatDate(inv.fecha_emision) : "—"}
-                      </td>
-                      <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
-                        {formatPYG(inv.total || 0)}
-                      </td>
-                      <td className="p-3 text-right font-mono text-red-600 dark:text-red-400">
-                        {formatPYG(inv.saldo_pendiente || 0)}
-                      </td>
-                      <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          inv.estado === "pagada" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-                        }`}>
-                          {inv.estado || "pendiente"}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-                          <CheckCircle className="w-3 h-3 text-emerald-500" /> Conciliado 100%
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {allSupplierInvoices.slice(0, 20).map(inv => {
+                    const isBlocked = (inv as any).bloqueada_para_pago || inv.estado === "retenida_discrepancia"
+                    return (
+                      <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3">
+                          <div className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                            {inv.numero_factura}
+                          </div>
+                          {(inv as any).xml_sifen_url && (
+                            <span className="text-[10px] text-teal-600 font-mono flex items-center gap-1">
+                              <CheckCircle className="w-2.5 h-2.5" /> DTE SIFEN XML
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 font-bold text-gray-900 dark:text-white">
+                          {inv.supplier_nombre || "Proveedor"}
+                        </td>
+                        <td className="p-3 text-gray-500">
+                          {inv.fecha_emision ? formatDate(inv.fecha_emision) : "—"}
+                        </td>
+                        <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                          {formatPYG(inv.total || 0)}
+                        </td>
+                        <td className="p-3 text-right font-mono text-red-600 dark:text-red-400">
+                          {formatPYG(inv.saldo_pendiente || 0)}
+                        </td>
+                        <td className="p-3">
+                          {isBlocked ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                                <Lock className="w-3 h-3 text-rose-500" /> PAGO BLOQUEADO
+                              </span>
+                              {(inv as any).motivo_bloqueo && (
+                                <span className="text-[10px] text-rose-500 max-w-[200px] truncate">
+                                  {(inv as any).motivo_bloqueo}
+                                </span>
+                              )}
+                            </div>
+                          ) : inv.estado === "aprobada" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                              <Unlock className="w-3 h-3 text-emerald-500" /> Habilitada Pago
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                              <Clock className="w-3 h-3 text-amber-500" /> Pendiente Conciliación
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => handleOpen3WayMatch(inv.id)}
+                            className="px-3 py-1 rounded-lg text-xs font-bold border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 inline-flex items-center gap-1.5 transition-colors"
+                          >
+                            <Scale className="w-3.5 h-3.5" /> Auditar Match
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2907,8 +3575,57 @@ export default function PurchasesPage() {
                 </div>
               </div>
 
+              {/* Barra de Adición Extraordinaria en Muelle */}
+              <div className="p-3 bg-amber-50/80 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <span className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                    <Plus className="w-4 h-4 text-amber-600" />
+                    ¿Llegó mercadería física fuera de la Orden de Compra? (Adición Extraordinaria)
+                  </span>
+                  <span className="text-[10px] text-amber-700 dark:text-amber-400">
+                    Requiere motivo de autorización explícito para auditoría
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Buscar producto por nombre o código de barra para agregar al muelle..."
+                      value={extraordinarySearch}
+                      onChange={(e) => handleSearchExtraordinary(e.target.value)}
+                      className="input-field w-full pl-9 text-xs bg-white dark:bg-slate-900"
+                    />
+                    {searchingExtraordinary && (
+                      <Loader2 className="w-4 h-4 text-indigo-500 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+                    )}
+                  </div>
+
+                  {extraordinaryResults.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                      {extraordinaryResults.map(p => (
+                        <div
+                          key={p.id}
+                          onClick={() => handleAddExtraordinaryItem(p)}
+                          className="p-2.5 hover:bg-amber-50 dark:hover:bg-amber-950/40 cursor-pointer flex items-center justify-between text-xs transition-colors"
+                        >
+                          <div>
+                            <span className="font-bold text-gray-900 dark:text-white">{p.nombre}</span>
+                            <span className="text-[10px] text-gray-400 ml-2 font-mono">{p.codigo_barra || p.sku}</span>
+                          </div>
+                          <span className="text-amber-600 font-bold text-xs flex items-center gap-1">
+                            <Plus className="w-3.5 h-3.5" /> Agregar
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="overflow-x-auto w-full border border-slate-200 dark:border-slate-700 rounded-xl">
-                <table className="w-full text-left text-xs min-w-[700px]">
+                <table className="w-full text-left text-xs min-w-[750px]">
                   <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
                     <tr>
                       <th className="p-2.5">Producto</th>
@@ -2920,14 +3637,41 @@ export default function PurchasesPage() {
                       <th className="p-2.5 w-32">Vencimiento</th>
                       <th className="p-2.5 text-right w-24">Rechazo</th>
                       <th className="p-2.5 w-32">Motivo Rechazo</th>
+                      <th className="p-2.5 text-center w-10"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
                     {receiptForm.items.map((it, idx) => (
-                      <tr key={idx}>
+                      <tr key={idx} className={it.es_extraordinario ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}>
                         <td className="p-2.5">
-                          <div className="font-bold text-gray-800 dark:text-gray-200">{it.nombre}</div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="font-bold text-gray-800 dark:text-gray-200">{it.nombre}</div>
+                            {it.es_extraordinario && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-100">
+                                EXTRAORDINARIO
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] text-gray-400 font-mono">SKU: {it.sku || "—"}</div>
+                          {it.es_extraordinario && (
+                            <div className="mt-1">
+                              <input
+                                type="text"
+                                placeholder="Motivo de autorización de ingreso fuera de OC *"
+                                value={it.autorizacion_motivo || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  setReceiptForm(prev => {
+                                    const copy = [...prev.items]
+                                    copy[idx].autorizacion_motivo = val
+                                    return { ...prev, items: copy }
+                                  })
+                                }}
+                                className="input-field w-full p-1 text-[11px] border-amber-300 dark:border-amber-700 bg-amber-50/60 text-amber-900 dark:text-amber-200"
+                                required
+                              />
+                            </div>
+                          )}
                         </td>
                         <td className="p-2.5 text-right font-mono font-bold text-gray-600 dark:text-gray-300">
                           {it.cantidad_ordenada.toLocaleString()}
@@ -3021,6 +3765,23 @@ export default function PurchasesPage() {
                             }}
                             className="input-field w-full p-1 text-xs"
                           />
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {it.es_extraordinario && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReceiptForm(prev => ({
+                                  ...prev,
+                                  items: prev.items.filter((_, i) => i !== idx)
+                                }))
+                              }}
+                              className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 rounded"
+                              title="Eliminar ítem extraordinario"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -3328,6 +4089,674 @@ export default function PurchasesPage() {
                 Cerrar Ficha
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: EMISIÓN DE ORDEN DE COMPRA MANUAL
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showManualPOModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-4xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <ShoppingCart className="w-5 h-5 text-indigo-500" /> Emisión Manual de Orden de Compra
+              </h3>
+              <button
+                onClick={() => setShowManualPOModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveManualPO} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Proveedor *
+                  </label>
+                  <select
+                    value={manualPOSupplierId}
+                    onChange={(e) => setManualPOSupplierId(e.target.value)}
+                    className="input-field w-full text-xs font-semibold"
+                    required
+                  >
+                    <option value="">Seleccione un proveedor...</option>
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.razon_social || s.nombre_fantasia} (RUC: {s.ruc || "—"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Fecha Entrega Est.
+                  </label>
+                  <input
+                    type="date"
+                    value={manualPOFechaEntrega}
+                    onChange={(e) => setManualPOFechaEntrega(e.target.value)}
+                    className="input-field w-full text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Condición de Pago
+                  </label>
+                  <select
+                    value={manualPOCondiciones}
+                    onChange={(e) => setManualPOCondiciones(e.target.value)}
+                    className="input-field w-full text-xs"
+                  >
+                    <option value="Contado">Contado</option>
+                    <option value="15 Días">15 Días</option>
+                    <option value="30 Días">30 Días</option>
+                    <option value="45 Días">45 Días</option>
+                    <option value="60 Días">60 Días</option>
+                    <option value="Consignación">Consignación</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Observaciones / Instrucciones de Entrega
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej. Entregar en rampa de descarga de 07:00 a 11:00..."
+                  value={manualPOObservaciones}
+                  onChange={(e) => setManualPOObservaciones(e.target.value)}
+                  className="input-field w-full text-xs"
+                />
+              </div>
+
+              {/* Buscador reactivo de productos */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
+                  Buscar y Agregar Productos a la Orden
+                </label>
+                <div className="relative">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Escriba nombre, código de barras o SKU del producto..."
+                    value={searchProductPO}
+                    onChange={(e) => handleSearchProductsPO(e.target.value)}
+                    className="input-field w-full pl-9 text-xs bg-white dark:bg-slate-900"
+                  />
+                  {searchingProductsPO && (
+                    <Loader2 className="w-4 h-4 text-indigo-500 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+                  )}
+
+                  {productSearchResultsPO.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-20 max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                      {productSearchResultsPO.map(p => (
+                        <div
+                          key={p.id}
+                          onClick={() => handleAddProductToManualPO(p)}
+                          className="p-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 cursor-pointer flex items-center justify-between text-xs transition-colors"
+                        >
+                          <div>
+                            <span className="font-bold text-gray-900 dark:text-white">{p.nombre}</span>
+                            <span className="text-[10px] text-gray-400 ml-2 font-mono">{p.codigo_barra || p.sku}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono text-gray-600 dark:text-gray-300">
+                              Costo: {formatPYG(Number(p.costo_unitario || (p as any).precio_costo || 0))}
+                            </span>
+                            <span className="text-indigo-600 font-bold text-xs flex items-center gap-1">
+                              <Plus className="w-3.5 h-3.5" /> Agregar
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Tabla de ítems de la orden manual */}
+              <div className="overflow-x-auto w-full border border-slate-200 dark:border-slate-700 rounded-xl">
+                <table className="w-full text-left text-xs min-w-[650px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-2.5">Producto</th>
+                      <th className="p-2.5 text-right w-28">Cantidad</th>
+                      <th className="p-2.5 text-right w-36">Precio Unitario (Gs.)</th>
+                      <th className="p-2.5 text-right w-20">IVA %</th>
+                      <th className="p-2.5 text-right w-36">Subtotal</th>
+                      <th className="p-2.5 text-center w-12"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {manualPOItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-6 text-center text-gray-400">
+                          Utilice el buscador para añadir productos a la orden.
+                        </td>
+                      </tr>
+                    ) : (
+                      manualPOItems.map((it, idx) => (
+                        <tr key={idx}>
+                          <td className="p-2.5">
+                            <div className="font-bold text-gray-900 dark:text-white">{it.nombre}</div>
+                            <div className="text-[10px] text-gray-400 font-mono">
+                              SKU: {it.sku || "—"} | Barra: {it.codigo_barra || "—"}
+                            </div>
+                          </td>
+                          <td className="p-2.5 text-right">
+                            <input
+                              type="number"
+                              min={1}
+                              value={it.cantidad}
+                              onChange={(e) => handleManualPOItemChange(idx, "cantidad", Math.max(1, Number(e.target.value)))}
+                              className="input-field w-24 p-1 text-right font-mono font-bold text-xs"
+                              required
+                            />
+                          </td>
+                          <td className="p-2.5 text-right">
+                            <input
+                              type="number"
+                              min={0}
+                              value={it.precio_unitario}
+                              onChange={(e) => handleManualPOItemChange(idx, "precio_unitario", Math.max(0, Number(e.target.value)))}
+                              className="input-field w-32 p-1 text-right font-mono font-bold text-xs"
+                              required
+                            />
+                          </td>
+                          <td className="p-2.5 text-right font-mono text-gray-500">
+                            {it.iva_tasa || 10}%
+                          </td>
+                          <td className="p-2.5 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                            {formatPYG(it.subtotal || 0)}
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItemFromManualPO(idx)}
+                              className="p-1 text-red-500 hover:text-red-700 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Barra de Totales */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 flex justify-between items-center text-xs">
+                <span className="text-gray-500 font-bold">
+                  Total de Ítems: <strong>{manualPOItems.length}</strong>
+                </span>
+                <div className="text-right font-mono">
+                  <span className="text-gray-500 font-bold mr-2">Total Estimado:</span>
+                  <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
+                    {formatPYG(manualPOItems.reduce((acc, it) => acc + (it.subtotal || 0), 0))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowManualPOModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingManualPO || manualPOItems.length === 0}
+                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2"
+                >
+                  {savingManualPO ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
+                  {savingManualPO ? "Emitiendo..." : "Emitir Orden de Compra"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: CONFIGURACIÓN DE BUZÓN DE FACTURAS ELECTRÓNICAS (cPanel IMAP)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showInboxConfigModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Mail className="w-5 h-5 text-indigo-500" /> Configuración de Buzón de Facturas (cPanel IMAP)
+              </h3>
+              <button
+                onClick={() => setShowInboxConfigModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Configure la cuenta de correo donde los proveedores envían los archivos XML de Facturas Electrónicas (SIFEN e-Kuatia). El sistema descargará e interpretará las facturas automáticamente.
+            </p>
+
+            <form onSubmit={handleSaveInboxConfig} className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Servidor IMAP *
+                  </label>
+                  <input
+                    type="text"
+                    value={inboxConfigForm.imap_host}
+                    onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_host: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="mail.superextra.com.py"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Puerto *
+                  </label>
+                  <input
+                    type="number"
+                    value={inboxConfigForm.imap_port}
+                    onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_port: Number(e.target.value) }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="993"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Usuario de Correo *
+                </label>
+                <input
+                  type="email"
+                  value={inboxConfigForm.imap_user}
+                  onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_user: e.target.value }))}
+                  className="input-field w-full text-xs font-mono"
+                  placeholder="facturaelectronica@superextra.com.py"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Contraseña de Correo
+                </label>
+                <input
+                  type="password"
+                  value={inboxConfigForm.imap_password}
+                  onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_password: e.target.value }))}
+                  className="input-field w-full text-xs"
+                  placeholder={inboxConfig?.imap_user ? "Dejar en blanco para mantener la actual" : "Contraseña de la casilla cPanel"}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Carpeta IMAP
+                  </label>
+                  <input
+                    type="text"
+                    value={inboxConfigForm.imap_folder}
+                    onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_folder: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="INBOX"
+                  />
+                </div>
+                <div className="flex items-center gap-3 pt-6">
+                  <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={inboxConfigForm.imap_ssl}
+                      onChange={(e) => setInboxConfigForm(prev => ({ ...prev, imap_ssl: e.target.checked }))}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Usar SSL / TLS
+                  </label>
+                </div>
+              </div>
+
+              {inboxConfig?.ultimo_sync && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-900/40 rounded-xl text-xs text-gray-500 space-y-1 font-mono">
+                  <div>Última Sincronización: {formatDate(inboxConfig.ultimo_sync)}</div>
+                  {inboxConfig.ultimo_error && (
+                    <div className="text-red-500">Último Error: {inboxConfig.ultimo_error}</div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowInboxConfigModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingInboxConfig}
+                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2"
+                >
+                  {savingInboxConfig ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {savingInboxConfig ? "Guardando..." : "Guardar Configuración"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: AUDITORÍA DETALLADA 3-WAY MATCH
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showMatchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-3xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <Scale className="w-5 h-5 text-indigo-500" /> Auditoría Cruzada 3-Way Match
+              </h3>
+              <button
+                onClick={() => setShowMatchModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {performingMatch ? (
+              <div className="py-16 text-center text-xs text-gray-400">
+                <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin text-indigo-500" />
+                Ejecutando conciliación matemática (OC vs Muelle vs Factura)...
+              </div>
+            ) : matchResult ? (
+              <div className="space-y-4">
+                {/* Banner de Estado del Match */}
+                <div className={`p-4 rounded-xl border ${
+                  matchResult.estado_matching === "match_perfecto"
+                    ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60"
+                    : "bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/60"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {matchResult.estado_matching === "match_perfecto" ? (
+                        <CheckCircle className="w-6 h-6 text-emerald-600" />
+                      ) : (
+                        <Lock className="w-6 h-6 text-rose-600" />
+                      )}
+                      <div>
+                        <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                          {matchResult.estado_matching === "match_perfecto"
+                            ? "¡Conciliación Exitosa: Match Perfecto (100%)!"
+                            : "Discrepancia Detectada — Factura Retenida para Pago"}
+                        </h4>
+                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                          {matchResult.mensaje}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Métricas del Match */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Facturado</span>
+                    <p className="text-base font-extrabold font-mono text-gray-900 dark:text-white mt-1">
+                      {formatPYG(matchResult.total_factura || 0)}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Total Recibido Muelle</span>
+                    <p className="text-base font-extrabold font-mono text-indigo-600 mt-1">
+                      {formatPYG(matchResult.total_calculado_recepcion || 0)}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Diferencia / Reclamo NC</span>
+                    <p className="text-base font-extrabold font-mono text-red-600 mt-1">
+                      {formatPYG(matchResult.diferencia_total || 0)}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-gray-400 font-bold uppercase block">Estado en Tesorería</span>
+                    <p className={`text-xs font-bold mt-1 ${
+                      matchResult.bloqueada_para_pago ? "text-rose-600" : "text-emerald-600"
+                    }`}>
+                      {matchResult.bloqueada_para_pago ? "BLOQUEADA (Sin NC)" : "HABILITADA PAGO"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Si se generó Solicitud de NC */}
+                {matchResult.nc_request_generada && (
+                  <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                        <FileText className="w-4 h-4 text-amber-600" />
+                        Solicitud de Nota de Crédito Generada Automáticamente
+                      </span>
+                      <span className="font-mono text-xs font-bold text-amber-900 dark:text-amber-200">
+                        {matchResult.nc_request_generada.numero_solicitud}
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-800 dark:text-amber-300">
+                      Monto Reclamado: <strong>{formatPYG(matchResult.nc_request_generada.monto_reclamado || 0)}</strong>.
+                      La factura no constituye obligación exigible hasta que el proveedor remita la Nota de Crédito correspondiente.
+                    </p>
+                  </div>
+                )}
+
+                {/* Tabla de discrepancias ítem por ítem */}
+                {matchResult.discrepancias && matchResult.discrepancias.length > 0 && (
+                  <div className="space-y-2">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                      Detalle de Discrepancias por Producto
+                    </h5>
+                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px]">
+                          <tr>
+                            <th className="p-2.5">Producto</th>
+                            <th className="p-2.5 text-center">Tipo Discrepancia</th>
+                            <th className="p-2.5 text-right">Cant. Recibida</th>
+                            <th className="p-2.5 text-right">Cant. Facturada</th>
+                            <th className="p-2.5 text-right">Diferencia (Gs.)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                          {matchResult.discrepancias.map((d: any, idx: number) => (
+                            <tr key={idx}>
+                              <td className="p-2.5 font-bold text-gray-900 dark:text-white">
+                                {d.descripcion}
+                              </td>
+                              <td className="p-2.5 text-center">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                                  {d.tipo?.replace("_", " ").toUpperCase()}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-right font-mono">
+                                {d.cantidad_recibida}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold text-red-600">
+                                {d.cantidad_facturada}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-black text-red-600">
+                                {formatPYG(d.diferencia_monto || 0)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setShowMatchModal(false)}
+                className="btn-primary text-xs px-6 py-2"
+              >
+                Cerrar Auditoría
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL: REGISTRAR NOTA DE CRÉDITO RECIBIDA DEL PROVEEDOR
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showResolveNcModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <FileCheck className="w-5 h-5 text-emerald-500" /> Registrar Nota de Crédito Recibida
+              </h3>
+              <button
+                onClick={() => setShowResolveNcModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Al cargar la Nota de Crédito emitida por el proveedor, se aplica el descuento formal sobre la factura, se reduce el saldo en Cuentas por Pagar y se habilita para pago en Tesorería.
+            </p>
+
+            <form onSubmit={handleSaveResolveNc} className="space-y-4">
+              <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl space-y-1 text-xs font-mono">
+                <div>Proveedor: <strong className="text-gray-900 dark:text-white">{selectedNcRequestForResolve?.supplier?.razon_social}</strong></div>
+                <div>Factura: <strong className="text-indigo-600">{selectedNcRequestForResolve?.invoice?.numero_factura}</strong></div>
+                <div>Monto Reclamado Original: <strong className="text-red-600">{formatPYG(selectedNcRequestForResolve?.monto_reclamado || 0)}</strong></div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    N° Nota de Crédito *
+                  </label>
+                  <input
+                    type="text"
+                    value={resolveNcForm.nc_recibida_numero}
+                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_numero: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="001-001-0004512"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Timbrado NC *
+                  </label>
+                  <input
+                    type="text"
+                    value={resolveNcForm.nc_recibida_timbrado}
+                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_timbrado: e.target.value }))}
+                    className="input-field w-full text-xs font-mono"
+                    placeholder="18545636"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Monto Real de la NC (Gs.) *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={resolveNcForm.nc_recibida_monto}
+                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_monto: Number(e.target.value) }))}
+                    className="input-field w-full text-xs font-mono font-bold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                    Fecha Emisión NC *
+                  </label>
+                  <input
+                    type="date"
+                    value={resolveNcForm.nc_recibida_fecha}
+                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_fecha: e.target.value }))}
+                    className="input-field w-full text-xs"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  CDC SIFEN de la Nota de Crédito (44 dígitos, opcional)
+                </label>
+                <input
+                  type="text"
+                  value={resolveNcForm.nc_recibida_cdc}
+                  onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_cdc: e.target.value }))}
+                  className="input-field w-full text-xs font-mono"
+                  placeholder="01801503779001001000451212026090412345678901"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Observaciones
+                </label>
+                <input
+                  type="text"
+                  value={resolveNcForm.observaciones}
+                  onChange={(e) => setResolveNcForm(prev => ({ ...prev, observaciones: e.target.value }))}
+                  className="input-field w-full text-xs"
+                  placeholder="Ej. NC aplicada por reposición de 10 paquetes de fideos vencidos"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowResolveNcModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={resolvingNc}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 shadow-sm"
+                >
+                  {resolvingNc ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  {resolvingNc ? "Aplicando NC..." : "Aplicar NC y Habilitar Factura"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

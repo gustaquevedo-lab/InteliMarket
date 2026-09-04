@@ -146,7 +146,7 @@ async function downloadAuthenticated(path: string, params: Record<string, string
 }
 
 // ========== TYPE STUBS ==========
-export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; imagen_url?: string | null; precio_venta?: number; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
+export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; imagen_url?: string | null; precio_venta?: number; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
 export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; extra_club_numero?: string | null; empresa_vinculada_nombre?: string | null; empresa_vinculada_ruc?: string | null; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
 export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_doc?: string; customer_extra_club?: string; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; forma_pago?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; numero_interno?: string; recibo_html?: string; recibo_escpos_b64?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
@@ -191,7 +191,7 @@ export interface ActivityStats { total?: number; completadas?: number; pendiente
 export interface Permission { id: string; name?: string; description?: string | null; module?: string; action?: string; created_at?: string }
 export interface Role { id: string; name?: string; description?: string | null; is_system?: boolean; is_default?: boolean; created_at?: string; permissions?: Permission[] }
 export interface TenantUser { id: string; email: string; nombre: string; telefono?: string | null; rol: string; activo: boolean; is_superadmin: boolean; foto_url?: string | null; last_login?: string | null; created_at: string; tenant_rol: string; role_names: string[] }
-export interface PurchaseOrder { id: string; company_id?: string; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; tipo_cambio?: number; fecha_entrega_estimada?: string | null; descuento_total?: number; iva_10?: number; iva_5?: number; observaciones?: string | null; items?: PurchaseOrderItem[]; created_at?: string; updated_at?: string }
+export interface PurchaseOrder { id: string; company_id?: string; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; tipo_cambio?: number; fecha_entrega_estimada?: string | null; prioridad?: string; condiciones_pago?: string; created_by_name?: string; user_id?: string; descuento_total?: number; iva_10?: number; iva_5?: number; observaciones?: string | null; items?: PurchaseOrderItem[]; created_at?: string; updated_at?: string }
 export interface PurchaseRequisitionItem { id: string; requisition_id: string; product_id: string; variant_id?: string | null; descripcion?: string | null; cantidad_solicitada: number; cantidad_aprobada?: number | null; precio_estimado?: number | null; total_estimado?: number | null; observaciones?: string | null; created_at: string }
 export interface PurchaseRequisition { id: string; company_id: string; numero: string; fecha: string; fecha_necesidad?: string | null; departamento?: string | null; solicitante_id?: string | null; solicitante_nombre?: string | null; estado: string; prioridad?: string | null; moneda?: string | null; subtotal?: number | null; total?: number | null; motivo?: string | null; observaciones?: string | null; aprobado_por?: string | null; fecha_aprobacion?: string | null; rechazado_motivo?: string | null; purchase_order_id?: string | null; user_id?: string | null; created_at: string; items?: PurchaseRequisitionItem[] }
 export interface PurchaseOrderItem { id?: string; orden_id?: string; producto_id?: string; producto?: Product; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; recibido?: number; pendiente?: number; created_at?: string }
@@ -1154,6 +1154,26 @@ export const api = {
         iva_tasa?: number
       }[]
     }) => client.post<PurchaseOrder>("/v1/purchases/generate-po-from-replenishment", { ...data, company_id: COMPANY_ID }),
+    getInboxConfig: (companyId?: string) =>
+      client.get<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox-config`),
+    saveInboxConfig: (data: any, companyId?: string) =>
+      client.post<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox-config`, { ...data, company_id: companyId || COMPANY_ID }),
+    syncInbox: (params?: { max_emails?: number; only_unseen?: boolean }, companyId?: string) =>
+      client.post<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox/sync?max_emails=${params?.max_emails || 30}&only_unseen=${params?.only_unseen ?? false}`),
+    uploadInvoiceXml: (file: File, userId?: string, companyId?: string) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      if (userId) formData.append("user_id", userId)
+      return requestMultipart<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox/upload-xml`, formData)
+    },
+    reconcile3WayMatch: (invoiceId: string, userId?: string) =>
+      client.post<any>("/v1/purchases/matching/reconcile", { invoice_id: invoiceId, user_id: userId }),
+    getInvoice3WayMatch: (invoiceId: string) =>
+      client.get<any>(`/v1/purchases/invoices/${invoiceId}/3way-match`),
+    listSupplierNcRequests: (params?: { estado?: string; supplier_id?: string }, companyId?: string) =>
+      client.get<any[]>(`/v1/companies/${companyId || COMPANY_ID}/supplier-nc-requests`, params),
+    resolveSupplierNcRequest: (requestId: string, data: any) =>
+      client.post<any>(`/v1/purchases/supplier-nc-requests/${requestId}/resolve`, data),
   },
   sifen: {
     timbrados: {
