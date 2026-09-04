@@ -31,7 +31,7 @@ class SupplierInvoice(Base):
     receipt_id = Column(UUID(as_uuid=True))
     condicion = Column(String(20), default="credito")
     tipo_comprobante = Column(String(20), default="factura")
-    estado = Column(String(20), nullable=False, default="pendiente")
+    estado = Column(String(50), nullable=False, default="pendiente")
     concepto = Column(String(300))
     bloqueada_para_pago = Column(Boolean, default=False)
     motivo_bloqueo = Column(Text)
