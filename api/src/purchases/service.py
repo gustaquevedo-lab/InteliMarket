@@ -411,7 +411,10 @@ async def delete_purchase_order(db: AsyncSession, po_id: str, force: bool = Fals
     # 4. Desvincular o eliminar recepciones
     for r in recs:
         if force:
-            await db.execute(text("DELETE FROM purchase_receipt_items WHERE purchase_receipt_id = :rid"), {"rid": str(r.id)})
+            await db.execute(text("UPDATE supplier_invoices SET receipt_id = NULL WHERE receipt_id = :rid"), {"rid": r.id})
+            await db.execute(text("DELETE FROM supplier_nc_requests WHERE receipt_id = :rid"), {"rid": r.id})
+            await db.execute(text("DELETE FROM purchase_receipt_items WHERE receipt_id = :rid"), {"rid": r.id})
+            await db.execute(text("DELETE FROM nemuha_record_map WHERE target_table = 'purchase_receipts' AND target_id = :rid"), {"rid": str(r.id)})
             await db.delete(r)
         else:
             r.purchase_order_id = None
