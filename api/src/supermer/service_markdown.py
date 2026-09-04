@@ -213,6 +213,7 @@ async def apply_recommendations(company_id: UUID, recommendation_ids: list[UUID]
     from api.src.products.models import Product
     from .models import PriceAuditLog
     applied = []
+    pesables_cambiados: list[Product] = []
     for rec_id in recommendation_ids:
         rec_result = await db.execute(select(MarkdownRecommendation).where(MarkdownRecommendation.id == rec_id))
         rec = rec_result.scalar_one_or_none()
@@ -224,6 +225,8 @@ async def apply_recommendations(company_id: UUID, recommendation_ids: list[UUID]
             old_price = Decimal(str(prod.precio_venta))
             new_price = rec.precio_recomendado
             prod.precio_venta = float(new_price)
+            if prod.plu_balanza:
+                pesables_cambiados.append(prod)
             # Log the change
             audit = PriceAuditLog(
                 company_id=company_id,
@@ -239,6 +242,17 @@ async def apply_recommendations(company_id: UUID, recommendation_ids: list[UUID]
         rec.aplicada_at = datetime.utcnow()
         applied.append(rec)
     await db.commit()
+
+    if pesables_cambiados:
+        import logging
+        from api.src.integrations.scales import service as scales_service
+        logger = logging.getLogger(__name__)
+        for prod in pesables_cambiados:
+            try:
+                await scales_service.auto_sync_product(db, company_id, prod)
+            except Exception as e:  # noqa: BLE001 -- una balanza offline no debe bloquear el rescate de vencimiento
+                logger.warning("Auto PLU sync (markdown) fallo para producto %s: %s", prod.id, e)
+
     return applied
 
 

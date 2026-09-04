@@ -69,6 +69,7 @@ contra la base real antes de extender este archivo.
 """
 
 import asyncio
+import logging
 import re
 import uuid
 from datetime import date, datetime
@@ -80,6 +81,8 @@ import pymysql
 import pymysql.cursors
 from sqlalchemy import select, text, func, case, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from api.src.config import settings
 from api.src.nemuha_connector.models import NemuhaRecordMap, NemuhaSyncRun
@@ -2197,6 +2200,7 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
     sku_to_prod = {p.sku.strip(): p for p in pg_prods if p.sku}
 
     count = 0
+    precio_cambiado_pesables: list[Product] = []
 
     for r in rows_prod:
         sku = str(r["ID_PRODUTO"]).strip()
@@ -2213,6 +2217,8 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
             if p_venta > 0 and prod.precio_venta != p_venta:
                 prod.precio_venta = p_venta
                 changed = True
+                if prod.plu_balanza:
+                    precio_cambiado_pesables.append(prod)
             if prod.activo != activo:
                 prod.activo = activo
                 # Si el producto se inactiva, desasociar codigo de barra para no colisionar en POS
@@ -2291,6 +2297,14 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
             db.add(tp)
             existing_tiers[key] = tp
             count += 1
+
+    if precio_cambiado_pesables:
+        from api.src.integrations.scales import service as scales_service
+        for prod in precio_cambiado_pesables:
+            try:
+                await scales_service.auto_sync_product(db, cid, prod)
+            except Exception as e:  # noqa: BLE001 -- una balanza offline no debe tumbar el sync de precios/stock del legacy
+                logger.warning("Auto PLU sync (Ñemuha) fallo para producto %s: %s", prod.id, e)
 
     return count
 

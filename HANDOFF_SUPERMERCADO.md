@@ -295,7 +295,17 @@ Prueba real: PLU 7 (ML COSTILLA DE PRIMERA / MATAMBRE KG) contra `192.168.0.72` 
 **Pendiente real para la próxima sesión**:
 1. Verificar visualmente `/escalas` con un usuario real (login normal).
 2. Revisar los KPIs del header de `ScalesPage.tsx` ("6 balanzas", "342 ítems", etc.) — siguen hardcodeados, no se tocaron en esta sesión (fuera de foco: la pestaña de configs/PLU sync era lo prioritario).
-3. Confirmar con el cliente que está bien que el auto-sync ahora dispare de verdad en cada cambio de precio de cualquier producto con `plu_balanza` (antes estaba "encendido" en la base pero muerto por falta de host — ahora es real).
+
+### ✅ Decisión confirmada por el cliente: auto-sync SIN aprobación manual, en cualquier cambio de precio confirmado
+
+Pedido explícito: "en cada cambio de precio de venta al confirmarse, si es pesable, tiene PLU, ya transmitir a la balanza sin más trámites". Ya estaba wireado para el caso obvio (`PATCH /products/{id}` — edición manual en Productos), pero se encontraron **2 caminos más donde `precio_venta` cambia sin pasar por ahí**, completamente mudos hasta ahora:
+
+1. **`service_markdown.apply_recommendations`** (rescate de vencimiento / markdown dinámico, `/gerencial` u otra pantalla que aplique recomendaciones) — cambia el precio directo en el modelo, sin el hook.
+2. **`nemuha_connector.service.sync_catalog_prices_and_scales`** — el cron horario que trae precios desde Ñemuha/legacy. Este es el más importante en volumen: cualquier cambio de precio hecho en el sistema legacy (que el cliente todavía usa en paralelo en algunos puntos) tampoco llegaba nunca a las balanzas.
+
+**Agregado en ambos** (mismo patrón que ya usaba `products/router.py`): al final de cada función, por cada producto cuyo `precio_venta` cambió y tiene `plu_balanza`, llama a `scales_service.auto_sync_product()` envuelto en `try/except` que solo loguea si falla -- **una balanza offline o de red caída nunca debe tumbar el sync de precios del legacy ni bloquear un rescate de vencimiento**. Verificado que ambos módulos siguen importando sin errores tras el cambio; no probado en vivo contra hardware real en esta pasada (a diferencia del flujo de `products/router.py`, que sí se probó extensamente antes).
+
+**Pendiente**: la próxima vez que corra el cron de Ñemuha (o se aplique una recomendación de markdown) con un producto pesable de por medio, confirmar en los logs (`logger.warning` si falla) o en el visor físico que efectivamente llegó.
 
 
 ## 🚨 SESIÓN 2026-08-26 (TARDE) — Verificador de Precios movido a PRODUCCIÓN, no volver a sandbox
