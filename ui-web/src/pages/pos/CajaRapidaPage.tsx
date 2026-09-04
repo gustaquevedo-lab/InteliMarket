@@ -1188,6 +1188,14 @@ export default function POSPage() {
     setBancardTxnState("idle"); setBancardTxnResult(null); setBancardTxnError(""); setShowBancardManualFallback(false); setBancardTxnLogId(null); setPosCardCuotas(1)
     setBancardQrState("idle"); setBancardQrResult(null); setBancardQrError(""); setBancardQrManualConfirm(false); setBancardQrLogId(null); setShowBancardQrManualFallback(false); setPosQrCupon(""); setPosQrAuth("")
     setPlugpayState("idle"); setPlugpayResult(null); setPlugpayError(""); setPlugpayBrlValue(null); setPlugpayQrImageUrl(""); clearPlugpayPoll()
+    // Si se abandona el flujo con una sesion RBIN/ENDOP abierta con el terminal
+    // Dinelco (ej. la cajera cancela a mitad de cobro), hay que avisarle al
+    // terminal con CANCEL -- si no, se queda esperando el ENDOP para siempre
+    // ("esperando informacion de caja" en su pantalla) y bloquea el siguiente
+    // cobro en esa misma caja.
+    if (dinelcoSessionId) {
+      (window as any).electronAPI?.dinelcoCancel?.(dinelcoSessionId).catch(() => {})
+    }
     setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
     setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf("")
   }
@@ -1390,6 +1398,10 @@ export default function POSPage() {
         exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
         monto: montoDinelco, terminal_ip: ip, raw_response: res2,
       })
+      // Avisarle al terminal que la sesion abierta por el RBIN anterior queda
+      // cancelada -- sin esto se queda "esperando informacion de caja" y
+      // arruina el proximo intento de cobro en esta caja.
+      electronAPI.dinelcoCancel?.(res1.sessionId).catch(() => {})
       setDinelcoSessionId(null)
       return
     }
