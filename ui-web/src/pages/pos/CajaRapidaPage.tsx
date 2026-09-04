@@ -5583,12 +5583,60 @@ export default function POSPage() {
                 <col style="width: 50%;">
               </colgroup>
               <tr><td colspan="2" style="font-weight: bold; padding-bottom: 1px;">Medios de Pago Utilizados:</td></tr>
-              ${salePaymentsForCreate.map((p) => `
-                <tr>
-                  <td>${FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}${p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}:</td>
-                  <td style="text-align: right;">${p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : `Gs. ${fmtGs(p.monto)}`}</td>
-                </tr>
-              `).join("")}
+              ${salePaymentsForCreate.map((p) => {
+                if (p.forma_pago === "EFECTIVO") {
+                  if (p.moneda === "BRL") {
+                    const brlRecibido = parseFloat(payCashBrl.replace(",", ".")) || 0
+                    const montoMostrar = brlRecibido > p.monto ? brlRecibido : p.monto
+                    const equivGs = Math.round(montoMostrar * (rates.BRL > 0 ? rates.BRL : 1))
+                    return `
+                      <tr>
+                        <td>Efectivo (BRL)${brlRecibido > p.monto ? " Entregado" : ""}:</td>
+                        <td style="text-align: right;">R$ ${montoMostrar.toFixed(2)}</td>
+                      </tr>
+                      ${rates.BRL > 0 ? `
+                        <tr>
+                          <td colspan="2" style="font-size: 8px; color: #555; padding-bottom: 1px;">(Cotiz: ${fmtGs(rates.BRL)} &rarr; Equiv: Gs. ${fmtGs(equivGs)})</td>
+                        </tr>
+                      ` : ""}
+                    `
+                  }
+                  if (p.moneda === "USD") {
+                    const usdRecibido = parseFloat(payCashUsd.replace(",", ".")) || 0
+                    const montoMostrar = usdRecibido > p.monto ? usdRecibido : p.monto
+                    const equivGs = Math.round(montoMostrar * (rates.USD > 0 ? rates.USD : 1))
+                    return `
+                      <tr>
+                        <td>Efectivo (USD)${usdRecibido > p.monto ? " Entregado" : ""}:</td>
+                        <td style="text-align: right;">US$ ${montoMostrar.toFixed(2)}</td>
+                      </tr>
+                      ${rates.USD > 0 ? `
+                        <tr>
+                          <td colspan="2" style="font-size: 8px; color: #555; padding-bottom: 1px;">(Cotiz: ${fmtGs(rates.USD)} &rarr; Equiv: Gs. ${fmtGs(equivGs)})</td>
+                        </tr>
+                      ` : ""}
+                    `
+                  }
+                  if (p.moneda === "PYG" || !p.moneda) {
+                    const pygRecibido = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10) || 0
+                    const montoMostrar = pygRecibido > p.monto ? pygRecibido : p.monto
+                    return `
+                      <tr>
+                        <td>Efectivo${pygRecibido > p.monto ? " Entregado" : ""}:</td>
+                        <td style="text-align: right;">Gs. ${fmtGs(montoMostrar)}</td>
+                      </tr>
+                    `
+                  }
+                }
+                const label = (FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago) + (p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : "")
+                const montoTxt = p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : `Gs. ${fmtGs(p.monto)}`
+                return `
+                  <tr>
+                    <td>${label}:</td>
+                    <td style="text-align: right;">${montoTxt}</td>
+                  </tr>
+                `
+              }).join("")}
               ${(bancardTxnState === "aprobada" && bancardTxnResult) ? `
                 <tr><td colspan="2" style="font-size: 8.5px; padding-top: 1px;">${bancardTxnResult.nombreTarjeta || ""}${bancardTxnResult.pan ? ` **** ${bancardTxnResult.pan}` : ""}</td></tr>
                 <tr><td colspan="2" style="font-size: 8.5px;">Aut. ${bancardTxnResult.codigoAutorizacion || "-"} · Boleta ${bancardTxnResult.nroBoleta || "-"}</td></tr>
@@ -5873,6 +5921,37 @@ export default function POSPage() {
           t += escposDashes(W) + '\n'
           t += 'Medios de Pago Utilizados:\n'
           for (const p of salePaymentsForCreate) {
+            if (p.forma_pago === "EFECTIVO") {
+              if (p.moneda === "BRL") {
+                const brlRecibido = parseFloat(payCashBrl.replace(",", ".")) || 0
+                const montoMostrar = brlRecibido > p.monto ? brlRecibido : p.monto
+                const label = `Efectivo (BRL)${brlRecibido > p.monto ? " Entregado" : ""}:`
+                t += escposTwoCol(label, `R$ ${montoMostrar.toFixed(2)}`) + '\n'
+                if (rates.BRL > 0) {
+                  const equivGs = Math.round(montoMostrar * rates.BRL)
+                  t += `  (Cotiz: ${fmtGs(rates.BRL)} -> Equiv: Gs. ${fmtGs(equivGs)})\n`
+                }
+                continue
+              }
+              if (p.moneda === "USD") {
+                const usdRecibido = parseFloat(payCashUsd.replace(",", ".")) || 0
+                const montoMostrar = usdRecibido > p.monto ? usdRecibido : p.monto
+                const label = `Efectivo (USD)${usdRecibido > p.monto ? " Entregado" : ""}:`
+                t += escposTwoCol(label, `US$ ${montoMostrar.toFixed(2)}`) + '\n'
+                if (rates.USD > 0) {
+                  const equivGs = Math.round(montoMostrar * rates.USD)
+                  t += `  (Cotiz: ${fmtGs(rates.USD)} -> Equiv: Gs. ${fmtGs(equivGs)})\n`
+                }
+                continue
+              }
+              if (p.moneda === "PYG" || !p.moneda) {
+                const pygRecibido = parseInt(payCashPyg.replace(/\D/g, "") || "0", 10) || 0
+                const montoMostrar = pygRecibido > p.monto ? pygRecibido : p.monto
+                const label = `Efectivo${pygRecibido > p.monto ? " Entregado" : ""}:`
+                t += escposTwoCol(label, fmtGs(montoMostrar)) + '\n'
+                continue
+              }
+            }
             const label = (FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago) + (p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : "")
             const montoTxt = p.moneda === "USD" ? `US$ ${p.monto.toFixed(2)}` : p.moneda === "BRL" ? `R$ ${p.monto.toFixed(2)}` : fmtGs(p.monto)
             t += escposTwoCol(escposStripAccents(label) + ':', montoTxt) + '\n'
