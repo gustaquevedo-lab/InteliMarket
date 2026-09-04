@@ -243,6 +243,24 @@ async def resolve_product_promotions(
     now_time = now_dt.time()
     sunday_dow = (today.weekday() + 1) % 7  # 0=Dom, 1=Lun ... 6=Sab
 
+    # El motor de caja (calculate_applicable) ya reconocia promos por
+    # categoria, pero este motor de precio dual (usado en catalogo/ficha de
+    # producto) solo miraba producto_ids -- un producto que entraba a una
+    # promo por categoria nunca mostraba el precio tachado aca, aunque en
+    # caja si se descontaba. Se busca la categoria real del producto para
+    # que ambos motores vean lo mismo.
+    categoria_id_res = await db.execute(select(Product.categoria_id).where(Product.id == pid))
+    categoria_id = categoria_id_res.scalar_one_or_none()
+
+    condiciones_aplica = [
+        Promotion.producto_ids.contains([pid]),
+        Promotion.aplica_a == "carrito",
+    ]
+    if categoria_id:
+        condiciones_aplica.append(
+            and_(Promotion.aplica_a == "categoria", Promotion.categoria_ids.contains([categoria_id]))
+        )
+
     result = await db.execute(
         select(Promotion).where(
             Promotion.company_id == cid,
@@ -250,10 +268,7 @@ async def resolve_product_promotions(
             Promotion.estado == "activa",
             Promotion.valido_desde <= today,
             Promotion.valido_hasta >= today,
-            or_(
-                Promotion.producto_ids.contains([pid]),
-                Promotion.aplica_a == "carrito"
-            )
+            or_(*condiciones_aplica)
         ).order_by(Promotion.created_at.desc())
     )
     promos = result.scalars().all()
@@ -694,12 +709,24 @@ async def calculate_applicable(
         except Exception:
             pass
 
+    total_cart = sum(Decimal(str(it.cantidad)) * it.precio_unitario for it in input.items)
+    total_qty_cart = sum(Decimal(str(it.cantidad)) for it in input.items)
+
     # 2. Evaluar Promociones Vigentes con límite por compra y stock
-    for p in promos:
+    # Las no-combinables se evalúan primero para que se queden con exclusividad
+    # sobre los items que tocan -- antes "combinable" se guardaba pero nunca se
+    # respetaba, el motor sumaba el descuento de TODAS las promos aplicables.
+    claimed_items: set[str] = set()
+    for p in sorted(promos, key=lambda pr: pr.combinable):
         # Verificar límite de stock
         if p.limitar_unidades and p.stock_limite_unidades:
             if (p.unidades_vendidas_promo or Decimal("0")) >= p.stock_limite_unidades:
                 continue
+
+        # Tope de usos totales de la promoción (se guardaba pero nunca se
+        # comparaba contra usos_actuales, la promo seguia aplicando sin fin)
+        if p.usos_maximos and (p.usos_actuales or 0) >= p.usos_maximos:
+            continue
 
         # Verificar días de semana
         if p.dias_semana and len(p.dias_semana) > 0:
@@ -716,9 +743,37 @@ async def calculate_applicable(
             if not input.codigo_cupon or input.codigo_cupon.lower() != (p.codigo_cupon or "").lower():
                 continue
 
-        # Aplicación por producto / categoría / carrito
+        # Monto minimo de compra (sobre el total del carrito completo)
+        if p.monto_minimo_compra and total_cart < p.monto_minimo_compra:
+            continue
+
+        # Cantidad minima de items en el carrito para desbloquear la promo
+        if p.cantidad_minima and total_qty_cart < p.cantidad_minima:
+            continue
+
+        # Tope de aplicaciones por cliente (necesita customer_id en el input;
+        # sin cliente identificado no se puede acotar, se deja pasar)
+        if p.aplicaciones_por_cliente and input.customer_id:
+            try:
+                usos_cliente_res = await db.execute(
+                    select(func.count(PromotionUsage.id)).where(
+                        PromotionUsage.promotion_id == p.id,
+                        PromotionUsage.customer_id == uuid.UUID(input.customer_id),
+                    )
+                )
+                usos_cliente = usos_cliente_res.scalar() or 0
+                if usos_cliente >= p.aplicaciones_por_cliente:
+                    continue
+            except Exception:
+                pass
+
+        # Aplicación por producto / categoría / carrito -- se excluyen los
+        # items ya reclamados en exclusividad por una promo no-combinable
+        # evaluada antes (ver sorted() arriba).
         aplica_items = []
         for item in input.items:
+            if item.producto_id in claimed_items:
+                continue
             try:
                 pid = uuid.UUID(item.producto_id)
                 if p.aplica_a == "carrito":
@@ -734,19 +789,35 @@ async def calculate_applicable(
             continue
 
         descuento_p = Decimal("0")
+        qty_acumulada = Decimal("0")
+        items_con_descuento = []
         for it in aplica_items:
-            # Control de limite_por_compra
+            # Control de limite_por_compra (tope por linea de producto)
             qty_promo = Decimal(str(it.cantidad))
             if p.limite_por_compra and qty_promo > Decimal(str(p.limite_por_compra)):
                 qty_promo = Decimal(str(p.limite_por_compra))
 
+            # Tope de cantidad total de items que la promo cubre en todo el
+            # carrito (se guardaba pero nunca se acotaba la suma real)
+            if p.cantidad_maxima_items:
+                restante = Decimal(str(p.cantidad_maxima_items)) - qty_acumulada
+                if restante <= 0:
+                    break
+                if qty_promo > restante:
+                    qty_promo = restante
+            qty_acumulada += qty_promo
+
             if p.tipo == "precio_fijo_oferta" and p.precio_fijo_promocional:
                 if p.precio_fijo_promocional < it.precio_unitario:
                     descuento_p += (it.precio_unitario - p.precio_fijo_promocional) * qty_promo
+                    items_con_descuento.append(it)
             elif p.tipo == "porcentaje" and p.valor:
-                descuento_p += (it.precio_unitario * qty_promo) * (p.valor / Decimal("100"))
+                pct = max(Decimal("0"), min(p.valor, Decimal("100"))) / Decimal("100")
+                descuento_p += (it.precio_unitario * qty_promo) * pct
+                items_con_descuento.append(it)
             elif p.tipo == "monto_fijo" and p.valor:
-                descuento_p += p.valor
+                descuento_p += min(p.valor, it.precio_unitario * qty_promo)
+                items_con_descuento.append(it)
 
         if p.valor_maximo and descuento_p > p.valor_maximo:
             descuento_p = p.valor_maximo
@@ -758,12 +829,12 @@ async def calculate_applicable(
                 tipo=p.tipo,
                 descuento=float(descuento_p),
                 descuento_maximo=float(p.valor_maximo) if p.valor_maximo else None,
-                items_aplicados=[it.producto_id for it in aplica_items],
+                items_aplicados=[it.producto_id for it in items_con_descuento],
                 descripcion=p.descripcion,
             ))
             total_descuento_promo += descuento_p
-
-    total_cart = sum(Decimal(str(it.cantidad)) * it.precio_unitario for it in input.items)
+            if not p.combinable:
+                claimed_items.update(it.producto_id for it in items_con_descuento)
     ahorro_total = total_descuento_promo + total_descuento_mayorista
     total_final = max(Decimal("0"), total_cart - ahorro_total)
 
@@ -922,6 +993,12 @@ async def log_promotion_usage(
             if promo.unidades_vendidas_promo >= promo.stock_limite_unidades:
                 promo.estado = "finalizada_por_stock"
                 promo.activo = False
+
+        # Auto-cierre si agotó el tope de usos (se guardaba pero nunca se
+        # comparaba contra usos_actuales -- la promo seguia activa sin fin)
+        if promo.usos_maximos and promo.usos_actuales >= promo.usos_maximos:
+            promo.estado = "finalizada_por_usos"
+            promo.activo = False
 
     await db.flush()
 

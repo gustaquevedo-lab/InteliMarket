@@ -91,6 +91,7 @@ export default function PromocionesPage() {
   const [newTipo, setNewTipo] = useState("precio_fijo_oferta")
   const [newBulkPrecioFijo, setNewBulkPrecioFijo] = useState<number | "">("")
   const [newBulkValorPct, setNewBulkValorPct] = useState<number | "">(15)
+  const [newBulkMontoFijo, setNewBulkMontoFijo] = useState<number | "">("")
   const [newOrigen, setNewOrigen] = useState("iniciativa_propia")
   const [newFinanciamiento, setNewFinanciamiento] = useState("propio_supermercado")
   const [newSupplierId, setNewSupplierId] = useState("")
@@ -356,6 +357,8 @@ export default function PromocionesPage() {
           promoPrice = Number(newBulkPrecioFijo)
         } else if (newTipo === "porcentaje" && newBulkValorPct !== "") {
           promoPrice = Math.round(regular * (1 - Number(newBulkValorPct) / 100))
+        } else if (newTipo === "monto_fijo" && newBulkMontoFijo !== "") {
+          promoPrice = Math.max(0, Math.round(regular - Number(newBulkMontoFijo)))
         } else {
           promoPrice = Math.round(regular * 0.85)
         }
@@ -383,6 +386,8 @@ export default function PromocionesPage() {
             promoPrice = Number(newBulkPrecioFijo)
           } else if (newTipo === "porcentaje" && newBulkValorPct !== "") {
             promoPrice = Math.round(regular * (1 - Number(newBulkValorPct) / 100))
+          } else if (newTipo === "monto_fijo" && newBulkMontoFijo !== "") {
+            promoPrice = Math.max(0, Math.round(regular - Number(newBulkMontoFijo)))
           } else {
             promoPrice = Math.round(regular * 0.85)
           }
@@ -413,6 +418,8 @@ export default function PromocionesPage() {
           newPromoPrice = Number(newBulkPrecioFijo)
         } else if (newTipo === "porcentaje" && newBulkValorPct !== "") {
           newPromoPrice = Math.round(item.precio_regular * (1 - Number(newBulkValorPct) / 100))
+        } else if (newTipo === "monto_fijo" && newBulkMontoFijo !== "") {
+          newPromoPrice = Math.max(0, Math.round(item.precio_regular - Number(newBulkMontoFijo)))
         }
         next.set(id, { ...item, precio_promocional: newPromoPrice })
       })
@@ -552,12 +559,25 @@ export default function PromocionesPage() {
       const avgCosto = itemsList.length > 0 ? totalCosto / itemsList.length : 0
       const avgPromoPrice = itemsList.reduce((sum, it) => sum + it.precio_promocional, 0) / itemsList.length
 
+      // Categoria dinamica: si el usuario armo la promo eligiendo una
+      // categoria completa (no productos sueltos) y es descuento por %, la
+      // promo aplica a la categoria de verdad -- productos nuevos que se
+      // agreguen despues tambien entran solos. Antes esto SIEMPRE mandaba
+      // "producto" con la lista fija de ese momento, sin importar el modo
+      // elegido: una promo de categoria dejaba de cubrir todo lo nuevo que
+      // se agregara despues, algo que nadie esperaria de "aplicar a toda la
+      // categoria". No aplica a precio_fijo_oferta porque ese tipo necesita
+      // un precio especifico por producto, no puede ser generico por
+      // categoria.
+      const esCategoriaDinamica = selectionMode === "category" && !!newCategoryId && newTipo === "porcentaje"
+
       const payload: any = {
         nombre: newNombre,
         descripcion: newDesc || `${itemsList.length} productos en promoción (${newTipo === "porcentaje" ? `-${newBulkValorPct}% OFF` : `Gs. ${formatPYG(avgPromoPrice)}`})`,
         tipo: newTipo,
-        aplica_a: itemsList.length === 1 ? "producto" : "producto",
-        producto_ids: productIds,
+        ...(esCategoriaDinamica
+          ? { aplica_a: "categoria", categoria_ids: [newCategoryId] }
+          : { aplica_a: "producto", producto_ids: productIds }),
         origen: newOrigen,
         financiamiento: newFinanciamiento,
         supplier_id: newSupplierId || (itemsList[0].product as any)?.supplier_id || undefined,
@@ -576,6 +596,8 @@ export default function PromocionesPage() {
         payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Number(newBulkPrecioFijo) : avgPromoPrice
       } else if (newTipo === "porcentaje") {
         payload.valor = Number(newBulkValorPct)
+      } else if (newTipo === "monto_fijo") {
+        payload.valor = Number(newBulkMontoFijo)
       }
 
       if (newLimitePorCompra !== "") payload.limite_por_compra = Number(newLimitePorCompra)
@@ -1681,22 +1703,31 @@ export default function PromocionesPage() {
                         >
                           <option value="precio_fijo_oferta">🏷️ Precio Fijo Masivo Común (Gs.)</option>
                           <option value="porcentaje">📉 Descuento Porcentual Masivo (% OFF)</option>
+                          <option value="monto_fijo">➖ Descuento Monto Fijo (Gs. off)</option>
                         </select>
+                        {selectionMode === "category" && newTipo !== "porcentaje" && (
+                          <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                            Categoría dinámica (incluye productos nuevos a futuro) solo aplica con % de descuento. Con esta mecánica se guarda la lista de productos de hoy.
+                          </p>
+                        )}
                       </div>
 
                       <div>
                         <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                          {newTipo === "precio_fijo_oferta" ? "Precio Fijo de Oferta Común (Gs.):" : "Porcentaje de Descuento (% OFF):"}
+                          {newTipo === "precio_fijo_oferta" ? "Precio Fijo de Oferta Común (Gs.):" : newTipo === "monto_fijo" ? "Descuento Fijo por Unidad (Gs.):" : "Porcentaje de Descuento (% OFF):"}
                         </label>
                         <input
                           type="number"
-                          value={newTipo === "precio_fijo_oferta" ? newBulkPrecioFijo : newBulkValorPct}
+                          min={0}
+                          max={newTipo === "porcentaje" ? 100 : undefined}
+                          value={newTipo === "precio_fijo_oferta" ? newBulkPrecioFijo : newTipo === "monto_fijo" ? newBulkMontoFijo : newBulkValorPct}
                           onChange={e => {
                             const v = e.target.value === "" ? "" : Number(e.target.value)
                             if (newTipo === "precio_fijo_oferta") setNewBulkPrecioFijo(v)
+                            else if (newTipo === "monto_fijo") setNewBulkMontoFijo(v)
                             else setNewBulkValorPct(v)
                           }}
-                          placeholder={newTipo === "precio_fijo_oferta" ? "Ej: 37477 para toda la línea" : "Ej: 20"}
+                          placeholder={newTipo === "precio_fijo_oferta" ? "Ej: 37477 para toda la línea" : newTipo === "monto_fijo" ? "Ej: 5000" : "Ej: 20"}
                           className="w-full text-xs font-mono font-black p-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                         />
                       </div>

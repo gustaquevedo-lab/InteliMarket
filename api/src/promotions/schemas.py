@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, List, Any
 from datetime import date, time, datetime
 from decimal import Decimal
@@ -60,6 +60,19 @@ class PromotionCreate(BaseModel):
     usos_maximos: Optional[int] = None
     activo: bool = True
     estado: Optional[str] = "activa"
+
+    @model_validator(mode="after")
+    def validar_consistencia(self):
+        if self.valido_hasta < self.valido_desde:
+            raise ValueError("La fecha de fin de vigencia no puede ser anterior a la de inicio.")
+        if self.tipo == "porcentaje" and self.valor is not None:
+            if self.valor <= 0 or self.valor > 100:
+                raise ValueError("El porcentaje de descuento debe estar entre 0 y 100.")
+        if self.aplica_a == "producto" and not self.producto_ids:
+            raise ValueError("Debe seleccionar al menos un producto para esta promoción.")
+        if self.aplica_a == "categoria" and not self.categoria_ids:
+            raise ValueError("Debe seleccionar al menos una categoría para esta promoción.")
+        return self
 
 
 class PromotionUpdate(BaseModel):
