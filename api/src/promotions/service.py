@@ -717,7 +717,15 @@ async def calculate_applicable(
     # sobre los items que tocan -- antes "combinable" se guardaba pero nunca se
     # respetaba, el motor sumaba el descuento de TODAS las promos aplicables.
     claimed_items: set[str] = set()
-    for p in sorted(promos, key=lambda pr: pr.combinable):
+    # Evaluar primero las no combinables, y dentro de ellas las de menor precio fijo (mayor descuento al cliente)
+    for p in sorted(
+        promos,
+        key=lambda pr: (
+            pr.combinable,
+            pr.precio_fijo_promocional if pr.precio_fijo_promocional is not None else Decimal("999999999"),
+            pr.valido_hasta,
+        ),
+    ):
         # Verificar límite de stock
         if p.limitar_unidades and p.stock_limite_unidades:
             if (p.unidades_vendidas_promo or Decimal("0")) >= p.stock_limite_unidades:

@@ -218,7 +218,7 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
             Promotion.valido_desde <= today,
             Promotion.valido_hasta >= today,
             Promotion.precio_fijo_promocional != None,
-        ).order_by(Promotion.valido_hasta.asc())
+        ).order_by(Promotion.precio_fijo_promocional.asc(), Promotion.valido_hasta.asc())
     )
 
     promo_map: dict[UUID, dict] = {}
@@ -229,7 +229,8 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
         if dias and sunday_dow not in dias:
             continue
         for pid in prod_ids_promo:
-            if pid not in promo_map:  # primer match = promo mas proxima a vencer
+            # Priorizar siempre la promoción con menor precio (mayor descuento al cliente)
+            if pid not in promo_map or pr.precio_fijo_promocional < promo_map[pid]["precio"]:
                 promo_map[pid] = {
                     "id": str(pr.id),
                     "nombre": pr.nombre,
