@@ -80,16 +80,54 @@ async def generate_internal_sale_number(db: AsyncSession, company_id: str) -> st
 
 
 async def resolve_sale_number(db: AsyncSession, data: SaleCreate) -> str:
-    """Si la empresa tiene facturacion fiscal configurada (autoimpresor,
-    preimpreso o electronico — mismo numerador para los 3), usa el numero
-    real 001-XXX-NNNNNNN de su timbrado vigente. Si no tiene nada configurado
-    (la mayoria de empresas todavia), sigue con el correlativo interno de
-    siempre — no rompe a nadie que no haya migrado a facturacion real."""
+    """Fuente única de verdad para numeración fiscal y puntos de emisión.
+    Resuelve el punto de emisión estricto según la terminal física asignada (pos_terminal_assignments)
+    o la caja de la sesión (CashSession -> CashRegister -> POS-XXX).
+    Nunca adivina ni utiliza puntos de otras cajas."""
     config = await fiscal_service.get_fiscal_config(db, str(data.company_id))
     if not config:
         return await generate_sale_number(db, str(data.company_id), str(data.branch_id) if data.branch_id else None)
 
-    punto_emision = data.punto_emision or config.punto_emision
+    punto: str | None = None
+
+    # 1. Si el frontend mandó punto_emision explícito (ej: "001-013" o "013"), extraer los 3 dígitos
+    if data.punto_emision:
+        raw = str(data.punto_emision).strip()
+        digits = "".join(c for c in raw if c.isdigit())
+        if digits:
+            punto = digits[-3:].zfill(3)
+
+    # 2. Si no vino o vino genérico, resolver por la sesión activa de caja (CashSession -> CashRegister)
+    if not punto and data.session_id:
+        sess_res = await db.execute(
+            select(CashSession.register_id).where(CashSession.id == data.session_id)
+        )
+        reg_id = sess_res.scalar_one_or_none()
+        if reg_id:
+            reg_res = await db.execute(
+                select(CashRegister.codigo, CashRegister.nombre).where(CashRegister.id == reg_id)
+            )
+            reg = reg_res.first()
+            if reg:
+                reg_cod, reg_nom = reg[0] or "", reg[1] or ""
+                # A partir del código de caja: "POS-013" -> "013"
+                digits = "".join(c for c in reg_cod if c.isdigit())
+                if digits:
+                    punto = digits[-3:].zfill(3)
+                if not punto and reg_nom:
+                    from api.src.pos_terminals.models import PosTerminalAssignment
+                    asn_res = await db.execute(
+                        select(PosTerminalAssignment.punto_emision).where(
+                            PosTerminalAssignment.caja_nombre.ilike(f"%{reg_nom}%"),
+                            PosTerminalAssignment.activo == True,
+                        ).limit(1)
+                    )
+                    asn_pe = asn_res.scalar_one_or_none()
+                    if asn_pe:
+                        punto = str(asn_pe).strip().zfill(3)
+
+    # 3. Fallback de emergencia a la configuración fiscal general solo si no hay caja ni sesión
+    punto_emision = punto or config.punto_emision or "001"
     return await fiscal_service.reserve_fiscal_invoice_number(db, str(data.company_id), punto_emision, "factura")
 
 
@@ -694,24 +732,26 @@ async def build_sale_receipt_escpos(
     tipo_doc = "FACTURA CREDITO" if is_credito else "FACTURA CONTADO"
 
     lines = []
-    lines.append("EXTRA SUPERMERCADO MAYORISTA".center(W))
+    lines.append("EXTRA PARAGUAY".center(W))
+    lines.append("SUPERMERCADO MAYORISTA".center(W))
     lines.append("GRUPO SANTA TERESA E.A.S.".center(W))
     lines.append("RUC: 80150377-9".center(W))
-    lines.append("Avda. San Blas e/ Avda. Mons. Rodriguez".center(W))
-    lines.append("Ciudad del Este - Paraguay".center(W))
-    lines.append("Tel: 0983 500 000".center(W))
-    lines.append("Timbrado No: 18545636 - Valido: 31/12/2026".center(W))
+    lines.append("Alejo Garcia esquina Carlos Antonio Lopez".center(W))
+    lines.append("Pedro Juan Caballero".center(W))
+    lines.append("+595992052200".center(W))
+    lines.append('"Ahorro de verdad!"'.center(W))
+    lines.append("Timbrado No: 18545636 - Valido hasta: 31/12/2026".center(W))
     lines.append(dashes())
     lines.append(f"{tipo_doc} No: {sale.numero or ''}")
     if sale.numero_interno:
         lines.append(f"No Venta: {sale.numero_interno}")
-    fecha_str = sale.fecha.strftime("%d/%m/%Y %H:%M") if sale.fecha else datetime.now().strftime("%d/%m/%Y %H:%M")
+    fecha_str = sale.fecha.strftime("%d/%m/%Y %H:%M:%S") if sale.fecha else datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     lines.append(f"Fecha/Hora: {fecha_str}")
     lines.append(f"Condicion: {'CREDITO' if is_credito else 'CONTADO'}")
     lines.append(f"Cajero: {cajero_nombre}")
 
     cliente_nombre = "CONSUMIDOR FINAL"
-    cliente_doc = "4444444-3"
+    cliente_doc = "44444401-7"
     empresa_vinculada = ""
     if cust:
         cliente_nombre = cust.razon_social or cust.nombre_fantasia or "CONSUMIDOR FINAL"
@@ -766,6 +806,17 @@ async def build_sale_receipt_escpos(
         fp = "EXTRA_CLUB" if is_credito else "EFECTIVO"
         lines.append(pad_two_col(f"  {fp}:", f"GS. {fmt_gs(sale.total)}"))
 
+    lines.append(dashes())
+    lines.append("LIQUIDACION DEL IVA (Ley 6380/19):")
+    b10 = float(sale.base_gravada_10 or 0)
+    i10 = float(sale.iva_10 or 0)
+    b5 = float(sale.base_gravada_5 or 0)
+    i5 = float(sale.iva_5 or 0)
+    ex = float(sale.base_exenta or 0)
+    lines.append(pad_two_col(f"Grav.10%: {fmt_gs(b10)}", f"IVA: {fmt_gs(i10)}"))
+    lines.append(pad_two_col(f"Grav.5%: {fmt_gs(b5)}", f"IVA: {fmt_gs(i5)}"))
+    lines.append(pad_two_col("Exentas:", fmt_gs(ex)))
+
     if is_credito:
         lines.append(dashes())
         lines.append(f"Cliente: {cliente_nombre.upper()[:32]}")
@@ -779,9 +830,8 @@ async def build_sale_receipt_escpos(
         lines.append("Factura a credito Extra Club".center(W))
         lines.append("Documento con valor para cobro".center(W))
 
-    lines.append("")
-    lines.append("GRACIAS POR SU PREFERENCIA".center(W))
-    lines.append("EXTRA SUPERMERCADO MAYORISTA".center(W))
+    lines.append(dashes())
+    lines.append("Muchas gracias por su preferencia!".center(W))
     lines.append("")
     lines.append("")
 
