@@ -20,6 +20,14 @@ async def reset_sandbox():
         await conn.execute(f"CREATE TABLE sandbox.{t} (LIKE public.{t} INCLUDING ALL)")
         await conn.execute(f"INSERT INTO sandbox.{t} SELECT * FROM public.{t}")
         
+    # Seteamos contraseñas de todos los usuarios en sandbox a "sandbox"
+    # para que en el entorno de pruebas siempre funcione la contraseña estándar
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    sb_hash = pwd_context.hash("sandbox")
+    await conn.execute("UPDATE sandbox.users SET password_hash = $1", sb_hash)
+    print("🔑 Contraseñas de sandbox.users actualizadas a 'sandbox'")
+
     await conn.close()
     print("🎉 Entorno Sandbox 100% reseteado y sincronizado con producción limpia!")
 
