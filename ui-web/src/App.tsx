@@ -32,7 +32,7 @@ const SpiPage = lazy(() => import("./pages/spi/SpiPage"))
 const BranchesPage = lazy(() => import("./pages/branches/BranchesPage"))
 const CreditAccountsPage = lazy(() => import("./pages/credit-accounts/CreditAccountsPage"))
 const LogisticsPage = lazy(() => import("./pages/logistics/LogisticsPage"))
-const AuditPage = lazy(() => import("./pages/audit/AuditPage"))
+const RiskAgentPage = lazy(() => import("./pages/risk-agent/RiskAgentPage"))
 const SueldokPage = lazy(() => import("./pages/sueldok/SueldokPage"))
 const ScalesPage = lazy(() => import("./pages/scales/ScalesPage"))
 const PedidosCotizacionesPage = lazy(() => import("./pages/sales-orders/PedidosCotizacionesPage"))
@@ -231,7 +231,7 @@ function AppRoutes() {
           ["caja", <CajaPage />],
           ["admin", <AdminPage />],
           ["admin/verticals", <VerticalsPage />],
-          ["audit", <AuditPage />],
+          ["audit", <RiskAgentPage />],
           ["quotes", <PedidosCotizacionesPage />],
           ["sales-orders", <PedidosCotizacionesPage />],
           ["returns", <ReturnsPage />],

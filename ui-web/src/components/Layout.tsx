@@ -157,14 +157,10 @@ const navGroups: NavGroup[] = [
     items: [
       { icon: LineChart, label: "Business Intelligence", path: "/reports" },
       { icon: PieChart, label: "Reportes Gerenciales", path: "/gerencial" },
-      // DESACTIVADO 2026-09-04: se llama a si mismo "Seguridad Forense y
-      // Prevencion de Fraude" pero la tabla de eventos (anulaciones, retiros,
-      // aperturas de gaveta) es un array fijo de 5 registros de ejemplo que usa
-      // NOMBRES REALES de empleados en eventos de fraude inventados -- riesgo
-      // serio si alguien lo confunde con un registro real. Los KPIs de arriba
-      // ni siquiera se calculan del array, estan tipeados fijos en el JSX. Las
-      // sesiones de caja (api.caja.sessions.list) si son reales. Ver auditoria de sidebar.
-      // { icon: Fingerprint, label: "Auditoría", path: "/audit" },
+      // REACTIVADO 2026-09-04: la maqueta vieja (nombres reales de empleados en
+      // fraude inventado) fue reemplazada por RiskAgentPage -- dashboard y chat
+      // reales sobre audit_logs, clasificados por nivel/categoria de riesgo.
+      { icon: Fingerprint, label: "Auditoría & Riesgos", path: "/audit" },
       { icon: Settings, label: "Configuración", path: "/settings" },
       { icon: Building, label: "Sucursales", path: "/branches" },
       { icon: ShieldCheck, label: "Usuarios & Permisos (RBAC)", path: "/rbac" },
