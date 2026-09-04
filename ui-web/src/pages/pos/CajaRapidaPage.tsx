@@ -3994,6 +3994,47 @@ export default function POSPage() {
     }
   }
 
+  // Clasificacion de riesgo por tipo de accion que requiere autorizacion de
+  // supervisor -- antes solo el descuento directo y el uso de peso de
+  // etiqueta dejaban rastro en auditoria; el resto (anular item, vaciar
+  // carrito, reabrir factura/pago, devoluciones, etc.) se ejecutaba sin
+  // ningun registro. direct_discount y use_label_weight quedan afuera de
+  // este mapa a proposito -- ya logean su propio evento mas detallado en
+  // executeSupervisorAction, esto evita duplicarlo.
+  const SUPERVISOR_ACTION_RISK: Record<string, { nivel: string; categoria: string }> = {
+    remove_item: { nivel: "BAJO", categoria: "operativo" },
+    decrease_qty: { nivel: "BAJO", categoria: "operativo" },
+    clear_cart: { nivel: "MEDIO", categoria: "operativo" },
+    open_pos_config: { nivel: "MEDIO", categoria: "seguridad" },
+    assign_terminal: { nivel: "MEDIO", categoria: "operativo" },
+    extra_club_payment: { nivel: "ALTO", categoria: "financiero" },
+    process_return: { nivel: "ALTO", categoria: "financiero" },
+    reopen_invoice: { nivel: "ALTO", categoria: "fiscal" },
+    reopen_payment: { nivel: "ALTO", categoria: "financiero" },
+  }
+
+  const logSupervisorRiskEvent = (action: { type: string, [k: string]: any }, resolverId?: string, resolverNombre?: string) => {
+    const risk = SUPERVISOR_ACTION_RISK[action.type]
+    if (!risk) return
+    api.inteliaudit.recordEvent({
+      company_id: COMPANY_ID,
+      user_id: resolverId || user?.id,
+      accion: `supervisor_${action.type}`,
+      entidad: "autorizacion_supervisor",
+      datos_nuevos: {
+        descripcion: describeSupervisorAction(action),
+        nivel_riesgo: risk.nivel,
+        categoria_riesgo: risk.categoria,
+        cajero_id: user?.id,
+        cajero_nombre: user?.nombre,
+        autorizado_por_id: resolverId,
+        autorizado_por_nombre: resolverNombre,
+        caja: terminalAssignment?.caja_nombre || machineHostname || "Caja POS",
+        timestamp: new Date().toISOString(),
+      },
+    } as any).catch((err: any) => console.warn("Error grabando auditoria de supervisor:", err))
+  }
+
   const requestSupervisorAuthorization = async (action: {
     type: "remove_item" | "clear_cart" | "decrease_qty" | "open_pos_config" | "process_return" | "assign_terminal" | "extra_club_payment" | "reopen_invoice" | "reopen_payment" | "use_label_weight" | "direct_discount",
     itemId?: string,
@@ -4010,6 +4051,7 @@ export default function POSPage() {
     discountReason?: string
   }) => {
     if (isSupervisorUser) {
+      logSupervisorRiskEvent(action, user!.id, user?.nombre || "Supervisor")
       if (action.type === "process_return") {
         await submitDevolucion(user!.id, user?.nombre || "Supervisor")
       } else if (action.type === "assign_terminal") {
@@ -4062,6 +4104,7 @@ export default function POSPage() {
           setRemoteAuthStatus("aprobado")
           setShowRemoteAuthModal(false)
           if (pendingSupervisorAction) {
+            logSupervisorRiskEvent(pendingSupervisorAction, req.resuelto_por || "", req.resuelto_por_nombre || "Supervisor")
             await executeApprovedRemoteAction(pendingSupervisorAction, req.resuelto_por || "", req.resuelto_por_nombre || "Supervisor")
           }
           toast.success("Autorización Aprobada", `Aprobado por ${req.resuelto_por_nombre || "supervisor"} desde su celular.`)
@@ -4221,6 +4264,7 @@ export default function POSPage() {
       }
       setShowSupervisorModal(false)
       if (pendingSupervisorAction) {
+        logSupervisorRiskEvent(pendingSupervisorAction, res.id!, res.nombre || "Supervisor")
         if (pendingSupervisorAction.type === "process_return") {
           await submitDevolucion(res.id!, res.nombre || "Supervisor")
         } else if (pendingSupervisorAction.type === "assign_terminal") {
