@@ -164,6 +164,16 @@ async def update_purchase_order(po_id: str, body: POUpdate, db: AsyncSession = D
     return result
 
 
+@router.delete("/purchase-orders/{po_id}")
+async def delete_purchase_order(
+    po_id: str,
+    force: bool = Query(False, description="Forzar eliminación desvinculando recepciones y solicitudes"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.delete_purchase_order(db, po_id, force=force)
+
+
+
 @router.post("/purchase-orders/{po_id}/confirm", response_model=POResponse)
 async def confirm_purchase_order(
     po_id: str,

@@ -11,6 +11,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from fastapi import HTTPException
 from api.src.purchases.models import (
     Supplier, PurchaseOrder, PurchaseOrderItem, PurchaseOrderHistory,
     PurchaseReceipt, PurchaseReceiptItem,
@@ -20,6 +21,7 @@ from api.src.purchases.models import (
     ForecastRule, ForecastProjection,
     PurchaseSuggestion, PurchaseBudget,
     PurchaseRfq, PurchaseRfqItem, PurchaseRfqResponse, PurchaseRfqResponseItem,
+    SupplierNcRequest,
 )
 from api.src.purchases.schemas import (
     SupplierCreate, SupplierUpdate,
@@ -371,6 +373,78 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) ->
     await db.refresh(order)
     await _attach_suppliers(db, [order])
     return order
+
+
+async def delete_purchase_order(db: AsyncSession, po_id: str, force: bool = False) -> dict:
+    """Elimina una orden de compra, sus ítems y desenlaza recepciones/solicitudes vinculadas."""
+    try:
+        order_uuid = uuid.UUID(po_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="ID de orden de compra inválido")
+
+    order = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == order_uuid))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
+
+    # 1. Verificar si tiene recepciones activas
+    recs = (await db.execute(select(PurchaseReceipt).where(PurchaseReceipt.purchase_order_id == order_uuid))).scalars().all()
+    active_recs = [r for r in recs if r.estado != "cancelado"]
+    if active_recs and not force:
+        rec_nums = ", ".join(r.numero for r in active_recs[:3])
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar la orden {order.numero}: tiene {len(active_recs)} recepción(es) activa(s) ({rec_nums}). Cancele las recepciones primero o use eliminación forzada."
+        )
+
+    # 2. Verificar solicitudes de NC activas
+    nc_reqs = (await db.execute(select(SupplierNcRequest).where(SupplierNcRequest.purchase_order_id == order_uuid))).scalars().all()
+    if nc_reqs and not force:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar la orden {order.numero}: tiene solicitudes de Nota de Crédito asociadas. Resuelva o anule las solicitudes primero o use eliminación forzada."
+        )
+
+    # 3. Limpiar solicitudes de NC si force=True
+    for nc in nc_reqs:
+        await db.delete(nc)
+
+    # 4. Desvincular o eliminar recepciones
+    for r in recs:
+        if force:
+            await db.execute(text("DELETE FROM purchase_receipt_items WHERE purchase_receipt_id = :rid"), {"rid": str(r.id)})
+            await db.delete(r)
+        else:
+            r.purchase_order_id = None
+
+    # 5. Desvincular demandas insatisfechas de clientes
+    await db.execute(
+        text("UPDATE customer_lost_demands SET orden_compra_id = NULL WHERE orden_compra_id = :oid"),
+        {"oid": order_uuid}
+    )
+
+    # 6. Eliminar items de la orden de compra
+    await db.execute(
+        text("DELETE FROM purchase_order_items WHERE purchase_order_id = :oid"),
+        {"oid": order_uuid}
+    )
+
+    # 7. Eliminar historial de la orden de compra si existiera
+    await db.execute(
+        text("DELETE FROM purchase_order_history WHERE purchase_order_id = :oid"),
+        {"oid": order_uuid}
+    )
+
+    # 8. Eliminar mapeo legado nemuha_record_map
+    await db.execute(
+        text("DELETE FROM nemuha_record_map WHERE target_table = 'purchase_orders' AND target_id = :oid"),
+        {"oid": str(order_uuid)}
+    )
+
+    numero = order.numero
+    await db.delete(order)
+    await db.commit()
+
+    return {"ok": True, "message": f"Orden de compra {numero} eliminada exitosamente", "numero": numero}
 
 
 async def confirm_purchase_order(db: AsyncSession, po_id: str, user_id: str | None = None, user_name: str | None = None) -> PurchaseOrder | None:

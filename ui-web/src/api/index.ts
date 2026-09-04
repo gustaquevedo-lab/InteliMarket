@@ -1075,6 +1075,7 @@ export const api = {
     confirmPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/confirm`),
     sendPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/send`),
     cancelPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/cancel`),
+    deletePO: (id: string, force: boolean = false) => client.delete<{ ok: boolean; message: string; numero: string }>(`/v1/purchase-orders/${id}${force ? '?force=true' : ''}`),
     receipts: () => client.get<PurchaseReceipt[]>(`/v1/companies/${COMPANY_ID}/purchase-receipts`),
     listReceipts: () => client.get<PurchaseReceipt[]>(`/v1/companies/${COMPANY_ID}/purchase-receipts`),
     getReceipt: (id: string) => client.get<PurchaseReceipt>(`/v1/purchase-receipts/${id}`),

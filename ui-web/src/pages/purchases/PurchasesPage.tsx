@@ -270,6 +270,11 @@ export default function PurchasesPage() {
   })
   const [savingReq, setSavingReq] = useState(false)
 
+  // Estado para Eliminación de Órdenes de Compra
+  const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null)
+  const [forceDeletePO, setForceDeletePO] = useState(false)
+  const [deletingPO, setDeletingPO] = useState(false)
+
   // ---------------------------------------------------------------------------
   // CARGA DE DATOS GENERALES (100% REALES DE NEMUHA)
   // ---------------------------------------------------------------------------
@@ -510,6 +515,25 @@ export default function PurchasesPage() {
       }
     } catch (e: any) {
       toast.error("Error al cancelar", e.message)
+    }
+  }
+
+  const handleDeletePO = async () => {
+    if (!poToDelete?.id) return
+    setDeletingPO(true)
+    try {
+      const res = await api.purchases.deletePO(poToDelete.id, forceDeletePO)
+      toast.success("Orden Eliminada", res.message || `Orden ${poToDelete.numero} eliminada exitosamente.`)
+      setOrders(prev => prev.filter(o => o.id !== poToDelete.id))
+      if (selectedPO?.id === poToDelete.id) {
+        setSelectedPO(null)
+      }
+      setPoToDelete(null)
+      setForceDeletePO(false)
+    } catch (err: any) {
+      toast.error("Error al eliminar orden", err.message || "No se pudo eliminar la orden de compra.")
+    } finally {
+      setDeletingPO(false)
     }
   }
 
@@ -2197,10 +2221,20 @@ export default function PurchasesPage() {
                               {po.estado === "borrador" && po.id && (
                                 <button
                                   onClick={() => handleCancelPO(po.id!)}
-                                  className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                                  className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
                                   title="Cancelar Orden"
                                 >
                                   <Ban className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {po.id && (
+                                <button
+                                  onClick={() => { setPoToDelete(po); setForceDeletePO(false); }}
+                                  className="p-1.5 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+                                  title="Eliminar Orden de Compra"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               )}
                             </div>
@@ -3485,41 +3519,56 @@ export default function PurchasesPage() {
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-2 pt-2">
-                  {selectedPO.estado === "borrador" && selectedPO.id && (
-                    <button
-                      onClick={() => handleConfirmPO(selectedPO.id!)}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5"
-                    >
-                      <Check className="w-4 h-4" /> Confirmar Orden
-                    </button>
-                  )}
-                  {selectedPO.estado === "confirmado" && selectedPO.id && (
-                    <button
-                      onClick={() => handleSendPO(selectedPO.id!)}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5"
-                    >
-                      <Send className="w-4 h-4" /> Enviar a Proveedor
-                    </button>
-                  )}
-                  {["confirmado", "enviada", "enviado", "parcial"].includes(selectedPO.estado || "") && (
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700/60">
+                  {selectedPO.id && (
                     <button
                       onClick={() => {
                         const target = selectedPO
-                        setSelectedPO(null)
-                        handleOpenReceiptModal(target)
+                        setPoToDelete(target)
+                        setForceDeletePO(false)
                       }}
-                      className="btn-primary text-xs flex items-center gap-1.5 px-4 py-2 shadow-sm"
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center gap-1.5 transition-colors"
+                      title="Eliminar esta Orden"
                     >
-                      <Truck className="w-4 h-4" /> Recibir en Muelle
+                      <Trash2 className="w-4 h-4" /> Eliminar Orden
                     </button>
                   )}
-                  <button
-                    onClick={() => setSelectedPO(null)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300"
-                  >
-                    Cerrar
-                  </button>
+                  <div className="flex items-center gap-2 ml-auto">
+                    {selectedPO.estado === "borrador" && selectedPO.id && (
+                      <button
+                        onClick={() => handleConfirmPO(selectedPO.id!)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5"
+                      >
+                        <Check className="w-4 h-4" /> Confirmar Orden
+                      </button>
+                    )}
+                    {selectedPO.estado === "confirmado" && selectedPO.id && (
+                      <button
+                        onClick={() => handleSendPO(selectedPO.id!)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5"
+                      >
+                        <Send className="w-4 h-4" /> Enviar a Proveedor
+                      </button>
+                    )}
+                    {["confirmado", "enviada", "enviado", "parcial"].includes(selectedPO.estado || "") && (
+                      <button
+                        onClick={() => {
+                          const target = selectedPO
+                          setSelectedPO(null)
+                          handleOpenReceiptModal(target)
+                        }}
+                        className="btn-primary text-xs flex items-center gap-1.5 px-4 py-2 shadow-sm"
+                      >
+                        <Truck className="w-4 h-4" /> Recibir en Muelle
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setSelectedPO(null)}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300"
+                    >
+                      Cerrar
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -4757,6 +4806,81 @@ export default function PurchasesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DE CONFIRMACIÓN DE ELIMINACIÓN DE OC ──────────────────────── */}
+      {poToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-red-100 dark:border-red-900/40 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-3 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">
+                  ¿Eliminar Orden de Compra?
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Estás por eliminar la orden <strong className="font-mono text-gray-800 dark:text-gray-200">{poToDelete.numero}</strong> de <strong className="text-gray-800 dark:text-gray-200">{poToDelete.supplier?.razon_social || "Proveedor"}</strong> por un total de <strong>{formatPYG(poToDelete.total || 0)}</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300">
+              <p className="font-bold flex items-center gap-1">
+                <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                Regla de seguridad operativa:
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed">
+                Si la orden ya cuenta con recepciones de mercadería en muelle, el sistema bloqueará la eliminación para proteger el inventario, a menos que marques la casilla de eliminación forzada.
+              </p>
+            </div>
+
+            <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750 cursor-pointer transition-colors">
+              <input
+                type="checkbox"
+                checked={forceDeletePO}
+                onChange={(e) => setForceDeletePO(e.target.checked)}
+                className="mt-0.5 rounded text-red-600 focus:ring-red-500"
+              />
+              <div className="text-xs">
+                <span className="font-bold text-gray-800 dark:text-gray-200">
+                  Forzar eliminación
+                </span>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Desvincular y limpiar recepciones y solicitudes asociadas a esta orden.
+                </p>
+              </div>
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => { setPoToDelete(null); setForceDeletePO(false); }}
+                disabled={deletingPO}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDeletePO}
+                disabled={deletingPO}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              >
+                {deletingPO ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Eliminando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" /> Confirmar Eliminación
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
