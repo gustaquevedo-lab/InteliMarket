@@ -21,6 +21,54 @@ from api.src.purchases.models import Supplier, PurchaseOrder
 from api.src.smart_pricing.models import TieredPrice
 
 
+def _aplicar_terminacion_psicologica(precio: Decimal, terminacion: Optional[int]) -> Decimal:
+    """Fuerza los ultimos 2 digitos de `precio` a `terminacion` (0-99), redondeando
+    hacia abajo (ej. terminacion=77 sobre Gs. 13.000 da Gs. 12.977). No aplica si
+    terminacion es None."""
+    if terminacion is None:
+        return precio
+    t = Decimal(max(0, min(99, terminacion)))
+    base = (precio // 100) * 100
+    candidato = base + t
+    if candidato > precio:
+        candidato -= 100
+    if candidato < t:
+        candidato = t
+    return candidato
+
+
+def calcular_precio_promocional(
+    tipo: str,
+    precio_regular: Decimal,
+    valor: Optional[Decimal],
+    precio_fijo_promocional: Optional[Decimal],
+    costo_unitario_referencia: Optional[Decimal] = None,
+    base_calculo_pct: str = "venta",
+    terminacion_psicologica: Optional[int] = None,
+) -> Decimal:
+    """Unico lugar donde se calcula el precio final de una promocion -- usado
+    tanto por el motor de catalogo (resolve_product_promotions) como por el
+    motor de caja (calculate_applicable) para que ambos vean siempre el mismo
+    numero, incluyendo el redondeo psicologico."""
+    precio_promo = precio_regular
+
+    if tipo == "precio_fijo_oferta" and precio_fijo_promocional:
+        precio_promo = round(precio_fijo_promocional)
+    elif tipo == "porcentaje" and valor:
+        pct = max(Decimal("0"), min(valor, Decimal("100"))) / Decimal("100")
+        if base_calculo_pct == "costo" and costo_unitario_referencia and costo_unitario_referencia > 0:
+            # El % define un margen objetivo sobre el costo, no un descuento
+            # sobre el precio de venta -- precio = costo * (1 + %).
+            precio_promo = round(costo_unitario_referencia * (Decimal("1") + pct))
+        else:
+            precio_promo = round(precio_regular * (Decimal("1") - pct))
+    elif tipo == "monto_fijo" and valor:
+        precio_promo = max(Decimal("0"), round(precio_regular - valor))
+
+    precio_promo = _aplicar_terminacion_psicologica(precio_promo, terminacion_psicologica)
+    return precio_promo
+
+
 async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCreate) -> Promotion:
     cid = uuid.UUID(company_id)
     
@@ -58,6 +106,8 @@ async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCre
         valor=data.valor,
         precio_fijo_promocional=data.precio_fijo_promocional,
         valor_maximo=data.valor_maximo,
+        base_calculo_pct=data.base_calculo_pct or "venta",
+        terminacion_psicologica=data.terminacion_psicologica,
         aplica_a=data.aplica_a,
         producto_ids=[uuid.UUID(p) for p in (data.producto_ids or [])] if data.producto_ids else None,
         categoria_ids=[uuid.UUID(c) for c in (data.categoria_ids or [])] if data.categoria_ids else None,
@@ -314,15 +364,15 @@ async def resolve_product_promotions(
 
         # Calcular precio promocional
         precio_regular = Decimal(str(current_price))
-        precio_promo = precio_regular
-
-        if p.tipo == "precio_fijo_oferta" and p.precio_fijo_promocional:
-            precio_promo = round(p.precio_fijo_promocional)
-        elif p.tipo == "porcentaje" and p.valor:
-            descuento_pct = p.valor / Decimal("100")
-            precio_promo = round(precio_regular * (Decimal("1") - descuento_pct))
-        elif p.tipo == "monto_fijo" and p.valor:
-            precio_promo = max(Decimal("0"), round(precio_regular - p.valor))
+        precio_promo = calcular_precio_promocional(
+            tipo=p.tipo,
+            precio_regular=precio_regular,
+            valor=p.valor,
+            precio_fijo_promocional=p.precio_fijo_promocional,
+            costo_unitario_referencia=p.costo_unitario_referencia,
+            base_calculo_pct=p.base_calculo_pct or "venta",
+            terminacion_psicologica=p.terminacion_psicologica,
+        )
 
         if precio_promo < precio_regular and es_activo_hoy and es_en_horario:
             ahorro = precio_regular - precio_promo
@@ -815,16 +865,17 @@ async def calculate_applicable(
                     qty_promo = restante
             qty_acumulada += qty_promo
 
-            if p.tipo == "precio_fijo_oferta" and p.precio_fijo_promocional:
-                if p.precio_fijo_promocional < it.precio_unitario:
-                    descuento_p += (it.precio_unitario - p.precio_fijo_promocional) * qty_promo
-                    items_con_descuento.append(it)
-            elif p.tipo == "porcentaje" and p.valor:
-                pct = max(Decimal("0"), min(p.valor, Decimal("100"))) / Decimal("100")
-                descuento_p += (it.precio_unitario * qty_promo) * pct
-                items_con_descuento.append(it)
-            elif p.tipo == "monto_fijo" and p.valor:
-                descuento_p += min(p.valor, it.precio_unitario * qty_promo)
+            precio_promo_unitario = calcular_precio_promocional(
+                tipo=p.tipo,
+                precio_regular=it.precio_unitario,
+                valor=p.valor,
+                precio_fijo_promocional=p.precio_fijo_promocional,
+                costo_unitario_referencia=p.costo_unitario_referencia,
+                base_calculo_pct=p.base_calculo_pct or "venta",
+                terminacion_psicologica=p.terminacion_psicologica,
+            )
+            if precio_promo_unitario < it.precio_unitario:
+                descuento_p += (it.precio_unitario - precio_promo_unitario) * qty_promo
                 items_con_descuento.append(it)
 
         if p.valor_maximo and descuento_p > p.valor_maximo:

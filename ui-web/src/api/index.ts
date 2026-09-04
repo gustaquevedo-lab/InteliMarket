@@ -560,6 +560,8 @@ export interface Promotion {
   valor?: number
   precio_fijo_promocional?: number
   valor_maximo?: number
+  base_calculo_pct?: string
+  terminacion_psicologica?: number
   aplica_a: string
   producto_ids?: string[]
   categoria_ids?: string[]

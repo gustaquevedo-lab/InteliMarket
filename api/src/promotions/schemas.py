@@ -7,12 +7,17 @@ from decimal import Decimal
 class PromotionCreate(BaseModel):
     nombre: str
     descripcion: Optional[str] = None
-    # porcentaje | monto_fijo | dos_por_uno | combo_precio | cantidad_lleva | precio_fijo_oferta
+    # Unicos tipos con calculo real: porcentaje | monto_fijo | precio_fijo_oferta.
+    # dos_por_uno/combo_precio/cantidad_lleva no tienen logica implementada.
     tipo: str = "precio_fijo_oferta"
     valor: Optional[Decimal] = None
     precio_fijo_promocional: Optional[Decimal] = None
     valor_maximo: Optional[Decimal] = None
-    
+    # venta | costo -- solo aplica a tipo=porcentaje
+    base_calculo_pct: Optional[str] = "venta"
+    # 0-99: fuerza los ultimos 2 digitos del precio final calculado, ej. 77 -> Gs. 12.977
+    terminacion_psicologica: Optional[int] = None
+
     # producto | categoria | carrito | marca
     aplica_a: str = "producto"
     producto_ids: Optional[list[str]] = None
@@ -63,6 +68,8 @@ class PromotionCreate(BaseModel):
 
     @model_validator(mode="after")
     def validar_consistencia(self):
+        if self.tipo in ("dos_por_uno", "combo_precio", "cantidad_lleva"):
+            raise ValueError(f"El tipo de promoción '{self.tipo}' todavía no tiene lógica de cálculo implementada. Use porcentaje, monto_fijo o precio_fijo_oferta.")
         if self.valido_hasta < self.valido_desde:
             raise ValueError("La fecha de fin de vigencia no puede ser anterior a la de inicio.")
         if self.tipo == "porcentaje" and self.valor is not None:
@@ -72,6 +79,13 @@ class PromotionCreate(BaseModel):
             raise ValueError("Debe seleccionar al menos un producto para esta promoción.")
         if self.aplica_a == "categoria" and not self.categoria_ids:
             raise ValueError("Debe seleccionar al menos una categoría para esta promoción.")
+        if self.base_calculo_pct and self.base_calculo_pct not in ("venta", "costo"):
+            raise ValueError("base_calculo_pct debe ser 'venta' o 'costo'.")
+        if self.tipo == "porcentaje" and self.base_calculo_pct == "costo":
+            if not self.costo_unitario_referencia or self.costo_unitario_referencia <= 0:
+                raise ValueError("Para calcular el % sobre el costo, debe indicar el costo unitario de referencia.")
+        if self.terminacion_psicologica is not None and not (0 <= self.terminacion_psicologica <= 99):
+            raise ValueError("La terminación psicológica de precio debe estar entre 0 y 99.")
         return self
 
 
@@ -82,6 +96,8 @@ class PromotionUpdate(BaseModel):
     valor: Optional[Decimal] = None
     precio_fijo_promocional: Optional[Decimal] = None
     valor_maximo: Optional[Decimal] = None
+    base_calculo_pct: Optional[str] = None
+    terminacion_psicologica: Optional[int] = None
     aplica_a: Optional[str] = None
     producto_ids: Optional[list[str]] = None
     categoria_ids: Optional[list[str]] = None
@@ -130,6 +146,8 @@ class PromotionResponse(BaseModel):
     valor: Optional[float] = None
     precio_fijo_promocional: Optional[float] = None
     valor_maximo: Optional[float] = None
+    base_calculo_pct: Optional[str] = "venta"
+    terminacion_psicologica: Optional[int] = None
     aplica_a: str
     producto_ids: Optional[Any] = None
     categoria_ids: Optional[Any] = None

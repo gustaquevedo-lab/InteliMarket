@@ -92,6 +92,8 @@ export default function PromocionesPage() {
   const [newBulkPrecioFijo, setNewBulkPrecioFijo] = useState<number | "">("")
   const [newBulkValorPct, setNewBulkValorPct] = useState<number | "">(15)
   const [newBulkMontoFijo, setNewBulkMontoFijo] = useState<number | "">("")
+  const [newBaseCalculoPct, setNewBaseCalculoPct] = useState<"venta" | "costo">("venta")
+  const [newTerminacionPsicologica, setNewTerminacionPsicologica] = useState<number | "">("")
   const [newOrigen, setNewOrigen] = useState("iniciativa_propia")
   const [newFinanciamiento, setNewFinanciamiento] = useState("propio_supermercado")
   const [newSupplierId, setNewSupplierId] = useState("")
@@ -343,6 +345,42 @@ export default function PromocionesPage() {
     })
   }, [promotions, search, filterOrigen, tab])
 
+  // Espeja exactamente calcular_precio_promocional() del backend (service.py)
+  // para que la previsualización en pantalla coincida con lo que se guarda.
+  const calcularPrecioPromocional = (
+    tipo: string,
+    precioRegular: number,
+    costo: number,
+    valorPct: number | "",
+    montoFijo: number | "",
+    precioFijo: number | "",
+    baseCalculo: "venta" | "costo",
+    terminacion: number | "",
+  ): number => {
+    let precio = precioRegular
+    if (tipo === "precio_fijo_oferta" && precioFijo !== "") {
+      precio = Number(precioFijo)
+    } else if (tipo === "porcentaje" && valorPct !== "") {
+      const pct = Number(valorPct) / 100
+      precio = baseCalculo === "costo" && costo > 0
+        ? Math.round(costo * (1 + pct))
+        : Math.round(precioRegular * (1 - pct))
+    } else if (tipo === "monto_fijo" && montoFijo !== "") {
+      precio = Math.max(0, Math.round(precioRegular - Number(montoFijo)))
+    } else {
+      precio = Math.round(precioRegular * 0.85)
+    }
+    if (terminacion !== "") {
+      const t = Math.max(0, Math.min(99, Number(terminacion)))
+      const base = Math.floor(precio / 100) * 100
+      let candidato = base + t
+      if (candidato > precio) candidato -= 100
+      if (candidato < t) candidato = t
+      precio = candidato
+    }
+    return precio
+  }
+
   // Selección individual o en lote
   const toggleSelectProduct = (p: Product) => {
     setSelectedBatchProducts(prev => {
@@ -352,16 +390,7 @@ export default function PromocionesPage() {
       } else {
         const costo = Number(p.costo_promedio || 0)
         const regular = Number(p.precio_venta || 0)
-        let promoPrice = regular
-        if (newTipo === "precio_fijo_oferta" && newBulkPrecioFijo !== "") {
-          promoPrice = Number(newBulkPrecioFijo)
-        } else if (newTipo === "porcentaje" && newBulkValorPct !== "") {
-          promoPrice = Math.round(regular * (1 - Number(newBulkValorPct) / 100))
-        } else if (newTipo === "monto_fijo" && newBulkMontoFijo !== "") {
-          promoPrice = Math.max(0, Math.round(regular - Number(newBulkMontoFijo)))
-        } else {
-          promoPrice = Math.round(regular * 0.85)
-        }
+        const promoPrice = calcularPrecioPromocional(newTipo, regular, costo, newBulkValorPct, newBulkMontoFijo, newBulkPrecioFijo, newBaseCalculoPct, newTerminacionPsicologica)
         next.set(p.id, {
           product: p,
           costo,
@@ -381,16 +410,7 @@ export default function PromocionesPage() {
         if (!next.has(p.id)) {
           const costo = Number(p.costo_promedio || 0)
           const regular = Number(p.precio_venta || 0)
-          let promoPrice = regular
-          if (newTipo === "precio_fijo_oferta" && newBulkPrecioFijo !== "") {
-            promoPrice = Number(newBulkPrecioFijo)
-          } else if (newTipo === "porcentaje" && newBulkValorPct !== "") {
-            promoPrice = Math.round(regular * (1 - Number(newBulkValorPct) / 100))
-          } else if (newTipo === "monto_fijo" && newBulkMontoFijo !== "") {
-            promoPrice = Math.max(0, Math.round(regular - Number(newBulkMontoFijo)))
-          } else {
-            promoPrice = Math.round(regular * 0.85)
-          }
+          const promoPrice = calcularPrecioPromocional(newTipo, regular, costo, newBulkValorPct, newBulkMontoFijo, newBulkPrecioFijo, newBaseCalculoPct, newTerminacionPsicologica)
           next.set(p.id, {
             product: p,
             costo,
@@ -413,14 +433,7 @@ export default function PromocionesPage() {
     setSelectedBatchProducts(prev => {
       const next = new Map()
       prev.forEach((item, id) => {
-        let newPromoPrice = item.precio_promocional
-        if (newTipo === "precio_fijo_oferta" && newBulkPrecioFijo !== "") {
-          newPromoPrice = Number(newBulkPrecioFijo)
-        } else if (newTipo === "porcentaje" && newBulkValorPct !== "") {
-          newPromoPrice = Math.round(item.precio_regular * (1 - Number(newBulkValorPct) / 100))
-        } else if (newTipo === "monto_fijo" && newBulkMontoFijo !== "") {
-          newPromoPrice = Math.max(0, Math.round(item.precio_regular - Number(newBulkMontoFijo)))
-        }
+        const newPromoPrice = calcularPrecioPromocional(newTipo, item.precio_regular, item.costo, newBulkValorPct, newBulkMontoFijo, newBulkPrecioFijo, newBaseCalculoPct, newTerminacionPsicologica)
         next.set(id, { ...item, precio_promocional: newPromoPrice })
       })
       return next
@@ -596,8 +609,12 @@ export default function PromocionesPage() {
         payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Number(newBulkPrecioFijo) : avgPromoPrice
       } else if (newTipo === "porcentaje") {
         payload.valor = Number(newBulkValorPct)
+        payload.base_calculo_pct = selectionMode === "category" ? "venta" : newBaseCalculoPct
       } else if (newTipo === "monto_fijo") {
         payload.valor = Number(newBulkMontoFijo)
+      }
+      if (newTerminacionPsicologica !== "") {
+        payload.terminacion_psicologica = Number(newTerminacionPsicologica)
       }
 
       if (newLimitePorCompra !== "") payload.limite_por_compra = Number(newLimitePorCompra)
@@ -1730,6 +1747,44 @@ export default function PromocionesPage() {
                           placeholder={newTipo === "precio_fijo_oferta" ? "Ej: 37477 para toda la línea" : newTipo === "monto_fijo" ? "Ej: 5000" : "Ej: 20"}
                           className="w-full text-xs font-mono font-black p-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                         />
+                      </div>
+
+                      {newTipo === "porcentaje" && (
+                        <div>
+                          <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Base de Cálculo del %:</label>
+                          <select
+                            value={newBaseCalculoPct}
+                            onChange={e => setNewBaseCalculoPct(e.target.value as "venta" | "costo")}
+                            disabled={selectionMode === "category"}
+                            className="w-full text-xs p-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold disabled:opacity-50"
+                          >
+                            <option value="venta">Sobre Precio de Venta (descuento directo)</option>
+                            <option value="costo">Sobre Costo (define margen objetivo)</option>
+                          </select>
+                          {selectionMode === "category" ? (
+                            <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                              No disponible en categoría dinámica: el costo varía por producto y no puede promediarse de forma confiable para lo que se agregue a futuro.
+                            </p>
+                          ) : newBaseCalculoPct === "costo" ? (
+                            <p className="text-[10px] text-blue-600 dark:text-blue-400 mt-1">
+                              Precio de oferta = costo × (1 + %). Requiere costo cargado en cada producto seleccionado.
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Precio Psicológico (opcional):</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={99}
+                          value={newTerminacionPsicologica}
+                          onChange={e => setNewTerminacionPsicologica(e.target.value === "" ? "" : Math.max(0, Math.min(99, Number(e.target.value))))}
+                          placeholder="Ej: 77 → precios terminan en ...977"
+                          className="w-full text-xs font-mono font-black p-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                        />
+                        <p className="text-[10px] text-gray-500 mt-1">Fuerza los últimos 2 dígitos del precio final calculado, sea cual sea la mecánica.</p>
                       </div>
                     </div>
 

@@ -12,7 +12,10 @@ class Promotion(Base):
     nombre = Column(String(150), nullable=False)
     descripcion = Column(Text)
 
-    # porcentaje | monto_fijo | dos_por_uno | combo_precio | cantidad_lleva | precio_fijo_oferta
+    # Unicos tipos con logica de calculo real (ver calcular_precio_promocional en
+    # service.py): porcentaje | monto_fijo | precio_fijo_oferta. Los valores
+    # dos_por_uno/combo_precio/cantidad_lleva quedan documentados pero SIN
+    # implementar -- no crear promociones con esos tipos, no se van a calcular.
     tipo = Column(String(30), nullable=False)
     valor = Column(Numeric(15, 2))  # porcentaje o monto de descuento
     precio_fijo_promocional = Column(Numeric(15, 2))  # precio directo de venta en oferta (ej. ₲ 38.000)
@@ -40,6 +43,16 @@ class Promotion(Base):
     # Control de Rentabilidad & Margen
     costo_unitario_referencia = Column(Numeric(15, 2), default=0)
     vende_bajo_costo = Column(Boolean, default=False)
+
+    # Base sobre la que se calcula el % de descuento: "venta" (descuento
+    # directo sobre el precio de venta actual) o "costo" (define un margen
+    # objetivo -- precio = costo * (1 + valor/100)). Solo aplica a tipo=porcentaje.
+    base_calculo_pct = Column(String(10), server_default="venta")
+
+    # Redondeo psicológico: fuerza que los últimos 2 dígitos del precio final
+    # calculado coincidan con este valor (0-99), ej. 77 -> Gs. 12.977. Aplica
+    # sobre el precio ya calculado por cualquier mecánica. Null = sin ajuste.
+    terminacion_psicologica = Column(Integer, nullable=True)
     
     # Aprobaciones de Gerencia
     # borrador | pendiente_aprobacion_gerencia | activa | pausada | finalizada_por_stock | finalizada_por_fecha
