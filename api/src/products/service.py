@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -151,12 +151,28 @@ async def list_products(
         # Por defecto, servir únicamente productos activos para POS, catálogo y ventas
         query = query.where(Product.activo == True)
 
-    if search:
-        query = query.where(
-            (Product.nombre.ilike(f"%{search}%")) |
-            (Product.sku.ilike(f"%{search}%")) |
-            (Product.codigo_barra.ilike(f"%{search}%"))
-        )
+    if search and search.strip():
+        tokens = [t.strip() for t in search.split() if t.strip()]
+        if len(tokens) > 1:
+            token_conds = []
+            for t in tokens:
+                token_conds.append(
+                    or_(
+                        Product.nombre.ilike(f"%{t}%"),
+                        Product.sku.ilike(f"%{t}%"),
+                        Product.codigo_barra.ilike(f"%{t}%")
+                    )
+                )
+            query = query.where(and_(*token_conds))
+        elif len(tokens) == 1:
+            t = tokens[0]
+            query = query.where(
+                or_(
+                    Product.nombre.ilike(f"%{t}%"),
+                    Product.sku.ilike(f"%{t}%"),
+                    Product.codigo_barra.ilike(f"%{t}%")
+                )
+            )
 
     # Filtrar productos con nombres válidos primero y activos con máxima prioridad
     query = query.order_by(Product.activo.desc(), Product.nombre.asc()).limit(limit).offset(offset)

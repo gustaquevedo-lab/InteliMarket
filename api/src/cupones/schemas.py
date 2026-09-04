@@ -206,6 +206,7 @@ class SorteoCampanaBase(BaseModel):
     tipo_trigger: str = "MONTO_GLOBAL"  # MONTO_GLOBAL | PRODUCTOS_ESPECIFICOS | MARCA_PROVEEDOR | CATEGORIA
     criterio_evaluacion: str = "MONTO_ACUMULADO"  # MONTO_ACUMULADO | CANTIDAD_UNIDADES
     valor_umbral: float = 50000
+    cupones_por_umbral: int = 1
     productos_participantes: Optional[List[Dict[str, Any]]] = []
     marcas_participantes: Optional[List[str]] = []
     categorias_participantes: Optional[List[str]] = []
@@ -248,6 +249,7 @@ class SorteoCampanaUpdate(BaseModel):
     tipo_trigger: Optional[str] = None
     criterio_evaluacion: Optional[str] = None
     valor_umbral: Optional[float] = None
+    cupones_por_umbral: Optional[int] = None
     productos_participantes: Optional[List[Dict[str, Any]]] = None
     marcas_participantes: Optional[List[str]] = None
     categorias_participantes: Optional[List[str]] = None

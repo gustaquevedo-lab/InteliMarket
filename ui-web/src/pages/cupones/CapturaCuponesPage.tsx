@@ -6,7 +6,8 @@ import {
   ShoppingBag, Clock, Brain, ThumbsUp, Copy, Check, Filter,
   Settings, Sliders, Printer, Wand2, Scissors, Save, HelpCircle,
   Plus, Edit3, X, CheckSquare, Gift, Store, BarChart3, ChevronRight,
-  Package, ToggleLeft, ToggleRight, Receipt, Percent, Star, ArrowUpRight
+  Package, ToggleLeft, ToggleRight, Receipt, Percent, Star, ArrowUpRight,
+  Loader2
 } from "lucide-react"
 import { api, type CuponTicket, type CuponCliente, type CuponStats, type Product } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -37,6 +38,7 @@ export interface SorteoCampanaUI {
   tipo_trigger: "MONTO_GLOBAL" | "PRODUCTOS_ESPECIFICOS" | "MARCA_PROVEEDOR" | "CATEGORIA"
   criterio_evaluacion: "MONTO_ACUMULADO" | "CANTIDAD_UNIDADES"
   valor_umbral: number
+  cupones_por_umbral?: number
   productos_participantes: Array<{
     id?: string
     producto_id?: string
@@ -93,6 +95,9 @@ export default function CapturaCuponesPage() {
   // Catálogo de Productos para Asignación a Campaña
   const [catalogoProductos, setCatalogoProductos] = useState<Product[]>([])
   const [busquedaProducto, setBusquedaProducto] = useState("")
+  const [searchingProductos, setSearchingProductos] = useState(false)
+  const [productosSugeridos, setProductosSugeridos] = useState<Product[]>([])
+  const searchTimeoutRef = useRef<any>(null)
 
   // Formulario de Captura Rápida
   const [documento, setDocumento] = useState("")
@@ -166,6 +171,56 @@ export default function CapturaCuponesPage() {
       console.warn("Error cargando productos de catálogo:", err)
     }
   }, [])
+
+  // ── BÚSQUEDA ROBUSTA DE PRODUCTOS CON DEBOUNCE Y FALLBACK LOCAL ──────────
+  useEffect(() => {
+    const q = busquedaProducto.trim()
+    if (q.length < 2) {
+      setProductosSugeridos([])
+      setSearchingProductos(false)
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+      return
+    }
+
+    const normalize = (s: string) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    const qNorm = normalize(q)
+    const tokens = qNorm.split(/\s+/).filter(Boolean)
+
+    const matchProduct = (p: Product) => {
+      const pNom = normalize(p.nombre || "")
+      const pSku = (p.sku || "").toLowerCase()
+      const pCb = (p.codigo_barra || "").toLowerCase()
+      return tokens.every(tok => pNom.includes(tok) || pSku.includes(tok) || pCb.includes(tok))
+    }
+
+    // 1. Coincidencias instantáneas en caché local
+    const localMatches = (catalogoProductos || []).filter(matchProduct).slice(0, 15)
+    setProductosSugeridos(localMatches)
+
+    // 2. Consulta remota en segundo plano para alcanzar el catálogo total (20.000+ productos)
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+    setSearchingProductos(true)
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const remoteResults = await api.products.list({ search: q, limit: 30 })
+        if (Array.isArray(remoteResults)) {
+          const map = new Map<string, Product>()
+          localMatches.forEach(p => map.set(p.id, p))
+          remoteResults.forEach(p => map.set(p.id, p))
+          setProductosSugeridos(Array.from(map.values()).slice(0, 20))
+        }
+      } catch (err) {
+        console.warn("Búsqueda remota falló, manteniendo resultados locales:", err)
+      } finally {
+        setSearchingProductos(false)
+      }
+    }, 250)
+
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+    }
+  }, [busquedaProducto, catalogoProductos])
 
   const loadStats = useCallback(async () => {
     try {
@@ -347,6 +402,7 @@ export default function CapturaCuponesPage() {
       tipo_trigger: "MONTO_GLOBAL",
       criterio_evaluacion: "MONTO_ACUMULADO",
       valor_umbral: 50000,
+      cupones_por_umbral: 1,
       productos_participantes: [],
       marcas_participantes: [],
       categorias_participantes: [],
@@ -381,7 +437,8 @@ export default function CapturaCuponesPage() {
         premio_destacado: campanaEditando.premio_destacado?.trim() || undefined,
         tipo_trigger: campanaEditando.tipo_trigger || "MONTO_GLOBAL",
         criterio_evaluacion: campanaEditando.criterio_evaluacion || "MONTO_ACUMULADO",
-        valor_umbral: Number(campanaEditando.valor_umbral) || 50000,
+        valor_umbral: Number(campanaEditando.valor_umbral) || (campanaEditando.criterio_evaluacion === "CANTIDAD_UNIDADES" ? 1 : 50000),
+        cupones_por_umbral: Math.max(1, Number(campanaEditando.cupones_por_umbral) || 1),
         productos_participantes: campanaEditando.productos_participantes || [],
         marcas_participantes: campanaEditando.marcas_participantes || [],
         categorias_participantes: campanaEditando.categorias_participantes || [],
@@ -1632,7 +1689,25 @@ export default function CapturaCuponesPage() {
                         <button
                           key={t.id}
                           type="button"
-                          onClick={() => setCampanaEditando({ ...campanaEditando, tipo_trigger: t.id as any })}
+                          onClick={() => {
+                            const tId = t.id as any
+                            let cVal = campanaEditando.criterio_evaluacion || "MONTO_ACUMULADO"
+                            let uVal = campanaEditando.valor_umbral || 50000
+                            if (tId === "MONTO_GLOBAL") {
+                              cVal = "MONTO_ACUMULADO"
+                              if (uVal < 1000) uVal = 50000
+                            } else if (tId === "PRODUCTOS_ESPECIFICOS") {
+                              cVal = "CANTIDAD_UNIDADES"
+                              if (uVal >= 1000) uVal = 2
+                            }
+                            setCampanaEditando({
+                              ...campanaEditando,
+                              tipo_trigger: tId,
+                              criterio_evaluacion: cVal,
+                              valor_umbral: uVal,
+                              cupones_por_umbral: campanaEditando.cupones_por_umbral || 1,
+                            })
+                          }}
                           className={`p-2.5 rounded-xl border text-left text-xs font-bold transition cursor-pointer ${
                             campanaEditando.tipo_trigger === t.id
                               ? "bg-amber-500 text-white border-amber-500 shadow-sm"
@@ -1648,32 +1723,163 @@ export default function CapturaCuponesPage() {
                     </div>
                   </div>
 
-                  {/* Criterio y Umbral */}
-                  <div className="grid grid-cols-2 gap-3 pt-2">
+                  {/* Criterio y Regla de Emisión de Cupones */}
+                  <div className="pt-2 border-t border-slate-200/80 dark:border-slate-700/80 space-y-3">
                     <div>
                       <label className="input-label">Criterio de Evaluación</label>
                       <select
                         value={campanaEditando.criterio_evaluacion || "MONTO_ACUMULADO"}
-                        onChange={(e) => setCampanaEditando({ ...campanaEditando, criterio_evaluacion: e.target.value as any })}
+                        onChange={(e) => {
+                          const nuevoCriterio = e.target.value as any
+                          let nuevoUmbral = campanaEditando.valor_umbral || 50000
+                          if (nuevoCriterio === "CANTIDAD_UNIDADES" && nuevoUmbral >= 1000) {
+                            nuevoUmbral = 2
+                          } else if (nuevoCriterio === "MONTO_ACUMULADO" && nuevoUmbral < 1000) {
+                            nuevoUmbral = 50000
+                          }
+                          setCampanaEditando({
+                            ...campanaEditando,
+                            criterio_evaluacion: nuevoCriterio,
+                            valor_umbral: nuevoUmbral,
+                          })
+                        }}
                         className="input-field text-xs font-bold"
                       >
-                        <option value="MONTO_ACUMULADO">Monto en Guaraníes (Gs.)</option>
-                        <option value="CANTIDAD_UNIDADES">Cantidad de Unidades (Items)</option>
+                        <option value="CANTIDAD_UNIDADES">📦 Cantidad de Unidades (Items / Paquetes)</option>
+                        <option value="MONTO_ACUMULADO">💰 Monto en Guaraníes (Gs. gastados)</option>
                       </select>
                     </div>
 
-                    <div>
-                      <label className="input-label">
-                        {campanaEditando.criterio_evaluacion === "MONTO_ACUMULADO" ? "Monto p/ 1 Cupón (Gs.) *" : "Unidades p/ 1 Cupón *"}
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={campanaEditando.valor_umbral || 50000}
-                        onChange={(e) => setCampanaEditando({ ...campanaEditando, valor_umbral: parseFloat(e.target.value) || 1 })}
-                        className="input-field text-xs font-mono font-black text-amber-600 dark:text-amber-400"
-                      />
+                    {/* Dos Columnas Lógicas: Por cada X -> Entrega Y cupones */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="input-label text-slate-700 dark:text-slate-300">
+                          {campanaEditando.criterio_evaluacion === "CANTIDAD_UNIDADES"
+                            ? "Por cada compra de (Unidades):"
+                            : "Por cada compra de (Guaraníes):"}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min={1}
+                            step={campanaEditando.criterio_evaluacion === "CANTIDAD_UNIDADES" ? 1 : 1000}
+                            value={campanaEditando.valor_umbral ?? (campanaEditando.criterio_evaluacion === "CANTIDAD_UNIDADES" ? 2 : 50000)}
+                            onChange={(e) =>
+                              setCampanaEditando({
+                                ...campanaEditando,
+                                valor_umbral: Math.max(1, parseFloat(e.target.value) || 1),
+                              })
+                            }
+                            className="input-field text-xs font-mono font-black text-amber-600 dark:text-amber-400 pl-3 pr-14"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">
+                            {campanaEditando.criterio_evaluacion === "CANTIDAD_UNIDADES" ? "unid." : "Gs."}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="input-label text-slate-700 dark:text-slate-300">
+                          Entrega al cliente:
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={campanaEditando.cupones_por_umbral ?? 1}
+                            onChange={(e) =>
+                              setCampanaEditando({
+                                ...campanaEditando,
+                                cupones_por_umbral: Math.max(1, parseInt(e.target.value) || 1),
+                              })
+                            }
+                            className="input-field text-xs font-mono font-black text-emerald-600 dark:text-emerald-400 pl-3 pr-16"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">
+                            cupon(es)
+                          </span>
+                        </div>
+                      </div>
                     </div>
+
+                    {/* Explicación en Lenguaje Natural y Simulador Interactivo */}
+                    {(() => {
+                      const esUnidades = campanaEditando.criterio_evaluacion === "CANTIDAD_UNIDADES"
+                      const umbral = Math.max(1, Number(campanaEditando.valor_umbral) || (esUnidades ? 2 : 50000))
+                      const cupones = Math.max(1, Number(campanaEditando.cupones_por_umbral) || 1)
+                      const targetDesc =
+                        campanaEditando.tipo_trigger === "PRODUCTOS_ESPECIFICOS"
+                          ? "los productos aceleradores participantes"
+                          : campanaEditando.tipo_trigger === "MARCA_PROVEEDOR"
+                          ? "las marcas seleccionadas"
+                          : campanaEditando.tipo_trigger === "CATEGORIA"
+                          ? "las categorías seleccionadas"
+                          : "la cesta global de compra"
+
+                      const ej1Qty = esUnidades ? Math.max(1, umbral - 1) : Math.round(umbral * 0.5)
+                      const ej1Cup = Math.floor(ej1Qty / umbral) * cupones
+
+                      const ej2Qty = umbral
+                      const ej2Cup = cupones
+
+                      const ej3Qty = umbral * 2
+                      const ej3Cup = cupones * 2
+
+                      return (
+                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2.5">
+                          <div className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                              <span>Regla Activa del Sorteo:</span>
+                            </div>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-mono">
+                              Cálculo automático en POS
+                            </span>
+                          </div>
+
+                          <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                            Por cada compra de{" "}
+                            <strong className="text-amber-600 dark:text-amber-400 font-black">
+                              {esUnidades ? `${umbral} ${umbral === 1 ? "unidad" : "unidades"}` : formatPYG(umbral)}
+                            </strong>{" "}
+                            en {targetDesc}, el cliente recibe automáticamente{" "}
+                            <strong className="text-emerald-600 dark:text-emerald-400 font-black">
+                              {cupones} {cupones === 1 ? "cupón impreso" : "cupones impresos"}
+                            </strong>
+                            .
+                          </div>
+
+                          {/* Simulador rápido con 3 escenarios */}
+                          <div className="grid grid-cols-3 gap-2 pt-1">
+                            <div className="bg-white/90 dark:bg-slate-900/90 p-2 rounded-lg border border-slate-200 dark:border-slate-800 text-center">
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                Compra: {esUnidades ? `${ej1Qty} unid.` : formatPYG(ej1Qty)}
+                              </div>
+                              <div className="text-xs font-black text-slate-500 mt-0.5">
+                                {ej1Cup} cupones
+                              </div>
+                            </div>
+                            <div className="bg-white/90 dark:bg-slate-900/90 p-2 rounded-lg border border-amber-400/50 dark:border-amber-500/50 text-center shadow-xs">
+                              <div className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-bold">
+                                Compra: {esUnidades ? `${ej2Qty} unid.` : formatPYG(ej2Qty)}
+                              </div>
+                              <div className="text-xs font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
+                                +{ej2Cup} {ej2Cup === 1 ? "cupón" : "cupones"}
+                              </div>
+                            </div>
+                            <div className="bg-white/90 dark:bg-slate-900/90 p-2 rounded-lg border border-emerald-400/50 dark:border-emerald-500/50 text-center shadow-xs">
+                              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold">
+                                Compra: {esUnidades ? `${ej3Qty} unid.` : formatPYG(ej3Qty)}
+                              </div>
+                              <div className="text-xs font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
+                                +{ej3Cup} cupones
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
 
@@ -1685,62 +1891,125 @@ export default function CapturaCuponesPage() {
                         Productos Aceleradores Participantes ({campanaEditando.productos_participantes?.length || 0})
                       </label>
                       <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-bold">
-                        Detección en tiempo real en POS
+                        Búsqueda en vivo en 20.000+ artículos
                       </span>
                     </div>
 
                     {/* Buscador de Producto en Catálogo */}
                     <div className="relative">
-                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      {searchingProductos ? (
+                        <Loader2 className="w-4 h-4 text-amber-500 animate-spin absolute left-3 top-1/2 -translate-y-1/2" />
+                      ) : (
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      )}
                       <input
                         type="text"
                         value={busquedaProducto}
                         onChange={(e) => setBusquedaProducto(e.target.value)}
-                        placeholder="Buscar producto por nombre o código de barras para agregar..."
-                        className="input-field pl-9 text-xs"
+                        placeholder="Escribí nombre, marca, SKU o código de barra (ej: costilla, arroz, leche, 120093)..."
+                        className="input-field pl-9 pr-8 text-xs"
                       />
+                      {busquedaProducto && (
+                        <button
+                          type="button"
+                          onClick={() => setBusquedaProducto("")}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
 
-                    {/* Sugerencias Rápidas */}
-                    {busquedaProducto.trim().length > 1 && (
-                      <div className="max-h-36 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-1 shadow-lg space-y-1">
-                        {catalogoProductos
-                          .filter(p => p.nombre.toLowerCase().includes(busquedaProducto.toLowerCase()) || (p.codigo_barra && p.codigo_barra.includes(busquedaProducto)))
-                          .slice(0, 6)
-                          .map((p) => (
-                            <div
-                              key={p.id}
-                              onClick={() => handleAgregarProductoACampana(p)}
-                              className="p-2 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs flex items-center justify-between cursor-pointer"
-                            >
-                              <div>
-                                <div className="font-bold text-slate-900 dark:text-white">{p.nombre}</div>
-                                <div className="text-[10px] text-slate-400 font-mono">SKU: {p.sku} · {formatPYG(p.precio_venta)}</div>
+                    {/* Sugerencias en Vivo */}
+                    {busquedaProducto.trim().length >= 2 && (
+                      <div className="max-h-48 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-1 shadow-xl space-y-1">
+                        {searchingProductos && productosSugeridos.length === 0 ? (
+                          <div className="p-3 text-xs text-slate-500 flex items-center justify-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
+                            <span>Buscando en catálogo general...</span>
+                          </div>
+                        ) : productosSugeridos.length === 0 ? (
+                          <div className="p-3 text-xs text-slate-500 text-center">
+                            No se encontraron productos para "<strong>{busquedaProducto}</strong>".
+                            <div className="text-[10px] text-slate-400 mt-0.5">Probá con palabras más cortas o el código SKU.</div>
+                          </div>
+                        ) : (
+                          productosSugeridos.map((p) => {
+                            const yaAgregado = (campanaEditando.productos_participantes || []).some(
+                              (item) => item.id === p.id || item.sku === p.sku
+                            )
+                            return (
+                              <div
+                                key={p.id}
+                                onClick={() => !yaAgregado && handleAgregarProductoACampana(p)}
+                                className={`p-2 rounded-lg text-xs flex items-center justify-between transition ${
+                                  yaAgregado
+                                    ? "bg-slate-100 dark:bg-slate-800/60 opacity-60 cursor-default"
+                                    : "hover:bg-amber-50 dark:hover:bg-amber-950/40 cursor-pointer"
+                                }`}
+                              >
+                                <div className="min-w-0 pr-2">
+                                  <div className="font-bold text-slate-900 dark:text-white truncate">{p.nombre}</div>
+                                  <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono mt-0.5">
+                                    <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                      SKU: {p.sku}
+                                    </span>
+                                    {p.codigo_barra && (
+                                      <span className="truncate max-w-[120px]">CB: {p.codigo_barra}</span>
+                                    )}
+                                    <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                      {formatPYG(p.precio_venta)}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {yaAgregado ? (
+                                  <span className="text-[10px] font-bold text-slate-400 px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 shrink-0">
+                                    ✓ Agregado
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 px-2 py-1 rounded-md bg-amber-100 dark:bg-amber-900/50 hover:bg-amber-200 transition shrink-0">
+                                    <Plus className="w-3.5 h-3.5" /> Agregar
+                                  </span>
+                                )}
                               </div>
-                              <Plus className="w-4 h-4 text-amber-600" />
-                            </div>
-                          ))}
+                            )
+                          })
+                        )}
                       </div>
                     )}
 
                     {/* Lista de Productos ya Agregados */}
-                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pt-1">
-                      {(campanaEditando.productos_participantes || []).map((p, idx) => (
-                        <span
-                          key={idx}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 text-slate-800 dark:text-slate-200 shadow-2xs"
-                        >
-                          <span className="truncate max-w-[180px]">{p.nombre}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleQuitarProductoDeCampana(idx)}
-                            className="text-slate-400 hover:text-red-500 cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
+                    {campanaEditando.productos_participantes && campanaEditando.productos_participantes.length > 0 ? (
+                      <div className="space-y-1.5 pt-1">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                          Artículos seleccionados ({campanaEditando.productos_participantes.length}):
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-1 bg-white/70 dark:bg-slate-900/70 rounded-xl border border-amber-200/60 dark:border-amber-900/40">
+                          {campanaEditando.productos_participantes.map((p, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 border border-amber-300/70 dark:border-amber-800/70 text-amber-950 dark:text-amber-100 shadow-2xs"
+                            >
+                              <span className="truncate max-w-[200px]">{p.nombre}</span>
+                              <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400">({p.sku})</span>
+                              <button
+                                type="button"
+                                onClick={() => handleQuitarProductoDeCampana(idx)}
+                                className="text-amber-400 hover:text-red-500 p-0.5 rounded cursor-pointer transition"
+                                title="Quitar de la campaña"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-amber-800/70 dark:text-amber-300/70 italic text-center p-2 rounded-xl bg-amber-500/5 border border-dashed border-amber-300/50">
+                        No hay productos agregados aún. Buscá arriba para sumar los aceleradores de la campaña.
+                      </div>
+                    )}
                   </div>
                 )}
 

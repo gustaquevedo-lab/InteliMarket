@@ -816,6 +816,7 @@ async def list_campanas(
             "tipo_trigger": c.tipo_trigger,
             "criterio_evaluacion": c.criterio_evaluacion,
             "valor_umbral": float(c.valor_umbral or 0),
+            "cupones_por_umbral": int(getattr(c, "cupones_por_umbral", 1) or 1),
             "productos_participantes": c.productos_participantes or [],
             "marcas_participantes": c.marcas_participantes or [],
             "categorias_participantes": c.categorias_participantes or [],
@@ -865,6 +866,7 @@ async def create_campana(
         tipo_trigger=data.tipo_trigger,
         criterio_evaluacion=data.criterio_evaluacion,
         valor_umbral=data.valor_umbral,
+        cupones_por_umbral=getattr(data, "cupones_por_umbral", 1) or 1,
         productos_participantes=data.productos_participantes or [],
         marcas_participantes=data.marcas_participantes or [],
         categorias_participantes=data.categorias_participantes or [],
@@ -950,10 +952,13 @@ async def evaluar_carrito_campanas(
         cupones_ganados = 0
         monto_o_cantidad_base = 0.0
         umbral = float(c.valor_umbral or 0)
+        multiplier = int(getattr(c, "cupones_por_umbral", 1) or 1)
+        if multiplier < 1:
+            multiplier = 1
 
         if c.tipo_trigger == "MONTO_GLOBAL":
             if umbral > 0:
-                cupones_ganados = int(total_monto // umbral)
+                cupones_ganados = int((total_monto // umbral) * multiplier)
                 monto_o_cantidad_base = total_monto
 
         elif c.tipo_trigger == "PRODUCTOS_ESPECIFICOS":
@@ -975,11 +980,11 @@ async def evaluar_carrito_campanas(
                 if matching_items and umbral > 0:
                     if c.criterio_evaluacion == "CANTIDAD_UNIDADES":
                         total_units = sum(float(it.cantidad) for it in matching_items)
-                        cupones_ganados = int(total_units // umbral)
+                        cupones_ganados = int((total_units // umbral) * multiplier)
                         monto_o_cantidad_base = total_units
                     else:  # MONTO_ACUMULADO
                         total_spent = sum(float(it.total) for it in matching_items)
-                        cupones_ganados = int(total_spent // umbral)
+                        cupones_ganados = int((total_spent // umbral) * multiplier)
                         monto_o_cantidad_base = total_spent
 
         elif c.tipo_trigger == "MARCA_PROVEEDOR":
@@ -987,18 +992,28 @@ async def evaluar_carrito_campanas(
             if marcas and items:
                 matching_items = [it for it in items if it.marca and str(it.marca).strip().upper() in marcas]
                 if matching_items and umbral > 0:
-                    total_spent = sum(float(it.total) for it in matching_items)
-                    cupones_ganados = int(total_spent // umbral)
-                    monto_o_cantidad_base = total_spent
+                    if c.criterio_evaluacion == "CANTIDAD_UNIDADES":
+                        total_units = sum(float(it.cantidad) for it in matching_items)
+                        cupones_ganados = int((total_units // umbral) * multiplier)
+                        monto_o_cantidad_base = total_units
+                    else:
+                        total_spent = sum(float(it.total) for it in matching_items)
+                        cupones_ganados = int((total_spent // umbral) * multiplier)
+                        monto_o_cantidad_base = total_spent
 
         elif c.tipo_trigger == "CATEGORIA":
             cats = {str(cat).strip().upper() for cat in (c.categorias_participantes or []) if cat}
             if cats and items:
                 matching_items = [it for it in items if it.categoria and str(it.categoria).strip().upper() in cats]
                 if matching_items and umbral > 0:
-                    total_spent = sum(float(it.total) for it in matching_items)
-                    cupones_ganados = int(total_spent // umbral)
-                    monto_o_cantidad_base = total_spent
+                    if c.criterio_evaluacion == "CANTIDAD_UNIDADES":
+                        total_units = sum(float(it.cantidad) for it in matching_items)
+                        cupones_ganados = int((total_units // umbral) * multiplier)
+                        monto_o_cantidad_base = total_units
+                    else:
+                        total_spent = sum(float(it.total) for it in matching_items)
+                        cupones_ganados = int((total_spent // umbral) * multiplier)
+                        monto_o_cantidad_base = total_spent
 
         if cupones_ganados > 0:
             total_cupones_acumulados += cupones_ganados

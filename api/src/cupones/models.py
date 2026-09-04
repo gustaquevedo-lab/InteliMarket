@@ -95,6 +95,7 @@ class SorteoCampana(Base):
     tipo_trigger = Column(String(50), default="MONTO_GLOBAL", server_default="MONTO_GLOBAL", nullable=False) # MONTO_GLOBAL | PRODUCTOS_ESPECIFICOS | MARCA_PROVEEDOR | CATEGORIA
     criterio_evaluacion = Column(String(50), default="MONTO_ACUMULADO", server_default="MONTO_ACUMULADO", nullable=False) # MONTO_ACUMULADO | CANTIDAD_UNIDADES
     valor_umbral = Column(Numeric(15, 2), default=50000, server_default=text("50000"), nullable=False)
+    cupones_por_umbral = Column(Integer, default=1, server_default=text("1"), nullable=False)
 
     # Filtros de aplicabilidad
     productos_participantes = Column(JSONB, nullable=True, default=list, server_default=text("'[]'::jsonb"))
