@@ -59,13 +59,8 @@ async def get_executive_analysis(db: AsyncSession, company_id: str) -> SalesRent
     dia_actual = float(tot_row["dia_actual"] or 16) if tot_row else 16.0
     dias_mes = float(tot_row["dias_mes"] or 31) if tot_row else 31.0
     
-    if facturacion_total == Decimal("0"):
-        facturacion_total = Decimal("635839971")
-        costo_total = Decimal("531247786")
-        tickets_mes = 6301
-
     ganancia_bruta = (facturacion_total - costo_total).quantize(Decimal("1"))
-    margen_actual_pct = float(((ganancia_bruta / facturacion_total) * 100).quantize(Decimal("0.1"))) if facturacion_total > 0 else 16.5
+    margen_actual_pct = float(((ganancia_bruta / facturacion_total) * 100).quantize(Decimal("0.1"))) if facturacion_total > 0 else 0.0
     
     # Proyección lineal fin de mes (Run-rate)
     proyeccion_cierre_gs = Decimal(str(int(round((float(facturacion_total) / max(1.0, dia_actual)) * dias_mes))))
