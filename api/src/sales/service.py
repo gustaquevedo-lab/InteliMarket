@@ -590,15 +590,41 @@ async def reopen_sale_customer(
     cliente -- siempre requiere autorizacion de supervisor (verificada en el
     frontend via el mismo flujo de solicitud remota que ya usan devoluciones
     y pagos Extra Club antes de llegar aca)."""
+    from api.src.customers.models import Customer
     result = await db.execute(select(Sale).where(Sale.id == uuid.UUID(sale_id)))
     sale = result.scalar_one_or_none()
     if not sale:
         return None
+
+    cust_res = await db.execute(select(Customer).where(Customer.id == uuid.UUID(customer_id)))
+    cust = cust_res.scalar_one_or_none()
+
     sale.customer_id = uuid.UUID(customer_id)
-    nota = f"[{datetime.now(timezone.utc).isoformat()}] Identificacion agregada por {autorizado_por_nombre}"
+    c_name = (cust.razon_social or cust.nombre_fantasia) if cust else str(customer_id)
+    c_doc = (cust.ruc or cust.ci or cust.telefono) if cust else ""
+    c_ec = cust.extra_club_numero if cust else None
+
+    nota = f"[{datetime.now(timezone.utc).isoformat()}] Identificacion agregada por {autorizado_por_nombre} | Cliente: {c_name} (Doc: {c_doc})"
     sale.observaciones = f"{sale.observaciones}\n{nota}" if sale.observaciones else nota
+
+    # Regenerar fielmente el ticket térmico ESC/POS y HTML con el nuevo titular/cliente
+    ticket_text, ticket_b64 = await build_sale_receipt_escpos(db, sale.id, cust_override=cust)
+    if ticket_b64:
+        sale.recibo_escpos_b64 = ticket_b64
+        sale.recibo_html = ticket_text
+
     await db.commit()
     await db.refresh(sale)
+
+    setattr(sale, "customer_nombre", c_name)
+    setattr(sale, "customer_doc", c_doc)
+    setattr(sale, "customer_extra_club", c_ec)
+
+    pm_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale.id))
+    payment = pm_res.scalars().first()
+    fp = payment.forma_pago if payment else ("EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO")
+    setattr(sale, "forma_pago", fp)
+
     return sale
 
 
