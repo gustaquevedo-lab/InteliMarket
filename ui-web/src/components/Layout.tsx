@@ -53,7 +53,11 @@ const navGroups: NavGroup[] = [
       { icon: FileSpreadsheet, label: "Pedidos & Cotizaciones", path: "/sales-orders" },
       { icon: Repeat, label: "Devoluciones & NC", path: "/returns" },
       { icon: Users, label: "Clientes", path: "/customers" },
-      { icon: DollarSign, label: "Precios Inteligentes", path: "/smart-pricing" },
+      // FUSIONADO 2026-09-04: Precios Inteligentes y Listas de Precios hacian
+      // basicamente lo mismo (editar margen de un producto) con dos pantallas
+      // separadas y confusas. El editor de margen ahora es una pestaña mas
+      // dentro de "Listas de Precios" (Editor de Margen). /smart-pricing
+      // redirige ahi.
       { icon: BadgeDollarSign, label: "Listas de Precios", path: "/price-lists" },
       { icon: LineChart, label: "Benchmarking Precios", path: "/benchmarking" },
       { icon: DollarSign, label: "Comisiones", path: "/commissions" },

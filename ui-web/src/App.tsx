@@ -95,7 +95,6 @@ const GeocercasPage = lazy(() => import("./pages/geocercas/GeocercasPage"))
 const RendimientoPage = lazy(() => import("./pages/rendimiento/RendimientoPage"))
 const InventoryAdvancedPage = lazy(() => import("./pages/inventory/InventoryAdvancedPage"))
 const IntegratedFinancePage = lazy(() => import("./pages/integrated-finance/IntegratedFinancePage"))
-const SmartPricingPage = lazy(() => import("./pages/smart-pricing/SmartPricingPage"))
 const DemandForecastPage = lazy(() => import("./pages/demand-forecast/DemandForecastPage"))
 const IntelligentRoutingPage = lazy(() => import("./pages/intelligent-routing/IntelligentRoutingPage"))
 const OportunidadesPage = lazy(() => import("./pages/comerciales/OportunidadesPage"))
@@ -296,7 +295,7 @@ function AppRoutes() {
         <Route path="distribuidora" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="distribuidora"><DistribuidoraPage /></FeatureRoute></Suspense>} />
         <Route path="advanced-inventory" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><InventoryAdvancedPage /></FeatureRoute></Suspense>} />
         <Route path="integrated-finance" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="integrated_finance"><IntegratedFinancePage /></FeatureRoute></Suspense>} />
-        <Route path="smart-pricing" element={<Suspense fallback={<PageLoader />}><SmartPricingPage /></Suspense>} />
+        <Route path="smart-pricing" element={<Navigate to="/price-lists" replace />} />
         <Route path="demand-forecast" element={<Suspense fallback={<PageLoader />}><DemandForecastPage /></Suspense>} />
         <Route path="auto-replenish" element={<Navigate to="/demand-forecast" replace />} />
         <Route path="intelligent-routing" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intelligent_routing"><IntelligentRoutingPage /></FeatureRoute></Suspense>} />
