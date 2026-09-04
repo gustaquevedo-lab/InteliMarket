@@ -83,8 +83,8 @@ async def compute_daily_pnl(
     product_rows = (await db.execute(
         text("""
             SELECT p.nombre AS name,
-                   SUM(si.total) AS sales,
-                   SUM(si.total - (si.costo_unitario * si.cantidad)) AS margin
+                   COALESCE(SUM(si.total), 0) AS sales,
+                   COALESCE(SUM(si.total - (COALESCE(si.costo_unitario, 0) * si.cantidad)), 0) AS margin
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
             JOIN products p ON p.id = si.product_id
