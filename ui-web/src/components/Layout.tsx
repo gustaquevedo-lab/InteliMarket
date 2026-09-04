@@ -46,7 +46,9 @@ const navGroups: NavGroup[] = [
     title: "Ventas",
     items: [
       { icon: MonitorSmartphone, label: "Punto de Venta", path: "/pos" },
-      { icon: Scan, label: "Self-Checkout", path: "/self-checkout" },
+      // DESACTIVADO 2026-09-04: escanea contra 7 productos hardcodeados (MOCK_ITEMS),
+      // no contra el catalogo real -- un cliente real no puede usarlo tal cual esta.
+      // { icon: Scan, label: "Self-Checkout", path: "/self-checkout" },
       { icon: Receipt, label: "Facturación", path: "/sales" },
       { icon: FileSpreadsheet, label: "Pedidos & Cotizaciones", path: "/sales-orders" },
       { icon: Repeat, label: "Devoluciones & NC", path: "/returns" },
@@ -114,16 +116,25 @@ const navGroups: NavGroup[] = [
       { icon: Users, label: "Fidelidad ExtraClub", path: "/crm" },
       { icon: Ticket, label: "Cupones de Sorteo", path: "/cupones" },
       { icon: PieChart, label: "Customer 360", path: "/customer360" },
-      { icon: MessageCircle, label: "IntelliZapp (WhatsApp)", path: "/intellizapp" },
+      // DESACTIVADO 2026-09-04: conversaciones/campanas 100% hardcodeadas en el
+      // frontend, sin ninguna llamada real a backend. Ver auditoria de sidebar.
+      // { icon: MessageCircle, label: "IntelliZapp (WhatsApp)", path: "/intellizapp" },
       { icon: Tag, label: "Promociones & Campañas", path: "/promociones" },
     ]
   },
   {
     title: "Recursos Humanos",
     items: [
-      { icon: PiggyBank, label: "Nómina & Sueldos (SueldOK)", path: "/sueldok" },
-      { icon: Clock, label: "Turnos & Horarios", path: "/schedule" },
-      { icon: LineChart, label: "Productividad de Cajas", path: "/productividad" },
+      // DESACTIVADO 2026-09-04: finge estar "conectado" (sueldok_connected=True
+      // hardcodeado) sin ninguna configuracion real -- riesgo alto, un gerente
+      // podria confiar en numeros de nomina/bonos inventados. Ver auditoria de sidebar.
+      // { icon: PiggyBank, label: "Nómina & Sueldos (SueldOK)", path: "/sueldok" },
+      // DESACTIVADO 2026-09-04: cuadrante de personal 100% hardcodeado, "Sincronizar"
+      // no persiste nada real. Ver auditoria de sidebar.
+      // { icon: Clock, label: "Turnos & Horarios", path: "/schedule" },
+      // DESACTIVADO 2026-09-04: 15 cajeras hardcodeadas, ignora company_id por
+      // completo. Ver auditoria de sidebar.
+      // { icon: LineChart, label: "Productividad de Cajas", path: "/productividad" },
     ]
   },
   {
@@ -132,8 +143,12 @@ const navGroups: NavGroup[] = [
       { icon: ShieldCheck, label: "Facturación & Autoimpresor (DNIT)", path: "/sifen" },
       { icon: FileSignature, label: "Facturación Electrónica (Próximamente)", path: "/facturacion-electronica" },
       { icon: Scale, label: "Básculas & Balanzas", path: "/escalas" },
-      { icon: Radio, label: "Etiquetas Electrónicas (ESL)", path: "/esl" },
-      { icon: Globe, label: "Delivery Apps", path: "/delivery-integrations" },
+      // DESACTIVADO 2026-09-04: dispositivos ESL (MAC, bateria, señal) sintetizados
+      // en el cliente, sin integracion real a hardware. Ver auditoria de sidebar.
+      // { icon: Radio, label: "Etiquetas Electrónicas (ESL)", path: "/esl" },
+      // DESACTIVADO 2026-09-04: cero llamadas a backend, plataformas/pedidos 100%
+      // hardcodeados incluido el badge "3 Canales Conectados". Ver auditoria de sidebar.
+      // { icon: Globe, label: "Delivery Apps", path: "/delivery-integrations" },
       { icon: CreditCard, label: "Integración Medios de Pago", path: "/integrations" },
     ]
   },
