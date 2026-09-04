@@ -3278,11 +3278,23 @@ export default function POSPage() {
         autorizado_por_id: resolverId,
         autorizado_por_nombre: resolverNombre,
       })
-      setReimprimirSales(prev => prev.map(s => s.id === sale.id ? { ...s, customer_id: updated.customer_id } as any : s))
+      const saleActualizada = {
+        ...sale,
+        customer_id: updated.customer_id ?? String(selected.id),
+        customer: selected || sale.customer,
+        customer_nombre: selected.nombre || sale.customer_nombre,
+        customer_doc: (selected.ruc || selected.ci) || sale.customer_doc,
+        customer_extra_club: (selected as any).extra_club_numero || sale.customer_extra_club,
+        observaciones: updated.observaciones || sale.observaciones,
+        recibo_escpos_b64: updated.recibo_escpos_b64 || sale.recibo_escpos_b64,
+        recibo_html: updated.recibo_html || sale.recibo_html,
+      } as Sale
+      setReimprimirSales(prev => prev.map(s => s.id === sale.id ? saleActualizada : s))
       setReabrirFacturaSaleId(null)
       setReabrirFacturaSearch("")
       setReabrirFacturaResults([])
-      toast.success("Factura reabierta", `${selected.nombre} vinculado a la venta Nº ${sale.numero}. Se puede reimprimir con su identificación.`)
+      toast.success("Factura reabierta", `${selected.nombre} vinculado a la venta Nº ${sale.numero}. Reimprimiendo con su identificación...`)
+      await handleReimprimirSale(saleActualizada)
     } catch (e: any) {
       toast.error("No se pudo reabrir la factura", e?.message || "Intente nuevamente.")
     } finally {
