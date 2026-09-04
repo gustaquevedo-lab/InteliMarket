@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react"
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
-  Search, Plus, Package, AlertTriangle, Edit, Trash2, Loader2, Eye, X,
+  Search, Plus, Package, AlertTriangle, AlertCircle, Edit, Trash2, Loader2, Eye, X,
   Save, Tag, Barcode, DollarSign, Layers, Upload, Download, Shirt,
   TrendingUp, TrendingDown, Percent, Sparkles, Building2, ShoppingCart,
   ArrowUpDown, CheckCircle2, ShieldAlert, Scale, ChevronDown, ChevronRight,
@@ -32,44 +32,169 @@ const PACK_PRESETS = [
   { label: "Pack x4", unidades: 4, tag: "Pack x4" },
 ]
 
-// Buscador de productos con autocompletado por código de barra / SKU / nombre,
-// para reemplazar los <select> que intentaban listar los ~11.000 productos de
-// una sola vez (inutilizable en un catálogo de este tamaño). Pega al backend
-// (que ya soporta buscar por codigo_barra, sku o nombre) en vez de filtrar en
-// el cliente sobre un array parcial.
+// Buscador de productos con autocompletado por código de barra / SKU / nombre.
+// Soporta lectura ultra-rápida por pistola/lector (Enter automático con coincidencia exacta o 1 resultado),
+// selección directa y mensaje claro e inequívoco si el código no existe en el catálogo.
 function ProductSearchPicker({
   selectedProduct,
   onSelect,
   onClear,
   placeholder = "Buscar por código de barra, SKU o nombre...",
   disabled = false,
+  autoFocus = false,
+  onAfterSelect,
 }: {
   selectedProduct: Product | null
   onSelect: (p: Product) => void
   onClear?: () => void
   placeholder?: string
   disabled?: boolean
+  autoFocus?: boolean
+  onAfterSelect?: (p: Product) => void
 }) {
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<Product[]>([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [selectedIndex, setSelectedIndex] = useState<number>(-1)
 
+  const inputRef = useRef<HTMLInputElement>(null)
+  const searchTimeoutRef = useRef<any>(null)
+
+  const selectProduct = useCallback((p: Product) => {
+    setQuery("")
+    setResults([])
+    setOpen(false)
+    setErrorMessage(null)
+    setSelectedIndex(-1)
+    onSelect(p)
+    onAfterSelect?.(p)
+  }, [onSelect, onAfterSelect])
+
+  const executeSearchAndSelect = useCallback(async (term: string) => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+    const cleanTerm = term.trim()
+    if (!cleanTerm) return
+
+    setLoading(true)
+    setErrorMessage(null)
+
+    try {
+      const res = (await api.products.list({ search: cleanTerm, limit: 25 })) || []
+      const qLower = cleanTerm.toLowerCase()
+
+      // 1. Coincidencia exacta por código de barra
+      const exactBarcode = res.find(p => p.codigo_barra && p.codigo_barra.trim().toLowerCase() === qLower)
+      if (exactBarcode) {
+        selectProduct(exactBarcode)
+        return
+      }
+
+      // 2. Coincidencia exacta por SKU
+      const exactSku = res.find(p => p.sku && p.sku.trim().toLowerCase() === qLower)
+      if (exactSku) {
+        selectProduct(exactSku)
+        return
+      }
+
+      // 3. Coincidencia exacta por nombre
+      const exactName = res.find(p => p.nombre && p.nombre.trim().toLowerCase() === qLower)
+      if (exactName) {
+        selectProduct(exactName)
+        return
+      }
+
+      // 4. Si hay exactamente 1 resultado
+      if (res.length === 1) {
+        selectProduct(res[0])
+        return
+      }
+
+      // 5. Si no se encontró ningún producto
+      if (res.length === 0) {
+        setResults([])
+        setOpen(false)
+        setErrorMessage(`No se encontró ningún producto con el código "${cleanTerm}"`)
+        inputRef.current?.select()
+        return
+      }
+
+      // 6. Múltiples resultados sin coincidencia exacta: desplegar para que el operador elija
+      setResults(res)
+      setSelectedIndex(0)
+      setOpen(true)
+      setErrorMessage(null)
+    } catch (err: any) {
+      setResults([])
+      setOpen(false)
+      setErrorMessage("Error al conectar con el servidor para buscar el producto.")
+    } finally {
+      setLoading(false)
+    }
+  }, [selectProduct])
+
+  // Debounce para búsqueda interactiva por tipeo normal
   useEffect(() => {
     if (!open || query.trim().length < 2) {
       setResults([])
+      setSelectedIndex(-1)
       return
     }
     let cancelled = false
     setLoading(true)
     const timer = setTimeout(() => {
       api.products.list({ search: query.trim(), limit: 20 })
-        .then((res) => { if (!cancelled) setResults(res || []) })
-        .catch(() => { if (!cancelled) setResults([]) })
-        .finally(() => { if (!cancelled) setLoading(false) })
+        .then((res) => {
+          if (!cancelled) {
+            setResults(res || [])
+            setSelectedIndex(-1)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setResults([])
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
     }, 250)
-    return () => { cancelled = true; clearTimeout(timer) }
+    searchTimeoutRef.current = timer
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [query, open])
+
+  // Manejador de teclado para lector de código de barras (Enter) y navegación con flechas
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      e.stopPropagation()
+      if (selectedIndex >= 0 && results[selectedIndex]) {
+        selectProduct(results[selectedIndex])
+        return
+      }
+      executeSearchAndSelect(query)
+    } else if (e.key === "ArrowDown") {
+      if (!open && results.length > 0) {
+        setOpen(true)
+        setSelectedIndex(0)
+      } else if (results.length > 0) {
+        e.preventDefault()
+        setSelectedIndex((prev) => (prev < results.length - 1 ? prev + 1 : 0))
+      }
+    } else if (e.key === "ArrowUp") {
+      if (results.length > 0) {
+        e.preventDefault()
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : results.length - 1))
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false)
+      setErrorMessage(null)
+    }
+  }
 
   if (disabled && selectedProduct) {
     return (
@@ -85,31 +210,62 @@ function ProductSearchPicker({
         <button
           type="button"
           disabled={disabled}
-          onClick={() => { setQuery(""); setOpen(true) }}
+          onClick={() => { setQuery(""); setErrorMessage(null); setOpen(true) }}
           className="input-field w-full text-xs font-bold flex items-center justify-between disabled:opacity-60 bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800"
         >
-          <span className="truncate text-left">{selectedProduct.nombre} <span className="font-mono text-slate-400 font-normal">(SKU: {selectedProduct.sku})</span></span>
+          <span className="truncate text-left">
+            {selectedProduct.nombre}{" "}
+            <span className="font-mono text-slate-400 font-normal">
+              ({selectedProduct.codigo_barra ? `Cód: ${selectedProduct.codigo_barra} · ` : ""}SKU: {selectedProduct.sku})
+            </span>
+          </span>
           {!disabled && (
             <X
               className="w-3.5 h-3.5 text-slate-400 hover:text-rose-500 shrink-0 ml-2"
-              onClick={(e) => { e.stopPropagation(); setQuery(""); onClear?.() }}
+              onClick={(e) => { e.stopPropagation(); setQuery(""); setErrorMessage(null); onClear?.() }}
             />
           )}
         </button>
       ) : (
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            autoFocus={open}
-            disabled={disabled}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onFocus={() => setOpen(true)}
-            onBlur={() => setTimeout(() => setOpen(false), 200)}
-            placeholder={placeholder}
-            className="input-field w-full text-xs font-bold pl-8"
-          />
+        <div>
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              ref={inputRef}
+              type="text"
+              autoFocus={autoFocus || open}
+              disabled={disabled}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                if (errorMessage) setErrorMessage(null)
+              }}
+              onFocus={() => setOpen(true)}
+              onBlur={() => setTimeout(() => setOpen(false), 200)}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholder}
+              className={`input-field w-full text-xs font-bold pl-8 pr-8 ${
+                errorMessage ? "border-rose-400 dark:border-rose-700 bg-rose-50/40 dark:bg-rose-950/20 focus:border-rose-500" : ""
+              }`}
+            />
+            {loading && (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600 absolute right-2.5 top-1/2 -translate-y-1/2" />
+            )}
+          </div>
+
+          {errorMessage && (
+            <div className="mt-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 flex items-center gap-2 text-xs font-semibold text-rose-600 dark:text-rose-400 animate-fade-in shadow-sm">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+              <div className="flex-1">{errorMessage}</div>
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -120,14 +276,21 @@ function ProductSearchPicker({
               <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" /> Buscando productos...
             </div>
           ) : results.length === 0 ? (
-            <div className="p-3.5 text-center text-xs text-slate-400">Sin resultados para "{query}"</div>
+            <div className="p-3.5 text-center text-xs text-rose-500 font-semibold flex items-center justify-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+              Sin resultados para "{query}"
+            </div>
           ) : (
-            results.map((p) => (
+            results.map((p, idx) => (
               <button
                 key={p.id}
                 type="button"
-                onMouseDown={(e) => { e.preventDefault(); onSelect(p); setQuery(""); setOpen(false) }}
-                className="w-full text-left px-3.5 py-2.5 hover:bg-amber-50 dark:hover:bg-amber-950/40 border-b border-slate-100 dark:border-slate-700/60 last:border-0 flex items-center justify-between gap-3 transition-colors"
+                onMouseDown={(e) => { e.preventDefault(); selectProduct(p) }}
+                className={`w-full text-left px-3.5 py-2.5 border-b border-slate-100 dark:border-slate-700/60 last:border-0 flex items-center justify-between gap-3 transition-colors ${
+                  selectedIndex === idx
+                    ? "bg-amber-100 dark:bg-amber-900/50"
+                    : "hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                }`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{p.nombre}</div>
@@ -238,6 +401,8 @@ export default function ProductsPage() {
     etiqueta: "",
     unidades_por_paquete: 1,
   })
+  const packBarcodeInputRef = useRef<HTMLInputElement>(null)
+  const packEtiquetaInputRef = useRef<HTMLInputElement>(null)
 
   // Módulo de Kits / Combos
   const [kitForm, setKitForm] = useState({
@@ -570,6 +735,7 @@ export default function ProductsPage() {
       if (keepProduct && !editingPackBarcode) {
         // Mantiene el producto base seleccionado y resetea solo los datos del pack para el siguiente
         setPackBarcodeForm({ codigo_barra: "", etiqueta: "", unidades_por_paquete: 1 })
+        setTimeout(() => packBarcodeInputRef.current?.focus(), 80)
         toast.info("Listo para el siguiente", `Podés escanear o cargar la siguiente presentación para "${packModalProduct?.nombre || 'este producto'}".`)
       } else {
         setShowPackBarcodeModal(false)
@@ -1847,11 +2013,15 @@ export default function ProductsPage() {
                   </div>
                 ) : (
                   <ProductSearchPicker
+                    autoFocus={!packModalProduct}
                     selectedProduct={packModalProduct}
                     onSelect={(p) => { setPackModalProductId(p.id); setPackModalProduct(p) }}
+                    onAfterSelect={() => {
+                      setTimeout(() => packBarcodeInputRef.current?.focus(), 80)
+                    }}
                     onClear={() => { setPackModalProductId(""); setPackModalProduct(null) }}
                     disabled={!!editingPackBarcode}
-                    placeholder="Buscar producto por código de barra, SKU o nombre..."
+                    placeholder="Escanear con lectora o buscar por código de barra, SKU o nombre..."
                   />
                 )}
               </div>
@@ -1889,12 +2059,21 @@ export default function ProductsPage() {
                 <div className="relative">
                   <Barcode className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
+                    ref={packBarcodeInputRef}
                     type="text"
                     required
-                    autoFocus
+                    autoFocus={!!packModalProduct}
                     placeholder="Escaneá con la lectora o tipeá el código impreso en la caja"
                     value={packBarcodeForm.codigo_barra}
                     onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, codigo_barra: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (!packBarcodeForm.etiqueta.trim()) {
+                          e.preventDefault()
+                          packEtiquetaInputRef.current?.focus()
+                        }
+                      }
+                    }}
                     className="input-field w-full text-xs font-mono font-bold pl-9 py-2.5"
                   />
                 </div>
@@ -1907,6 +2086,7 @@ export default function ProductsPage() {
                     Etiqueta Descriptiva *
                   </label>
                   <input
+                    ref={packEtiquetaInputRef}
                     type="text"
                     required
                     placeholder="Ej. Caja x24, Six-Pack, Fardo x12"
