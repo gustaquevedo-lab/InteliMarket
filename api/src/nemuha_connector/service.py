@@ -2188,10 +2188,17 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
 
     # 1. Leer productos de MySQL
     rows_prod = await _fetch("""
-        SELECT ID_PRODUTO, DS_PRODUTO, UNIDADE_MEDIDA, QTD_MINIMA_EM_ESTOQUE,
-               VL_PRECO_VENDA_VAREJO, VL_PRECO_VENDA_ATACADO, VL_CUSTO_MEDIO_GS,
-               BO_ATIVO, DT_MODIFICACAO
-        FROM est_produto;
+        SELECT p.ID_PRODUTO, p.DS_PRODUTO, p.UNIDADE_MEDIDA, p.QTD_MINIMA_EM_ESTOQUE,
+               p.VL_PRECO_VENDA_VAREJO, p.VL_PRECO_VENDA_ATACADO, p.VL_CUSTO_MEDIO_GS,
+               p.BO_ATIVO, p.DT_MODIFICACAO,
+               e.CODIGO_BARRA
+        FROM est_produto p
+        LEFT JOIN (
+            SELECT ID_PRODUTO, MAX(CODIGO_BARRA) as CODIGO_BARRA
+            FROM est_existencia
+            WHERE CODIGO_BARRA IS NOT NULL AND CODIGO_BARRA != ''
+            GROUP BY ID_PRODUTO
+        ) e ON e.ID_PRODUTO = p.ID_PRODUTO;
     """)
 
     # 2. Mapear productos existentes en PostgreSQL
@@ -2208,10 +2215,28 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
         p_costo = Decimal(str(r["VL_CUSTO_MEDIO_GS"] or 0))
         activo = bool(r["BO_ATIVO"])
         stock_min = int(r["QTD_MINIMA_EM_ESTOQUE"] or 0)
+        codigo_barra_legacy = str(r.get("CODIGO_BARRA") or "").strip() or None
+        plu_val = None
+        um = r["UNIDADE_MEDIDA"] or "UN"
+        nombre_prod = r["DS_PRODUTO"] or f"Producto {sku}"
+
+        # Detectar productos de balanza (formato 2000xxx)
+        if codigo_barra_legacy and codigo_barra_legacy.startswith("2000") and len(codigo_barra_legacy) == 7 and codigo_barra_legacy[4:].isdigit():
+            plu_val = int(codigo_barra_legacy[4:])
+            if "KG" in nombre_prod.upper():
+                um = "KG"
 
         if sku in sku_to_prod:
             prod = sku_to_prod[sku]
             changed = False
+            # Si el producto no tenia codigo_barra en InteliMarket y viene en el legacy, enlazarlo
+            if codigo_barra_legacy and not prod.codigo_barra and activo:
+                prod.codigo_barra = codigo_barra_legacy
+                if plu_val and not prod.plu_balanza:
+                    prod.plu_balanza = plu_val
+                if um == "KG" and prod.unidad_medida != "KG":
+                    prod.unidad_medida = "KG"
+                changed = True
             # Protección: Si el precio en el legacy viene en 0 pero ya tenemos un precio
             # positivo válido en InteliMarket, no pisarlo con 0.
             if p_venta > 0 and prod.precio_venta != p_venta:
@@ -2242,13 +2267,15 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
             new_prod = Product(
                 company_id=cid,
                 sku=sku,
-                nombre=r["DS_PRODUTO"] or f"Producto {sku}",
+                nombre=nombre_prod,
+                codigo_barra=codigo_barra_legacy,
+                plu_balanza=plu_val,
                 precio_venta=p_venta,
                 costo_promedio=p_costo,
                 ultimo_costo=p_costo,
                 stock_minimo=stock_min,
                 activo=True,
-                unidad_medida=r["UNIDADE_MEDIDA"] or "UN",
+                unidad_medida=um,
             )
             db.add(new_prod)
             await db.flush()
