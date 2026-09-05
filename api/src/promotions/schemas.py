@@ -68,11 +68,16 @@ class PromotionCreate(BaseModel):
 
     @model_validator(mode="after")
     def validar_consistencia(self):
-        if self.tipo in ("dos_por_uno", "combo_precio", "cantidad_lleva"):
-            raise ValueError(f"El tipo de promoción '{self.tipo}' todavía no tiene lógica de cálculo implementada. Use porcentaje, monto_fijo o precio_fijo_oferta.")
+        tipos_validos = (
+            "precio_fijo_oferta", "porcentaje", "monto_fijo",
+            "dos_por_uno", "tres_por_dos", "nxm", "cantidad_lleva",
+            "segunda_unidad_pct", "combo_pack", "combo_precio"
+        )
+        if self.tipo not in tipos_validos:
+            raise ValueError(f"Tipo de promoción '{self.tipo}' no válido. Tipos soportados: {', '.join(tipos_validos)}.")
         if self.valido_hasta < self.valido_desde:
             raise ValueError("La fecha de fin de vigencia no puede ser anterior a la de inicio.")
-        if self.tipo == "porcentaje" and self.valor is not None:
+        if self.tipo in ("porcentaje", "segunda_unidad_pct") and self.valor is not None:
             if self.valor <= 0 or self.valor > 100:
                 raise ValueError("El porcentaje de descuento debe estar entre 0 y 100.")
         if self.aplica_a == "producto" and not self.producto_ids:

@@ -64,6 +64,24 @@ def calcular_precio_promocional(
             precio_promo = round(precio_regular * (Decimal("1") - pct))
     elif tipo == "monto_fijo" and valor:
         precio_promo = max(Decimal("0"), round(precio_regular - valor))
+    elif tipo == "dos_por_uno":
+        # 2x1: Lleva 2, paga 1. Precio unitario equivalente = precio regular / 2
+        precio_promo = round(precio_regular / Decimal("2"))
+    elif tipo == "tres_por_dos":
+        # 3x2: Lleva 3, paga 2. Precio unitario equivalente = (precio regular * 2) / 3
+        precio_promo = round((precio_regular * Decimal("2")) / Decimal("3"))
+    elif tipo in ("nxm", "cantidad_lleva") and valor:
+        # Lleva N, paga M (donde valor es M). Si no hay N, default 2.
+        n = Decimal("2")
+        m = Decimal(str(valor)) if valor > 0 else Decimal("1")
+        if n > m:
+            precio_promo = round((precio_regular * m) / n)
+    elif tipo == "segunda_unidad_pct":
+        # 2da unidad al X% OFF: promedio unitario = precio * (1 - (X / 200))
+        pct_descuento_segunda = valor if valor else Decimal("50")
+        precio_promo = round(precio_regular * (Decimal("1") - (pct_descuento_segunda / Decimal("200"))))
+    elif tipo in ("combo_pack", "combo_precio") and precio_fijo_promocional:
+        precio_promo = round(precio_fijo_promocional)
 
     precio_promo = _aplicar_terminacion_psicologica(precio_promo, terminacion_psicologica)
     return precio_promo
@@ -381,6 +399,16 @@ async def resolve_product_promotions(
             badge = "🏷️ OFERTA EXTRA"
             if p.horario_desde and p.horario_hasta:
                 badge = f"⚡ RELÁMPAGO ({p.horario_desde.strftime('%H:%M')}-{p.horario_hasta.strftime('%H:%M')})"
+            elif p.tipo == "dos_por_uno":
+                badge = "🎁 2x1 (LLEVA 2 PAGA 1)"
+            elif p.tipo == "tres_por_dos":
+                badge = "🎁 3x2 (LLEVA 3 PAGA 2)"
+            elif p.tipo in ("nxm", "cantidad_lleva"):
+                badge = f"🎁 LLEVA {p.cantidad_minima or 2} PAGA {int(p.valor or 1)}"
+            elif p.tipo == "segunda_unidad_pct":
+                badge = f"🏷️ 2da UNIDAD AL {int(p.valor or 50)}% OFF"
+            elif p.tipo in ("combo_pack", "combo_precio"):
+                badge = "📦 COMBO PACK"
             elif p.origen == "corto_vencimiento":
                 badge = "⚡ LIQUIDACIÓN"
             elif p.origen == "accion_proveedor":
@@ -871,17 +899,46 @@ async def calculate_applicable(
                     qty_promo = restante
             qty_acumulada += qty_promo
 
-            precio_promo_unitario = calcular_precio_promocional(
-                tipo=p.tipo,
-                precio_regular=it.precio_unitario,
-                valor=p.valor,
-                precio_fijo_promocional=p.precio_fijo_promocional,
-                costo_unitario_referencia=p.costo_unitario_referencia,
-                base_calculo_pct=p.base_calculo_pct or "venta",
-                terminacion_psicologica=p.terminacion_psicologica,
-            )
-            if precio_promo_unitario < it.precio_unitario:
-                descuento_p += (it.precio_unitario - precio_promo_unitario) * qty_promo
+            descuento_item = Decimal("0")
+            if p.tipo == "dos_por_uno":
+                grupos = int(qty_promo // Decimal("2"))
+                unidades_gratis = Decimal(str(grupos * 1))
+                descuento_item = unidades_gratis * it.precio_unitario
+            elif p.tipo == "tres_por_dos":
+                grupos = int(qty_promo // Decimal("3"))
+                unidades_gratis = Decimal(str(grupos * 1))
+                descuento_item = unidades_gratis * it.precio_unitario
+            elif p.tipo in ("nxm", "cantidad_lleva"):
+                n = p.cantidad_minima or 2
+                m = int(p.valor) if p.valor and p.valor > 0 else 1
+                if n > m:
+                    grupos = int(qty_promo // Decimal(str(n)))
+                    unidades_gratis = Decimal(str(grupos * (n - m)))
+                    descuento_item = unidades_gratis * it.precio_unitario
+            elif p.tipo == "segunda_unidad_pct":
+                pares = int(qty_promo // Decimal("2"))
+                pct = (p.valor or Decimal("50")) / Decimal("100")
+                descuento_item = Decimal(str(pares)) * (it.precio_unitario * pct)
+            elif p.tipo in ("combo_pack", "combo_precio"):
+                if p.precio_fijo_promocional:
+                    total_regular_linea = it.precio_unitario * qty_promo
+                    if total_regular_linea > p.precio_fijo_promocional:
+                        descuento_item = total_regular_linea - p.precio_fijo_promocional
+            else:
+                precio_promo_unitario = calcular_precio_promocional(
+                    tipo=p.tipo,
+                    precio_regular=it.precio_unitario,
+                    valor=p.valor,
+                    precio_fijo_promocional=p.precio_fijo_promocional,
+                    costo_unitario_referencia=p.costo_unitario_referencia,
+                    base_calculo_pct=p.base_calculo_pct or "venta",
+                    terminacion_psicologica=p.terminacion_psicologica,
+                )
+                if precio_promo_unitario < it.precio_unitario:
+                    descuento_item = (it.precio_unitario - precio_promo_unitario) * qty_promo
+
+            if descuento_item > 0:
+                descuento_p += descuento_item
                 items_con_descuento.append(it)
 
         if p.valor_maximo and descuento_p > p.valor_maximo:

@@ -12,10 +12,8 @@ class Promotion(Base):
     nombre = Column(String(150), nullable=False)
     descripcion = Column(Text)
 
-    # Unicos tipos con logica de calculo real (ver calcular_precio_promocional en
-    # service.py): porcentaje | monto_fijo | precio_fijo_oferta. Los valores
-    # dos_por_uno/combo_precio/cantidad_lleva quedan documentados pero SIN
-    # implementar -- no crear promociones con esos tipos, no se van a calcular.
+    # Tipos soportados con cálculo real:
+    # precio_fijo_oferta | porcentaje | monto_fijo | dos_por_uno | tres_por_dos | nxm | cantidad_lleva | segunda_unidad_pct | combo_pack | combo_precio
     tipo = Column(String(30), nullable=False)
     valor = Column(Numeric(15, 2))  # porcentaje o monto de descuento
     precio_fijo_promocional = Column(Numeric(15, 2))  # precio directo de venta en oferta (ej. ₲ 38.000)

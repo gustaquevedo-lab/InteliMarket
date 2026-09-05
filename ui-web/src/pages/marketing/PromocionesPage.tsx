@@ -32,10 +32,14 @@ const TIER_ORIGEN_COLORS: Record<string, { bg: string; text: string; border: str
 
 const TIPO_LABELS: Record<string, string> = {
   precio_fijo_oferta: "🏷️ Precio Fijo de Oferta",
-  porcentaje: "📉 Descuento Porcentual",
+  porcentaje: "📉 Descuento Porcentual (% OFF)",
   monto_fijo: "💵 Descuento Monto Fijo",
-  dos_por_uno: "🎁 2x1 / NxM",
+  dos_por_uno: "🎁 2x1 (Lleva 2, Paga 1)",
+  tres_por_dos: "🎁 3x2 (Lleva 3, Paga 2)",
+  nxm: "🎁 NxM (Lleva N, Paga M)",
   cantidad_lleva: "📦 Lleva N y Paga M",
+  segunda_unidad_pct: "🏷️ 2da Unidad con % OFF",
+  combo_pack: "📦 Combo Especial Pack",
   combo_precio: "🍔 Combo Especial",
 }
 
@@ -115,6 +119,11 @@ export default function PromocionesPage() {
   const [newDiasSemana, setNewDiasSemana] = useState<number[]>([0, 1, 2, 3, 4, 5, 6])
   const [newDesde, setNewDesde] = useState(new Date().toISOString().slice(0, 10))
   const [newHasta, setNewHasta] = useState(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+  const [newCombinable, setNewCombinable] = useState(false)
+  const [newMontoMinimoCompra, setNewMontoMinimoCompra] = useState<number | "">("")
+  const [newCantidadMinima, setNewCantidadMinima] = useState<number | "">("")
+  const [newSegundaUnidadPct, setNewSegundaUnidadPct] = useState<number | "">(50)
+  const [showAdvancedRules, setShowAdvancedRules] = useState(false)
   
   // Selección Múltiple de Productos
   const [selectionMode, setSelectionMode] = useState<"search" | "supplier" | "category">("search")
@@ -249,10 +258,43 @@ export default function PromocionesPage() {
   const [ncMonto, setNcMonto] = useState<number | "">("")
   const [savingNC, setSavingNC] = useState(false)
 
-  // Simulador
+  // Simulador conectado al backend (/v1/promotions/calculate)
   const [simItems, setSimItems] = useState<{ product_id: string; nombre: string; precio: number; cantidad: number }[]>([])
   const [simProdSearch, setSimProdSearch] = useState("")
   const [simProdResults, setSimProdResults] = useState<Product[]>([])
+  const [simCupon, setSimCupon] = useState("")
+  const [simCalculation, setSimCalculation] = useState<any>(null)
+  const [simLoadingCalc, setSimLoadingCalc] = useState(false)
+
+  // Disparo automático de cálculo cuando el carrito del simulador cambia
+  useEffect(() => {
+    if (simItems.length === 0) {
+      setSimCalculation(null)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setSimLoadingCalc(true)
+      try {
+        const payload = {
+          items: simItems.map(it => ({
+            producto_id: it.product_id,
+            cantidad: it.cantidad,
+            precio_unitario: it.precio
+          })),
+          codigo_cupon: simCupon.trim() || undefined
+        }
+        const res = await api.promotions.calculate(payload)
+        setSimCalculation(res)
+      } catch (err) {
+        console.error("Error al simular cálculo de promociones:", err)
+      } finally {
+        setSimLoadingCalc(false)
+      }
+    }, 200)
+
+    return () => clearTimeout(timer)
+  }, [simItems, simCupon])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -367,6 +409,15 @@ export default function PromocionesPage() {
         : Math.round(precioRegular * (1 - pct))
     } else if (tipo === "monto_fijo" && montoFijo !== "") {
       precio = Math.max(0, Math.round(precioRegular - Number(montoFijo)))
+    } else if (tipo === "dos_por_uno") {
+      precio = Math.round(precioRegular / 2)
+    } else if (tipo === "tres_por_dos") {
+      precio = Math.round((precioRegular * 2) / 3)
+    } else if (tipo === "segunda_unidad_pct") {
+      const pct = (Number(valorPct) || 50) / 200
+      precio = Math.round(precioRegular * (1 - pct))
+    } else if ((tipo === "combo_pack" || tipo === "combo_precio") && precioFijo !== "") {
+      precio = Number(precioFijo)
     } else {
       precio = Math.round(precioRegular * 0.85)
     }
@@ -612,11 +663,26 @@ export default function PromocionesPage() {
         payload.base_calculo_pct = selectionMode === "category" ? "venta" : newBaseCalculoPct
       } else if (newTipo === "monto_fijo") {
         payload.valor = Number(newBulkMontoFijo)
+      } else if (newTipo === "dos_por_uno") {
+        payload.valor = 1
+        payload.cantidad_minima = 2
+      } else if (newTipo === "tres_por_dos") {
+        payload.valor = 2
+        payload.cantidad_minima = 3
+      } else if (newTipo === "segunda_unidad_pct") {
+        payload.valor = newSegundaUnidadPct !== "" ? Number(newSegundaUnidadPct) : 50
+        payload.cantidad_minima = 2
+      } else if (newTipo === "combo_pack" || newTipo === "combo_precio") {
+        payload.precio_fijo_promocional = newBulkPrecioFijo !== "" ? Number(newBulkPrecioFijo) : avgPromoPrice
       }
+
       if (newTerminacionPsicologica !== "") {
         payload.terminacion_psicologica = Number(newTerminacionPsicologica)
       }
 
+      payload.combinable = newCombinable
+      if (newMontoMinimoCompra !== "") payload.monto_minimo_compra = Number(newMontoMinimoCompra)
+      if (newCantidadMinima !== "" && !payload.cantidad_minima) payload.cantidad_minima = Number(newCantidadMinima)
       if (newLimitePorCompra !== "") payload.limite_por_compra = Number(newLimitePorCompra)
       if (newLimitarStock && newStockLimite !== "") {
         payload.limitar_unidades = true
@@ -849,16 +915,16 @@ export default function PromocionesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs min-w-[850px]">
+              <table className="w-full text-xs min-w-[1020px]">
                 <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
                   <tr>
-                    <th className="p-3.5 text-left">Estado</th>
-                    <th className="p-3.5 text-left">Promoción & Mecánica</th>
-                    <th className="p-3.5 text-left">Origen / Trade Spend</th>
-                    <th className="p-3.5 text-right font-mono">Precio / Descuento</th>
-                    <th className="p-3.5 text-left">Vigencia & Días</th>
-                    <th className="p-3.5 text-left">Stock & Cupo</th>
-                    <th className="p-3.5 text-right">Acciones</th>
+                    <th className="p-3.5 text-left w-28">Estado</th>
+                    <th className="p-3.5 text-left min-w-[280px]">Promoción & Mecánica</th>
+                    <th className="p-3.5 text-left w-48">Origen / Trade Spend</th>
+                    <th className="p-3.5 text-right font-mono w-40">Precio / Descuento</th>
+                    <th className="p-3.5 text-left w-44">Vigencia & Días</th>
+                    <th className="p-3.5 text-left w-36">Stock & Cupo</th>
+                    <th className="p-3.5 text-right w-24">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-slate-800/60">
@@ -894,22 +960,46 @@ export default function PromocionesPage() {
                         </td>
 
                         {/* Nombre y Mecánica */}
-                        <td className="p-3.5 max-w-xs">
-                          <p className="font-extrabold text-gray-900 dark:text-white truncate">
+                        <td className="p-3.5">
+                          <p className="font-extrabold text-gray-900 dark:text-white text-xs line-clamp-2 leading-snug" title={promo.nombre}>
                             {promo.nombre}
                           </p>
-                          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                          <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
                             {TIPO_LABELS[promo.tipo] || promo.tipo}
                           </p>
-                          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1">
                             {promo.legacy_id && (
-                              <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400">
+                              <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900/50">
                                 Ñemuha #{promo.legacy_id}
                               </span>
                             )}
+                            {promo.combinable ? (
+                              <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                                Combinable
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                                Exclusiva
+                              </span>
+                            )}
+                            {promo.monto_minimo_compra && Number(promo.monto_minimo_compra) > 0 && (
+                              <span className="text-[9px] font-mono font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-200 dark:border-purple-800">
+                                Mín. {formatPYG(Number(promo.monto_minimo_compra))}
+                              </span>
+                            )}
+                            {promo.cantidad_minima && promo.cantidad_minima > 1 && (
+                              <span className="text-[9px] font-mono font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                                Mín. {promo.cantidad_minima} un.
+                              </span>
+                            )}
+                            {promo.terminacion_psicologica !== null && promo.terminacion_psicologica !== undefined && (
+                              <span className="text-[9px] font-mono font-bold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/40 px-1.5 py-0.5 rounded border border-teal-200 dark:border-teal-800">
+                                .{promo.terminacion_psicologica}
+                              </span>
+                            )}
                             {promo.supplier_id && (
-                              <span className="text-[10px] font-bold text-gray-500 bg-gray-100 dark:bg-slate-800 px-1.5 py-0.2 rounded truncate max-w-[180px]">
-                                🏢 {suppliers.find(s => s.id === promo.supplier_id)?.razon_social || "Proveedor Comercial"}
+                              <span className="text-[10px] font-bold text-gray-500 bg-gray-100 dark:bg-slate-800 px-1.5 py-0.5 rounded truncate max-w-[200px]">
+                                🏢 {suppliers.find(s => s.id === promo.supplier_id)?.razon_social || "Proveedor"}
                               </span>
                             )}
                           </div>
@@ -927,7 +1017,23 @@ export default function PromocionesPage() {
 
                         {/* Precio / Descuento */}
                         <td className="p-3.5 text-right font-mono font-black text-sm whitespace-nowrap">
-                          {promo.tipo === "precio_fijo_oferta" && promo.precio_fijo_promocional ? (
+                          {promo.tipo === "dos_por_uno" ? (
+                            <span className="text-purple-600 dark:text-purple-400 font-extrabold text-xs bg-purple-50 dark:bg-purple-950/60 px-2 py-1 rounded-lg border border-purple-200 dark:border-purple-900/50">
+                              🎁 2x1 (Lleva 2, Paga 1)
+                            </span>
+                          ) : promo.tipo === "tres_por_dos" ? (
+                            <span className="text-purple-600 dark:text-purple-400 font-extrabold text-xs bg-purple-50 dark:bg-purple-950/60 px-2 py-1 rounded-lg border border-purple-200 dark:border-purple-900/50">
+                              🎁 3x2 (Lleva 3, Paga 2)
+                            </span>
+                          ) : promo.tipo === "segunda_unidad_pct" ? (
+                            <span className="text-blue-600 dark:text-blue-400 font-extrabold text-xs bg-blue-50 dark:bg-blue-950/60 px-2 py-1 rounded-lg border border-blue-200 dark:border-blue-900/50">
+                              2da un. -{promo.valor || 50}% OFF
+                            </span>
+                          ) : (promo.tipo === "combo_pack" || promo.tipo === "combo_precio") ? (
+                            <span className="text-indigo-600 dark:text-indigo-400">
+                              {promo.precio_fijo_promocional ? formatPYG(Number(promo.precio_fijo_promocional)) : "Combo Pack"}
+                            </span>
+                          ) : promo.tipo === "precio_fijo_oferta" && promo.precio_fijo_promocional ? (
                             <span className="text-emerald-600 dark:text-emerald-400">
                               {formatPYG(Number(promo.precio_fijo_promocional))}
                             </span>
@@ -1063,26 +1169,110 @@ export default function PromocionesPage() {
             {/* Contenido Ficha */}
             <div className="p-5 space-y-4 text-xs">
               
-              {/* Bloque Precios */}
+              {/* Bloque Precios & Mecánica */}
               <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2">
                 <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">Esquema de Precios & Beneficio</span>
                 <div className="flex items-baseline justify-between">
                   <span className="text-gray-600 dark:text-gray-400">Beneficio al Cliente:</span>
                   <span className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
-                    {viewingPromo.tipo === "precio_fijo_oferta" && viewingPromo.precio_fijo_promocional
+                    {viewingPromo.tipo === "dos_por_uno"
+                      ? "🎁 2x1 (Lleva 2, Paga 1)"
+                      : viewingPromo.tipo === "tres_por_dos"
+                      ? "🎁 3x2 (Lleva 3, Paga 2)"
+                      : viewingPromo.tipo === "segunda_unidad_pct"
+                      ? `🏷️ 2da Unidad al -${viewingPromo.valor || 50}% OFF`
+                      : (viewingPromo.tipo === "combo_pack" || viewingPromo.tipo === "combo_precio")
+                      ? (viewingPromo.precio_fijo_promocional ? formatPYG(Number(viewingPromo.precio_fijo_promocional)) : "Combo Pack")
+                      : viewingPromo.tipo === "precio_fijo_oferta" && viewingPromo.precio_fijo_promocional
                       ? formatPYG(Number(viewingPromo.precio_fijo_promocional))
                       : viewingPromo.tipo === "porcentaje" && viewingPromo.valor
-                      ? `-${viewingPromo.valor}% OFF`
+                      ? `-${viewingPromo.valor}% OFF (${viewingPromo.base_calculo_pct === "costo" ? "s/ costo" : "s/ venta"})`
                       : formatPYG(Number(viewingPromo.valor || 0))}
                   </span>
                 </div>
 
-                {viewingPromo.vende_bajo_costo && (
-                  <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-[11px] flex items-center gap-2">
-                    <ShieldAlert className="w-4 h-4 shrink-0" />
-                    <span>Esta promoción vende por debajo del costo unitario de compra.</span>
+                {viewingPromo.terminacion_psicologica !== null && viewingPromo.terminacion_psicologica !== undefined && (
+                  <div className="flex justify-between items-center text-[11px] pt-1 border-t border-gray-200 dark:border-slate-700">
+                    <span className="text-gray-500">Terminación Psicológica de Precio:</span>
+                    <span className="font-mono font-bold text-teal-600 dark:text-teal-400">
+                      Termina en .{viewingPromo.terminacion_psicologica} (ej: ...9{viewingPromo.terminacion_psicologica})
+                    </span>
                   </div>
                 )}
+
+                {viewingPromo.vende_bajo_costo && (
+                  <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-[11px] flex items-center gap-2 mt-1">
+                    <ShieldAlert className="w-4 h-4 shrink-0" />
+                    <span>Esta promoción vende por debajo del costo unitario de compra. Requiere autorización de Gerencia.</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Bloque Productos Vinculados (si aplica_a === 'producto') */}
+              {viewingPromo.producto_ids && viewingPromo.producto_ids.length > 0 && (
+                <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+                      Productos Vinculados ({viewingPromo.producto_ids.length})
+                    </span>
+                    <Package className="w-4 h-4 text-gray-400" />
+                  </div>
+                  <div className="max-h-36 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-700/60 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700">
+                    {viewingPromo.producto_ids.map(pid => {
+                      const prod = allCatalogProducts.find(p => p.id === pid)
+                      return (
+                        <div key={pid} className="p-2 flex items-center justify-between gap-2 text-xs">
+                          <div className="truncate min-w-0">
+                            <span className="font-bold text-gray-900 dark:text-white truncate block">
+                              {prod ? prod.nombre : `Producto ID: ${pid.slice(0, 8)}...`}
+                            </span>
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              Cód: {prod?.codigo_barra || prod?.sku || "S/C"} · Costo: {formatPYG(Number(prod?.costo_promedio || 0))}
+                            </span>
+                          </div>
+                          <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
+                            {formatPYG(Number(prod?.precio_venta || 0))}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Bloque Reglas de Caja & Combinabilidad */}
+              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2">
+                <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">Reglas de Activación en Caja</span>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">Combinabilidad:</span>
+                    <span className={`font-bold inline-flex items-center gap-1 mt-0.5 ${viewingPromo.combinable ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-slate-400"}`}>
+                      {viewingPromo.combinable ? "✅ Combinable" : "🔒 Exclusiva (No acumulable)"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">Límite por Ticket:</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200 mt-0.5 block">
+                      {viewingPromo.limite_por_compra ? `${viewingPromo.limite_por_compra} un. / compra` : "Sin límite"}
+                    </span>
+                  </div>
+                  {viewingPromo.monto_minimo_compra && Number(viewingPromo.monto_minimo_compra) > 0 && (
+                    <div>
+                      <span className="text-gray-400 block text-[10px]">Compra Mínima en Ticket:</span>
+                      <span className="font-mono font-bold text-purple-600 dark:text-purple-400 mt-0.5 block">
+                        {formatPYG(Number(viewingPromo.monto_minimo_compra))}
+                      </span>
+                    </div>
+                  )}
+                  {viewingPromo.cantidad_minima && viewingPromo.cantidad_minima > 1 && (
+                    <div>
+                      <span className="text-gray-400 block text-[10px]">Cantidad Mínima Items:</span>
+                      <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 mt-0.5 block">
+                        {viewingPromo.cantidad_minima} unidades
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Bloque Trade Spend & Proveedor */}
@@ -1137,6 +1327,22 @@ export default function PromocionesPage() {
                     </strong>
                   </div>
                 )}
+
+                {/* Datos de Conciliación de Nota de Crédito */}
+                {viewingPromo.nc_numero_proveedor && (
+                  <div className="p-2.5 bg-blue-50/70 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900/50 space-y-1 text-[11px] mt-2">
+                    <div className="font-bold text-blue-800 dark:text-blue-200 flex items-center justify-between">
+                      <span>🧾 Nota de Crédito Conciliada:</span>
+                      <span className="font-mono">{viewingPromo.nc_numero_proveedor}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-gray-500">
+                      <span>Timbrado: {viewingPromo.nc_timbrado_proveedor || "18545636"}</span>
+                      <span className="font-mono font-bold text-blue-600">
+                        {formatPYG(Number(viewingPromo.nc_monto_total || 0))}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Bloque Vigencia & Horarios */}
@@ -1159,7 +1365,7 @@ export default function PromocionesPage() {
                 )}
 
                 <div className="flex items-center justify-between pt-1">
-                  <span className="text-gray-500">Días:</span>
+                  <span className="text-gray-500">Días Activos:</span>
                   <div className="flex gap-1">
                     {DIAS_SEMANA.map(d => {
                       const active = !viewingPromo.dias_semana || viewingPromo.dias_semana.includes(d.id)
@@ -1180,7 +1386,7 @@ export default function PromocionesPage() {
                 </div>
               </div>
 
-              {/* Bloque Cupos */}
+              {/* Bloque Cupos y Stock */}
               <div className="p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/80 space-y-2">
                 <span className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">Control de Stock & Cupos</span>
                 <div className="flex justify-between">
@@ -1193,7 +1399,7 @@ export default function PromocionesPage() {
                 {viewingPromo.limitar_unidades && viewingPromo.stock_limite_unidades && (
                   <div className="space-y-1 pt-1">
                     <div className="flex justify-between text-[11px]">
-                      <span className="text-gray-500">Unidades Vendidas:</span>
+                      <span className="text-gray-500">Unidades Vendidas / Cupo:</span>
                       <span className="font-mono font-bold">
                         {viewingPromo.unidades_vendidas_promo || 0} / {viewingPromo.stock_limite_unidades} un.
                       </span>
@@ -1712,7 +1918,7 @@ export default function PromocionesPage() {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Mecánica de Descuento:</label>
+                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Mecánica de Promoción:</label>
                         <select
                           value={newTipo}
                           onChange={e => setNewTipo(e.target.value)}
@@ -1721,32 +1927,88 @@ export default function PromocionesPage() {
                           <option value="precio_fijo_oferta">🏷️ Precio Fijo Masivo Común (Gs.)</option>
                           <option value="porcentaje">📉 Descuento Porcentual Masivo (% OFF)</option>
                           <option value="monto_fijo">➖ Descuento Monto Fijo (Gs. off)</option>
+                          <option value="dos_por_uno">🎁 2x1 (Lleva 2, Paga 1)</option>
+                          <option value="tres_por_dos">🎁 3x2 (Lleva 3, Paga 2)</option>
+                          <option value="segunda_unidad_pct">🏷️ 2da Unidad con % Descuento</option>
+                          <option value="combo_pack">📦 Combo Especial Pack (Precio Conjunto)</option>
                         </select>
                         {selectionMode === "category" && newTipo !== "porcentaje" && (
                           <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
-                            Categoría dinámica (incluye productos nuevos a futuro) solo aplica con % de descuento. Con esta mecánica se guarda la lista de productos de hoy.
+                            Categoría dinámica solo aplica con % de descuento. Con esta mecánica se guarda la lista de productos de hoy.
                           </p>
                         )}
                       </div>
 
                       <div>
-                        <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
-                          {newTipo === "precio_fijo_oferta" ? "Precio Fijo de Oferta Común (Gs.):" : newTipo === "monto_fijo" ? "Descuento Fijo por Unidad (Gs.):" : "Porcentaje de Descuento (% OFF):"}
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={newTipo === "porcentaje" ? 100 : undefined}
-                          value={newTipo === "precio_fijo_oferta" ? newBulkPrecioFijo : newTipo === "monto_fijo" ? newBulkMontoFijo : newBulkValorPct}
-                          onChange={e => {
-                            const v = e.target.value === "" ? "" : Number(e.target.value)
-                            if (newTipo === "precio_fijo_oferta") setNewBulkPrecioFijo(v)
-                            else if (newTipo === "monto_fijo") setNewBulkMontoFijo(v)
-                            else setNewBulkValorPct(v)
-                          }}
-                          placeholder={newTipo === "precio_fijo_oferta" ? "Ej: 37477 para toda la línea" : newTipo === "monto_fijo" ? "Ej: 5000" : "Ej: 20"}
-                          className="w-full text-xs font-mono font-black p-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
-                        />
+                        {newTipo === "dos_por_uno" ? (
+                          <div className="p-2.5 bg-purple-50 dark:bg-purple-950/40 rounded-xl border border-purple-200 dark:border-purple-900/50">
+                            <span className="font-bold text-purple-900 dark:text-purple-200 block text-[11px]">🎁 Mecánica 2x1:</span>
+                            <p className="text-[10px] text-purple-700 dark:text-purple-300 mt-0.5">
+                              Por cada 2 unidades compradas en caja, 1 se descuenta al 100% (50% de ahorro promedio por unidad).
+                            </p>
+                          </div>
+                        ) : newTipo === "tres_por_dos" ? (
+                          <div className="p-2.5 bg-purple-50 dark:bg-purple-950/40 rounded-xl border border-purple-200 dark:border-purple-900/50">
+                            <span className="font-bold text-purple-900 dark:text-purple-200 block text-[11px]">🎁 Mecánica 3x2:</span>
+                            <p className="text-[10px] text-purple-700 dark:text-purple-300 mt-0.5">
+                              Por cada 3 unidades compradas en caja, 1 se bonifica al 100% (33.3% de ahorro promedio por unidad).
+                            </p>
+                          </div>
+                        ) : newTipo === "segunda_unidad_pct" ? (
+                          <div>
+                            <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                              % Descuento en la 2da Unidad (% OFF):
+                            </label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={newSegundaUnidadPct}
+                              onChange={e => setNewSegundaUnidadPct(e.target.value === "" ? "" : Number(e.target.value))}
+                              placeholder="Ej: 50 (para 2da al 50%) o 70 (2da al 70%)"
+                              className="w-full text-xs font-mono font-black p-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                            />
+                            <p className="text-[10px] text-blue-600 dark:text-blue-400 mt-1">
+                              Al comprar de a pares, la segunda unidad recibe este descuento exacto.
+                            </p>
+                          </div>
+                        ) : (
+                          <div>
+                            <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                              {newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
+                                ? "Precio Fijo de Oferta Común (Gs.):"
+                                : newTipo === "monto_fijo"
+                                ? "Descuento Fijo por Unidad (Gs.):"
+                                : "Porcentaje de Descuento (% OFF):"}
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={newTipo === "porcentaje" ? 100 : undefined}
+                              value={
+                                newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
+                                  ? newBulkPrecioFijo
+                                  : newTipo === "monto_fijo"
+                                  ? newBulkMontoFijo
+                                  : newBulkValorPct
+                              }
+                              onChange={e => {
+                                const v = e.target.value === "" ? "" : Number(e.target.value)
+                                if (newTipo === "precio_fijo_oferta" || newTipo === "combo_pack") setNewBulkPrecioFijo(v)
+                                else if (newTipo === "monto_fijo") setNewBulkMontoFijo(v)
+                                else setNewBulkValorPct(v)
+                              }}
+                              placeholder={
+                                newTipo === "precio_fijo_oferta" || newTipo === "combo_pack"
+                                  ? "Ej: 37477 para toda la línea"
+                                  : newTipo === "monto_fijo"
+                                  ? "Ej: 5000"
+                                  : "Ej: 20"
+                              }
+                              className="w-full text-xs font-mono font-black p-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                            />
+                          </div>
+                        )}
                       </div>
 
                       {newTipo === "porcentaje" && (
@@ -1761,15 +2023,6 @@ export default function PromocionesPage() {
                             <option value="venta">Sobre Precio de Venta (descuento directo)</option>
                             <option value="costo">Sobre Costo (define margen objetivo)</option>
                           </select>
-                          {selectionMode === "category" ? (
-                            <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
-                              No disponible en categoría dinámica: el costo varía por producto y no puede promediarse de forma confiable para lo que se agregue a futuro.
-                            </p>
-                          ) : newBaseCalculoPct === "costo" ? (
-                            <p className="text-[10px] text-blue-600 dark:text-blue-400 mt-1">
-                              Precio de oferta = costo × (1 + %). Requiere costo cargado en cada producto seleccionado.
-                            </p>
-                          ) : null}
                         </div>
                       )}
 
@@ -1784,8 +2037,159 @@ export default function PromocionesPage() {
                           placeholder="Ej: 77 → precios terminan en ...977"
                           className="w-full text-xs font-mono font-black p-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                         />
-                        <p className="text-[10px] text-gray-500 mt-1">Fuerza los últimos 2 dígitos del precio final calculado, sea cual sea la mecánica.</p>
+                        <p className="text-[10px] text-gray-500 mt-1">Fuerza los últimos 2 dígitos del precio final calculado (ej: .77).</p>
                       </div>
+                    </div>
+
+                    {/* ── ⚙️ REGLAS AVANZADAS DE ACTIVACIÓN EN CAJA ── */}
+                    <div className="pt-2 border-t border-emerald-500/20">
+                      <button
+                        type="button"
+                        onClick={() => setShowAdvancedRules(!showAdvancedRules)}
+                        className="text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5 cursor-pointer hover:underline"
+                      >
+                        <Settings className="w-3.5 h-3.5" />
+                        <span>{showAdvancedRules ? "Ocultar Reglas Avanzadas de Caja ▲" : "Configurar Reglas Avanzadas de Caja (Límites, Días, Horario) ▼"}</span>
+                      </button>
+
+                      {showAdvancedRules && (
+                        <div className="mt-3 p-3 bg-white dark:bg-slate-900 rounded-xl border border-emerald-300/40 dark:border-slate-700 space-y-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="flex items-center gap-2 pt-2">
+                              <input
+                                type="checkbox"
+                                id="chkCombinable"
+                                checked={newCombinable}
+                                onChange={e => setNewCombinable(e.target.checked)}
+                                className="w-4 h-4 rounded text-emerald-600"
+                              />
+                              <label htmlFor="chkCombinable" className="font-bold text-gray-700 dark:text-gray-300 text-xs cursor-pointer">
+                                ¿Combinable con otras promos?
+                              </label>
+                            </div>
+
+                            <div>
+                              <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Límite por Ticket (un.):</label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={newLimitePorCompra}
+                                onChange={e => setNewLimitePorCompra(e.target.value === "" ? "" : Number(e.target.value))}
+                                placeholder="Ej: 6 un. máx"
+                                className="w-full text-xs font-mono p-2 rounded-lg border border-gray-200 dark:border-slate-700"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Cupo Total Stock Promo (un.):</label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={newStockLimite}
+                                onChange={e => {
+                                  const v = e.target.value === "" ? "" : Number(e.target.value)
+                                  setNewStockLimite(v)
+                                  setNewLimitarStock(v !== "")
+                                }}
+                                placeholder="Ej: 200 un. total"
+                                className="w-full text-xs font-mono p-2 rounded-lg border border-gray-200 dark:border-slate-700"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Compra Mínima en Ticket (Gs.):</label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={newMontoMinimoCompra}
+                                onChange={e => setNewMontoMinimoCompra(e.target.value === "" ? "" : Number(e.target.value))}
+                                placeholder="Ej: 100000"
+                                className="w-full text-xs font-mono p-2 rounded-lg border border-gray-200 dark:border-slate-700"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="font-bold text-gray-700 dark:text-gray-300 block mb-1">Cantidad Mínima Items Carrito:</label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={newCantidadMinima}
+                                onChange={e => setNewCantidadMinima(e.target.value === "" ? "" : Number(e.target.value))}
+                                placeholder="Ej: 2"
+                                className="w-full text-xs font-mono p-2 rounded-lg border border-gray-200 dark:border-slate-700"
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-2 pt-2">
+                              <input
+                                type="checkbox"
+                                id="chkRelampago"
+                                checked={newEsRelampago}
+                                onChange={e => setNewEsRelampago(e.target.checked)}
+                                className="w-4 h-4 rounded text-amber-500"
+                              />
+                              <label htmlFor="chkRelampago" className="font-bold text-gray-700 dark:text-gray-300 text-xs cursor-pointer">
+                                ⚡ Horario Relámpago (Happy Hour)
+                              </label>
+                            </div>
+                          </div>
+
+                          {newEsRelampago && (
+                            <div className="grid grid-cols-2 gap-3 p-2 bg-amber-50 dark:bg-amber-950/40 rounded-lg border border-amber-200 dark:border-amber-900/50">
+                              <div>
+                                <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300 block mb-0.5">Hora Desde:</label>
+                                <input
+                                  type="time"
+                                  value={newHorarioDesde}
+                                  onChange={e => setNewHorarioDesde(e.target.value)}
+                                  className="w-full text-xs p-1.5 rounded border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-gray-600 dark:text-gray-300 block mb-0.5">Hora Hasta:</label>
+                                <input
+                                  type="time"
+                                  value={newHorarioHasta}
+                                  onChange={e => setNewHorarioHasta(e.target.value)}
+                                  className="w-full text-xs p-1.5 rounded border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Días de la semana interactivos */}
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Días de Semana Aplicables:</label>
+                            <div className="flex gap-1.5 flex-wrap">
+                              {DIAS_SEMANA.map(d => {
+                                const active = newDiasSemana.includes(d.id)
+                                return (
+                                  <button
+                                    key={d.id}
+                                    type="button"
+                                    onClick={() => {
+                                      if (active) {
+                                        if (newDiasSemana.length > 1) {
+                                          setNewDiasSemana(newDiasSemana.filter(x => x !== d.id))
+                                        }
+                                      } else {
+                                        setNewDiasSemana([...newDiasSemana, d.id].sort())
+                                      }
+                                    }}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                      active
+                                        ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm"
+                                        : "bg-gray-100 dark:bg-slate-800 text-gray-400 hover:text-gray-600"
+                                    }`}
+                                  >
+                                    {d.label}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Grilla con los items seleccionados y precios recalculados */}
@@ -2214,78 +2618,268 @@ export default function PromocionesPage() {
         document.body
       )}
 
-      {/* ── MODAL: SIMULADOR DE CARRITO ───────────────────────────────────── */}
+      {/* ── MODAL: SIMULADOR DE CARRITO & MOTOR DE CAJA ───────────────────── */}
       {showSimModal && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-gray-200 dark:border-slate-800 space-y-4">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
-              <div>
-                <h3 className="text-base font-extrabold text-gray-900 dark:text-white">Simulador de Carrito y Promociones</h3>
-                <p className="text-xs text-gray-500">Pruebe las reglas comerciales agregando items</p>
+        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-gray-200 dark:border-slate-800 space-y-4 max-h-[92vh] flex flex-col">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-purple-500/20">
+                  <ShoppingCart className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-purple-600 bg-purple-500/10 px-2 py-0.5 rounded-md">
+                      MOTOR DE CAJA EN TIEMPO REAL
+                    </span>
+                    {simLoadingCalc && (
+                      <span className="text-[10px] font-bold text-amber-500 flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Calculando...
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-base font-extrabold text-gray-900 dark:text-white mt-0.5">
+                    Simulador Oficial de Carrito, Promociones & Mayorista
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Probá 2x1, 3x2, descuentos por volumen y escalas mayoristas exactamente como se aplican en la caja.
+                  </p>
+                </div>
               </div>
-              <button onClick={() => setShowSimModal(false)} className="p-1 rounded-xl hover:bg-gray-100 text-gray-400">
+              <button onClick={() => setShowSimModal(false)} className="p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div className="relative">
+            {/* Body */}
+            <div className="space-y-4 text-xs overflow-y-auto flex-1 pr-1">
+              
+              {/* Buscador de Producto para agregar al carrito */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-gray-700 dark:text-gray-300 block text-[11px]">
+                  Buscar y Agregar Producto al Carrito:
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={simProdSearch}
+                    onChange={e => {
+                      const q = e.target.value
+                      setSimProdSearch(q)
+                      if (!q.trim()) {
+                        setSimProdResults([])
+                        return
+                      }
+                      const filtered = (allCatalogProducts || []).filter(p =>
+                        p.nombre.toLowerCase().includes(q.toLowerCase()) ||
+                        (p.codigo_barra && p.codigo_barra.includes(q)) ||
+                        (p.sku && p.sku.toLowerCase().includes(q.toLowerCase()))
+                      ).slice(0, 8)
+                      setSimProdResults(filtered)
+                    }}
+                    placeholder="Escribir nombre o código de barra para agregar..."
+                    className="w-full text-xs p-2.5 pl-8 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                  />
+                  <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-3" />
+                </div>
+
+                {simProdResults.length > 0 && (
+                  <div className="max-h-36 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 shadow-lg">
+                    {simProdResults.map(p => (
+                      <div
+                        key={p.id}
+                        onClick={() => {
+                          setSimItems(prev => {
+                            const existingIndex = prev.findIndex(it => it.product_id === p.id)
+                            if (existingIndex >= 0) {
+                              const updated = [...prev]
+                              updated[existingIndex] = { ...updated[existingIndex], cantidad: updated[existingIndex].cantidad + 1 }
+                              return updated
+                            }
+                            return [...prev, { product_id: p.id, nombre: p.nombre, precio: Number(p.precio_venta || 0), cantidad: 1 }]
+                          })
+                          setSimProdSearch("")
+                          setSimProdResults([])
+                        }}
+                        className="p-2.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer flex justify-between items-center transition"
+                      >
+                        <div>
+                          <span className="font-bold text-gray-900 dark:text-white block">{p.nombre}</span>
+                          <span className="text-[10px] text-gray-400 font-mono">Cód: {p.codigo_barra || p.sku || "S/C"}</span>
+                        </div>
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                          {formatPYG(Number(p.precio_venta || 0))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Items del Carrito de Simulación */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-[11px] text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Carrito Actual ({simItems.length} items)
+                  </span>
+                  {simItems.length > 0 && (
+                    <button
+                      onClick={() => setSimItems([])}
+                      className="text-[10px] font-bold text-red-500 hover:text-red-700 cursor-pointer"
+                    >
+                      Vaciar Carrito
+                    </button>
+                  )}
+                </div>
+
+                {simItems.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400 bg-gray-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-gray-200 dark:border-slate-700">
+                    <ShoppingCart className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="font-bold text-gray-600 dark:text-gray-300 text-xs">El carrito está vacío</p>
+                    <p className="text-[11px] mt-0.5">Buscá productos arriba para simular promociones y precios mayoristas.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-gray-50 dark:bg-slate-800/50 p-2 rounded-2xl border border-gray-200 dark:border-slate-700">
+                    {simItems.map((it, idx) => (
+                      <div key={idx} className="p-2 flex items-center justify-between gap-3">
+                        <div className="truncate min-w-0 flex-1">
+                          <span className="font-bold text-gray-900 dark:text-white truncate block">{it.nombre}</span>
+                          <span className="text-[10px] text-gray-400 font-mono">
+                            {formatPYG(it.precio)} c/u · Subtotal: {formatPYG(it.precio * it.cantidad)}
+                          </span>
+                        </div>
+
+                        {/* Control de Cantidad (+ / -) */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => {
+                              if (it.cantidad <= 1) {
+                                setSimItems(prev => prev.filter((_, i) => i !== idx))
+                              } else {
+                                setSimItems(prev => prev.map((item, i) => i === idx ? { ...item, cantidad: item.cantidad - 1 } : item))
+                              }
+                            }}
+                            className="w-6 h-6 rounded-lg bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 flex items-center justify-center font-bold text-gray-600 dark:text-gray-200 hover:bg-gray-100 cursor-pointer"
+                          >
+                            -
+                          </button>
+                          <span className="w-8 text-center font-mono font-bold text-xs">
+                            {it.cantidad}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setSimItems(prev => prev.map((item, i) => i === idx ? { ...item, cantidad: item.cantidad + 1 } : item))
+                            }}
+                            className="w-6 h-6 rounded-lg bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 flex items-center justify-center font-bold text-gray-600 dark:text-gray-200 hover:bg-gray-100 cursor-pointer"
+                          >
+                            +
+                          </button>
+                          <button
+                            onClick={() => setSimItems(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-red-400 hover:text-red-600 p-1 font-bold ml-1 cursor-pointer"
+                            title="Quitar item"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Cupón Opcional */}
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold text-gray-500 uppercase shrink-0">Cupón de Descuento:</span>
                 <input
                   type="text"
-                  value={simProdSearch}
-                  onChange={e => setSimProdSearch(e.target.value)}
-                  placeholder="Buscar producto para agregar al carrito..."
-                  className="w-full text-xs p-2.5 pl-8 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  value={simCupon}
+                  onChange={e => setSimCupon(e.target.value.toUpperCase())}
+                  placeholder="Ej: EXTRA2026 (opcional)"
+                  className="w-48 text-xs font-mono font-bold uppercase p-2 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                 />
-                <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-3" />
               </div>
 
-              {simProdResults.length > 0 && (
-                <div className="max-h-32 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 border rounded-xl">
-                  {simProdResults.map(p => (
-                    <div
-                      key={p.id}
-                      onClick={() => {
-                        setSimItems(prev => [...prev, { product_id: p.id, nombre: p.nombre, precio: Number(p.precio_venta || 0), cantidad: 1 }])
-                        setSimProdSearch("")
-                        setSimProdResults([])
-                      }}
-                      className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer flex justify-between items-center"
-                    >
-                      <span className="font-bold">{p.nombre}</span>
-                      <span className="font-mono font-bold text-emerald-600">{formatPYG(Number(p.precio_venta || 0))}</span>
+              {/* Resultados del Cálculo en Tiempo Real */}
+              {simCalculation && (
+                <div className="space-y-3 pt-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                    <div className="p-2.5 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700">
+                      <span className="text-[10px] text-gray-400 uppercase font-bold block">Subtotal Bruto:</span>
+                      <strong className="text-sm font-mono font-bold text-gray-800 dark:text-gray-200">
+                        {formatPYG(simItems.reduce((acc, it) => acc + (it.precio * it.cantidad), 0))}
+                      </strong>
                     </div>
-                  ))}
-                </div>
-              )}
 
-              {simItems.length > 0 && (
-                <div className="p-3 bg-gray-50 dark:bg-slate-800/60 rounded-2xl space-y-2 border border-gray-200 dark:border-slate-700 max-h-48 overflow-y-auto">
-                  {simItems.map((it, idx) => (
-                    <div key={idx} className="flex items-center justify-between">
-                      <span className="font-semibold truncate max-w-xs">{it.nombre}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold">{formatPYG(it.precio * it.cantidad)}</span>
-                        <button
-                          onClick={() => setSimItems(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-red-500 hover:text-red-700 font-bold"
-                        >
-                          ×
-                        </button>
+                    <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-900/50">
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-bold block">Descuento Promos:</span>
+                      <strong className="text-sm font-mono font-black text-emerald-600 dark:text-emerald-400">
+                        -{formatPYG(simCalculation.total_descuento_promociones || 0)}
+                      </strong>
+                    </div>
+
+                    <div className="p-2.5 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900/50">
+                      <span className="text-[10px] text-blue-600 dark:text-blue-400 uppercase font-bold block">Desc. Mayorista [M]:</span>
+                      <strong className="text-sm font-mono font-black text-blue-600 dark:text-blue-400">
+                        -{formatPYG(simCalculation.total_descuento_mayorista || 0)}
+                      </strong>
+                    </div>
+
+                    <div className="p-2.5 bg-slate-900 text-white dark:bg-slate-950 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-emerald-400 uppercase font-bold block">Total Neto en Caja:</span>
+                      <strong className="text-base font-mono font-black text-emerald-400">
+                        {formatPYG(simCalculation.total_final || 0)}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* Detalle de Promociones Aplicadas */}
+                  {simCalculation.applicable_promotions && simCalculation.applicable_promotions.length > 0 && (
+                    <div className="p-3 bg-purple-50/50 dark:bg-purple-950/30 rounded-2xl border border-purple-200 dark:border-purple-900/40 space-y-1.5">
+                      <span className="text-[10px] font-extrabold text-purple-900 dark:text-purple-300 uppercase tracking-wider block">
+                        Promociones Aplicadas al Ticket ({simCalculation.applicable_promotions.length}):
+                      </span>
+                      <div className="space-y-1">
+                        {simCalculation.applicable_promotions.map((p: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between text-xs p-1.5 bg-white dark:bg-slate-900 rounded-lg border border-purple-100 dark:border-purple-900/30">
+                            <span className="font-bold text-gray-800 dark:text-gray-200">
+                              🎁 {p.nombre} ({TIPO_LABELS[p.tipo] || p.tipo})
+                            </span>
+                            <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
+                              -{formatPYG(p.descuento)}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
+                  )}
+
+                  {/* Recuadro Térmico ESC/POS */}
+                  {simCalculation.recuadro_ticket_texto && (
+                    <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 text-slate-200 font-mono text-[11px] leading-tight space-y-1 shadow-inner">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">
+                        Previsualización Recuadro Térmico Impreso:
+                      </span>
+                      <pre className="whitespace-pre overflow-x-auto text-emerald-400 font-mono">
+                        {simCalculation.recuadro_ticket_texto}
+                      </pre>
+                    </div>
+                  )}
                 </div>
               )}
 
-              <div className="pt-2 flex justify-end">
-                <button
-                  onClick={() => setShowSimModal(false)}
-                  className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-extrabold"
-                >
-                  Cerrar Simulador
-                </button>
-              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="pt-3 border-t border-gray-100 dark:border-slate-800 flex justify-end shrink-0">
+              <button
+                onClick={() => setShowSimModal(false)}
+                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold cursor-pointer"
+              >
+                Cerrar Simulador
+              </button>
             </div>
           </div>
         </div>,
