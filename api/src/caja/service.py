@@ -682,6 +682,24 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     return recon_data
 
 
+async def _efectivo_esperado_por_moneda(db: AsyncSession, session_id: uuid.UUID | str, moneda: str) -> Decimal:
+    """Efectivo recibido en una moneda durante la sesion (sin conversion — cada
+    moneda de caja se cuenta por separado)."""
+    s_uuid = uuid.UUID(str(session_id))
+    result = await db.execute(
+        select(func.coalesce(func.sum(SalePayment.monto), 0))
+        .select_from(SalePayment)
+        .join(Sale, Sale.id == SalePayment.sale_id)
+        .where(
+            Sale.session_id == s_uuid,
+            func.upper(SalePayment.forma_pago) == "EFECTIVO",
+            func.upper(SalePayment.moneda) == moneda.upper(),
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+        )
+    )
+    return Decimal(str(result.scalar() or 0))
+
+
 async def close_session(
     db: AsyncSession,
     session_id: str,
