@@ -1,6 +1,6 @@
 from sqlalchemy import select, func, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
 from api.src.plugpay.models import PlugpayTransaction
@@ -23,6 +23,26 @@ async def link_sale(db: AsyncSession, txn_id: str, sale_id: str) -> PlugpayTrans
     await db.commit()
     await db.refresh(row)
     return row
+
+
+async def get_last_unlinked_pix(db: AsyncSession, company_id: str, minutes: int = 45) -> PlugpayTransaction | None:
+    since = datetime.utcnow() - timedelta(minutes=minutes)
+    query = (
+        select(PlugpayTransaction)
+        .where(
+            and_(
+                PlugpayTransaction.company_id == uuid.UUID(company_id),
+                PlugpayTransaction.tipo_operacion == "pix",
+                PlugpayTransaction.sale_id.is_(None),
+                PlugpayTransaction.referencia_interna.isnot(None),
+                PlugpayTransaction.created_at >= since,
+            )
+        )
+        .order_by(desc(PlugpayTransaction.created_at))
+        .limit(1)
+    )
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
 
 
 async def list_transactions(

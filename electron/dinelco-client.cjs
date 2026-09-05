@@ -12,13 +12,15 @@ function nextSessionId() {
 
 function parseResponse(raw) {
   // raw viene sin el ';' final, ej: "RBIN|OK|123456789" o "ENDOP|NOK|05|Rechazada"
-  const parts = raw.split('|')
+  // Si el terminal envió un saludo inicial ej "BIENVENIDO!!PIX", limpiarlo
+  let cleanRaw = String(raw || '').replace(/BIENVENIDO!!/g, '')
+  const parts = cleanRaw.split('|')
   const comando = parts[0]
   if (parts[1] === 'OK') {
     return { comando, ok: true, campos: parts.slice(2) }
   }
-  if (parts[1] === 'NOK') {
-    return { comando, ok: false, code: parts[2] || null, desc: parts[3] || 'Error desconocido', campos: parts.slice(2) }
+  if (parts[1] === 'NOK' || parts[1]?.startsWith('-')) {
+    return { comando, ok: false, code: parts[1] === 'NOK' ? (parts[2] || null) : parts[1], desc: parts[1] === 'NOK' ? (parts[3] || 'Error desconocido') : (parts[2] || 'Rechazado'), campos: parts.slice(1) }
   }
   return { comando, ok: false, code: null, desc: 'Respuesta no reconocida: ' + raw, campos: parts.slice(1) }
 }

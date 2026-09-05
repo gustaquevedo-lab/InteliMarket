@@ -895,6 +895,9 @@ export default function POSPage() {
   const [dinelcoQrError, setDinelcoQrError] = useState<string>("")
   const [dinelcoQrMode, setDinelcoQrMode] = useState<"qr" | "pix">("qr")
   const [dinelcoPixCpf, setDinelcoPixCpf] = useState("")
+  const [dinelcoQrCupon, setDinelcoQrCupon] = useState("")
+  const [showDinelcoQrManualFallback, setShowDinelcoQrManualFallback] = useState(false)
+  const [checkingLastPix, setCheckingLastPix] = useState(false)
   // Efectivo Multimoneda simultáneo (Guaraníes NUNCA tiene decimales)
   const [payCashPyg, setPayCashPyg] = useState<string>("")
   const [payCashBrl, setPayCashBrl] = useState<string>("")
@@ -1105,6 +1108,66 @@ export default function POSPage() {
     }
   }
 
+  const handleCheckLastPlugpayPix = async () => {
+    setCheckingLastPix(true)
+    try {
+      // 1. Si tenemos una referencia interna en el estado actual, consultarla directamente
+      const currentRef = plugpayResult?.referenciaInterna
+      if (currentRef) {
+        const res = await api.plugpay.pixStatus(currentRef)
+        if (res.ok && res.data) {
+          const status = res.data.status ?? res.data.Status
+          if (status === 1) {
+            clearPlugpayPoll()
+            setPlugpayState("aprobada")
+            setBancardQrResult({
+              codigoAutorizacion: res.data.transactionCode || "PLUGPAY",
+              nroBoleta: String(res.data.IdTransacao || Date.now()),
+              mensajeDisplay: "APROBADA",
+              nombreTarjeta: "PIX BRASIL",
+              nombreCliente: "CLIENTE BRASILEÑO",
+            })
+            setBancardQrState("aprobada")
+            toast.success("Pago Aprobado", "Aero confirmó que el pago PIX fue recibido con éxito.")
+            const montoPyg = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+            printPlugpayPixVoucher(res.data, montoPyg, plugpayCpf)
+            return
+          } else {
+            toast.info("Estado en Aero: Pendiente", res.data.statusDescription || "Aero aún no registra el pago completado por el cliente.")
+            return
+          }
+        }
+      }
+
+      // 2. Si se perdió la referencia local (ej. se cerró el modal o recargó), buscar la última en DB
+      const lastRes = await api.plugpay.getLastPendingPix()
+      if (lastRes.ok && lastRes.is_approved) {
+        clearPlugpayPoll()
+        setPlugpayState("aprobada")
+        setPlugpayResult(lastRes.live_status)
+        setBancardQrResult({
+          codigoAutorizacion: lastRes.live_status?.transactionCode || "PLUGPAY",
+          nroBoleta: String(lastRes.id_transacao || Date.now()),
+          mensajeDisplay: "APROBADA",
+          nombreTarjeta: "PIX BRASIL",
+          nombreCliente: "CLIENTE BRASILEÑO",
+        })
+        setBancardQrState("aprobada")
+        toast.success("Pago Recuperado y Aprobado", "Se encontró y confirmó el pago PIX en Aero.")
+        const montoPyg = lastRes.monto || (isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg)
+        printPlugpayPixVoucher(lastRes.live_status, montoPyg, plugpayCpf)
+      } else if (lastRes.ok) {
+        toast.info("Estado en Aero", "La última transacción PIX sigue pendiente de confirmación en el banco.")
+      } else {
+        toast.warning("Sin PIX reciente", lastRes.error_message || "No se encontró ningún pago PIX reciente en espera.")
+      }
+    } catch (e: any) {
+      toast.error("Error al consultar Aero", e.message || "No se pudo verificar el estado en PlugPay.")
+    } finally {
+      setCheckingLastPix(false)
+    }
+  }
+
   const handlePlugpayParcelado = async () => {
     const cleanCpf = plugpayCpf.replace(/\D/g, "")
     if (!cleanCpf || cleanCpf.length !== 11) {
@@ -1215,7 +1278,7 @@ export default function POSPage() {
       (window as any).electronAPI?.dinelcoCancel?.(dinelcoSessionId).catch(() => {})
     }
     setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
-    setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf("")
+    setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf(""); setDinelcoQrCupon(""); setShowDinelcoQrManualFallback(false)
   }
 
   // El terminal Bancard no tiene forma via API de forzar la limpieza de una
@@ -1337,6 +1400,12 @@ export default function POSPage() {
     })
     setBancardTxnLogId((logged as any)?.id || null)
     setPosCardCupon(result.nroBoleta || "")
+    if (isMultiPayment && activeMethods.has("cash")) {
+      const remaining = Math.max(0, totalPyg - montoBancard)
+      if (remaining > 0 && !payCashPyg) {
+        setPayCashPyg(formatPYG(remaining))
+      }
+    }
   }
 
   const logDinelcoTxn = async (data: Record<string, any>) => {
@@ -1442,6 +1511,12 @@ export default function POSPage() {
     setDinelcoTxnLogId((logged as any)?.id || null)
     setDinelcoSessionId(null)
     setDinelcoCupon(result.nroBoleta || "")
+    if (isMultiPayment && activeMethods.has("cash")) {
+      const remaining = Math.max(0, totalPyg - montoDinelco)
+      if (remaining > 0 && !payCashPyg) {
+        setPayCashPyg(formatPYG(remaining))
+      }
+    }
   }
 
   const handleDinelcoQR = async () => {
@@ -1463,6 +1538,7 @@ export default function POSPage() {
     if (!electronAPI?.dinelcoCall) {
       setDinelcoQrState("error_conexion")
       setDinelcoQrError("Esta pantalla no está corriendo dentro de la app de caja -- no se puede conectar al terminal desde acá.")
+      setShowDinelcoQrManualFallback(true)
       return
     }
     setDinelcoQrState("esperando")
@@ -1477,6 +1553,7 @@ export default function POSPage() {
     if (!res.ok) {
       setDinelcoQrState(res.error ? "error_conexion" : "error_rechazo")
       setDinelcoQrError(res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."))
+      setShowDinelcoQrManualFallback(true)
       await logDinelcoTxn({
         tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
         error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
@@ -1488,6 +1565,28 @@ export default function POSPage() {
     await logDinelcoTxn({
       tipo_operacion: tipoOperacion, exitosa: true, verificado_automaticamente: true,
       monto: montoQrDinelco, terminal_ip: ip, mensaje_display: "APROBADA", raw_response: res,
+    })
+  }
+
+  const handleConfirmDinelcoQrManual = async () => {
+    const cupon = dinelcoQrCupon.trim()
+    if (!cupon) {
+      toast.warning("Falta Nº de Voucher", "Ingresá el número de comprobante o cupón emitido por el POS Dinelco.")
+      return
+    }
+    const montoQrDinelco = isMultiPayment ? parseInt(mixedQrPyg.replace(/\D/g, "") || "0", 10) : totalPyg
+    setDinelcoQrState("aprobada")
+    toast.success("Cobro Manual Confirmado", `Cupón ${cupon} registrado para Dinelco.`)
+    await logDinelcoTxn({
+      tipo_operacion: dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr",
+      exitosa: true,
+      verificado_automaticamente: false,
+      monto: montoQrDinelco,
+      terminal_ip: activePosConfig.dinelcoIp || "manual",
+      mensaje_display: "CONFIRMACION_MANUAL_POS",
+      codigo_autorizacion: cupon,
+      nro_boleta: cupon,
+      raw_response: { manual: true, voucher: cupon },
     })
   }
 
@@ -4474,24 +4573,43 @@ export default function POSPage() {
     const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
     const W = ESCPOS_LINE_WIDTH
 
-    // Documento interno (no fiscal, no va al cliente) -- sin logo ni datos
-    // de la empresa, al minimo de renglones posible para ahorrar papel.
+    let companyData: any = {}
+    try {
+      const saved = localStorage.getItem("pos_company_data")
+      if (saved) companyData = JSON.parse(saved)
+    } catch (e) {}
+
+    const fantasia = companyData.nombre_fantasia || companyData.nombre || "Extra Supermercado Mayorista"
+    const razon = companyData.razon_social || "GRUPO SANTA TERESA E.A.S."
+    const rucEmpresa = companyData.ruc || "80150377-9"
+
     let t = ESCPOS_INIT
     t += ESCPOS_ALIGN_CENTER
-    t += ESCPOS_BOLD_ON + 'COMPROBANTE PIX (interno)' + ESCPOS_BOLD_OFF + '\n'
+    t += ESCPOS_BOLD_ON + escposStripAccents(fantasia.toUpperCase()) + ESCPOS_BOLD_OFF + '\n'
+    t += `${escposStripAccents(razon)} - RUC: ${rucEmpresa}\n`
+    t += escposDashes(W) + '\n'
+    t += ESCPOS_BOLD_ON + '*** COMPROBANTE DE PAGO PIX ***' + ESCPOS_BOLD_OFF + '\n'
     t += ESCPOS_ALIGN_LEFT
     t += escposDashes(W) + '\n'
-    t += `${new Date().toLocaleString("es-PY")} - ${escposStripAccents(user?.nombre || '')} (${puntoEmision})\n`
-    t += `CPF: ${cpf}\n`
-    t += `ID: ${pixData?.IdTransacao ?? '-'} Ref: ${pixData?.referenciaInterna ?? '-'}\n`
+    t += `Fecha: ${new Date().toLocaleString("es-PY")}\n`
+    t += `Cajero: ${escposStripAccents(user?.nombre || '')} (${puntoEmision})\n`
+    if (cpf) t += `CPF Pagador: ${cpf}\n`
+    t += `ID Transaccion: ${pixData?.IdTransacao ?? '-'}\n`
+    if (pixData?.referenciaInterna) t += `Ref. Interna: ${pixData.referenciaInterna}\n`
     t += escposDashes(W) + '\n'
-    t += escposTwoCol('Gs.', fmtGs(montoPyg), W) + '\n'
-    t += escposTwoCol('R$', pixData?.valueBRL ? Number(pixData.valueBRL).toFixed(2) : '-', W) + '\n'
+    t += escposTwoCol('TOTAL Gs.:', `PYG ${fmtGs(montoPyg)}`, W) + '\n'
+    const valBrl = pixData?.valueBRL || pixData?.valorEmBRL
+    if (valBrl) {
+      t += escposTwoCol('TOTAL R$:', `BRL ${Number(valBrl).toFixed(2)}`, W) + '\n'
+    }
     t += escposDashes(W) + '\n'
     t += ESCPOS_ALIGN_CENTER
-    t += ESCPOS_BOLD_ON + 'APROBADO' + ESCPOS_BOLD_OFF + '\n'
+    t += ESCPOS_BOLD_ON + '✓ PAGO CONFIRMADO / APROBADO' + ESCPOS_BOLD_OFF + '\n'
+    t += 'Operacion procesada por Banco Central do Brasil / BS2\n'
+    t += escposDashes(W) + '\n'
 
-    t += '\n'.repeat(2)
+    // Saltos antes de cortar para que la cuchilla no corte sobre el texto (saltos extra pedidos)
+    t += '\n'.repeat(5)
     t += GS + 'V' + '\x01'
 
     try {
@@ -9203,25 +9321,38 @@ export default function POSPage() {
                             </div>
 
                             {plugpayState === "idle" && (
-                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-                                <div className="sm:col-span-8">
-                                  <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF (11 dígitos):</label>
-                                  <input
-                                    type="text"
-                                    value={plugpayCpf}
-                                    onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                                    placeholder="52998224725"
-                                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-orange-500 text-center font-bold"
-                                  />
+                              <div className="space-y-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                                  <div className="sm:col-span-8">
+                                    <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF (11 dígitos):</label>
+                                    <input
+                                      type="text"
+                                      value={plugpayCpf}
+                                      onChange={(e) => setPlugpayCpf(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                                      placeholder="52998224725"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-mono text-xs outline-none focus:border-orange-500 text-center font-bold"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-4">
+                                    <button
+                                      type="button"
+                                      onClick={handlePlugpayPix}
+                                      className="w-full py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-orange-600/20 flex items-center justify-center gap-1.5 h-[36px]"
+                                    >
+                                      <QrCode className="w-3.5 h-3.5" />
+                                      <span>Generar PIX</span>
+                                    </button>
+                                  </div>
                                 </div>
-                                <div className="sm:col-span-4">
+                                <div className="pt-1.5 flex justify-end">
                                   <button
                                     type="button"
-                                    onClick={handlePlugpayPix}
-                                    className="w-full py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-sm shadow-orange-600/20 flex items-center justify-center gap-1.5 h-[36px]"
+                                    onClick={handleCheckLastPlugpayPix}
+                                    disabled={checkingLastPix}
+                                    className="text-xs text-orange-600 dark:text-orange-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
                                   >
-                                    <QrCode className="w-3.5 h-3.5" />
-                                    <span>Generar PIX</span>
+                                    {checkingLastPix ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                                    <span>🔍 Verificar si el cliente ya pagó (Consultar Aero)</span>
                                   </button>
                                 </div>
                               </div>
@@ -9281,6 +9412,42 @@ export default function POSPage() {
                                       Escanear desde app de banco (Nubank, Itaú, Bradesco, Mercado Pago, Inter).
                                     </p>
                                   </div>
+                                </div>
+
+                                <div className="pt-2 border-t border-orange-200 dark:border-orange-800">
+                                  <button
+                                    type="button"
+                                    onClick={handleCheckLastPlugpayPix}
+                                    disabled={checkingLastPix}
+                                    className="w-full py-2 px-3 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
+                                  >
+                                    {checkingLastPix ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                                    <span>Consultar Estado Ahora en Aero</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {plugpayState === "error" && (
+                              <div className="p-3 bg-rose-500/10 border border-rose-500/40 rounded-2xl text-xs text-rose-600 dark:text-rose-300 space-y-2 text-left">
+                                <div className="font-black">✕ {plugpayError || "Error al procesar PIX"}</div>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={handlePlugpayPix}
+                                    className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded-lg text-xs cursor-pointer shadow-xs"
+                                  >
+                                    Reintentar Generar PIX
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleCheckLastPlugpayPix}
+                                    disabled={checkingLastPix}
+                                    className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold rounded-lg text-xs cursor-pointer hover:bg-slate-300 dark:hover:bg-slate-700 flex items-center gap-1"
+                                  >
+                                    {checkingLastPix && <Loader2 className="w-3 h-3 animate-spin" />}
+                                    <span>Verificar en Aero</span>
+                                  </button>
                                 </div>
                               </div>
                             )}
@@ -9364,6 +9531,16 @@ export default function POSPage() {
                               </button>
                             )}
 
+                            {dinelcoQrState !== "aprobada" && (
+                              <button
+                                type="button"
+                                onClick={() => setShowDinelcoQrManualFallback((v) => !v)}
+                                className="text-[11px] font-bold text-purple-600 dark:text-purple-400 hover:underline cursor-pointer"
+                              >
+                                {showDinelcoQrManualFallback ? "▾ Ocultar carga manual de cupón" : "▸ ¿Error en terminal? Cargar cupón POS manualmente"}
+                              </button>
+                            )}
+
                             {dinelcoQrState === "aprobada" && (
                               <div className="w-full max-w-sm p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
                                 <div className="font-black">✓ Transacción {dinelcoQrMode === "pix" ? "PIX" : "QR"} Dinelco Aprobada</div>
@@ -9381,6 +9558,33 @@ export default function POSPage() {
                               <div className="w-full max-w-sm p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
                                 <div className="font-black">⚠ {dinelcoQrError}</div>
                                 <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
+                              </div>
+                            )}
+
+                            {(showDinelcoQrManualFallback || dinelcoQrState === "error_rechazo" || dinelcoQrState === "error_conexion") && dinelcoQrState !== "aprobada" && (
+                              <div className="w-full max-w-sm p-3 rounded-xl bg-purple-500/10 border border-purple-500/30 text-xs text-slate-700 dark:text-slate-300 space-y-2 text-left">
+                                <div className="font-black text-purple-700 dark:text-purple-300">
+                                  💡 Contingencia Manual para POS Dinelco
+                                </div>
+                                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-tight">
+                                  Si el terminal Dinelco arrojó error (ej. Código 19 en PIX) o no conecta por red, realizá el cobro directo en el teclado del POS físico e ingresá el Nº de boleta / comprobante aquí:
+                                </p>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    value={dinelcoQrCupon}
+                                    onChange={(e) => setDinelcoQrCupon(e.target.value)}
+                                    placeholder="Nº Boleta / Cupón"
+                                    className="flex-1 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={handleConfirmDinelcoQrManual}
+                                    className="px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-xs whitespace-nowrap"
+                                  >
+                                    Confirmar
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -9646,7 +9850,22 @@ export default function POSPage() {
               <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
                 <button
                   type="button"
-                  onClick={() => setShowPaymentModal(false)}
+                  onClick={() => {
+                    const yaCobrado =
+                      (activeMethods.has("bancard") && (bancardTxnState === "aprobada" || posCardCupon.trim().length > 0)) ||
+                      (activeMethods.has("dinelco") && (dinelcoTxnState === "aprobada" || dinelcoCupon.trim().length > 0)) ||
+                      (activeMethods.has("qr") && (
+                        (qrSubMethod === "zimple" && (bancardQrState === "aprobada" || bancardQrManualConfirm)) ||
+                        (qrSubMethod === "pix" && plugpayState === "aprobada") ||
+                        (qrSubMethod === "dinelco" && (dinelcoQrState === "aprobada" || dinelcoQrCupon.trim().length > 0))
+                      ))
+                    if (yaCobrado) {
+                      if (!window.confirm("¡ATENCIÓN! Ya se cobró una parte de la venta en el terminal POS / PIX. Si volvés al carrito, el cobro físico no se anula solo. ¿Estás seguro de salir?")) {
+                        return
+                      }
+                    }
+                    setShowPaymentModal(false)
+                  }}
                   className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center gap-1.5 shadow-xs"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
@@ -9669,7 +9888,7 @@ export default function POSPage() {
                       const qrConfirmado =
                         (qrSubMethod === "zimple" && bancardQrState === "aprobada") ||
                         (qrSubMethod === "pix" && plugpayState === "aprobada") ||
-                        (qrSubMethod === "dinelco" && dinelcoQrState === "aprobada")
+                        (qrSubMethod === "dinelco" && (dinelcoQrState === "aprobada" || dinelcoQrCupon.trim().length > 0))
                       if (!qrConfirmado) {
                         toast.warning("QR sin confirmar", "Generá el QR y esperá el pago, o marcá que ya cobraste por fuera del sistema.")
                         return

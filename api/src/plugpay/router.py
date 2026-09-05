@@ -58,6 +58,39 @@ async def pix_create(data: PixCreateRequest, db: AsyncSession = Depends(get_db),
         return _error_response(e)
 
 
+@router.get("/pix/last-pending")
+async def get_last_pending_pix(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    try:
+        txn = await transactions_service.get_last_unlinked_pix(db, user["company_id"])
+        if not txn:
+            return {"ok": False, "error_message": "No hay transacciones PIX pendientes recientes."}
+        
+        ref = txn.referencia_interna
+        live_status = await service.get_pix_status(db, user["company_id"], ref)
+        status_code = live_status.get("status") or live_status.get("Status")
+        
+        # Si ya se aprobó, actualizar el registro
+        if status_code == 1:
+            txn.exitosa = True
+            await db.commit()
+            await db.refresh(txn)
+
+        return {
+            "ok": True,
+            "transaction_log_id": str(txn.id),
+            "referencia_interna": ref,
+            "id_transacao": txn.id_transacao,
+            "monto": float(txn.monto_origen or 0),
+            "value_brl": float(txn.value_brl or 0) if txn.value_brl else None,
+            "created_at": txn.created_at.isoformat() if txn.created_at else None,
+            "live_status": live_status,
+            "is_approved": status_code == 1,
+            "status_code": status_code,
+        }
+    except Exception as e:
+        return {"ok": False, "error_message": str(e)}
+
+
 @router.get("/pix/status/{referencia_interna}", response_model=PlugpayTransactionResponse)
 async def pix_status(referencia_interna: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     try:

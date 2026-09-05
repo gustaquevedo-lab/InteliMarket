@@ -1473,6 +1473,20 @@ export const api = {
       client.post<{ ok: boolean; data?: any; error_message?: string; transaction_log_id?: string }>("/v1/plugpay/pix/create", data),
     pixStatus: (referenciaInterna: string) =>
       client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/status/${referenciaInterna}`),
+    getLastPendingPix: () =>
+      client.get<{
+        ok: boolean;
+        transaction_log_id?: string;
+        referencia_interna?: string;
+        id_transacao?: string;
+        monto?: number;
+        value_brl?: number;
+        created_at?: string;
+        live_status?: any;
+        is_approved?: boolean;
+        status_code?: number;
+        error_message?: string;
+      }>("/v1/plugpay/pix/last-pending"),
     pixQrcode: (referenciaInterna: string) =>
       client.get<{ ok: boolean; data?: any; error_message?: string }>(`/v1/plugpay/pix/qrcode/${referenciaInterna}`),
     quotePix: (data: { monto: number; moneda?: string }) =>
