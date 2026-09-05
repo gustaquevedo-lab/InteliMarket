@@ -3903,10 +3903,11 @@ export default function POSPage() {
       }
     }
 
-    // 1. DECODIFICACIÓN AUTOMÁTICA DE CÓDIGOS DE BALANZA DE GÓNDOLA (EAN-13 PREFIJO 2)
-    // Si existe un producto unitario cuyo código de barras exacto coincide, NO es una etiqueta de balanza
+    // 1. DECODIFICACIÓN AUTOMÁTICA DE CÓDIGOS DE BALANZA DE GÓNDOLA (EAN-13 EXCLUSIVAMENTE PREFIJO 20)
+    // Las balanzas etiquetadoras (Balmak Edge, Toledo, DIGI) usan estrictamente prefijo 20.
+    // Los prefijos 21 a 29 (ej. 28 de juguetería/bazar) son productos unitarios normales.
     const isExactNonPesable = products.some(p => (p.codigo_barra === code || p.sku === code) && !isPesableProduct(p))
-    if (!qtyPrefix && code.length === 13 && code.startsWith("2") && !isExactNonPesable) {
+    if (!qtyPrefix && code.length === 13 && code.startsWith("20") && !isExactNonPesable) {
       const pluCandidate = code.substring(0, 7)
       const weightGrams = parseInt(code.substring(7, 12), 10)
       if (weightGrams > 0) {
