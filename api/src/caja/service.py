@@ -682,24 +682,6 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     return recon_data
 
 
-async def _efectivo_esperado_por_moneda(db: AsyncSession, session_id: uuid.UUID | str, moneda: str) -> Decimal:
-    """Efectivo recibido en una moneda durante la sesion (sin conversion — cada
-    moneda de caja se cuenta por separado)."""
-    s_uuid = uuid.UUID(str(session_id))
-    result = await db.execute(
-        select(func.coalesce(func.sum(SalePayment.monto), 0))
-        .select_from(SalePayment)
-        .join(Sale, Sale.id == SalePayment.sale_id)
-        .where(
-            Sale.session_id == s_uuid,
-            func.upper(SalePayment.forma_pago) == "EFECTIVO",
-            func.upper(SalePayment.moneda) == moneda.upper(),
-            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
-        )
-    )
-    return Decimal(str(result.scalar() or 0))
-
-
 async def close_session(
     db: AsyncSession,
     session_id: str,
@@ -723,40 +705,22 @@ async def close_session(
     session_obj.estado = "cerrada"
     await db.flush()
 
-    # Obtener cotizaciones de la sesión
-    tasa_brl, tasa_usd = await get_effective_exchange_rates_for_session(db, session_obj.id, session_obj.fecha_apertura)
+    # Conciliación consolidada unificada en Guaraníes
+    recon = await get_session_reconciliation_data(db, session_obj.id)
+    tasa_brl = Decimal(str(recon["tasa_brl"])) if recon else Decimal("1")
+    tasa_usd = Decimal(str(recon["tasa_usd"])) if recon else Decimal("1")
 
-    # Calcular ventas efectivas
-    efectivo_pyg_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "PYG")
-    efectivo_usd_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "USD")
-    efectivo_brl_esperado = await _efectivo_esperado_por_moneda(db, session_obj.id, "BRL")
+    monto_apertura_pyg = Decimal(str(recon["fondo_pyg"])) if recon else Decimal(str(session_obj.monto_apertura or 0))
+    monto_apertura_usd = Decimal(str(recon["fondo_usd"])) if recon else Decimal(str(session_obj.monto_apertura_usd or 0))
+    monto_apertura_brl = Decimal(str(recon["fondo_brl"])) if recon else Decimal(str(session_obj.monto_apertura_brl or 0))
 
-    # Retiros / Drops confirmados
-    cd_res = await db.execute(
-        select(CashDropRequest).where(CashDropRequest.session_id == session_obj.id, CashDropRequest.estado == "confirmado")
-    )
-    drops = list(cd_res.scalars().all())
-    d_pyg = sum(Decimal(str(d.monto_confirmado_pyg or d.monto_pyg or 0)) for d in drops)
-    d_brl = sum(Decimal(str(d.monto_confirmado_brl or d.monto_brl or 0)) for d in drops)
-    d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops)
-    total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
+    # Monto de cierre esperado consolidado (100% en Guaraníes)
+    monto_cierre_esperado_total_gs = Decimal(str(recon["esperado_total_gs"])) if recon else Decimal("0")
 
-    # Fondos iniciales consolidados
-    monto_apertura_pyg = Decimal(str(session_obj.monto_apertura or 0))
-    monto_apertura_usd = Decimal(str(session_obj.monto_apertura_usd or 0))
-    monto_apertura_brl = Decimal(str(session_obj.monto_apertura_brl or 0))
-    fondo_total_gs = monto_apertura_pyg + (monto_apertura_brl * tasa_brl) + (monto_apertura_usd * tasa_usd)
-
-    # Ventas en efectivo consolidadas
-    ventas_ef_total_gs = efectivo_pyg_esperado + (efectivo_brl_esperado * tasa_brl) + (efectivo_usd_esperado * tasa_usd)
-
-    # Monto de cierre esperado consolidado
-    monto_cierre_esperado_total_gs = fondo_total_gs + ventas_ef_total_gs - total_drops_gs
-
-    # Total contado declarado consolidado
+    # Total contado declarado consolidado en Guaraníes
     contado_total_gs = Decimal(str(monto_cierre_real)) + (Decimal(str(monto_cierre_brl)) * tasa_brl) + (Decimal(str(monto_cierre_usd)) * tasa_usd)
 
-    # Diferencia unificada en Guaraníes
+    # Diferencia unificada en Guaraníes (sin desdoblar faltantes ni sobrantes en moneda extranjera)
     diferencia_consolidada = contado_total_gs - monto_cierre_esperado_total_gs
 
     register_result = await db.execute(select(CashRegister).where(CashRegister.id == session_obj.register_id))
@@ -2208,18 +2172,15 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         select(CashCount).where(CashCount.session_id == s.id).order_by(CashCount.created_at.desc()).limit(1)
     )
     count = count_res.scalar_one_or_none()
-
-    efectivo_pyg = await _efectivo_esperado_por_moneda(db, s.id, "PYG")
-    efectivo_usd = await _efectivo_esperado_por_moneda(db, s.id, "USD")
-    efectivo_brl = await _efectivo_esperado_por_moneda(db, s.id, "BRL")
+    recon = await get_session_reconciliation_data(db, s.id)
 
     monto_apertura_pyg = float(s.monto_apertura or 0)
     monto_apertura_usd = float(s.monto_apertura_usd or 0)
     monto_apertura_brl = float(s.monto_apertura_brl or 0)
 
-    monto_cierre_esperado = monto_apertura_pyg + float(efectivo_pyg)
-    monto_cierre_esperado_usd = monto_apertura_usd + float(efectivo_usd)
-    monto_cierre_esperado_brl = monto_apertura_brl + float(efectivo_brl)
+    monto_cierre_esperado = float(recon["esperado_total_gs"]) if recon else monto_apertura_pyg
+    monto_cierre_esperado_usd = monto_apertura_usd
+    monto_cierre_esperado_brl = monto_apertura_brl
 
     # Breakdown formas de pago
     breakdown = await get_session_payment_breakdown(db, str(s.id))
@@ -2256,9 +2217,9 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         "monto_cierre_esperado": monto_cierre_esperado,
         "monto_cierre_esperado_usd": monto_cierre_esperado_usd,
         "monto_cierre_esperado_brl": monto_cierre_esperado_brl,
-        "efectivo_cobrado_pyg": float(efectivo_pyg),
-        "efectivo_usd_esperado": float(efectivo_usd),
-        "efectivo_brl_esperado": float(efectivo_brl),
+        "efectivo_cobrado_pyg": float(recon["ventas_ef_total_gs"]) if recon else 0.0,
+        "efectivo_usd_esperado": 0.0,
+        "efectivo_brl_esperado": 0.0,
         "monto_efectivo_usd": float(count.monto_efectivo_usd or 0) if count else 0,
         "monto_efectivo_brl": float(count.monto_efectivo_brl or 0) if count else 0,
         "diferencia": float(count.diferencia or 0) if count else 0,
