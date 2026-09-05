@@ -3082,6 +3082,7 @@ export default function POSPage() {
   const [cuponModalStep, setCuponModalStep] = useState<"pregunta" | "formulario">("pregunta")
   const [lookingUpDoc, setLookingUpDoc] = useState(false)
   const [pendingCuponData, setPendingCuponData] = useState<{
+    saleId?: string
     saleNumero: string
     montoCompra: number
     totalCupones: number
@@ -3268,6 +3269,7 @@ export default function POSPage() {
     const fullTel = `${pendingCuponData.telCodigo}${pendingCuponData.telefono.trim()}`
     try {
       await api.cupones.registrarMultiple({
+        sale_id: pendingCuponData.saleId || undefined,
         documento: pendingCuponData.doc.trim(),
         nombre: pendingCuponData.nombre.trim(),
         telefono: fullTel,
@@ -4802,12 +4804,15 @@ export default function POSPage() {
     })
   }, [customerSearch, customerSearchResults, customers])
 
-  // El índice 0 siempre es "Consumidor Final"; 1..N son los resultados de
-  // combinedCustomerList -- se resetea cada vez que cambia la búsqueda para
-  // no dejar seleccionado un resultado que ya no está en la lista.
+  // Si hay búsqueda activa con resultados, se preselecciona el primer resultado (índice 1);
+  // de lo contrario, queda en Consumidor Final (índice 0).
   useEffect(() => {
-    setCustomerHighlight(0)
-  }, [customerSearch, showCustomerModal])
+    if (customerSearch.trim() && combinedCustomerList.length > 0) {
+      setCustomerHighlight(1)
+    } else {
+      setCustomerHighlight(0)
+    }
+  }, [customerSearch, showCustomerModal, combinedCustomerList.length])
 
   useEffect(() => {
     if (showPausedModal) setPausedHighlight(0)
@@ -6246,13 +6251,18 @@ export default function POSPage() {
               initialTelNum = initialTelNum.slice(3)
             }
 
+            const isConsumidorFinal = !customer?.nombre || customer.nombre === "Consumidor Final" || customer.id === DEFAULT_CUSTOMER.id
+            const initialDoc = isConsumidorFinal ? "" : (customer.ci || customer.ruc || "")
+            const initialNombre = isConsumidorFinal ? "" : customer.nombre
+
             setPendingCuponData({
+              saleId: createdSaleId || undefined,
               saleNumero: numeroComprobante,
               montoCompra: totalPyg,
               totalCupones: evalRes.total_cupones,
               campanasCalificadas: evalRes.campanas_calificadas,
-              doc: customer?.ci || customer?.ruc || "",
-              nombre: (customer?.nombre && customer?.nombre !== "Consumidor Final") ? customer.nombre : "",
+              doc: initialDoc,
+              nombre: initialNombre,
               telCodigo: initialTelCod,
               telefono: initialTelNum,
               barrio: (customer as any)?.barrio || "Centro",
@@ -11853,7 +11863,12 @@ export default function POSPage() {
                   </button>
 
                   <button
-                    onClick={() => setCuponModalStep("formulario")}
+                    onClick={() => {
+                      setCuponModalStep("formulario")
+                      if (pendingCuponData?.doc) {
+                        handleLookupDoc(pendingCuponData.doc, true)
+                      }
+                    }}
                     className="py-3 px-4 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs shadow-lg shadow-orange-500/30 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   >
                     <span>Sí, Participar</span>
