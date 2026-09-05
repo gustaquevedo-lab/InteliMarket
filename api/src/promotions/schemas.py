@@ -7,8 +7,8 @@ from decimal import Decimal
 class PromotionCreate(BaseModel):
     nombre: str
     descripcion: Optional[str] = None
-    # Unicos tipos con calculo real: porcentaje | monto_fijo | precio_fijo_oferta.
-    # dos_por_uno/combo_precio/cantidad_lleva no tienen logica implementada.
+    # Ver tipos_validos en validar_consistencia() para la lista completa y
+    # calcular_precio_promocional() en service.py para la logica de cada uno.
     tipo: str = "precio_fijo_oferta"
     valor: Optional[Decimal] = None
     precio_fijo_promocional: Optional[Decimal] = None
