@@ -173,6 +173,8 @@ def generate_price_variance_pdf(company: dict, variance_rows: list[dict], genera
 def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], generated_by: str = "") -> bytes:
     buffer = io.BytesIO()
     doc, styles = _base_doc(buffer, f"Orden de Compra {order.get('numero', '')}", company, generated_by)
+    if "SmallBold" not in styles:
+        styles.add(ParagraphStyle("SmallBold", fontName=FONT_BOLD, fontSize=8, leading=11, textColor=GRAY_DARK))
 
     # Si no viene razón social definida en company, usar los datos oficiales de Extra Supermercado
     company_data = {
