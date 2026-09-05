@@ -4197,6 +4197,9 @@ export default function POSPage() {
       })
       setRemoteAuthRequestId(created.id)
       setRemoteAuthStatus("pendiente")
+      if (action.type === "reopen_invoice" || action.type === "reopen_payment") {
+        setShowReimprimirModal(false)
+      }
       setShowRemoteAuthModal(true)
     } catch (e: any) {
       toast.error("No se pudo enviar la solicitud", e?.message || "Intente nuevamente.")
@@ -7716,7 +7719,7 @@ export default function POSPage() {
 
       {/* ── SOLICITUD DE AUTORIZACIÓN REMOTA (SIN SUPERVISOR EN ESTA CAJA) ──── */}
       {showRemoteAuthModal && (
-        <div className="fixed inset-0 z-[125] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[220] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-brand-orange rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in text-center">
             <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-brand-orange flex items-center justify-center text-[#1C1710] shadow-lg shadow-orange-500/30 animate-pulse">
               <ShieldAlert className="w-7 h-7" />
@@ -7781,7 +7784,7 @@ export default function POSPage() {
 
       {/* ── 7. MODAL DE AUTORIZACIÓN DE SUPERVISOR (SEGURIDAD DE CAJA) ──────── */}
       {showSupervisorModal && (
-        <div className="fixed inset-0 z-[200] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[230] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-md w-full p-6 shadow-2xl text-slate-900 dark:text-slate-100 animate-fade-in">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-xl bg-brand-orange flex items-center justify-center text-[#1C1710] font-black shadow-sm shadow-orange-500/30">
@@ -8181,11 +8184,11 @@ export default function POSPage() {
 
       {/* ── 8. MODAL DE COBRO MULTIMONEDA & PASARELAS POS BANCARD / DINELCO (F12) ── */}
       {showPaymentModal && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-5xl w-full shadow-2xl text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col">
+        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-5xl w-full max-h-[92vh] shadow-2xl text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col">
             
             {/* 1. HEADER BAR */}
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60">
+            <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-slate-950 shrink-0 shadow-sm font-black text-base">
                   ₲
@@ -8214,11 +8217,11 @@ export default function POSPage() {
               </button>
             </div>
 
-            {/* 2. BODY SPLIT (2 COLUMNS) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
+            {/* 2. BODY SPLIT (2 COLUMNS) WITH INTERNAL SCROLL */}
+            <div className="overflow-y-auto flex-1 p-0 grid grid-cols-1 lg:grid-cols-12 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
               
               {/* ── COLUMNA IZQUIERDA: RESUMEN FINANCIERO Y VUELTO (5 COLS) ── */}
-              <div className="lg:col-span-5 p-4 bg-slate-50/60 dark:bg-slate-950/40 space-y-2.5">
+              <div className="lg:col-span-5 p-4 bg-slate-50/60 dark:bg-slate-950/40 space-y-2.5 min-w-0">
                 {/* Hero Total Venta */}
                 <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1.5">
                   <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
@@ -8532,7 +8535,7 @@ export default function POSPage() {
               </div>
 
               {/* ── COLUMNA DERECHA: SELECCIÓN DE MÉTODO Y ENTRADA DE PAGO (7 COLS) ── */}
-              <div className="lg:col-span-7 p-4 space-y-3">
+              <div className="lg:col-span-7 p-4 space-y-3 min-w-0">
                 {/* Selector de Métodos de Pago */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
@@ -9337,17 +9340,17 @@ export default function POSPage() {
                                   </button>
                                 </div>
 
-                                <div className="flex items-center gap-3.5">
+                                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3.5 min-w-0">
                                   {(plugpayQrImageUrl || plugpayResult?.qrCodeStringImage) && (
                                     <div className="p-2 bg-white rounded-xl shadow-xs border border-orange-300 shrink-0">
                                       <img
                                         src={plugpayQrImageUrl || `data:image/png;base64,${plugpayResult.qrCodeStringImage}`}
-                                        className="w-48 h-48 sm:w-52 sm:h-52 object-contain rounded-md"
+                                        className="w-36 h-36 sm:w-44 sm:h-44 object-contain rounded-md"
                                         alt="PIX QR Code Brasil"
                                       />
                                     </div>
                                   )}
-                                  <div className="flex-1 space-y-2.5 text-left">
+                                  <div className="flex-1 space-y-2 text-center sm:text-left min-w-0 w-full">
                                     <div>
                                       <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Total a pagar:</span>
                                       <span className="text-xl font-black font-posMono text-orange-600 dark:text-orange-400">
@@ -9430,7 +9433,7 @@ export default function POSPage() {
                             )}
 
                             {dinelcoQrMode === "pix" && dinelcoQrState !== "aprobada" && (
-                              <div className="w-full max-w-sm">
+                              <div className="w-full max-w-md">
                                 <label className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">CPF del comprador (11 dígitos):</label>
                                 <input
                                   type="text"
@@ -9447,7 +9450,7 @@ export default function POSPage() {
                                 type="button"
                                 onClick={handleDinelcoQR}
                                 disabled={!activePosConfig.dinelcoIp || dinelcoQrState === "esperando"}
-                                className="w-full max-w-sm flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
+                                className="w-full max-w-md flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-600/20"
                               >
                                 {dinelcoQrState === "esperando" ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
                                 <span>
@@ -9459,20 +9462,20 @@ export default function POSPage() {
                             )}
 
                             {dinelcoQrState === "aprobada" && (
-                              <div className="w-full max-w-sm p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
+                              <div className="w-full max-w-md p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs text-emerald-600 dark:text-emerald-300 text-left">
                                 <div className="font-black">✓ Transacción {dinelcoQrMode === "pix" ? "PIX" : "QR"} Dinelco Aprobada</div>
                               </div>
                             )}
 
                             {dinelcoQrState === "error_rechazo" && (
-                              <div className="w-full max-w-sm p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
+                              <div className="w-full max-w-md p-3 rounded-xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-600 dark:text-rose-300 space-y-1.5 text-left">
                                 <div className="font-black">✕ {dinelcoQrError}</div>
                                 <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar</button>
                               </div>
                             )}
 
                             {dinelcoQrState === "error_conexion" && (
-                              <div className="w-full max-w-sm p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
+                              <div className="w-full max-w-md p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
                                 <div className="font-black">⚠ {dinelcoQrError}</div>
                                 <button type="button" onClick={handleDinelcoQR} className="text-xs font-bold underline cursor-pointer">Reintentar conexión</button>
                               </div>
@@ -9802,7 +9805,7 @@ export default function POSPage() {
               </div>
 
               {/* 3. FOOTER ACTION BAR */}
-              <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
+              <div className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70">
                 <button
                   type="button"
                   onClick={() => setShowPaymentModal(false)}
