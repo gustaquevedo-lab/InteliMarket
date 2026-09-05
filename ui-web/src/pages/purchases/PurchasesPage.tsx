@@ -2262,7 +2262,7 @@ export default function PurchasesPage() {
                             />
                           </th>
                           {renderSortHeader("producto", "Producto & SKU", "left", undefined, "min-w-[200px]")}
-                          {renderSortHeader("proveedor", "Último Proveedor", "left", "Último proveedor registrado para este producto", "min-w-[140px]")}
+                          {renderSortHeader("proveedor", "Último Proveedor", "left", "Último proveedor registrado para este producto", "min-w-[150px] max-w-[210px]")}
                           {renderSortHeader("stock", "Stock Físico", "right", "Stock actual físico registrado en góndola/depósito")}
                           {renderSortHeader("m4", labels4m[0], "right", `Ventas mensuales registradas en ${labels4m[0]}`, "font-mono")}
                           {renderSortHeader("m3", labels4m[1], "right", `Ventas mensuales registradas en ${labels4m[1]}`, "font-mono")}
@@ -2280,8 +2280,9 @@ export default function PurchasesPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                        {displayedReplenishmentItems.map((it: any) => {
+                        {displayedReplenishmentItems.map((it: any, idx: number) => {
                           const isSelected = !!selectedItemsIA[it.product_id]
+                          const isEven = idx % 2 === 0
                           const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0))
                           const unitCost = editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (Number(it.costo_unitario_estimado) || 0)
                           const subtotal = Number(qty) * unitCost
@@ -2293,13 +2294,17 @@ export default function PurchasesPage() {
                           return (
                             <tr
                               key={it.product_id}
-                              className={`hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors ${
-                                it.autonomia_estado === "critico"
-                                  ? "bg-red-50/30 dark:bg-red-950/10"
+                              className={`transition-all duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
+                                isSelected
+                                  ? "bg-indigo-50/80 dark:bg-indigo-950/40"
+                                  : it.autonomia_estado === "critico"
+                                  ? "bg-red-50/40 dark:bg-red-950/20"
                                   : it.autonomia_estado === "bajo"
-                                  ? "bg-amber-50/20 dark:bg-amber-950/10"
-                                  : ""
-                              }`}
+                                  ? "bg-amber-50/30 dark:bg-amber-950/15"
+                                  : isEven
+                                  ? "bg-white dark:bg-slate-900"
+                                  : "bg-slate-50/60 dark:bg-slate-800/30"
+                              } hover:!bg-blue-100/80 dark:hover:!bg-indigo-950/70 hover:shadow-sm`}
                             >
                               <td className="p-3 text-center">
                                 <input
@@ -2327,11 +2332,13 @@ export default function PurchasesPage() {
                               </td>
 
                               {/* Último Proveedor Habitual */}
-                              <td className="p-2.5 min-w-[140px]">
+                              <td className="p-2.5 min-w-[150px] max-w-[210px]">
                                 {it.ultimo_proveedor_nombre ? (
-                                  <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200" title={`Último Proveedor: ${it.ultimo_proveedor_nombre}`}>
-                                    <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                    <span className="text-[11px] font-semibold truncate max-w-[130px]">{it.ultimo_proveedor_nombre}</span>
+                                  <div className="flex items-start gap-1.5 text-slate-700 dark:text-slate-200" title={`Último Proveedor: ${it.ultimo_proveedor_nombre}`}>
+                                    <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
+                                    <span className="text-[11px] font-semibold leading-snug line-clamp-2 break-words">
+                                      {it.ultimo_proveedor_nombre}
+                                    </span>
                                   </div>
                                 ) : (
                                   <span className="text-[10px] text-gray-400 italic">Sin asignar</span>
