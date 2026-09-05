@@ -11,6 +11,7 @@ import {
   ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star,
   Lock, Unlock, FileCheck
 } from "lucide-react"
+import * as XLSX from "xlsx"
 import {
   api,
   type PurchaseOrder,
@@ -212,6 +213,7 @@ export default function PurchasesPage() {
   const [replenishmentData, setReplenishmentData] = useState<SmartReplenishmentResponse | null>(null)
   const [loadingReplenishment, setLoadingReplenishment] = useState(false)
   const [editedQuantities, setEditedQuantities] = useState<Record<string, number>>({})
+  const [editedCosts, setEditedCosts] = useState<Record<string, number>>({})
   const [selectedItemsIA, setSelectedItemsIA] = useState<Record<string, boolean>>({})
 
   // Modal de Confirmación y Generación de OC desde IA
@@ -477,6 +479,99 @@ export default function PurchasesPage() {
     }
   }
 
+  // Exportar listado de órdenes de compra a Excel (.xlsx)
+  const handleExportOrdersToExcel = () => {
+    try {
+      if (filteredOrders.length === 0) {
+        toast.info("Sin datos", "No hay órdenes de compra para exportar.")
+        return
+      }
+      const dataToExport = filteredOrders.map(o => ({
+        "N° Orden": o.numero || "S/N",
+        "Proveedor": o.supplier?.razon_social || "Sin Asignar",
+        "RUC Proveedor": o.supplier?.ruc || "—",
+        "Fecha Emisión": o.fecha ? formatDate(o.fecha) : formatDate(o.created_at || ""),
+        "Fecha Entrega": o.fecha_entrega_estimada ? formatDate(o.fecha_entrega_estimada) : "—",
+        "Estado": poStatusMap[o.estado || ""]?.label || o.estado || "Borrador",
+        "Condición": o.condiciones_pago || "30 Días",
+        "Moneda": o.moneda || "PYG",
+        "Subtotal (Gs.)": Number(o.subtotal || 0),
+        "Total IVA (Gs.)": Number(o.iva_10 || 0) + Number(o.iva_5 || 0),
+        "Total General (Gs.)": Number(o.total || 0),
+        "Observaciones": o.observaciones || "",
+      }))
+      const ws = XLSX.utils.json_to_sheet(dataToExport)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "OrdenesDeCompra")
+      XLSX.writeFile(wb, `Listado_Ordenes_Compra_${new Date().toISOString().split("T")[0]}.xlsx`)
+      toast.success("Excel Exportado", `Se descargaron ${filteredOrders.length} órdenes de compra en formato .xlsx.`)
+    } catch (e: any) {
+      toast.error("Error al exportar a Excel", e.message)
+    }
+  }
+
+  // Exportar detalle de una orden de compra individual a Excel (.xlsx)
+  const handleExportSinglePOToExcel = (po: PurchaseOrder, items: any[]) => {
+    try {
+      const headerRows: any[][] = [
+        ["EXTRA SUPERMERCADO MAYORISTA - GRUPO SANTA TERESA E.A.S."],
+        ["RUC: 80150377-9 | Timbrado: 18545636 | Casa Matriz: Av. Santa Teresa - Fernando de la Mora"],
+        ["ORDEN DE COMPRA OFICIAL DE ADQUISICIÓN DE MERCADERÍAS"],
+        [],
+        ["N° Orden:", po.numero || "S/N", "", "Fecha Emisión:", po.fecha ? formatDate(po.fecha) : formatDate(po.created_at || "")],
+        ["Proveedor:", po.supplier?.razon_social || "—", "", "Fecha Entrega:", po.fecha_entrega_estimada ? formatDate(po.fecha_entrega_estimada) : "Inmediata / A convenir"],
+        ["RUC Proveedor:", po.supplier?.ruc || "—", "", "Condición Pago:", po.condiciones_pago || "30 Días"],
+        ["Estado:", poStatusMap[po.estado || ""]?.label || po.estado || "Borrador", "", "Comprador:", po.created_by_name || "Departamento de Compras"],
+        [],
+        ["#", "Código / SKU", "Descripción del Producto", "Cantidad", "Precio Unitario (Gs.)", "IVA %", "Subtotal (Gs.)"]
+      ]
+
+      items.forEach((it, idx) => {
+        const cant = Number(it.cantidad || 0)
+        const precio = Number(it.precio_unitario || 0)
+        const sub = Number(it.total || it.subtotal || (cant * precio))
+        const desc = it.descripcion || it.producto?.nombre || "Ítem"
+        const code = it.producto?.codigo_barra || it.producto?.sku || it.sku || "—"
+        headerRows.push([
+          idx + 1,
+          code,
+          desc,
+          cant,
+          precio,
+          Number(it.iva_tasa || 10),
+          sub
+        ])
+      })
+
+      headerRows.push([])
+      headerRows.push(["", "", "", "", "", "TOTAL ORDEN (Gs.):", Number(po.total || 0)])
+
+      const ws = XLSX.utils.aoa_to_sheet(headerRows)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, `OC_${po.numero || "Detalle"}`)
+      XLSX.writeFile(wb, `OC_${po.numero || po.id?.slice(0, 8)}.xlsx`)
+      toast.success("Excel Descargado", `Se generó la planilla de la OC N° ${po.numero || "S/N"}.`)
+    } catch (e: any) {
+      toast.error("Error al exportar Excel", e.message)
+    }
+  }
+
+  // Descargar PDF de Orden de Compra desde endpoint oficial
+  const handleDownloadPOAsPdf = async (po: PurchaseOrder) => {
+    if (!po.id) return
+    try {
+      await api.purchases.downloadOrderPdf(po.id, po.numero)
+      toast.success("PDF Descargado", `Se descargó la OC N° ${po.numero || "S/N"} en formato PDF oficial.`)
+    } catch (e: any) {
+      toast.error("Error al descargar PDF", e.message)
+    }
+  }
+
+  // Imprimir Orden de Compra membretada (A4)
+  const handlePrintPO = () => {
+    window.print()
+  }
+
   const handleConfirmPO = async (id: string) => {
     try {
       await api.purchases.confirmPO(id)
@@ -565,12 +660,12 @@ export default function PurchasesPage() {
       return
     }
     const itemsToOrder = (replenishmentData?.items || []).filter(
-      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] || 0) > 0
+      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
     ).map((it: any) => ({
       product_id: it.product_id,
       descripcion: it.nombre,
-      cantidad: Number(editedQuantities[it.product_id] || it.cantidad_sugerida),
-      precio_unitario: Number(it.costo_unitario_estimado || 0),
+      cantidad: Number(editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida),
+      precio_unitario: Number(editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (it.costo_unitario_estimado || 0)),
       iva_tasa: Number(it.iva_tasa || 10),
     }))
 
@@ -1075,10 +1170,10 @@ export default function PurchasesPage() {
       .reduce((acc: number, it: any) => {
         const rawQty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
         const qty = Math.max(0, Number(rawQty) || 0)
-        const cost = Number(it.costo_unitario_estimado) || 0
+        const cost = editedCosts[it.product_id] !== undefined ? Number(editedCosts[it.product_id]) : (Number(it.costo_unitario_estimado) || 0)
         return acc + (qty * cost)
       }, 0)
-  }, [replenishmentData, selectedItemsIA, editedQuantities])
+  }, [replenishmentData, selectedItemsIA, editedQuantities, editedCosts])
 
   const totalUnidadesIASugerida = useMemo(() => {
     if (!replenishmentData) return 0
@@ -1848,212 +1943,257 @@ export default function PurchasesPage() {
               </div>
             ) : (
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-left text-xs min-w-[1100px]">
-                  <thead className="bg-slate-100/80 dark:bg-slate-900/50 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60 sticky top-0">
-                    <tr>
-                      <th className="p-3 w-10 text-center">
-                        <input
-                          type="checkbox"
-                          checked={displayedReplenishmentItems.length > 0 && displayedReplenishmentItems.every((it: any) => selectedItemsIA[it.product_id])}
-                          onChange={(e) => {
-                            const checked = e.target.checked
-                            const newSel = { ...selectedItemsIA }
-                            displayedReplenishmentItems.forEach((it: any) => { newSel[it.product_id] = checked })
-                            setSelectedItemsIA(newSel)
-                          }}
-                          className="rounded text-indigo-600 focus:ring-indigo-500"
-                        />
-                      </th>
-                      <th className="p-3 min-w-[200px]">Producto & SKU</th>
-                      <th className="p-3 text-right" title="Stock actual físico registrado en inventario">Stock Físico</th>
-                      <th className="p-3 text-right" title="Unidades en órdenes de compra confirmadas/enviadas que están en camino">En Tránsito</th>
-                      <th className="p-3 text-right" title="Ventas reales de los últimos días">Ventas {diasHistorialVentas}d</th>
-                      <th className="p-3 text-right" title="Venta diaria estimada por el algoritmo IA">Demanda / Día</th>
-                      <th className="p-3 text-center" title="Días de stock restantes con el ritmo de venta actual = (Stock + Tránsito) / Demanda">Autonomía Actual</th>
-                      <th className="p-3 text-center" title="Cantidad óptima sugerida por la IA para cubrir tus días de cobertura">Sugerencia IA</th>
-                      <th className="p-3 text-center min-w-[150px]" title="Modificá esta cantidad libremente. Tu autonomía se recalculará en tiempo real">Tu Pedido (Un.)</th>
-                      <th className="p-3 text-center min-w-[130px]" title="Autonomía en días que te quedará en el escenario de comprar la cantidad ingresada">Autonomía Proyectada</th>
-                      <th className="p-3 text-right">Costo Unit.</th>
-                      <th className="p-3 text-right">Subtotal</th>
-                      <th className="p-3 min-w-[180px]">Justificación IA</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                    {displayedReplenishmentItems.map((it: any) => {
-                      const isSelected = !!selectedItemsIA[it.product_id]
-                      const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0))
-                      const subtotal = Number(qty) * Number(it.costo_unitario_estimado || 0)
-
-                      // Cálculo interactivo de Autonomía Proyectada
-                      const stockActual = Number(it.stock_actual) || 0
-                      const stockTransito = Number(it.stock_en_transito) || 0
-                      const demandaD = Number(it.demanda_diaria_ajustada) || 0
-                      const stockTotalConPedido = stockActual + stockTransito + Number(qty)
-                      const nuevaAutonomia = demandaD > 0 ? (stockTotalConPedido / demandaD) : 999
-                      const esOptimo = nuevaAutonomia >= diasCobertura
-                      const esCritico = nuevaAutonomia < 7
-
-                      return (
-                        <tr
-                          key={it.product_id}
-                          className={`hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors ${
-                            it.autonomia_estado === "critico"
-                              ? "bg-red-50/30 dark:bg-red-950/10"
-                              : it.autonomia_estado === "bajo"
-                              ? "bg-amber-50/20 dark:bg-amber-950/10"
-                              : ""
-                          }`}
-                        >
-                          <td className="p-3 text-center">
+                {(() => {
+                  const labels4m = (replenishmentData?.meses_labels && replenishmentData.meses_labels.length === 4)
+                    ? replenishmentData.meses_labels
+                    : ["M-4", "M-3", "M-2", "M-1"]
+                  return (
+                    <table className="w-full text-left text-xs min-w-[1350px]">
+                      <thead className="bg-slate-100/90 dark:bg-slate-900/70 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60 sticky top-0 z-10 shadow-xs">
+                        <tr>
+                          <th className="p-3 w-10 text-center">
                             <input
                               type="checkbox"
-                              checked={isSelected}
+                              checked={displayedReplenishmentItems.length > 0 && displayedReplenishmentItems.every((it: any) => selectedItemsIA[it.product_id])}
                               onChange={(e) => {
-                                setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: e.target.checked }))
+                                const checked = e.target.checked
+                                const newSel = { ...selectedItemsIA }
+                                displayedReplenishmentItems.forEach((it: any) => { newSel[it.product_id] = checked })
+                                setSelectedItemsIA(newSel)
                               }}
-                              className="rounded text-indigo-600 focus:ring-indigo-500"
+                              className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                             />
-                          </td>
-                          <td className="p-3">
-                            <div className="font-bold text-gray-900 dark:text-white line-clamp-1" title={it.nombre}>
-                              {it.nombre}
-                            </div>
-                            <div className="text-[11px] text-gray-400 font-mono flex items-center gap-1.5 mt-0.5 flex-wrap">
-                              <span>SKU: {it.sku || "—"}</span>
-                              <span className="px-1 bg-slate-100 dark:bg-slate-700 rounded text-[10px] font-bold">{it.unidad_medida}</span>
-                              {it.punto_reorden !== undefined && (
-                                <span className="px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] text-amber-700 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800/50" title="Punto de Reorden Estadístico">
-                                  ROP: {Math.round(it.punto_reorden).toLocaleString()}
-                                </span>
-                              )}
-                              {it.stock_seguridad !== undefined && (
-                                <span className="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/40 text-[10px] text-indigo-700 dark:text-indigo-300 font-bold border border-indigo-200 dark:border-indigo-800/50" title="Stock de Seguridad Estadístico (95% nivel servicio)">
-                                  SS: {Math.round(it.stock_seguridad).toLocaleString()}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-3 text-right font-mono font-bold text-gray-800 dark:text-gray-200">
-                            {stockActual.toLocaleString()}
-                          </td>
-                          <td className="p-3 text-right font-mono text-amber-600 dark:text-amber-400">
-                            {stockTransito > 0 ? `+${stockTransito.toLocaleString()}` : "—"}
-                          </td>
-                          <td className="p-3 text-right font-mono text-gray-600 dark:text-gray-300">
-                            {Number(it.ventas_periodo || 0).toLocaleString()}
-                          </td>
-                          <td className="p-3 text-right font-mono">
-                            <span className="font-bold text-gray-900 dark:text-white">
-                              {demandaD.toFixed(1)}
-                            </span>
-                            {Number(it.multiplicador_estacional) > 1 && (
-                              <span className="text-[10px] text-indigo-600 font-bold block">
-                                (x{Number(it.multiplicador_estacional).toFixed(2)})
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3 text-center">
-                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold font-mono border whitespace-nowrap ${
-                              it.autonomia_estado === "critico"
-                                ? "bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/80"
-                                : it.autonomia_estado === "bajo"
-                                ? "bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/80"
-                                : it.autonomia_estado === "optimo"
-                                ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/80"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
-                            }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${
-                                it.autonomia_estado === "critico" ? "bg-red-500 animate-pulse" :
-                                it.autonomia_estado === "bajo" ? "bg-amber-500" :
-                                it.autonomia_estado === "optimo" ? "bg-emerald-500" : "bg-slate-400"
-                              }`} />
-                              <span>{Number(it.dias_stock_restantes) > 900 ? "Sin Venta" : `${Number(it.dias_stock_restantes).toFixed(1)}d`}</span>
-                            </span>
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex flex-col items-center gap-0.5">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                                <Sparkles className="w-3 h-3 text-indigo-500" />
-                                {Math.round(Number(it.cantidad_sugerida) || 0).toLocaleString()} un.
-                              </span>
-                              {it.target_stock !== undefined && (
-                                <span className="text-[9px] text-gray-400 font-mono">
-                                  Meta: {Math.round(it.target_stock).toLocaleString()} ({diasCobertura}d+{leadTimeDias}d)
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const cur = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.round(Number(it.cantidad_sugerida) || 0)
-                                  const nxt = Math.max(0, cur - 1)
-                                  setEditedQuantities(prev => ({ ...prev, [it.product_id]: nxt }))
-                                  if (nxt > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
-                                }}
-                                className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
-                              >
-                                -
-                              </button>
-                              <input
-                                type="number"
-                                min={0}
-                                value={qty}
-                                onChange={(e) => {
-                                  const val = Math.max(0, Number(e.target.value))
-                                  setEditedQuantities(prev => ({ ...prev, [it.product_id]: val }))
-                                  if (val > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
-                                }}
-                                className="w-20 p-1 text-center font-mono font-black text-xs input-field bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const cur = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.round(Number(it.cantidad_sugerida) || 0)
-                                  const nxt = cur + 1
-                                  setEditedQuantities(prev => ({ ...prev, [it.product_id]: nxt }))
-                                  setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
-                                }}
-                                className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
-                              >
-                                +
-                              </button>
-                            </div>
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex flex-col items-center gap-0.5">
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-black border whitespace-nowrap ${
-                                demandaD <= 0
-                                  ? "bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200"
-                                  : esCritico
-                                  ? "bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
-                                  : esOptimo
-                                  ? "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
-                                  : "bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
-                              }`}>
-                                {demandaD <= 0 ? "Sin demanda" : `${nuevaAutonomia.toFixed(1)} Días`}
-                              </span>
-                              <span className="text-[10px] text-gray-400 font-mono">
-                                {Number(qty) > 0 ? `+${(Number(qty) / Math.max(0.01, demandaD)).toFixed(1)}d con tu pedido` : "Sin pedido"}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="p-3 text-right font-mono text-gray-600 dark:text-gray-300">
-                            {formatPYG(it.costo_unitario_estimado)}
-                          </td>
-                          <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
-                            {formatPYG(subtotal)}
-                          </td>
-                          <td className="p-3 text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1" title={it.explicacion_ia}>
-                            {it.explicacion_ia}
-                          </td>
+                          </th>
+                          <th className="p-3 min-w-[200px]">Producto & SKU</th>
+                          <th className="p-3 text-right" title="Stock actual físico registrado en góndola/depósito">Stock Físico</th>
+                          <th className="p-2.5 text-right font-mono" title={`Ventas mensuales registradas en ${labels4m[0]}`}>{labels4m[0]}</th>
+                          <th className="p-2.5 text-right font-mono" title={`Ventas mensuales registradas en ${labels4m[1]}`}>{labels4m[1]}</th>
+                          <th className="p-2.5 text-right font-mono" title={`Ventas mensuales registradas en ${labels4m[2]}`}>{labels4m[2]}</th>
+                          <th className="p-2.5 text-right font-mono text-indigo-600 dark:text-indigo-400 font-extrabold" title={`Ventas mensuales registradas en ${labels4m[3]}`}>{labels4m[3]}</th>
+                          <th className="p-2.5 text-center min-w-[95px]" title="Tendencia / Pulso de Venta reciente">Pulso Venta</th>
+                          <th className="p-2.5 text-right min-w-[100px]" title="Costo Promedio Ponderado de Inventario (PPP)">Costo PPP</th>
+                          <th className="p-2.5 text-right min-w-[110px]" title="Último Costo de Compra facturado por el proveedor">Última Compra</th>
+                          <th className="p-3 text-center" title="Días de stock restantes con stock físico real = Stock / Demanda Diaria">Autonomía</th>
+                          <th className="p-3 text-center" title="Cantidad óptima sugerida por la IA">Sugerencia IA</th>
+                          <th className="p-3 text-center min-w-[140px]" title="Modificá esta cantidad libremente.">Tu Pedido (Un.)</th>
+                          <th className="p-3 text-right min-w-[125px]" title="Modificá el precio de compra acordado con el proveedor">Costo Unit. (Gs.)</th>
+                          <th className="p-3 text-right min-w-[115px]">Subtotal (Gs.)</th>
+                          <th className="p-3 min-w-[210px]">Justificación & Alertas</th>
                         </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                        {displayedReplenishmentItems.map((it: any) => {
+                          const isSelected = !!selectedItemsIA[it.product_id]
+                          const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.max(0, Math.round(Number(it.cantidad_sugerida) || 0))
+                          const unitCost = editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (Number(it.costo_unitario_estimado) || 0)
+                          const subtotal = Number(qty) * unitCost
+
+                          const stockActual = Number(it.stock_actual) || 0
+                          const demandaD = Number(it.demanda_diaria_ajustada) || 0
+                          const nuevaAutonomia = demandaD > 0 ? ((stockActual + Number(qty)) / demandaD) : 999
+
+                          return (
+                            <tr
+                              key={it.product_id}
+                              className={`hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors ${
+                                it.autonomia_estado === "critico"
+                                  ? "bg-red-50/30 dark:bg-red-950/10"
+                                  : it.autonomia_estado === "bajo"
+                                  ? "bg-amber-50/20 dark:bg-amber-950/10"
+                                  : ""
+                              }`}
+                            >
+                              <td className="p-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: e.target.checked }))
+                                  }}
+                                  className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                />
+                              </td>
+                              <td className="p-3">
+                                <div className="font-bold text-gray-900 dark:text-white line-clamp-1" title={it.nombre}>
+                                  {it.nombre}
+                                </div>
+                                <div className="text-[11px] text-gray-400 font-mono flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                  <span>SKU: {it.sku || "—"}</span>
+                                  <span className="px-1 bg-slate-100 dark:bg-slate-700 rounded text-[10px] font-bold">{it.unidad_medida}</span>
+                                  {it.punto_reorden !== undefined && (
+                                    <span className="px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] text-amber-700 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800/50" title="Punto de Reorden">
+                                      ROP: {Math.round(it.punto_reorden).toLocaleString()}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Stock Físico */}
+                              <td className="p-3 text-right font-mono font-bold text-gray-800 dark:text-gray-200">
+                                {stockActual.toLocaleString()}
+                              </td>
+
+                              {/* 4 Columnas de Ventas Históricas */}
+                              <td className="p-2.5 text-right font-mono text-gray-500 dark:text-gray-400">
+                                {Number(it.ventas_mes_4 || 0).toLocaleString()}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-gray-500 dark:text-gray-400">
+                                {Number(it.ventas_mes_3 || 0).toLocaleString()}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300 font-semibold">
+                                {Number(it.ventas_mes_2 || 0).toLocaleString()}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50/40 dark:bg-indigo-950/20">
+                                {Number(it.ventas_mes_1 || 0).toLocaleString()}
+                              </td>
+
+                              {/* Pulso de Venta */}
+                              <td className="p-2.5 text-center">
+                                {it.pulso_tendencia === "acelerando" ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" title="Rotación acelerando (+25% vs meses previos)">
+                                    <TrendingUp className="w-3 h-3 text-emerald-600" /> Acelera
+                                  </span>
+                                ) : it.pulso_tendencia === "desacelerando" ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800" title="Demanda cayendo (-25% vs meses previos)">
+                                    <TrendingDown className="w-3 h-3 text-red-600" /> En baja
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                    Estable
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Costo Promedio (PPP) */}
+                              <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300">
+                                {formatPYG(it.costo_promedio || 0)}
+                              </td>
+
+                              {/* Último Costo con indicador de variación */}
+                              <td className="p-2.5 text-right font-mono">
+                                <div className="font-bold text-gray-900 dark:text-white">
+                                  {formatPYG(it.ultimo_costo || it.costo_promedio || 0)}
+                                </div>
+                                {it.variacion_costo_pct !== undefined && Math.abs(it.variacion_costo_pct) > 0.5 && (
+                                  <span className={`text-[10px] font-extrabold inline-flex items-center gap-0.5 justify-end ${
+                                    it.variacion_costo_pct > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"
+                                  }`} title={`Variación vs Costo PPP: ${it.variacion_costo_pct > 0 ? '+' : ''}${it.variacion_costo_pct}%`}>
+                                    {it.variacion_costo_pct > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                    {Math.abs(it.variacion_costo_pct)}%
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Autonomía Actual */}
+                              <td className="p-3 text-center">
+                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold font-mono border whitespace-nowrap ${
+                                  it.autonomia_estado === "critico"
+                                    ? "bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/80"
+                                    : it.autonomia_estado === "bajo"
+                                    ? "bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/80"
+                                    : it.autonomia_estado === "optimo"
+                                    ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/80"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${
+                                    it.autonomia_estado === "critico" ? "bg-red-500 animate-pulse" :
+                                    it.autonomia_estado === "bajo" ? "bg-amber-500" :
+                                    it.autonomia_estado === "optimo" ? "bg-emerald-500" : "bg-slate-400"
+                                  }`} />
+                                  <span>{Number(it.dias_stock_restantes) > 900 ? "Sin Venta" : `${Number(it.dias_stock_restantes).toFixed(1)}d`}</span>
+                                </span>
+                              </td>
+
+                              {/* Sugerencia IA */}
+                              <td className="p-3 text-center">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                  <Sparkles className="w-3 h-3 text-indigo-500" />
+                                  {Math.round(Number(it.cantidad_sugerida) || 0).toLocaleString()} un.
+                                </span>
+                              </td>
+
+                              {/* Tu Pedido (Un.) */}
+                              <td className="p-3 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const cur = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.round(Number(it.cantidad_sugerida) || 0)
+                                      const nxt = Math.max(0, cur - 1)
+                                      setEditedQuantities(prev => ({ ...prev, [it.product_id]: nxt }))
+                                      if (nxt > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
+                                    }}
+                                    className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={qty}
+                                    onChange={(e) => {
+                                      const val = Math.max(0, Number(e.target.value))
+                                      setEditedQuantities(prev => ({ ...prev, [it.product_id]: val }))
+                                      if (val > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
+                                    }}
+                                    className="w-20 p-1 text-center font-mono font-black text-xs input-field bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const cur = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : Math.round(Number(it.cantidad_sugerida) || 0)
+                                      const nxt = cur + 1
+                                      setEditedQuantities(prev => ({ ...prev, [it.product_id]: nxt }))
+                                      setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
+                                    }}
+                                    className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-200 flex items-center justify-center font-bold text-xs"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </td>
+
+                              {/* Costo Unitario EDITABLE */}
+                              <td className="p-3 text-right">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={50}
+                                  value={unitCost}
+                                  onChange={(e) => {
+                                    const val = Math.max(0, Number(e.target.value))
+                                    setEditedCosts(prev => ({ ...prev, [it.product_id]: val }))
+                                    if (Number(qty) > 0) setSelectedItemsIA(prev => ({ ...prev, [it.product_id]: true }))
+                                  }}
+                                  className="w-28 p-1 text-right font-mono font-bold text-xs input-field bg-white dark:bg-slate-900 border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 focus:ring-1 focus:ring-indigo-500"
+                                  title="Precio de compra negociado para la orden de compra"
+                                />
+                              </td>
+
+                              {/* Subtotal */}
+                              <td className="p-3 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                                {formatPYG(subtotal)}
+                              </td>
+
+                              {/* Justificación IA y Alertas de Promos */}
+                              <td className="p-3 text-[11px] text-gray-500 dark:text-gray-400">
+                                {it.tiene_promocion_detectada && (
+                                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] font-bold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 mb-1" title={it.promocion_info || "Promoción detectada"}>
+                                    <Flame className="w-3 h-3 text-amber-500 shrink-0" />
+                                    <span>Promo Pasada Detectada</span>
+                                  </div>
+                                )}
+                                <div className="line-clamp-2" title={it.explicacion_ia}>
+                                  {it.explicacion_ia}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )
+                })()}
               </div>
             )}
           </div>
@@ -2105,6 +2245,13 @@ export default function PurchasesPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportOrdersToExcel}
+                className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-2 shrink-0 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 font-bold"
+                title="Descargar listado filtrado de órdenes de compra en formato .xlsx"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Exportar a Excel
+              </button>
               <button
                 onClick={handleOpenManualPOModal}
                 className="btn-primary text-xs flex items-center gap-1.5 px-3.5 py-2 shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
@@ -2182,10 +2329,34 @@ export default function PurchasesPage() {
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 onClick={() => handleViewPO(po)}
-                                className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
-                                title="Ver Detalle de Ítems"
+                                className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400 hover:bg-indigo-100 transition-colors flex items-center gap-1"
+                                title="Reporte Premium / Vista Oficial A4"
                               >
                                 <Eye className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                onClick={() => handleDownloadPOAsPdf(po)}
+                                className="p-1.5 rounded-lg bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-400 hover:bg-red-100 transition-colors"
+                                title="Descargar PDF Oficial"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                onClick={async () => {
+                                  if (!po.id) return
+                                  try {
+                                    const items = await api.purchases.getOrderItems(po.id)
+                                    handleExportSinglePOToExcel(po, items || [])
+                                  } catch (e: any) {
+                                    toast.error("Error al obtener ítems", e.message)
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400 hover:bg-emerald-100 transition-colors"
+                                title="Descargar Planilla Excel (.xlsx)"
+                              >
+                                <FileSpreadsheet className="w-3.5 h-3.5" />
                               </button>
 
                               {po.estado === "borrador" && po.id && (
@@ -3443,83 +3614,277 @@ export default function PurchasesPage() {
       ────────────────────────────────────────────────────────────────────────── */}
       {selectedPO && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-3xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-              <div>
-                <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
-                  <ShoppingCart className="w-5 h-5 text-indigo-500" />
-                  Orden de Compra N° {selectedPO.numero}
-                </h3>
-                <p className="text-xs text-gray-400">
-                  Proveedor: <strong className="text-gray-700 dark:text-gray-200">{selectedPO.supplier?.razon_social || "—"}</strong> | Emitido: {formatDate(selectedPO.fecha || selectedPO.created_at || "")}
-                </p>
+          <style>{`
+            @media print {
+              body * {
+                visibility: hidden !important;
+              }
+              #po-premium-sheet, #po-premium-sheet * {
+                visibility: visible !important;
+              }
+              #po-premium-sheet {
+                position: fixed !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 10mm 15mm !important;
+                background: white !important;
+                color: #111827 !important;
+                box-shadow: none !important;
+                border: none !important;
+                z-index: 999999 !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+            }
+          `}</style>
+
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[92vh] overflow-y-auto">
+            {/* Barra de herramientas superior del modal (no-print) */}
+            <div className="no-print flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg text-xs font-black bg-indigo-600 text-white tracking-wider uppercase">
+                  Reporte Premium de Orden de Compra
+                </span>
+                <span className="text-xs font-mono font-bold text-gray-500">
+                  #{selectedPO.numero}
+                </span>
               </div>
-              <button
-                onClick={() => setSelectedPO(null)}
-                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrintPO}
+                  className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-1.5 font-bold shadow-xs hover:bg-slate-100"
+                  title="Imprimir documento en formato A4 membretado"
+                >
+                  <Printer className="w-4 h-4 text-indigo-600" /> Imprimir A4
+                </button>
+
+                <button
+                  onClick={() => handleDownloadPOAsPdf(selectedPO)}
+                  className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-1.5 font-bold text-red-700 dark:text-red-400 border-red-200 dark:border-red-800/60 hover:bg-red-50"
+                  title="Descargar archivo PDF oficial con timbrado"
+                >
+                  <Download className="w-4 h-4 text-red-600" /> Descargar PDF
+                </button>
+
+                <button
+                  onClick={() => handleExportSinglePOToExcel(selectedPO, poDetailItems)}
+                  className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-1.5 font-bold text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-50"
+                  title="Descargar planilla en formato Excel (.xlsx)"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Exportar Excel
+                </button>
+
+                <button
+                  onClick={() => setSelectedPO(null)}
+                  className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400 ml-2"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {loadingPODetail ? (
-              <div className="flex justify-center py-10">
-                <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+              <div className="flex justify-center py-16">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="overflow-x-auto w-full border border-slate-200 dark:border-slate-700 rounded-xl">
-                  <table className="w-full text-left text-xs min-w-[600px]">
-                    <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
-                      <tr>
-                        <th className="p-2.5">Producto / Descripción</th>
-                        <th className="p-2.5 text-right">Cantidad</th>
-                        <th className="p-2.5 text-right">Recibido</th>
-                        <th className="p-2.5 text-right">Precio Unit.</th>
-                        <th className="p-2.5 text-right">IVA %</th>
-                        <th className="p-2.5 text-right">Total (Gs.)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                      {poDetailItems.map((it, idx) => (
-                        <tr key={idx}>
-                          <td className="p-2.5 font-semibold text-gray-800 dark:text-gray-200">
-                            {(it as any).producto?.nombre || (it as any).descripcion || "Ítem"}
-                          </td>
-                          <td className="p-2.5 text-right font-mono font-bold">
-                            {Number(it.cantidad || 0).toLocaleString()}
-                          </td>
-                          <td className="p-2.5 text-right font-mono text-emerald-600 font-bold">
-                            {Number(it.recibido || (it as any).cantidad_recibida || 0).toLocaleString()}
-                          </td>
-                          <td className="p-2.5 text-right font-mono">
-                            {formatPYG(it.precio_unitario || 0)}
-                          </td>
-                          <td className="p-2.5 text-right font-mono text-gray-500">
-                            {it.iva_tasa || 10}%
-                          </td>
-                          <td className="p-2.5 text-right font-mono font-extrabold text-gray-900 dark:text-white">
-                            {formatPYG(it.subtotal || (Number(it.cantidad || 0) * Number(it.precio_unitario || 0)))}
-                          </td>
+                {/* ── HOJA MEMBRETADA PREMIUM DE LA ORDEN DE COMPRA (#po-premium-sheet) ── */}
+                <div id="po-premium-sheet" className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-5 text-gray-900 dark:text-gray-100 shadow-sm print:shadow-none print:border-0 print:p-0">
+                  {/* Encabezado Institucional Oficial */}
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b-2 border-indigo-600 pb-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black text-sm tracking-wider">
+                          EX
+                        </div>
+                        <div>
+                          <h2 className="text-base font-black uppercase tracking-tight text-gray-900 dark:text-white leading-tight">
+                            Extra Supermercado Mayorista
+                          </h2>
+                          <p className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+                            GRUPO SANTA TERESA E.A.S.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 space-y-0.5 pt-1">
+                        <div><strong>RUC:</strong> 80150377-9 | <strong>Timbrado:</strong> 18545636</div>
+                        <div>Av. Santa Teresa c/ Av. Mcal. López — Fernando de la Mora, Paraguay</div>
+                        <div>Tel: (021) 680-000 | Email: compras@superextra.com.py</div>
+                      </div>
+                    </div>
+
+                    <div className="sm:text-right space-y-1 bg-slate-50 dark:bg-slate-800/80 p-3 rounded-xl border border-slate-200 dark:border-slate-700 min-w-[220px]">
+                      <span className="inline-block px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-300">
+                        Orden de Compra Oficial
+                      </span>
+                      <div className="text-xl font-black font-mono text-indigo-600 dark:text-indigo-400">
+                        N° {selectedPO.numero}
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        Fecha: <strong>{selectedPO.fecha ? formatDate(selectedPO.fecha) : formatDate(selectedPO.created_at || "")}</strong>
+                      </div>
+                      <div className="text-[11px]">
+                        Estado: <strong className="uppercase font-bold">{poStatusMap[selectedPO.estado || ""]?.label || selectedPO.estado}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Ficha Proveedor & Ficha de la Orden en 2 Columnas */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <div className="font-bold uppercase tracking-wider text-[10px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 pb-1">
+                        <Building2 className="w-3.5 h-3.5" /> Datos del Proveedor
+                      </div>
+                      <div><strong>Razón Social:</strong> {selectedPO.supplier?.razon_social || "Sin Asignar"}</div>
+                      <div><strong>RUC:</strong> {selectedPO.supplier?.ruc || "—"}</div>
+                      <div><strong>Teléfono:</strong> {selectedPO.supplier?.telefono || "—"}</div>
+                      <div><strong>Contacto / Email:</strong> {selectedPO.supplier?.email || selectedPO.supplier?.contacto_nombre || "—"}</div>
+                      <div><strong>Dirección:</strong> {selectedPO.supplier?.direccion || "—"}</div>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <div className="font-bold uppercase tracking-wider text-[10px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 pb-1">
+                        <FileCheck className="w-3.5 h-3.5" /> Condiciones de Adquisición
+                      </div>
+                      <div><strong>Fecha de Entrega:</strong> {selectedPO.fecha_entrega_estimada ? formatDate(selectedPO.fecha_entrega_estimada) : "Inmediata / A convenir"}</div>
+                      <div><strong>Condición de Pago:</strong> {selectedPO.condiciones_pago || "30 Días"}</div>
+                      <div><strong>Moneda:</strong> {selectedPO.moneda || "PYG"} (Guaraníes)</div>
+                      <div><strong>Comprador Responsable:</strong> {selectedPO.created_by_name || "Departamento de Compras"}</div>
+                      <div><strong>Prioridad:</strong> <span className="capitalize font-bold">{selectedPO.prioridad || "Normal"}</span></div>
+                    </div>
+                  </div>
+
+                  {/* Tabla Itemizada de Productos */}
+                  <div className="overflow-x-auto w-full border border-slate-200 dark:border-slate-700 rounded-xl">
+                    <table className="w-full text-left text-xs min-w-[650px]">
+                      <thead className="bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                        <tr>
+                          <th className="p-2.5 text-center w-8">#</th>
+                          <th className="p-2.5">Código / SKU</th>
+                          <th className="p-2.5">Descripción del Producto</th>
+                          <th className="p-2.5 text-right w-20">Cantidad</th>
+                          <th className="p-2.5 text-right w-20">Recibido</th>
+                          <th className="p-2.5 text-right w-28">Precio Unit.</th>
+                          <th className="p-2.5 text-center w-16">IVA %</th>
+                          <th className="p-2.5 text-right w-32">Subtotal (Gs.)</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {poDetailItems.map((it: any, idx) => {
+                          const cant = Number(it.cantidad || 0)
+                          const prec = Number(it.precio_unitario || 0)
+                          const sub = Number(it.total || it.subtotal || (cant * prec))
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                              <td className="p-2.5 text-center font-mono text-gray-400">{idx + 1}</td>
+                              <td className="p-2.5 font-mono text-gray-500">
+                                {it.producto?.codigo_barra || it.producto?.sku || it.sku || "—"}
+                              </td>
+                              <td className="p-2.5 font-semibold text-gray-900 dark:text-white">
+                                {it.producto?.nombre || it.descripcion || "Ítem"}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold">
+                                {cant.toLocaleString()}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-emerald-600 font-bold">
+                                {Number(it.recibido || it.cantidad_recibida || 0).toLocaleString()}
+                              </td>
+                              <td className="p-2.5 text-right font-mono">
+                                {formatPYG(prec)}
+                              </td>
+                              <td className="p-2.5 text-center font-mono text-gray-500">
+                                {it.iva_tasa || 10}%
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-black text-gray-900 dark:text-white">
+                                {formatPYG(sub)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Liquidación Impositiva & Total de la Orden */}
+                  {(() => {
+                    let sub10 = 0
+                    let sub5 = 0
+                    let subEx = 0
+                    poDetailItems.forEach((it: any) => {
+                      const sub = Number(it.total || it.subtotal || (Number(it.cantidad || 0) * Number(it.precio_unitario || 0)))
+                      const tasa = Number(it.iva_tasa || 10)
+                      if (tasa === 10) sub10 += sub
+                      else if (tasa === 5) sub5 += sub
+                      else subEx += sub
+                    })
+                    const iva10 = Math.round(sub10 / 11)
+                    const iva5 = Math.round(sub5 / 21)
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
+                        <div className="space-y-1 text-gray-600 dark:text-gray-400">
+                          <div className="font-bold text-[10px] uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                            Liquidación Impositiva del IVA
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                            <div>Gravadas 10%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(sub10)}</strong></div>
+                            <div>IVA 10%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(iva10)}</strong></div>
+                            <div>Gravadas 5%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(sub5)}</strong></div>
+                            <div>IVA 5%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(iva5)}</strong></div>
+                            <div>Exentas: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(subEx)}</strong></div>
+                          </div>
+                          {selectedPO.observaciones && (
+                            <div className="text-[11px] pt-2 border-t border-slate-200 dark:border-slate-700 text-gray-600">
+                              <strong>Instrucciones:</strong> {selectedPO.observaciones}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col justify-center sm:text-right border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-700 md:pl-4 space-y-1">
+                          <div className="text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                            Monto Total de la Orden de Compra
+                          </div>
+                          <div className="text-2xl font-black font-mono text-indigo-600 dark:text-indigo-400">
+                            {formatPYG(selectedPO.total || 0)}
+                          </div>
+                          <div className="text-[11px] text-gray-400 font-mono">
+                            {poDetailItems.length} ítems adjudicados | Condición: {selectedPO.condiciones_pago || "30 Días"}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Firmas y Autorizaciones Institucionales */}
+                  <div className="pt-8 grid grid-cols-3 gap-6 text-center text-[11px] text-gray-500">
+                    <div>
+                      <div className="border-t border-slate-400 dark:border-slate-600 pt-1.5 font-bold text-gray-800 dark:text-gray-200">
+                        {selectedPO.created_by_name || "Departamento de Compras"}
+                      </div>
+                      <div className="text-[10px] text-gray-400">Elaborado por (Comprador)</div>
+                    </div>
+                    <div>
+                      <div className="border-t border-slate-400 dark:border-slate-600 pt-1.5 font-bold text-gray-800 dark:text-gray-200">
+                        Gerencia de Compras & Finanzas
+                      </div>
+                      <div className="text-[10px] text-gray-400">Aprobado y Autorizado</div>
+                    </div>
+                    <div>
+                      <div className="border-t border-slate-400 dark:border-slate-600 pt-1.5 font-bold text-gray-800 dark:text-gray-200">
+                        {selectedPO.supplier?.razon_social || "Proveedor"}
+                      </div>
+                      <div className="text-[10px] text-gray-400">Recibido Conforme (Firma y Sello)</div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 flex justify-between items-center text-xs">
-                  <div className="text-gray-400">
-                    Condición: <strong className="text-gray-700 dark:text-gray-300">{(selectedPO as any).condiciones_pago || "Contado"}</strong>
-                  </div>
-                  <div className="text-right font-mono">
-                    <span className="text-gray-500 font-bold mr-2">Total Orden:</span>
-                    <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
-                      {formatPYG(selectedPO.total || 0)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700/60">
+                {/* Acciones operativas inferiores del modal (no-print) */}
+                <div className="no-print flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-700/60">
                   {selectedPO.id && (
                     <button
                       onClick={() => {

@@ -2292,6 +2292,21 @@ async def calculate_smart_replenishment_preview(
     cid = company_id
     dias_hist = max(dias_historial_ventas, 7)
     
+    # Etiquetas de los 4 meses anteriores en español (cronológico: M-4, M-3, M-2, M-1)
+    month_names_es = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"]
+    today = date.today()
+    cur_year = today.year
+    cur_month = today.month
+    
+    meses_labels = []
+    for i in [4, 3, 2, 1]:
+        m = cur_month - i
+        y = cur_year
+        while m <= 0:
+            m += 12
+            y -= 1
+        meses_labels.append(month_names_es[m - 1])
+    
     where_clauses = ["p.company_id = :cid", "p.activo = true"]
     params: dict = {"cid": cid, "days": dias_hist, "limit": limit}
     
@@ -2320,12 +2335,20 @@ async def calculate_smart_replenishment_preview(
             p.sku,
             p.codigo_barra,
             p.unidad_medida,
+            COALESCE(p.costo_promedio, 0) as costo_promedio,
+            COALESCE(p.ultimo_costo, 0) as ultimo_costo,
             COALESCE(p.ultimo_costo, p.costo_promedio, 0) as costo_estimado,
             COALESCE(p.iva_tasa, 10) as iva_tasa,
             p.categoria_id,
             COALESCE(stk.total_stock, 0) as stock_actual,
             COALESCE(sales.total_vendido, 0) as total_vendido_periodo,
-            COALESCE(po_transit.total_en_transito, 0) as stock_en_transito
+            COALESCE(po_transit.total_en_transito, 0) as stock_en_transito,
+            COALESCE(sales_4m.v_m1, 0) as v_m1,
+            COALESCE(sales_4m.v_m2, 0) as v_m2,
+            COALESCE(sales_4m.v_m3, 0) as v_m3,
+            COALESCE(sales_4m.v_m4, 0) as v_m4,
+            COALESCE(sales_4m.v_promo_qty, 0) as v_promo_qty,
+            COALESCE(promo_flag.en_promo_activa, false) as en_promo_flag
         FROM products p
         LEFT JOIN (
             SELECT product_id, SUM(cantidad) as total_stock
@@ -2341,6 +2364,28 @@ async def calculate_smart_replenishment_preview(
               AND s.fecha >= NOW() - make_interval(days => :days)
             GROUP BY si.product_id
         ) sales ON sales.product_id = p.id
+        LEFT JOIN (
+            SELECT 
+                si.product_id,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '1 month') AND s.fecha < DATE_TRUNC('month', NOW()) THEN si.cantidad ELSE 0 END) as v_m1,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '2 month') AND s.fecha < DATE_TRUNC('month', NOW() - INTERVAL '1 month') THEN si.cantidad ELSE 0 END) as v_m2,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '3 month') AND s.fecha < DATE_TRUNC('month', NOW() - INTERVAL '2 month') THEN si.cantidad ELSE 0 END) as v_m3,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '4 month') AND s.fecha < DATE_TRUNC('month', NOW() - INTERVAL '3 month') THEN si.cantidad ELSE 0 END) as v_m4,
+                SUM(CASE WHEN (COALESCE(si.descuento_monto, 0) > 0 OR COALESCE(si.descuento_pct, 0) > 0) AND s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '4 month') THEN si.cantidad ELSE 0 END) as v_promo_qty
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            WHERE s.company_id = :cid
+              AND s.estado = 'confirmado'
+              AND s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '4 month')
+            GROUP BY si.product_id
+        ) sales_4m ON sales_4m.product_id = p.id
+        LEFT JOIN (
+            SELECT DISTINCT unnest(pr.producto_ids) as product_id, true as en_promo_activa
+            FROM promotions pr
+            WHERE pr.company_id = :cid
+              AND pr.estado IN ('activa', 'finalizada_por_fecha')
+              AND (pr.fecha_fin IS NULL OR pr.fecha_fin >= CURRENT_DATE - INTERVAL '120 days')
+        ) promo_flag ON promo_flag.product_id = p.id
         LEFT JOIN (
             SELECT poi.product_id, SUM(poi.cantidad - COALESCE(poi.cantidad_recibida, 0)) as total_en_transito
             FROM purchase_order_items poi
@@ -2371,19 +2416,61 @@ async def calculate_smart_replenishment_preview(
         sku = r[2]
         cod_barra = r[3]
         unidad = r[4] or "UN"
-        costo_unit = Decimal(str(r[5]))
-        iva_tasa = Decimal(str(r[6]))
-        stock_actual = Decimal(str(r[8]))
-        ventas_periodo = Decimal(str(r[9]))
-        stock_en_transito = Decimal(str(r[10]))
+        costo_prom = Decimal(str(r[5]))
+        costo_ult = Decimal(str(r[6]))
+        costo_est = Decimal(str(r[7]))
+        costo_unit = costo_ult if costo_ult > 0 else (costo_est if costo_est > 0 else costo_prom)
+        iva_tasa = Decimal(str(r[8]))
+        stock_actual = Decimal(str(r[10]))
+        ventas_periodo = Decimal(str(r[11]))
+        stock_en_transito = Decimal(str(r[12]))
         
-        # Demanda diaria base
-        demanda_diaria_base = (ventas_periodo / Decimal(str(dias_hist))).quantize(Decimal("0.01"))
+        vm1 = float(r[13])
+        vm2 = float(r[14])
+        vm3 = float(r[15])
+        vm4 = float(r[16])
+        v_promo_qty = float(r[17])
+        en_promo_flag = bool(r[18])
+        
+        # Variación porcentual de costo (Último costo vs Costo promedio)
+        if costo_prom > Decimal("0") and costo_ult > Decimal("0"):
+            var_costo_pct = float(round(((costo_ult - costo_prom) / costo_prom) * Decimal("100"), 1))
+        else:
+            var_costo_pct = 0.0
+            
+        # Pulso de venta (Tendencia comparando mes reciente con promedio de meses previos)
+        prom_prev = (vm2 + vm3 + vm4) / 3.0 if (vm2 + vm3 + vm4) > 0 else vm1
+        if prom_prev > 0:
+            ratio_pulso = vm1 / prom_prev
+            if ratio_pulso >= 1.25:
+                pulso_tendencia = "acelerando"
+            elif ratio_pulso <= 0.75:
+                pulso_tendencia = "desacelerando"
+            else:
+                pulso_tendencia = "estable"
+        else:
+            pulso_tendencia = "estable"
+
+        # Demanda diaria base y ajuste por promociones que nublan el análisis
+        explicaciones = []
+        tiene_promo = en_promo_flag or v_promo_qty > 0
+        promo_info = None
+        total_4m = vm1 + vm2 + vm3 + vm4
+        
+        ventas_periodo_calc = ventas_periodo
+        if tiene_promo:
+            if v_promo_qty > 0 and total_4m > 0 and (v_promo_qty / total_4m) >= 0.15:
+                promo_info = f"Promo detectada ({int(v_promo_qty)} un. en oferta). Demanda normalizada para evitar sobre-compra."
+                exceso_estimado = Decimal(str(v_promo_qty * 0.35))
+                ventas_periodo_calc = max(Decimal("0"), ventas_periodo - (exceso_estimado / Decimal("4.0")))
+                explicaciones.append("Demanda normalizada por promociones pasadas")
+            elif en_promo_flag:
+                promo_info = "Producto con promoción activa o reciente en tienda."
+
+        demanda_diaria_base = (ventas_periodo_calc / Decimal(str(dias_hist))).quantize(Decimal("0.01"))
         
         # Multiplicadores de contexto
         mult = Decimal("1.0")
-        explicaciones = []
-        
         nombre_lower = nombre.lower()
         is_bebida_o_asado = any(w in nombre_lower for w in ["cerv", "coca", "pepsi", "fanta", "agua", "vino", "carne", "costilla", "vacio", "carbon", "snack"])
         is_canasta_o_limp = any(w in nombre_lower for w in ["arroz", "aceite", "harina", "azucar", "fideo", "leche", "lavandina", "jabon", "detergente", "papel"])
@@ -2434,9 +2521,8 @@ async def calculate_smart_replenishment_preview(
 
         demanda_ajustada = (demanda_diaria_base * mult).quantize(Decimal("0.01"))
         
-        # Parámetros Estadísticos de Inventario (Objetivos y Dinámicos)
+        # Parámetros Estadísticos de Inventario
         lead_time_dec = Decimal(str(lead_time_dias))
-        # Nivel de servicio 95% (Z = 1.65) con volatilidad estimada del 35% de demanda diaria
         sigma_estimado = demanda_ajustada * Decimal("0.35")
         import math
         sqrt_lead = Decimal(str(round(math.sqrt(float(lead_time_dias)), 2)))
@@ -2445,23 +2531,16 @@ async def calculate_smart_replenishment_preview(
             (Decimal("1.65") * sigma_estimado * sqrt_lead).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         )
         
-        # Punto de Reorden Estadístico (ROP = Demanda * LeadTime + StockSeguridad)
         punto_reorden = ((demanda_ajustada * lead_time_dec) + stock_seguridad).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
-        # Días de stock restantes (autonomía)
+        # Días de stock restantes (autonomía basada en stock físico real)
         if demanda_ajustada > Decimal("0.001"):
             dias_restantes = (stock_actual / demanda_ajustada).quantize(Decimal("0.1"))
         else:
             dias_restantes = Decimal("999.0") if stock_actual > 0 else Decimal("0.0")
             
-        # Clasificación Objetiva y Estadística del Estado de Stock
-        # - "critico": Stock físico <= stock de seguridad o se agota dentro del Lead Time
-        # - "bajo": Stock físico <= Punto de Reorden (ROP)
-        # - "optimo": Stock físico > ROP y dentro de cobertura
-        # - "sobrestock": Stock físico > Cobertura * 1.4
         dias_totales_objetivo = Decimal(str(dias_cobertura + lead_time_dias))
         target_stock = (demanda_ajustada * dias_totales_objetivo).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-        stock_total_disponible = stock_actual + stock_en_transito
 
         if stock_actual <= 0 or stock_actual <= (demanda_ajustada * lead_time_dec) or stock_actual <= stock_seguridad:
             autonomia_estado = "critico"
@@ -2477,8 +2556,8 @@ async def calculate_smart_replenishment_preview(
         if solo_quiebre_o_bajo and autonomia_estado not in ("critico", "bajo"):
             continue
             
-        # Cálculo de cantidad sugerida
-        deficit = max(Decimal("0"), target_stock - stock_total_disponible)
+        # Cantidad sugerida: basada puramente en stock físico en góndola/depósito
+        deficit = max(Decimal("0"), target_stock - stock_actual)
         cantidad_sugerida = deficit
         
         if cantidad_sugerida > Decimal("0"):
@@ -2487,7 +2566,7 @@ async def calculate_smart_replenishment_preview(
         subtotal_item = (cantidad_sugerida * costo_unit).quantize(Decimal("1"))
         monto_total_estimado += subtotal_item
         
-        explicacion_texto = "; ".join(explicaciones) if explicaciones else f"Demanda promedio calculada sobre {dias_hist} días de ventas."
+        explicacion_texto = "; ".join(explicaciones) if explicaciones else f"Demanda calculada sobre ventas reales ({dias_hist}d) y ritmo de 4 meses."
         
         items.append({
             "product_id": pid,
@@ -2498,6 +2577,16 @@ async def calculate_smart_replenishment_preview(
             "stock_actual": float(stock_actual),
             "stock_en_transito": float(stock_en_transito),
             "ventas_periodo": float(ventas_periodo),
+            "ventas_mes_1": vm1,
+            "ventas_mes_2": vm2,
+            "ventas_mes_3": vm3,
+            "ventas_mes_4": vm4,
+            "costo_promedio": float(costo_prom),
+            "ultimo_costo": float(costo_ult),
+            "variacion_costo_pct": var_costo_pct,
+            "pulso_tendencia": pulso_tendencia,
+            "tiene_promocion_detectada": tiene_promo,
+            "promocion_info": promo_info,
             "demanda_diaria_base": float(demanda_diaria_base),
             "multiplicador_estacional": float(mult),
             "demanda_diaria_ajustada": float(demanda_ajustada),
@@ -2520,6 +2609,7 @@ async def calculate_smart_replenishment_preview(
         "total_bajos": total_bajos,
         "total_sugeridos": total_sugeridos,
         "monto_total_estimado": float(monto_total_estimado),
+        "meses_labels": meses_labels,
         "items": items,
     }
 

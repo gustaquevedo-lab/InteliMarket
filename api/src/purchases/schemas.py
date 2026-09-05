@@ -886,8 +886,18 @@ class SmartReplenishmentItem(BaseModel):
     codigo_barra: Optional[str] = None
     unidad_medida: str = "UN"
     stock_actual: float
-    stock_en_transito: float
+    stock_en_transito: float = 0.0
     ventas_periodo: float
+    ventas_mes_1: float = 0.0
+    ventas_mes_2: float = 0.0
+    ventas_mes_3: float = 0.0
+    ventas_mes_4: float = 0.0
+    costo_promedio: float = 0.0
+    ultimo_costo: float = 0.0
+    variacion_costo_pct: Optional[float] = 0.0
+    pulso_tendencia: Optional[str] = "estable"  # "acelerando", "estable", "desacelerando"
+    tiene_promocion_detectada: bool = False
+    promocion_info: Optional[str] = None
     demanda_diaria_base: float
     multiplicador_estacional: float
     demanda_diaria_ajustada: float
@@ -910,6 +920,7 @@ class SmartReplenishmentResponse(BaseModel):
     total_bajos: int
     total_sugeridos: int
     monto_total_estimado: float
+    meses_labels: list[str] = []
     items: list[SmartReplenishmentItem]
 
 

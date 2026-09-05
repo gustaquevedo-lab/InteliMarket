@@ -509,6 +509,55 @@ async def export_price_variance_pdf(company_id: str, db: AsyncSession = Depends(
     )
 
 
+@router.get("/purchases/orders/{order_id}/pdf")
+async def export_purchase_order_pdf(order_id: str, db: AsyncSession = Depends(get_db)):
+    order = await service.get_order(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
+    
+    items = await service.get_order_items(db, order_id)
+    company = await _get_company_info(db, str(order.company_id))
+    
+    order_dict = {
+        "id": str(order.id),
+        "numero": order.numero,
+        "fecha": order.fecha,
+        "created_at": order.created_at,
+        "fecha_entrega_estimada": order.fecha_entrega_estimada,
+        "condiciones_pago": order.condiciones_pago,
+        "moneda": order.moneda,
+        "created_by_name": order.created_by_name,
+        "observaciones": order.observaciones,
+        "total": float(order.total or 0),
+        "supplier": {
+            "razon_social": order.supplier.razon_social if order.supplier else None,
+            "ruc": order.supplier.ruc if order.supplier else None,
+            "telefono": order.supplier.telefono if order.supplier else None,
+            "email": order.supplier.email if order.supplier else None,
+            "direccion": order.supplier.direccion if order.supplier else None,
+        } if order.supplier else {}
+    }
+    
+    items_list = []
+    for it in items:
+        items_list.append({
+            "descripcion": it.descripcion or (it.producto.nombre if it.producto else "Ítem"),
+            "sku": it.producto.sku if it.producto else None,
+            "codigo_barra": it.producto.codigo_barra if it.producto else None,
+            "cantidad": float(it.cantidad or 0),
+            "precio_unitario": float(it.precio_unitario or 0),
+            "iva_tasa": float(it.iva_tasa or 10),
+            "total": float(it.total or (float(it.cantidad or 0) * float(it.precio_unitario or 0))),
+        })
+        
+    pdf_bytes = purchases_pdf_reports.generate_purchase_order_pdf(company, order_dict, items_list)
+    filename = f"OC_{order.numero or order_id[:8]}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]), media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Content-Length": str(len(pdf_bytes))},
+    )
+
+
 # ── RFQ / Cotizacion comparativa ────────────────────────────────────────────────
 
 @router.post("/purchase-rfqs", response_model=RfqWithDetail, status_code=status.HTTP_201_CREATED)

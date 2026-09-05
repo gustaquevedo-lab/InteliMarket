@@ -213,6 +213,16 @@ export interface SmartReplenishmentItem {
   stock_actual: number
   stock_en_transito: number
   ventas_periodo: number
+  ventas_mes_1?: number
+  ventas_mes_2?: number
+  ventas_mes_3?: number
+  ventas_mes_4?: number
+  costo_promedio?: number
+  ultimo_costo?: number
+  variacion_costo_pct?: number
+  pulso_tendencia?: "acelerando" | "estable" | "desacelerando"
+  tiene_promocion_detectada?: boolean
+  promocion_info?: string | null
   demanda_diaria_base: number
   multiplicador_estacional: number
   demanda_diaria_ajustada: number
@@ -235,6 +245,7 @@ export interface SmartReplenishmentResponse {
   total_bajos: number
   total_sugeridos: number
   monto_total_estimado: number
+  meses_labels?: string[]
   items: SmartReplenishmentItem[]
 }
 
@@ -1136,6 +1147,8 @@ export const api = {
       downloadSpendBySupplierPdf: () => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/purchase-reports/export/spend-by-supplier.pdf`, undefined, "gasto_por_proveedor.pdf"),
       downloadPriceVariancePdf: () => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/purchase-reports/export/price-variance.pdf`, undefined, "varianza_de_precios.pdf"),
     },
+    downloadOrderPdf: (orderId: string, orderNumber?: string) =>
+      downloadAuthenticated(`/v1/purchases/orders/${orderId}/pdf`, undefined, `OC_${orderNumber || orderId.slice(0, 8)}.pdf`),
     smartReplenishmentPreview: (data: SmartReplenishmentRequest) =>
       client.post<SmartReplenishmentResponse>("/v1/purchases/smart-replenishment-preview", { ...data, company_id: COMPANY_ID }),
     generatePOFromReplenishment: (data: {
