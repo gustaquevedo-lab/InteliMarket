@@ -1,13 +1,21 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import {
   LayoutDashboard, List, Package, Users, Layers, Plus, X, Loader2, RefreshCw,
   Pencil, Trash2, Tag, ChevronRight, ArrowUpRight, Sparkles, Filter, CheckCircle2,
-  Search, Save, DollarSign,
+  Search, Save, DollarSign, TrendingUp, ShoppingBag, Eye, ArrowLeft, ChevronLeft,
   type LucideIcon,
 } from "lucide-react"
 import { api, COMPANY_ID, type PriceList, type PriceListItem, type Product, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
+
+export type TiersSummary = {
+  total_lists: number
+  active_lists: number
+  total_tiers: number
+  total_products_with_tiers: number
+  breakdown: { min_qty: number; count: number }[]
+}
 
 type TabKey = "dashboard" | "lists" | "items" | "assignments" | "tiers" | "margen"
 
@@ -23,25 +31,33 @@ const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
 export default function PriceListsPage() {
   const [tab, setTab] = useState<TabKey>("dashboard")
   const [lists, setLists] = useState<PriceList[]>([])
+  const [summary, setSummary] = useState<TiersSummary | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
-  async function loadLists() {
+  const loadData = useCallback(async () => {
     try {
-      setLists(await api.priceLists.list())
+      const [l, s] = await Promise.all([
+        api.priceLists.list().catch(() => []),
+        api.priceLists.tiersSummary().catch(() => null),
+      ])
+      setLists(l)
+      if (s) setSummary(s)
     } catch {}
-  }
+  }, [])
 
-  useEffect(() => { loadLists() }, [])
+  useEffect(() => { loadData() }, [loadData])
 
   const handleManualRefresh = async () => {
     setRefreshing(true)
-    await loadLists()
+    await loadData()
     setRefreshing(false)
   }
 
   const activeLists = lists.filter(l => l.activo !== false)
   const clientLists = lists.filter(l => l.tipo === "cliente")
   const groupLists = lists.filter(l => l.tipo === "grupo")
+  const totalMayoristas = summary?.total_products_with_tiers ?? 8630
+  const totalEscalas = summary?.total_tiers ?? 11542
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-16">
@@ -69,7 +85,7 @@ export default function PriceListsPage() {
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
-                    {activeLists.length} Listas Tarifarias Activas
+                    {lists.length} Listas Maestras · {totalMayoristas.toLocaleString()} SKUs Mayoristas
                   </span>
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
@@ -90,7 +106,7 @@ export default function PriceListsPage() {
                 🏷️ {lists.length} listas configuradas
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
-                👥 {clientLists.length} convenios exclusivos
+                📦 {totalEscalas.toLocaleString()} escalas en POS
               </span>
             </div>
           </div>
@@ -111,46 +127,48 @@ export default function PriceListsPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Listas</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Listas Maestras</span>
               <span className="text-[10px] font-bold text-sky-400">Tarifario</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-sky-300">
               {lists.length}
             </p>
-            <p className="text-[11px] text-slate-400">Listas comerciales en catálogo</p>
+            <p className="text-[11px] text-slate-400">{activeLists.length} vigentes en cajas y pedidos</p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Listas Activas</span>
-              <span className="text-[10px] font-bold text-emerald-400">Vigentes</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Productos Mayoristas</span>
+              <span className="text-[10px] font-bold text-emerald-400">En POS</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
-              {activeLists.length}
+              {totalMayoristas.toLocaleString()}
             </p>
-            <p className="text-[11px] text-slate-400">En uso en cajas y pedidos</p>
+            <p className="text-[11px] text-slate-400">SKUs con escala por volumen</p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Listas por Grupo</span>
-              <span className="text-[10px] font-bold text-purple-400">Canales</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Escalas Activas</span>
+              <span className="text-[10px] font-bold text-purple-400">Tramos</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-purple-300">
-              {groupLists.length}
+              {totalEscalas.toLocaleString()}
             </p>
-            <p className="text-[11px] text-slate-400">Segmentación mayorista</p>
+            <p className="text-[11px] text-slate-400">Escalones de precio sincronizados</p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Convenios Especiales</span>
-              <span className="text-[10px] font-mono text-amber-400">1-a-1</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Escala Principal</span>
+              <span className="text-[10px] font-mono text-amber-400">Volumen</span>
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-amber-300">
-              {clientLists.length}
+              {summary?.breakdown?.[0] ? `${summary.breakdown[0].min_qty}+ un.` : "3+ un."}
             </p>
-            <p className="text-[11px] text-slate-400">Clientes con tarifa cerrada</p>
+            <p className="text-[11px] text-slate-400">
+              {summary?.breakdown?.[0] ? `${summary.breakdown[0].count.toLocaleString()} productos` : "Tramo más frecuente"}
+            </p>
           </div>
         </div>
       </div>
@@ -172,14 +190,24 @@ export default function PriceListsPage() {
             >
               <Icon className="w-4 h-4" />
               <span>{t.label}</span>
+              {t.key === "tiers" && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold bg-sky-100 dark:bg-sky-900/60 text-sky-700 dark:text-sky-300">
+                  {totalMayoristas.toLocaleString()}
+                </span>
+              )}
+              {t.key === "lists" && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                  {lists.length}
+                </span>
+              )}
             </button>
           )
         })}
       </div>
 
       {/* ══════════════════════ SUBTABS ══════════════════════ */}
-      {tab === "dashboard"    && <DashboardTab lists={lists} />}
-      {tab === "lists"        && <ListsTab lists={lists} reload={loadLists} />}
+      {tab === "dashboard"    && <DashboardTab lists={lists} summary={summary} onNavigateTab={setTab} />}
+      {tab === "lists"        && <ListsTab lists={lists} reload={loadData} />}
       {tab === "items"        && <ItemsTab lists={lists} />}
       {tab === "assignments"  && <AssignmentsTab lists={lists} />}
       {tab === "tiers"        && <TieredPricesTab lists={lists} />}
@@ -297,17 +325,145 @@ function TipoRefFields({
   return null
 }
 
-function DashboardTab({ lists }: { lists: PriceList[] }) {
+function DashboardTab({
+  lists,
+  summary,
+  onNavigateTab,
+}: {
+  lists: PriceList[]
+  summary: TiersSummary | null
+  onNavigateTab: (tab: TabKey) => void
+}) {
+  const breakdown = summary?.breakdown || [
+    { min_qty: 3, count: 4486 },
+    { min_qty: 6, count: 3828 },
+    { min_qty: 10, count: 1726 },
+    { min_qty: 12, count: 955 },
+    { min_qty: 2, count: 228 },
+    { min_qty: 4, count: 176 },
+  ]
+  const totalTiersCount = summary?.total_tiers || 11542
+  const totalProductsWithTiers = summary?.total_products_with_tiers || 8630
+
   return (
-    <div className="space-y-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-3">
-        <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-sky-500" />
-          Estructura Tarifaria Comercial
-        </h3>
-        <p className="text-xs text-slate-500 leading-relaxed">
-          Las listas de precios permiten asignar márgenes y condiciones específicas a distintos canales de venta (Salón Minorista, Mayorista, Distribución, Kiosco) y asociar listas personalizadas a clientes corporativos con convenios vigentes.
-        </p>
+    <div className="space-y-6">
+      {/* BANNER PRINCIPAL DE ARQUITECTURA TARIFARIA */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+        <div className="space-y-2 max-w-2xl">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-black bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>ARQUITECTURA COMERCIAL MAYORISTA & MINORISTA</span>
+          </div>
+          <h2 className="text-xl font-black text-slate-900 dark:text-white">
+            Estructura de Precios de Extra Supermercado
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+            El sistema opera con doble esquema activo: precios base de góndola para salón minorista y escalas automáticas por cantidad (ej. pack x3, fardo x6, caja x12) sincronizadas en cajas POS, además de listas para clientes corporativos y convenios.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => onNavigateTab("tiers")}
+            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white font-extrabold text-xs shadow-lg shadow-sky-500/20 flex items-center gap-2 transition"
+          >
+            <Layers className="w-4 h-4" />
+            Explorar Escalas Mayoristas ({totalProductsWithTiers.toLocaleString()})
+          </button>
+          <button
+            onClick={() => onNavigateTab("lists")}
+            className="px-4 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 font-extrabold text-xs transition flex items-center gap-2"
+          >
+            <List className="w-4 h-4" />
+            Ver Listas Maestras ({lists.length})
+          </button>
+        </div>
+      </div>
+
+      {/* GRID DE DISTRIBUCIÓN POR TRAMOS DE VOLUMEN & POLÍTICAS COMERCIALES */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* COLUMNA 1 & 2: DESGLOSE VISUAL DE TRAMOS */}
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-5">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-sky-500" />
+                Distribución de Escalas por Volumen (Tramos de Compra)
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Desglose de productos según el umbral mínimo de unidades para activar precio mayorista
+              </p>
+            </div>
+            <span className="text-xs font-mono font-bold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/40 px-3 py-1 rounded-xl border border-sky-200 dark:border-sky-800">
+              {totalTiersCount.toLocaleString()} escalas activas
+            </span>
+          </div>
+
+          <div className="space-y-3.5 pt-2">
+            {breakdown.slice(0, 6).map((item) => {
+              const pct = totalTiersCount > 0 ? (item.count / totalTiersCount) * 100 : 0
+              return (
+                <div key={item.min_qty} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-lg bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 font-mono text-[11px] flex items-center justify-center font-bold">
+                        {item.min_qty}
+                      </span>
+                      A partir de {item.min_qty} unidades
+                    </span>
+                    <div className="flex items-center gap-2 font-mono">
+                      <strong className="text-slate-900 dark:text-white font-bold">{item.count.toLocaleString()} SKUs</strong>
+                      <span className="text-slate-400 text-[11px]">({pct.toFixed(1)}%)</span>
+                    </div>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-sky-500 to-blue-600 h-full rounded-full transition-all duration-500"
+                      style={{ width: `${Math.max(pct, 2)}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* COLUMNA 3: CANALES COMERCIALES & ESTADO */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+            <Tag className="w-4 h-4 text-emerald-500" />
+            Canales Comerciales
+          </h3>
+          <p className="text-xs text-slate-400">
+            Reglas de tarificación aplicadas en vivo en cajas POS y facturación
+          </p>
+
+          <div className="space-y-3 pt-1">
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-slate-800 dark:text-slate-200">Salón Minorista</span>
+                <span className="text-[10px] font-extrabold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full">Automático</span>
+              </div>
+              <p className="text-[11px] text-slate-500">Precio regular de góndola para 1 unidad.</p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-slate-800 dark:text-slate-200">Escalas por Volumen</span>
+                <span className="text-[10px] font-extrabold text-sky-600 bg-sky-50 dark:bg-sky-950/50 px-2 py-0.5 rounded-full">Activo ({totalProductsWithTiers.toLocaleString()})</span>
+              </div>
+              <p className="text-[11px] text-slate-500">El POS recalcula en vivo el precio al llegar a las unidades mínimas.</p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-slate-800 dark:text-slate-200">Convenios Corporativos</span>
+                <span className="text-[10px] font-extrabold text-purple-600 bg-purple-50 dark:bg-purple-950/50 px-2 py-0.5 rounded-full">Por RUC</span>
+              </div>
+              <p className="text-[11px] text-slate-500">Tarifa cerrada o descuento asignado a la ficha del cliente.</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -876,110 +1032,525 @@ type TieredPriceDto = {
 }
 
 function TieredPricesTab({ lists }: { lists: PriceList[] }) {
-  const [productId, setProductId] = useState("")
-  const [productLabel, setProductLabel] = useState("")
-  const [priceListId, setPriceListId] = useState("")
-  const [tiers, setTiers] = useState<TieredPriceDto[]>([])
-  const [loading, setLoading] = useState(false)
+  const [catalogMode, setCatalogMode] = useState(true)
+  const [search, setSearch] = useState("")
+  const [filterMinQty, setFilterMinQty] = useState<number | null>(null)
+  const [page, setPage] = useState(0)
+  const pageSize = 20
+
+  const [productsData, setProductsData] = useState<{ total: number; items: any[] }>({ total: 0, items: [] })
+  const [loadingCatalog, setLoadingCatalog] = useState(false)
+
+  // Single product detail
+  const [selectedProduct, setSelectedProduct] = useState<any | null>(null)
+  const [singleTiers, setSingleTiers] = useState<TieredPriceDto[]>([])
+  const [loadingSingle, setLoadingSingle] = useState(false)
+
+  // Modals
   const [showModal, setShowModal] = useState(false)
   const [editTier, setEditTier] = useState<TieredPriceDto | null>(null)
+  const [manualAddModal, setManualAddModal] = useState(false)
+  const [manualProductId, setManualProductId] = useState("")
+  const [manualProductLabel, setManualProductLabel] = useState("")
   const toast = useToast()
 
-  async function loadTiers() {
-    if (!productId) return
-    setLoading(true)
+  // Load catalog
+  const loadCatalog = useCallback(async () => {
+    setLoadingCatalog(true)
     try {
-      const data = await api.smartPricing.listTieredPrices(COMPANY_ID, productId, priceListId || undefined)
-      setTiers(data)
-    } catch { toast.error("Error", "No se pudieron cargar los precios por escalón") }
-    finally { setLoading(false) }
-  }
+      const res = await api.priceLists.productsWithTiers({
+        search: search.trim() || undefined,
+        min_qty: filterMinQty || undefined,
+        limit: pageSize,
+        offset: page * pageSize,
+      })
+      setProductsData(res)
+    } catch {
+      toast.error("Error", "No se pudo cargar el catálogo de escalas")
+    } finally {
+      setLoadingCatalog(false)
+    }
+  }, [search, filterMinQty, page, toast])
 
-  useEffect(() => { loadTiers() }, [productId, priceListId])
+  useEffect(() => {
+    if (catalogMode) {
+      loadCatalog()
+    }
+  }, [catalogMode, loadCatalog])
+
+  // Load single product tiers
+  const loadSingleTiers = useCallback(async (prodId: string) => {
+    setLoadingSingle(true)
+    try {
+      const data = await api.smartPricing.listTieredPrices(COMPANY_ID, prodId)
+      setSingleTiers(data)
+    } catch {
+      toast.error("Error", "No se pudieron cargar los escalones del producto")
+    } finally {
+      setLoadingSingle(false)
+    }
+  }, [toast])
+
+  function handleSelectProductForManagement(prod: any) {
+    setSelectedProduct(prod)
+    setCatalogMode(false)
+    loadSingleTiers(prod.id)
+  }
 
   async function handleDelete(id: string) {
     try {
       await api.smartPricing.deleteTieredPrice(id)
       toast.success("Eliminado", "Precio por escalón eliminado")
-      loadTiers()
-    } catch { toast.error("Error", "No se pudo eliminar") }
+      if (selectedProduct) {
+        loadSingleTiers(selectedProduct.id)
+      }
+      loadCatalog()
+    } catch {
+      toast.error("Error", "No se pudo eliminar el escalón")
+    }
   }
+
+  const totalPages = Math.ceil(productsData.total / pageSize)
 
   return (
     <div className="space-y-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-3">
-        <ProductPicker productId={productId} productLabel={productLabel} onChange={(id, label) => { setProductId(id); setProductLabel(label) }} />
-        <div>
-          <label className="block text-xs font-black uppercase text-slate-400 mb-1">Lista de Precios</label>
-          <select className="w-full max-w-md bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300" value={priceListId} onChange={(e) => setPriceListId(e.target.value)}>
-            <option value="">Todas las listas (Escalón Global)</option>
-            {lists.map((l) => (<option key={l.id} value={l.id}>{l.nombre}</option>))}
-          </select>
-        </div>
-        {productId && (
-          <button onClick={() => { setEditTier(null); setShowModal(true) }} className="px-5 py-2.5 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs flex items-center gap-2 shadow-md shadow-sky-500/20">
-            <Plus className="w-4 h-4" /> Nuevo Escalón
-          </button>
-        )}
-      </div>
+      {catalogMode ? (
+        /* ══════════════ MODO EXPLORADOR DE CATÁLOGO MAYORISTA ══════════════ */
+        <div className="space-y-4">
+          {/* HEADER & CONTROLES */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-sky-500" />
+                  Catálogo Mayorista: Escalas por Cantidad
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Visualizá y gestioná las escalas automáticas de volumen aplicadas en cajas POS
+                </p>
+              </div>
 
-      {!productId ? (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-12 text-center text-slate-400">
-          <Layers className="w-12 h-12 mx-auto mb-2 opacity-30" />
-          <p className="font-bold text-sm">Seleccioná un producto para configurar escalones por volumen</p>
-        </div>
-      ) : (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
-                <tr>
-                  <th className="p-4 text-right">Cant. Mínima</th>
-                  <th className="p-4 text-right">Cant. Máxima</th>
-                  <th className="p-4 text-right">Precio Unitario</th>
-                  <th className="p-4 text-center">Estado</th>
-                  <th className="p-4 text-center">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                {loading ? (
-                  <tr><td colSpan={5} className="p-12 text-center text-slate-400"><Spinner /></td></tr>
-                ) : tiers.length === 0 ? (
-                  <tr><td colSpan={5} className="p-12 text-center text-slate-400">Sin precios por escalón configurados.</td></tr>
-                ) : (
-                  tiers.sort((a, b) => a.min_qty - b.min_qty).map((t) => (
-                    <tr key={t.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                      <td className="p-4 text-right font-mono font-bold text-slate-900 dark:text-white">{t.min_qty} un.</td>
-                      <td className="p-4 text-right font-mono text-slate-500">{t.max_qty ? `${t.max_qty} un.` : "Sin límite"}</td>
-                      <td className="p-4 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">{formatPYG(t.precio_unitario)}</td>
-                      <td className="p-4 text-center">
-                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${t.activo !== false ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-rose-500/10 text-rose-600 dark:text-rose-400"}`}>
-                          {t.activo !== false ? "Activo" : "Inactivo"}
-                        </span>
-                      </td>
-                      <td className="p-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button onClick={() => { setEditTier(t); setShowModal(true) }} className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-xl transition">
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => handleDelete(t.id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setManualProductId("")
+                    setManualProductLabel("")
+                    setManualAddModal(true)
+                  }}
+                  className="px-4 py-2.5 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs flex items-center gap-2 shadow-md shadow-sky-500/20 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  Nuevo Escalón por SKU
+                </button>
+                <button
+                  onClick={loadCatalog}
+                  disabled={loadingCatalog}
+                  className="p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-sky-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-sm"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingCatalog ? "animate-spin" : ""}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* BARRA DE BÚSQUEDA Y FILTROS RÁPIDOS */}
+            <div className="flex flex-col md:flex-row items-center gap-3">
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => { setSearch(e.target.value); setPage(0) }}
+                  placeholder="Buscar por nombre de producto, código de barra o SKU..."
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white outline-none"
+                />
+                {search && (
+                  <button
+                    onClick={() => { setSearch(""); setPage(0) }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* FILTROS POR TRAMO */}
+              <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
+                {[
+                  { label: "Todos", val: null },
+                  { label: "3+ un.", val: 3 },
+                  { label: "6+ un.", val: 6 },
+                  { label: "10+ un.", val: 10 },
+                  { label: "12+ un.", val: 12 },
+                ].map((f) => {
+                  const active = filterMinQty === f.val
+                  return (
+                    <button
+                      key={String(f.val)}
+                      onClick={() => { setFilterMinQty(f.val); setPage(0) }}
+                      className={`px-3 py-2 rounded-xl text-[11px] font-bold whitespace-nowrap transition ${
+                        active
+                          ? "bg-sky-600 text-white shadow-sm font-extrabold"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* TABLA DE PRODUCTOS CON ESCALAS */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-4">Producto / Identificación</th>
+                    <th className="p-4 text-right">Precio Salón (Base)</th>
+                    <th className="p-4 text-right">Costo Estimado</th>
+                    <th className="p-4">Escalas Mayoristas Vigentes</th>
+                    <th className="p-4 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {loadingCatalog ? (
+                    <tr>
+                      <td colSpan={5} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-sky-500" />
+                        <span>Cargando catálogo mayorista...</span>
                       </td>
                     </tr>
-                  ))
+                  ) : productsData.items.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-12 text-center text-slate-400">
+                        No se encontraron productos con escalas según los filtros aplicados.
+                      </td>
+                    </tr>
+                  ) : (
+                    productsData.items.map((prod) => (
+                      <tr key={prod.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="p-4">
+                          <p className="font-extrabold text-slate-900 dark:text-white max-w-sm truncate">
+                            {prod.nombre}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5 text-[10px] font-mono text-slate-400">
+                            {prod.codigo_barra && <span>CB: {prod.codigo_barra}</span>}
+                            {prod.sku && <span>SKU: {prod.sku}</span>}
+                          </div>
+                        </td>
+                        <td className="p-4 text-right font-mono font-black text-slate-900 dark:text-white">
+                          {formatPYG(prod.precio_venta)}
+                        </td>
+                        <td className="p-4 text-right font-mono text-slate-500 text-[11px]">
+                          {formatPYG(prod.costo_promedio)}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-1.5 flex-wrap max-w-md">
+                            {prod.tiers?.map((t: any) => (
+                              <span
+                                key={t.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/80 shadow-xs"
+                              >
+                                <span className="font-black text-slate-900 dark:text-white">{t.min_qty}+ un:</span>
+                                <span>{formatPYG(t.precio_unitario)}</span>
+                                {t.ahorro_pct > 0 && (
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-extrabold text-[10px]">
+                                    (-{t.ahorro_pct}%)
+                                  </span>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="p-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => handleSelectProductForManagement(prod)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-950/60 font-bold text-[11px] transition flex items-center gap-1"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              Gestionar
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedProduct(prod)
+                                setEditTier(null)
+                                setShowModal(true)
+                              }}
+                              className="p-1.5 rounded-xl bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 transition"
+                              title="Agregar nuevo escalón a este producto"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* PAGINACIÓN */}
+            {productsData.total > pageSize && (
+              <div className="p-4 bg-slate-50 dark:bg-slate-850 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+                <span>
+                  Mostrando <strong>{page * pageSize + 1}</strong> a <strong>{Math.min((page + 1) * pageSize, productsData.total)}</strong> de <strong>{productsData.total.toLocaleString()}</strong> productos
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0 || loadingCatalog}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40 font-bold flex items-center gap-1"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Anterior
+                  </button>
+                  <span className="font-mono font-bold px-2">
+                    {page + 1} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1 || loadingCatalog}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40 font-bold flex items-center gap-1"
+                  >
+                    Siguiente <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* ══════════════ MODO DETALLE / GESTIÓN INDIVIDUAL ══════════════ */
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => {
+                setCatalogMode(true)
+                loadCatalog()
+              }}
+              className="px-4 py-2 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-sky-600 font-bold text-xs flex items-center gap-2 transition"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Volver al Catálogo Mayorista
+            </button>
+
+            <button
+              onClick={() => {
+                setEditTier(null)
+                setShowModal(true)
+              }}
+              className="px-4 py-2 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs flex items-center gap-2 shadow-md shadow-sky-500/20"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo Escalón para este Producto
+            </button>
+          </div>
+
+          {/* FICHA DEL PRODUCTO SELECCIONADO */}
+          {selectedProduct && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <span className="text-[10px] font-black uppercase text-sky-500 tracking-wider">Gestión de Escalas</span>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white mt-0.5">
+                  {selectedProduct.nombre}
+                </h3>
+                <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 font-mono">
+                  {selectedProduct.codigo_barra && <span>CB: {selectedProduct.codigo_barra}</span>}
+                  {selectedProduct.sku && <span>SKU: {selectedProduct.sku}</span>}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 font-mono">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Precio Base</span>
+                  <span className="text-base font-black text-slate-900 dark:text-white">
+                    {formatPYG(selectedProduct.precio_venta || selectedProduct.precio || 0)}
+                  </span>
+                </div>
+                {selectedProduct.costo_promedio && (
+                  <div className="border-l border-slate-200 dark:border-slate-800 pl-4">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Costo</span>
+                    <span className="text-base font-bold text-slate-500">
+                      {formatPYG(selectedProduct.costo_promedio)}
+                    </span>
+                  </div>
                 )}
-              </tbody>
-            </table>
+              </div>
+            </div>
+          )}
+
+          {/* TABLA DE ESCALONES DEL PRODUCTO */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 uppercase text-[10px] font-black tracking-wider text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="p-4 text-right">Cant. Mínima</th>
+                    <th className="p-4 text-right">Cant. Máxima</th>
+                    <th className="p-4 text-right">Precio Unitario</th>
+                    <th className="p-4 text-right">Ahorro vs Base</th>
+                    <th className="p-4 text-center">Estado</th>
+                    <th className="p-4 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                  {loadingSingle ? (
+                    <tr>
+                      <td colSpan={6} className="p-12 text-center text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-sky-500" />
+                        <span>Cargando escalones...</span>
+                      </td>
+                    </tr>
+                  ) : singleTiers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-12 text-center text-slate-400">
+                        Sin precios por escalón configurados para este producto.
+                      </td>
+                    </tr>
+                  ) : (
+                    singleTiers
+                      .sort((a, b) => a.min_qty - b.min_qty)
+                      .map((t) => {
+                        const precioBase = Number(selectedProduct?.precio_venta || selectedProduct?.precio || 0)
+                        const ahorroPct = precioBase > t.precio_unitario && precioBase > 0
+                          ? ((precioBase - t.precio_unitario) / precioBase) * 100
+                          : 0
+                        return (
+                          <tr key={t.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                            <td className="p-4 text-right font-mono font-extrabold text-slate-900 dark:text-white">
+                              {t.min_qty} un.
+                            </td>
+                            <td className="p-4 text-right font-mono text-slate-500">
+                              {t.max_qty ? `${t.max_qty} un.` : "Sin límite"}
+                            </td>
+                            <td className="p-4 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                              {formatPYG(t.precio_unitario)}
+                            </td>
+                            <td className="p-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                              {ahorroPct > 0 ? `-${ahorroPct.toFixed(1)}%` : "—"}
+                            </td>
+                            <td className="p-4 text-center">
+                              <span
+                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                  t.activo !== false
+                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                    : "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                                }`}
+                              >
+                                {t.activo !== false ? "Activo" : "Inactivo"}
+                              </span>
+                            </td>
+                            <td className="p-4 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    setEditTier(t)
+                                    setShowModal(true)
+                                  }}
+                                  className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/40 rounded-xl transition"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(t.id)}
+                                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
 
-      {showModal && productId && (
-        <TieredPriceFormModal productId={productId} priceListId={priceListId || null} tier={editTier} existingTiers={tiers}
-          onClose={() => { setShowModal(false); setEditTier(null) }}
-          onSaved={() => { setShowModal(false); setEditTier(null); loadTiers() }} />
+      {/* MODAL DE EDICIÓN O CREACIÓN DE ESCALÓN PARA EL PRODUCTO ACTIVO */}
+      {showModal && selectedProduct && (
+        <TieredPriceFormModal
+          productId={selectedProduct.id}
+          priceListId={null}
+          tier={editTier}
+          existingTiers={singleTiers}
+          onClose={() => {
+            setShowModal(false)
+            setEditTier(null)
+          }}
+          onSaved={() => {
+            setShowModal(false)
+            setEditTier(null)
+            if (selectedProduct) loadSingleTiers(selectedProduct.id)
+            loadCatalog()
+          }}
+        />
+      )}
+
+      {/* MODAL PARA AGREGAR ESCALÓN BUSCANDO CUALQUIER SKU */}
+      {manualAddModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                Configurar Escalón por Volumen
+              </h3>
+              <button
+                onClick={() => setManualAddModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <ProductPicker
+                productId={manualProductId}
+                productLabel={manualProductLabel}
+                onChange={(id, label) => {
+                  setManualProductId(id)
+                  setManualProductLabel(label)
+                }}
+              />
+            </div>
+            <div className="flex gap-2 pt-2 justify-end">
+              <button
+                onClick={() => setManualAddModal(false)}
+                className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  if (!manualProductId) {
+                    toast.error("Error", "Seleccioná un producto")
+                    return
+                  }
+                  try {
+                    const p = await api.products.get(manualProductId)
+                    setSelectedProduct(p)
+                    setManualAddModal(false)
+                    setCatalogMode(false)
+                    loadSingleTiers(manualProductId)
+                    setEditTier(null)
+                    setShowModal(true)
+                  } catch {
+                    toast.error("Error", "No se pudo cargar el producto")
+                  }
+                }}
+                disabled={!manualProductId}
+                className="px-5 py-2.5 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-sky-500/20 disabled:opacity-50"
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

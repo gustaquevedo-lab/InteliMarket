@@ -1,6 +1,6 @@
 """Price list router"""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
@@ -12,6 +12,26 @@ from api.src.price_lists.schemas import (
 )
 
 router = APIRouter(prefix="/api/v1/price-lists", tags=["price-lists"])
+
+
+@router.get("/tiers-summary")
+async def tiers_summary(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_tiers_summary(db, user["company_id"])
+
+
+@router.get("/products-with-tiers")
+async def products_with_tiers(
+    search: str | None = Query(None),
+    min_qty: int | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_products_with_tiers(db, user["company_id"], search, min_qty, limit, offset)
 
 
 @router.get("/lookup")

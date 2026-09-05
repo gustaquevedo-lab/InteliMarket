@@ -1,6 +1,6 @@
 """Price list service"""
 
-from sqlalchemy import select
+from sqlalchemy import select, text, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 import uuid
@@ -145,3 +145,143 @@ async def resolve_customer_price(
             return {"precio": float(item.precio), "price_list_id": price_list_id, "source": "lista_plana"}
 
     return None
+
+
+async def get_tiers_summary(db: AsyncSession, company_id: str) -> dict:
+    cid = uuid.UUID(company_id)
+    # List counts
+    total_lists = (await db.execute(
+        select(sa_func.count(PriceList.id)).where(PriceList.company_id == cid)
+    )).scalar() or 0
+    active_lists = (await db.execute(
+        select(sa_func.count(PriceList.id)).where(PriceList.company_id == cid, PriceList.activo == True)
+    )).scalar() or 0
+    
+    # Tiers stats
+    stats_q = text("""
+        SELECT 
+            COUNT(*) as total_tiers,
+            COUNT(DISTINCT product_id) as total_products,
+            MIN(precio_unitario) as min_price,
+            MAX(precio_unitario) as max_price
+        FROM sp_tiered_prices
+        WHERE activo = true AND company_id = :cid
+    """)
+    stats_row = (await db.execute(stats_q, {"cid": cid})).fetchone()
+    
+    # Breakdown by min_qty
+    breakdown_q = text("""
+        SELECT min_qty, COUNT(*) as count
+        FROM sp_tiered_prices
+        WHERE activo = true AND company_id = :cid
+        GROUP BY min_qty
+        ORDER BY count DESC
+        LIMIT 10
+    """)
+    breakdown_rows = (await db.execute(breakdown_q, {"cid": cid})).fetchall()
+    
+    return {
+        "total_lists": total_lists,
+        "active_lists": active_lists,
+        "total_tiers": stats_row.total_tiers if stats_row else 0,
+        "total_products_with_tiers": stats_row.total_products if stats_row else 0,
+        "breakdown": [{"min_qty": r.min_qty, "count": r.count} for r in breakdown_rows],
+    }
+
+
+async def get_products_with_tiers(
+    db: AsyncSession,
+    company_id: str,
+    search: Optional[str] = None,
+    min_qty: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    
+    where_clauses = ["p.company_id = :cid", "tp.activo = true"]
+    params = {"cid": cid, "limit": limit, "offset": offset}
+    
+    if search and search.strip():
+        where_clauses.append("(p.nombre ILIKE :search OR p.codigo_barra ILIKE :search OR p.sku ILIKE :search)")
+        params["search"] = f"%{search.strip()}%"
+        
+    if min_qty is not None and min_qty > 0:
+        where_clauses.append("tp.min_qty = :min_qty")
+        params["min_qty"] = min_qty
+        
+    where_sql = " AND ".join(where_clauses)
+    
+    # Count total distinct products
+    count_sql = text(f"""
+        SELECT COUNT(DISTINCT p.id)
+        FROM products p
+        JOIN sp_tiered_prices tp ON tp.product_id = p.id
+        WHERE {where_sql}
+    """)
+    total_count = (await db.execute(count_sql, params)).scalar() or 0
+    
+    # Query paginated products with aggregated tiers
+    data_sql = text(f"""
+        WITH ranked_products AS (
+            SELECT DISTINCT p.id, p.nombre, p.codigo_barra, p.sku, p.precio_venta, p.costo_promedio
+            FROM products p
+            JOIN sp_tiered_prices tp ON tp.product_id = p.id
+            WHERE {where_sql}
+            ORDER BY p.nombre ASC
+            LIMIT :limit OFFSET :offset
+        )
+        SELECT 
+            rp.id, rp.nombre, rp.codigo_barra, rp.sku, rp.precio_venta, rp.costo_promedio,
+            COALESCE(
+                json_agg(
+                    json_build_object(
+                        'id', tp.id,
+                        'min_qty', tp.min_qty,
+                        'max_qty', tp.max_qty,
+                        'precio_unitario', tp.precio_unitario,
+                        'activo', tp.activo
+                    ) ORDER BY tp.min_qty ASC
+                ) FILTER (WHERE tp.id IS NOT NULL), '[]'
+            ) as tiers
+        FROM ranked_products rp
+        JOIN sp_tiered_prices tp ON tp.product_id = rp.id AND tp.activo = true
+        GROUP BY rp.id, rp.nombre, rp.codigo_barra, rp.sku, rp.precio_venta, rp.costo_promedio
+        ORDER BY rp.nombre ASC
+    """)
+    rows = (await db.execute(data_sql, params)).fetchall()
+    
+    items = []
+    for r in rows:
+        precio_base = float(r.precio_venta or 0)
+        tiers_list = []
+        raw_tiers = r.tiers if isinstance(r.tiers, list) else []
+        for t in raw_tiers:
+            p_unit = float(t.get("precio_unitario") or 0)
+            ahorro_pct = round(((precio_base - p_unit) / precio_base) * 100, 1) if precio_base > p_unit > 0 else 0.0
+            tiers_list.append({
+                "id": str(t.get("id")),
+                "min_qty": t.get("min_qty"),
+                "max_qty": t.get("max_qty"),
+                "precio_unitario": p_unit,
+                "ahorro_pct": ahorro_pct,
+                "activo": t.get("activo", True),
+            })
+            
+        items.append({
+            "id": str(r.id),
+            "nombre": r.nombre,
+            "codigo_barra": r.codigo_barra,
+            "sku": r.sku,
+            "precio_venta": precio_base,
+            "costo_promedio": float(r.costo_promedio or 0),
+            "tiers": tiers_list,
+        })
+        
+    return {
+        "total": total_count,
+        "items": items,
+        "limit": limit,
+        "offset": offset,
+    }
+

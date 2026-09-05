@@ -1434,6 +1434,8 @@ export const api = {
     updateItem: (listId: string, itemId: string, data: Partial<PriceListItem>) => client.patch<PriceListItem>(`/v1/price-lists/${listId}/items/${itemId}`, data),
     removeItem: (listId: string, itemId: string) => client.delete<void>(`/v1/price-lists/${listId}/items/${itemId}`),
     resolvePrice: (customerId: string, productId: string, quantity = 1) => client.get<{ precio: number; price_list_id: string; source: string } | null>("/v1/price-lists/lookup", { customer_id: customerId, product_id: productId, quantity }),
+    tiersSummary: () => client.get<{ total_lists: number; active_lists: number; total_tiers: number; total_products_with_tiers: number; breakdown: { min_qty: number; count: number }[] }>("/v1/price-lists/tiers-summary"),
+    productsWithTiers: (params?: { search?: string; min_qty?: number; limit?: number; offset?: number }) => client.get<{ total: number; items: any[]; limit: number; offset: number }>("/v1/price-lists/products-with-tiers", params as any),
   },
   posTerminalTransactions: {
     create: (data: Partial<PosTerminalTransaction>) => client.post<PosTerminalTransaction>("/v1/pos-terminal-transactions", data),
