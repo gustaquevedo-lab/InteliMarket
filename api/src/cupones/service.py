@@ -1091,9 +1091,60 @@ async def registrar_cupones_multiples(
             cliente.ticket_promedio = round(float(cliente.total_gastado) / cliente.cantidad_compras, 2)
         cliente.ultimo_consumo = datetime.now(timezone.utc)
 
-    # 2. Registrar cada lote de cupones por campaña
+    # 2. Cruce Automático con la tabla de ventas `sales`
+    sale = None
+    if data.sale_id:
+        sale = await db.get(Sale, data.sale_id)
+    if not sale and data.nro_ticket:
+        cleaned_ticket = data.nro_ticket.strip().upper()
+        sale_query = select(Sale).options(selectinload(Sale.items)).where(
+            Sale.company_id == company_id,
+            or_(
+                Sale.numero == cleaned_ticket,
+                Sale.numero.ilike(f"%{cleaned_ticket}"),
+                Sale.numero.ilike(f"%{cleaned_ticket.replace('-', '')}%")
+            )
+        ).order_by(desc(Sale.fecha))
+        res_sale = await db.execute(sale_query)
+        sale = res_sale.scalars().first()
+
+    # Si encontramos la venta y estaba como Consumidor Final, asignarla al cliente elegido
+    if sale:
+        final_cust_id = UUID("00000000-0000-0000-0000-000000000001")
+        if not sale.customer_id or sale.customer_id == final_cust_id:
+            # Buscar si existe en customers de Intelimarket o crearlo
+            q_cust = select(Customer).where(
+                Customer.company_id == company_id,
+                or_(
+                    Customer.ci == cleaned_doc,
+                    Customer.ruc == cleaned_doc,
+                    Customer.ruc.like(f"{cleaned_doc}%")
+                )
+            )
+            res_cust = await db.execute(q_cust)
+            cust = res_cust.scalars().first()
+            if not cust:
+                cust = Customer(
+                    company_id=company_id,
+                    razon_social=cliente.nombre,
+                    ci=cleaned_doc,
+                    ruc=cleaned_doc,
+                    telefono=cliente.telefono,
+                    direccion=cliente.direccion,
+                    ciudad=cliente.ciudad or "Pedro Juan Caballero",
+                    tipo="cliente",
+                    tipo_persona="fisica",
+                    activo=True
+                )
+                db.add(cust)
+                await db.flush()
+            sale.customer_id = cust.id
+
+    # 3. Registrar cada lote de cupones por campaña
     total_cupones_creados = 0
     tickets_registrados = []
+    sale_id_to_link = sale.id if sale else data.sale_id
+    sincronizado_val = True if sale else (data.sale_id is not None)
 
     for item_camp in data.cupones_por_campana:
         if item_camp.cantidad <= 0:
@@ -1104,29 +1155,41 @@ async def registrar_cupones_multiples(
             cliente_id=cliente.id,
             campana_id=item_camp.campana_id,
             campana_nombre=item_camp.campana_nombre,
-            sale_id=data.sale_id,
+            sale_id=sale_id_to_link,
             nro_ticket=data.nro_ticket,
             cantidad=item_camp.cantidad,
-            monto_compra=data.monto_compra,
-            fecha_compra=datetime.now(timezone.utc),
+            monto_compra=float(sale.total) if sale else data.monto_compra,
+            fecha_compra=sale.fecha if sale and sale.fecha else datetime.now(timezone.utc),
             usuario_nombre=data.usuario_nombre or "Cajero POS",
-            sincronizado=data.sale_id is not None
+            sincronizado=sincronizado_val
         )
         db.add(ticket)
         await db.flush()
 
-        # Guardar items si vinieron
-        if data.items:
-            for it in data.items:
-                t_item = CuponTicketItem(
-                    ticket_id=ticket.id,
-                    producto_id=it.get("producto_id"),
-                    descripcion=it.get("nombre") or it.get("descripcion") or "Producto",
-                    cantidad=float(it.get("cantidad") or 1),
-                    precio_unitario=float(it.get("precio_unitario") or 0),
-                    total=float(it.get("total") or 0)
-                )
-                db.add(t_item)
+        # Guardar items si vinieron o tomarlos de la venta
+        items_source = data.items or []
+        if not items_source and sale and sale.items:
+            items_source = [
+                {
+                    "producto_id": it.product_id,
+                    "nombre": it.descripcion or "Producto de Salón",
+                    "cantidad": float(it.cantidad or 1),
+                    "precio_unitario": float(it.precio_unitario or 0),
+                    "total": float(it.total or 0)
+                }
+                for it in sale.items
+            ]
+
+        for it in items_source:
+            t_item = CuponTicketItem(
+                ticket_id=ticket.id,
+                producto_id=it.get("producto_id"),
+                descripcion=it.get("nombre") or it.get("descripcion") or "Producto",
+                cantidad=float(it.get("cantidad") or 1),
+                precio_unitario=float(it.get("precio_unitario") or 0),
+                total=float(it.get("total") or 0)
+            )
+            db.add(t_item)
 
         total_cupones_creados += item_camp.cantidad
         tickets_registrados.append({
@@ -1138,7 +1201,6 @@ async def registrar_cupones_multiples(
 
         # Disparar WhatsApp para esta campaña si está configurado
         if data.enviar_whatsapp and cliente.telefono:
-            # Obtener template de la campaña o default
             campana_obj = await get_campana(db, company_id, item_camp.campana_id) if item_camp.campana_id else None
             tmpl = campana_obj.whatsapp_template if campana_obj and campana_obj.whatsapp_template else None
             premio_str = campana_obj.premio_destacado if campana_obj and campana_obj.premio_destacado else "Gran Sorteo"
@@ -1146,15 +1208,13 @@ async def registrar_cupones_multiples(
             async def _send_wa(t_id=ticket.id, t_cant=item_camp.cantidad, c_nombre=item_camp.campana_nombre, t_tmpl=tmpl, p_str=premio_str):
                 try:
                     res_wa = await send_cupon_whatsapp_confirmation(
-                        phone=cliente.telefono,
-                        cliente_nombre=cliente.nombre,
+                        telefono=cliente.telefono,
+                        nombre=cliente.nombre,
                         cantidad_cupones=t_cant,
                         nro_ticket=data.nro_ticket,
                         template=t_tmpl,
-                        sorteo_nombre=c_nombre,
-                        premio_destacado=p_str
+                        sorteo_nombre=c_nombre
                     )
-                    # Actualizar status en bd
                     async with db.begin_nested():
                         t_db = await db.get(CuponTicket, t_id)
                         if t_db:
