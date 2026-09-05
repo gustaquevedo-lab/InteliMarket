@@ -242,10 +242,10 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                 reg_id = reg_res.scalar_one_or_none()
 
             if not reg_id:
-                # Fallback: primera caja activa de producción (nunca inactivas ni Caja 2 de sandbox)
+                # Fallback: primera caja activa de producción
                 reg_res = await db.execute(
                     select(CashRegister.id)
-                    .where(CashRegister.activo == True, CashRegister.codigo != "POS-012")
+                    .where(CashRegister.activo == True)
                     .order_by(CashRegister.nombre.asc())
                     .limit(1)
                 )
