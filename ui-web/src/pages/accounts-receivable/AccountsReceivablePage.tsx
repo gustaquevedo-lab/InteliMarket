@@ -135,12 +135,18 @@ export default function AccountsReceivablePage() {
   const [page, setPage] = useState(0)
   const [docsTotal, setDocsTotal] = useState(0)
 
+  const [debouncedSearch, setDebouncedSearch] = useState(search)
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
   const fetchData = async () => {
     setLoading(true)
     try {
       const estadoParam = filterStatus !== "todos" ? filterStatus : undefined
       const [docsData, countData, agingData, summaryData] = await Promise.all([
-        api.accountsReceivable.list({ estado: estadoParam, search: search || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+        api.accountsReceivable.list({ estado: estadoParam, search: debouncedSearch.trim() || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
         api.accountsReceivable.count({ estado: estadoParam }),
         api.accountsReceivable.aging(),
         api.accountsReceivable.summary(),
@@ -160,8 +166,8 @@ export default function AccountsReceivablePage() {
     }
   }
 
-  useEffect(() => { fetchData() }, [filterStatus, page])
-  useEffect(() => { setPage(0) }, [filterStatus, search])
+  useEffect(() => { setPage(0) }, [filterStatus, debouncedSearch])
+  useEffect(() => { fetchData() }, [filterStatus, page, debouncedSearch])
 
   const fetchScoring = async () => {
     setScoresLoading(true)
@@ -306,11 +312,18 @@ export default function AccountsReceivablePage() {
   const handleDownloadCobranzasExcel = () => api.accountsReceivable.downloadCobranzasExcel(reportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadCobranzasPdf = () => api.accountsReceivable.downloadCobranzasPdf(reportParams).catch((e: any) => toast.error("Error", e.message))
 
-  const filteredDocs = docs.filter(d =>
-    !search ||
-    d.numero_documento?.toLowerCase().includes(search.toLowerCase()) ||
-    d.customer_name?.toLowerCase().includes(search.toLowerCase())
-  )
+  const filteredDocs = docs.filter(d => {
+    if (!search) return true
+    const q = search.toLowerCase().trim()
+    const qClean = q.replace(/\D/g, "")
+    const rucClean = (d.customer_ruc || "").replace(/\D/g, "")
+    return (
+      d.numero_documento?.toLowerCase().includes(q) ||
+      d.customer_name?.toLowerCase().includes(q) ||
+      d.customer_ruc?.toLowerCase().includes(q) ||
+      (qClean.length > 0 && rucClean.includes(qClean))
+    )
+  })
 
   const getScoreBadge = (score: number) => {
     if (score >= 80) return { label: "Excelente", class: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border-emerald-200" }
@@ -550,7 +563,10 @@ export default function AccountsReceivablePage() {
                               {d.numero_documento || "—"}
                             </td>
                             <td className="p-3.5 font-medium text-gray-900 dark:text-white max-w-xs truncate" title={d.customer_name}>
-                              {d.customer_name || "Cliente general"}
+                              <div>{d.customer_name || "Cliente general"}</div>
+                              {d.customer_ruc && (
+                                <div className="text-[11px] font-mono text-gray-400 font-normal">CI/RUC: {d.customer_ruc}</div>
+                              )}
                             </td>
                             <td className="p-3.5 text-xs text-gray-500 font-mono">
                               {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : "—"}
