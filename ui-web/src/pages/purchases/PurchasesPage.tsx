@@ -202,6 +202,42 @@ export default function PurchasesPage() {
   const [searchProductIA, setSearchProductIA] = useState("")
   const [soloQuiebreIA, setSoloQuiebreIA] = useState(false)
   const [filterEstadoIA, setFilterEstadoIA] = useState<"todos" | "quiebres" | "bajos" | "sugeridos">("todos")
+
+  // Ordenamiento interactivo de la Matriz de Sugerencia IA
+  type IASortColumn =
+    | "producto"
+    | "proveedor"
+    | "stock"
+    | "m4"
+    | "m3"
+    | "m2"
+    | "m1"
+    | "pulso"
+    | "costo_ppp"
+    | "ultimo_costo"
+    | "autonomia"
+    | "sugerencia"
+    | "pedido"
+    | "costo_unit"
+    | "subtotal"
+
+  const [sortColumnIA, setSortColumnIA] = useState<IASortColumn | null>(null)
+  const [sortDirectionIA, setSortDirectionIA] = useState<"asc" | "desc">("asc")
+
+  const handleSortIA = (col: IASortColumn) => {
+    if (sortColumnIA === col) {
+      if (sortDirectionIA === "asc") {
+        setSortDirectionIA("desc")
+      } else {
+        setSortColumnIA(null)
+        setSortDirectionIA("asc")
+      }
+    } else {
+      setSortColumnIA(col)
+      const defaultDesc = ["stock", "m4", "m3", "m2", "m1", "sugerencia", "pedido", "costo_ppp", "ultimo_costo", "costo_unit", "subtotal"].includes(col)
+      setSortDirectionIA(defaultDesc ? "desc" : "asc")
+    }
+  }
   
   // Factores Estacionales y Contextuales de Supermercado
   const [factorFinSemana, setFactorFinSemana] = useState(false)
@@ -1296,10 +1332,10 @@ export default function PurchasesPage() {
     )
   }, [suppliers, filterSupplierSearchIA])
 
-  // Filtrado reactivo de la Matriz de Sugerencia IA (sin recargar API)
+  // Filtrado y Ordenamiento reactivo de la Matriz de Sugerencia IA (sin recargar API)
   const displayedReplenishmentItems = useMemo(() => {
     if (!replenishmentData?.items) return []
-    return replenishmentData.items.filter((it: any) => {
+    const filtered = replenishmentData.items.filter((it: any) => {
       const matchSearch = !searchProductIA ||
         it.nombre?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
         it.sku?.toLowerCase().includes(searchProductIA.toLowerCase())
@@ -1314,7 +1350,94 @@ export default function PurchasesPage() {
       }
       return true
     })
-  }, [replenishmentData, searchProductIA, filterEstadoIA, editedQuantities])
+
+    if (!sortColumnIA) return filtered
+
+    return [...filtered].sort((a: any, b: any) => {
+      let valA: any
+      let valB: any
+
+      switch (sortColumnIA) {
+        case "producto":
+          valA = (a.nombre || "").toLowerCase()
+          valB = (b.nombre || "").toLowerCase()
+          break
+        case "proveedor":
+          valA = (a.ultimo_proveedor_nombre || "").toLowerCase()
+          valB = (b.ultimo_proveedor_nombre || "").toLowerCase()
+          break
+        case "stock":
+          valA = Number(a.stock_actual) || 0
+          valB = Number(b.stock_actual) || 0
+          break
+        case "m4":
+          valA = Number(a.ventas_mes_4) || 0
+          valB = Number(b.ventas_mes_4) || 0
+          break
+        case "m3":
+          valA = Number(a.ventas_mes_3) || 0
+          valB = Number(b.ventas_mes_3) || 0
+          break
+        case "m2":
+          valA = Number(a.ventas_mes_2) || 0
+          valB = Number(b.ventas_mes_2) || 0
+          break
+        case "m1":
+          valA = Number(a.ventas_mes_1) || 0
+          valB = Number(b.ventas_mes_1) || 0
+          break
+        case "pulso": {
+          const rank = (p: string) => (p === "acelerando" ? 3 : p === "estable" ? 2 : 1)
+          valA = rank(a.pulso_tendencia)
+          valB = rank(b.pulso_tendencia)
+          break
+        }
+        case "costo_ppp":
+          valA = Number(a.costo_promedio) || 0
+          valB = Number(b.costo_promedio) || 0
+          break
+        case "ultimo_costo":
+          valA = Number(a.ultimo_costo || a.costo_promedio) || 0
+          valB = Number(b.ultimo_costo || b.costo_promedio) || 0
+          break
+        case "autonomia":
+          valA = Number(a.dias_stock_restantes) || 0
+          valB = Number(b.dias_stock_restantes) || 0
+          break
+        case "sugerencia":
+          valA = Number(a.cantidad_sugerida) || 0
+          valB = Number(b.cantidad_sugerida) || 0
+          break
+        case "pedido":
+          valA = editedQuantities[a.product_id] !== undefined ? editedQuantities[a.product_id] : Math.max(0, Math.round(Number(a.cantidad_sugerida) || 0))
+          valB = editedQuantities[b.product_id] !== undefined ? editedQuantities[b.product_id] : Math.max(0, Math.round(Number(b.cantidad_sugerida) || 0))
+          break
+        case "costo_unit":
+          valA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || 0)
+          valB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || 0)
+          break
+        case "subtotal": {
+          const qtyA = editedQuantities[a.product_id] !== undefined ? editedQuantities[a.product_id] : Math.max(0, Math.round(Number(a.cantidad_sugerida) || 0))
+          const costA = editedCosts[a.product_id] !== undefined ? editedCosts[a.product_id] : (Number(a.costo_unitario_estimado) || 0)
+          const qtyB = editedQuantities[b.product_id] !== undefined ? editedQuantities[b.product_id] : Math.max(0, Math.round(Number(b.cantidad_sugerida) || 0))
+          const costB = editedCosts[b.product_id] !== undefined ? editedCosts[b.product_id] : (Number(b.costo_unitario_estimado) || 0)
+          valA = qtyA * costA
+          valB = qtyB * costB
+          break
+        }
+        default:
+          return 0
+      }
+
+      if (typeof valA === "string" && typeof valB === "string") {
+        return sortDirectionIA === "asc"
+          ? valA.localeCompare(valB)
+          : valB.localeCompare(valA)
+      }
+
+      return sortDirectionIA === "asc" ? valA - valB : valB - valA
+    })
+  }, [replenishmentData, searchProductIA, filterEstadoIA, editedQuantities, editedCosts, sortColumnIA, sortDirectionIA])
 
   // Filtrado y Paginación de Órdenes
   const filteredOrders = useMemo(() => {
@@ -2031,6 +2154,41 @@ export default function PurchasesPage() {
               </div>
             </div>
 
+            {/* BARRA DE ESTADO DE ORDENAMIENTO ACTIVO */}
+            {sortColumnIA && (
+              <div className="flex items-center justify-between px-4 py-2 bg-indigo-50/80 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900/60 text-xs text-indigo-800 dark:text-indigo-200 animate-in fade-in duration-150">
+                <div className="flex items-center gap-2">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>
+                    Ordenado por: <strong className="font-extrabold">{
+                      sortColumnIA === "producto" ? "Producto & SKU" :
+                      sortColumnIA === "proveedor" ? "Último Proveedor" :
+                      sortColumnIA === "stock" ? "Stock Físico" :
+                      sortColumnIA === "m4" ? (replenishmentData?.meses_labels?.[0] || "M-4") :
+                      sortColumnIA === "m3" ? (replenishmentData?.meses_labels?.[1] || "M-3") :
+                      sortColumnIA === "m2" ? (replenishmentData?.meses_labels?.[2] || "M-2") :
+                      sortColumnIA === "m1" ? (replenishmentData?.meses_labels?.[3] || "M-1") :
+                      sortColumnIA === "pulso" ? "Pulso Venta" :
+                      sortColumnIA === "costo_ppp" ? "Costo PPP" :
+                      sortColumnIA === "ultimo_costo" ? "Última Compra" :
+                      sortColumnIA === "autonomia" ? "Autonomía" :
+                      sortColumnIA === "sugerencia" ? "Sugerencia IA" :
+                      sortColumnIA === "pedido" ? "Tu Pedido" :
+                      sortColumnIA === "costo_unit" ? "Costo Unitario" :
+                      sortColumnIA === "subtotal" ? "Subtotal" : sortColumnIA
+                    }</strong> ({sortDirectionIA === "asc" ? "Menor a Mayor / A-Z" : "Mayor a Menor / Z-A"})
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSortColumnIA(null)}
+                  className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-100 font-bold text-[11px] underline cursor-pointer flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Quitar ordenamiento
+                </button>
+              </div>
+            )}
+
             {loadingReplenishment ? (
               <div className="flex flex-col items-center justify-center py-20 gap-3">
                 <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
@@ -2047,6 +2205,45 @@ export default function PurchasesPage() {
                   const labels4m = (replenishmentData?.meses_labels && replenishmentData.meses_labels.length === 4)
                     ? replenishmentData.meses_labels
                     : ["M-4", "M-3", "M-2", "M-1"]
+
+                  const renderSortHeader = (
+                    col: IASortColumn,
+                    label: string,
+                    align: "left" | "center" | "right" = "left",
+                    title?: string,
+                    extraClass = ""
+                  ) => {
+                    const isSorted = sortColumnIA === col
+                    return (
+                      <th
+                        onClick={() => handleSortIA(col)}
+                        title={title || `Ordenar por ${label} (clic para alternar)`}
+                        className={`p-2.5 select-none cursor-pointer group transition-colors hover:bg-slate-200/80 dark:hover:bg-slate-800/80 ${
+                          isSorted ? "bg-indigo-100/70 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300" : ""
+                        } ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"} ${extraClass}`}
+                      >
+                        <div className={`inline-flex items-center gap-1.5 ${
+                          align === "right" ? "justify-end w-full" : align === "center" ? "justify-center w-full" : "justify-start"
+                        }`}>
+                          <span>{label}</span>
+                          <span className={`inline-flex items-center transition-all ${
+                            isSorted ? "opacity-100 text-indigo-600 dark:text-indigo-400 scale-110" : "opacity-30 group-hover:opacity-80"
+                          }`}>
+                            {isSorted ? (
+                              sortDirectionIA === "asc" ? (
+                                <ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />
+                              ) : (
+                                <ArrowDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                              )
+                            ) : (
+                              <ArrowUpDown className="w-3 h-3" />
+                            )}
+                          </span>
+                        </div>
+                      </th>
+                    )
+                  }
+
                   return (
                     <table className="w-full text-left text-xs min-w-[1350px]">
                       <thead className="bg-slate-100/90 dark:bg-slate-900/70 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60 sticky top-0 z-10 shadow-xs">
@@ -2064,21 +2261,21 @@ export default function PurchasesPage() {
                               className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                             />
                           </th>
-                          <th className="p-3 min-w-[200px]">Producto & SKU</th>
-                          <th className="p-2.5 min-w-[140px]" title="Último proveedor registrado para este producto">Último Proveedor</th>
-                          <th className="p-3 text-right" title="Stock actual físico registrado en góndola/depósito">Stock Físico</th>
-                          <th className="p-2.5 text-right font-mono" title={`Ventas mensuales registradas en ${labels4m[0]}`}>{labels4m[0]}</th>
-                          <th className="p-2.5 text-right font-mono" title={`Ventas mensuales registradas en ${labels4m[1]}`}>{labels4m[1]}</th>
-                          <th className="p-2.5 text-right font-mono" title={`Ventas mensuales registradas en ${labels4m[2]}`}>{labels4m[2]}</th>
-                          <th className="p-2.5 text-right font-mono text-indigo-600 dark:text-indigo-400 font-extrabold" title={`Ventas mensuales registradas en ${labels4m[3]}`}>{labels4m[3]}</th>
-                          <th className="p-2.5 text-center min-w-[95px]" title="Tendencia / Pulso de Venta reciente">Pulso Venta</th>
-                          <th className="p-2.5 text-right min-w-[100px]" title="Costo Promedio Ponderado de Inventario (PPP)">Costo PPP</th>
-                          <th className="p-2.5 text-right min-w-[110px]" title="Último Costo de Compra facturado por el proveedor">Última Compra</th>
-                          <th className="p-3 text-center" title="Días de stock restantes con stock físico real = Stock / Demanda Diaria">Autonomía</th>
-                          <th className="p-3 text-center" title="Cantidad óptima sugerida por la IA">Sugerencia IA</th>
-                          <th className="p-3 text-center min-w-[140px]" title="Modificá esta cantidad libremente.">Tu Pedido (Un.)</th>
-                          <th className="p-3 text-right min-w-[125px]" title="Modificá el precio de compra acordado con el proveedor">Costo Unit. (Gs.)</th>
-                          <th className="p-3 text-right min-w-[115px]">Subtotal (Gs.)</th>
+                          {renderSortHeader("producto", "Producto & SKU", "left", undefined, "min-w-[200px]")}
+                          {renderSortHeader("proveedor", "Último Proveedor", "left", "Último proveedor registrado para este producto", "min-w-[140px]")}
+                          {renderSortHeader("stock", "Stock Físico", "right", "Stock actual físico registrado en góndola/depósito")}
+                          {renderSortHeader("m4", labels4m[0], "right", `Ventas mensuales registradas en ${labels4m[0]}`, "font-mono")}
+                          {renderSortHeader("m3", labels4m[1], "right", `Ventas mensuales registradas en ${labels4m[1]}`, "font-mono")}
+                          {renderSortHeader("m2", labels4m[2], "right", `Ventas mensuales registradas en ${labels4m[2]}`, "font-mono")}
+                          {renderSortHeader("m1", labels4m[3], "right", `Ventas mensuales registradas en ${labels4m[3]}`, "font-mono text-indigo-600 dark:text-indigo-400 font-extrabold")}
+                          {renderSortHeader("pulso", "Pulso Venta", "center", "Tendencia / Pulso de Venta reciente", "min-w-[95px]")}
+                          {renderSortHeader("costo_ppp", "Costo PPP", "right", "Costo Promedio Ponderado de Inventario (PPP)", "min-w-[100px]")}
+                          {renderSortHeader("ultimo_costo", "Última Compra", "right", "Último Costo de Compra facturado por el proveedor", "min-w-[110px]")}
+                          {renderSortHeader("autonomia", "Autonomía", "center", "Días de stock restantes con stock físico real = Stock / Demanda Diaria")}
+                          {renderSortHeader("sugerencia", "Sugerencia IA", "center", "Cantidad óptima sugerida por la IA")}
+                          {renderSortHeader("pedido", "Tu Pedido (Un.)", "center", "Modificá esta cantidad libremente.", "min-w-[140px]")}
+                          {renderSortHeader("costo_unit", "Costo Unit. (Gs.)", "right", "Modificá el precio de compra acordado con el proveedor", "min-w-[125px]")}
+                          {renderSortHeader("subtotal", "Subtotal (Gs.)", "right", undefined, "min-w-[115px]")}
                           <th className="p-3 min-w-[210px]">Justificación & Alertas</th>
                         </tr>
                       </thead>
