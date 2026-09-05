@@ -153,70 +153,43 @@ export default function MarketingAgentPage() {
 
   // Chat State
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; suggestions?: string[] }>>([
-    {
-      role: "assistant",
-      content: "🎯 **¡Hola! Soy tu Gerente de Marketing IA (CMO Virtual).**\n\nHe analizado el comportamiento de nuestros **4.854 clientes registrados** y el flujo de ventas de la semana:\n\n1. **Oportunidad de Liquidación:** Detecté **18 ítems de Verdulería y Fiambrería** con stock alto y riesgo de merma. Diseñé un combo flash que recupera **Gs. 14.200.000** protegiendo un margen bruto del **28.5%**.\n2. **Alerta de Retención (Anti-Churn):** Hay **42 clientes nivel Oro/VIP** que no compran hace más de 18 días. Sugiero enviar un cupón exclusivo del 10% por **IntelliZapp** para reactivarlos.\n3. **Campaña Fin de Semana:** El Gerente Financiero validó un cupo de inversión de Gs. 3.000.000 para la promoción *'Viernes de Asado'*.\n\n¿Qué estrategia deseas que activemos primero?",
-      suggestions: [
-        "Lanzar combo de sobre-stock en Verdulería",
-        "Reactivar los 42 clientes VIP por IntelliZapp",
-        "Ver calendario de promociones recomendadas",
-        "Consultar margen y ROI proyectado"
-      ]
-    }
+    { role: "assistant", content: "Cargando el panel de clientes y campañas reales...", suggestions: [] },
   ])
   const [inputMessage, setInputMessage] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Campañas sugeridas por IA
-  const [suggestedCampaigns, setSuggestedCampaigns] = useState<any[]>([
-    {
-      id: "camp-1",
-      titulo: "Super Combo Frescura de la Huerta",
-      tipo: "Combo 3x2 con Margen Protegido",
-      segmento: "Clientes Frecuentes de Frutas & Verduras (840 clientes)",
-      canal: "WhatsApp vía IntelliZapp",
-      margen_proyectado: "31.2%",
-      recuperacion_stock: "Gs. 8.450.000",
-      estado: "sugerida",
-      copy: "🥬 ¡Hola {nombre}! Hoy en Extra Supermercado tenemos los vegetales más frescos con 3x2 en hojas verdes y 20% en tomates seleccionados. Mostrá este mensaje en caja y disfrutá tu descuento exclusivo ExtraClub. 🛒"
-    },
-    {
-      id: "camp-2",
-      titulo: "Reactivación VIP: Te Extrañamos en Extra",
-      tipo: "Cupón Personalizado Anti-Abandono",
-      segmento: "Clientes VIP Inactivos > 15 días (42 clientes)",
-      canal: "WhatsApp Directo IntelliZapp",
-      margen_proyectado: "26.0%",
-      recuperacion_stock: "Gs. 12.800.000",
-      estado: "sugerida",
-      copy: "🌟 ¡Hola {nombre}! Hace días que no te vemos por el súper. Queremos consentirte con un 10% de descuento en toda tu compra este fin de semana. Tu cupón personal es: VIP-EXTRA2026. ¡Te esperamos!"
-    },
-    {
-      id: "camp-3",
-      titulo: "Viernes de Parrilla & Carnicería Premium",
-      tipo: "Venta Cruzada (Carne + Carbón + Bebidas)",
-      segmento: "Compradores de Carnes y Bebidas (1.250 clientes)",
-      canal: "Folleto Digital IntelliZapp",
-      margen_proyectado: "29.8%",
-      recuperacion_stock: "Gs. 24.500.000",
-      estado: "sugerida",
-      copy: "🥩 ¡Llegó el viernes de asado! Costilla de primera a Gs. 32.900/kg + Carbón vegetal 4kg de regalo llevando más de 3kg de carne. Validez hoy y mañana en todas las sucursales."
-    }
-  ])
+  // Campañas sugeridas por IA -- se cargan reales desde el dashboard (ver loadData)
+  const [suggestedCampaigns, setSuggestedCampaigns] = useState<any[]>([])
+  const [marketingDashboard, setMarketingDashboard] = useState<any>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [custRes, prodRes, salesRes] = await Promise.allSettled([
+      const [custRes, prodRes, salesRes, dashRes] = await Promise.allSettled([
         api.customers.list({ limit: 100 } as any),
         api.products.list({ limit: 50 } as any),
         api.reports.salesSummary({}),
+        api.marketingAgent.dashboard(),
       ])
 
       if (custRes.status === "fulfilled" && Array.isArray(custRes.value)) setCustomers(custRes.value)
       if (prodRes.status === "fulfilled" && Array.isArray(prodRes.value)) setProducts(prodRes.value)
       if (salesRes.status === "fulfilled") setSalesStats(salesRes.value)
+      if (dashRes.status === "fulfilled") {
+        const dash = dashRes.value
+        setMarketingDashboard(dash)
+        setSuggestedCampaigns((dash.campañas_sugeridas || []).map((c: any) => ({
+          id: c.id, titulo: c.titulo, segmento: c.segmento, motivo: c.motivo,
+          cantidad_clientes: c.cantidad_clientes, estado: "sugerida",
+        })))
+        const segLineas = (dash.segmentos || []).map((s: any) => `- **${s.nombre}:** ${s.cantidad} (${s.criterio})`).join("\n")
+        setMessages([{
+          role: "assistant",
+          content: `🎯 **Panel de clientes real (Gerente de Marketing IA):**\n\n${segLineas}\n\n${dash.resumen_ejecutivo}\n\n¿Qué estrategia querés que analicemos?`,
+          suggestions: ["Ver oportunidades de combo/sobre-stock", "¿Cuántos clientes VIP están inactivos?", "Cruce de margen con Finanzas"],
+        }])
+      }
     } catch {
       // Graceful fallback
     } finally {
@@ -226,7 +199,7 @@ export default function MarketingAgentPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  const handleSendMessage = (textToSend?: string) => {
+  const handleSendMessage = async (textToSend?: string) => {
     const query = textToSend || inputMessage
     if (!query.trim()) return
 
@@ -235,23 +208,14 @@ export default function MarketingAgentPage() {
     setInputMessage("")
     setChatLoading(true)
 
-    setTimeout(() => {
-      let reply = ""
-      const q = query.toLowerCase()
-
-      if (q.includes("combo") || q.includes("sobre-stock") || q.includes("verdulería")) {
-        reply = "🥦 **Estrategia de Liquidación de Frescos Generada:**\n\n- **Objetivo:** Acelerar rotación de 18 ítems de hortalizas y frutas con más de 4 días en cámara.\n- **Mecánica:** Combo 'Ensalada Lista' (Lechuga Hidropónica + Tomate Santa Cruz + Zanahoria) a **Gs. 18.500** (Precio regular Gs. 24.000).\n- **Impacto Financiero:** Margen bruto protegido en **29.4%**, reduciendo la merma proyectada en **74%**.\n- **Acción:** ¿Deseas que prepare la campaña masiva en **IntelliZapp** para enviarla a los 840 clientes habituales de frescos?"
-      } else if (q.includes("vip") || q.includes("reactivar") || q.includes("anti-churn") || q.includes("abandono")) {
-        reply = "🌟 **Plan de Reactivación de Clientes VIP (42 clientes):**\n\n- **Criterio RFM:** Clientes con ticket promedio > Gs. 350.000 que llevan entre 15 y 30 días sin registrar compras.\n- **Oferta:** Cupón exclusivo de **10% OFF** en compras mayores a Gs. 200.000 + **Doble Puntaje ExtraClub**.\n- **Canal:** Mensaje personalizado vía **IntelliZapp** con nombre de pila y botón interactivo de confirmación.\n- **Retorno Esperado:** Reactivación estimada del **68%** con compras estimadas de **Gs. 12.8M** en 48 horas."
-      } else if (q.includes("margen") || q.includes("roi") || q.includes("financiero")) {
-        reply = "📊 **Auditoría de Margen & Sincronización con Gerente Financiero:**\n\n- **Margen Bruto Global de Campañas Activas:** 30.1% (Supera el umbral mínimo del 25% exigido por Finanzas).\n- **Presupuesto Mensual de Marketing:** Gs. 15.000.000 (Ejecutado: Gs. 4.250.000 / 28%).\n- **ROI Histórico de Envíos IntelliZapp:** Por cada Gs. 1.000 invertido en comunicación WhatsApp, generamos **Gs. 14.800 en ventas de caja**."
-      } else {
-        reply = `Entendido. He procesado tu solicitud sobre **"${query}"**.\n\nAnalicé la base de clientes y las ventas recientes: sugiero enfocar la comunicación de esta semana en fidelización de canasta básica y activación de promociones cruzadas en cajas vía IntelliZapp para maximizar el ticket promedio.`
-      }
-
-      setMessages([...newMsgs, { role: "assistant", content: reply }])
+    try {
+      const res = await api.marketingAgent.chat({ message: query })
+      setMessages([...newMsgs, { role: "assistant", content: res.reply, suggestions: res.suggested_prompts }])
+    } catch {
+      setMessages([...newMsgs, { role: "assistant", content: "No pude consultar los datos reales ahora. Intentá de nuevo." }])
+    } finally {
       setChatLoading(false)
-    }, 900)
+    }
   }
 
   const handleLaunchCampaign = (campId: string) => {

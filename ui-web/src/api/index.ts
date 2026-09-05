@@ -1349,6 +1349,12 @@ export const api = {
     bulkDecide: (approve: boolean, ids: string[], approved_by: string, comments?: string) =>
       client.post<{ decididas: number }>(`/v1/finance-agent/recommendations/bulk-decide?approve=${approve}`, { ids, approved_by, comments }),
   },
+  marketingAgent: {
+    dashboard: (companyId?: string) =>
+      client.get<any>("/v1/marketing-agent/dashboard", { company_id: companyId || COMPANY_ID }),
+    chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
+      client.post<{ reply: string; suggested_prompts?: string[] }>("/v1/marketing-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),
+  },
   riskAgent: {
     dashboard: (dias?: number, companyId?: string) =>
       client.get<any>("/v1/risk-agent/dashboard", { company_id: companyId || COMPANY_ID, dias: dias || 30 }),
