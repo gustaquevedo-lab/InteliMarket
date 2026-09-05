@@ -4,10 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.general_agent import service
 from api.src.general_agent.schemas import ChatRequest, ChatResponse
 
-router = APIRouter(prefix="/api/v1/general-agent", tags=["general-agent"])
+router = APIRouter(prefix="/api/v1/general-agent", tags=["general-agent"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/chat", response_model=ChatResponse)

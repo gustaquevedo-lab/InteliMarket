@@ -1,6 +1,7 @@
 """Currency API router"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from api.src.auth.middleware import require_auth
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
@@ -8,7 +9,7 @@ from api.src.db import get_db
 from api.src.currency.schemas import CurrencyResponse, ExchangeRateResponse
 from api.src.currency import service
 
-router = APIRouter(prefix="/api/v1", tags=["currency"])
+router = APIRouter(prefix="/api/v1", tags=["currency"], dependencies=[Depends(require_auth)])
 
 
 @router.get("/companies/{company_id}/currencies", response_model=list[CurrencyResponse])

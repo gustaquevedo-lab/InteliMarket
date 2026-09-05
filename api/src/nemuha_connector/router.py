@@ -6,11 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.config import settings
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.nemuha_connector import service
 from api.src.nemuha_connector.models import NemuhaSyncRun
 from api.src.nemuha_connector.schemas import NemuhaSyncRunResponse, TriggerSyncRequest
 
-router = APIRouter(prefix="/api/v1/nemuha-connector", tags=["nemuha-connector"])
+router = APIRouter(prefix="/api/v1/nemuha-connector", tags=["nemuha-connector"], dependencies=[Depends(require_auth)])
 
 
 def _require_intellizapp_key(x_api_key: str = Header(...)) -> None:

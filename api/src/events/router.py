@@ -1,6 +1,7 @@
 import asyncio
 import json
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Depends, Request, Query
+from api.src.auth.middleware import require_auth
 from fastapi.responses import StreamingResponse
 from .manager import manager
 
@@ -11,6 +12,7 @@ router = APIRouter(prefix="/api/v1/events", tags=["events"])
 async def event_stream(
     request: Request,
     company_id: str = Query(..., description="Company ID to subscribe to"),
+    user: dict = Depends(require_auth),
 ):
     queue = await manager.connect(company_id)
 

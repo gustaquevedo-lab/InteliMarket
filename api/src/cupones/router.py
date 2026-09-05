@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.cupones import service, schemas
 
 DEFAULT_COMPANY_ID = UUID("00000000-0000-0000-0000-000000000010")
 
-router = APIRouter(prefix="/api/v1/cupones", tags=["Cupones Sorteo & Fidelización IA"])
+router = APIRouter(prefix="/api/v1/cupones", tags=["Cupones Sorteo & Fidelización IA"], dependencies=[Depends(require_auth)])
 
 
 @router.get("/clientes/{documento}", response_model=schemas.ClienteLookupResponse)
