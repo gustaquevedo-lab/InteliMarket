@@ -3904,12 +3904,14 @@ export default function POSPage() {
     }
 
     // 1. DECODIFICACIÓN AUTOMÁTICA DE CÓDIGOS DE BALANZA DE GÓNDOLA (EAN-13 PREFIJO 2)
-    if (!qtyPrefix && code.length === 13 && code.startsWith("2")) {
+    // Si existe un producto unitario cuyo código de barras exacto coincide, NO es una etiqueta de balanza
+    const isExactNonPesable = products.some(p => (p.codigo_barra === code || p.sku === code) && !isPesableProduct(p))
+    if (!qtyPrefix && code.length === 13 && code.startsWith("2") && !isExactNonPesable) {
       const pluCandidate = code.substring(0, 7)
       const weightGrams = parseInt(code.substring(7, 12), 10)
       if (weightGrams > 0) {
         const weightKg = weightGrams / 1000
-        const matchPesable = products.find(p => p.codigo_barra === pluCandidate || p.sku === pluCandidate || p.codigo_barra?.startsWith(pluCandidate))
+        const matchPesable = products.find(p => isPesableProduct(p) && (p.codigo_barra === pluCandidate || p.sku === pluCandidate || (p.codigo_barra?.startsWith(pluCandidate) && p.codigo_barra.length <= 7)))
         if (matchPesable) {
           const tol = getPesoTolerancia(weightKg)
           const diffKg = Math.abs(currentScaleWeight - weightKg)

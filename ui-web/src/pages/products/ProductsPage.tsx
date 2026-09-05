@@ -601,18 +601,23 @@ export default function ProductsPage() {
     }
     setSaving(true)
     try {
-      const payload: any = {
-        ...form,
+      const isPeso = form.tipo_venta === "peso"
+      const payload: Partial<Product> & { sku: string; nombre: string } = {
         sku: form.sku.trim(),
         nombre: form.nombre.trim(),
+        codigo_barra: form.codigo_barra?.trim() || undefined,
+        descripcion: form.descripcion?.trim() || null,
         categoria_id: form.categoria_id && form.categoria_id.trim() !== "" ? form.categoria_id : null,
-        plu_balanza: form.plu_balanza ? Number(form.plu_balanza) : null,
+        tipo: form.tipo || "producto",
+        tipo_venta: isPeso ? "peso" : "unidad",
+        unidad_medida: isPeso ? "KG" : (form.unidad_medida === "KG" ? "UN" : (form.unidad_medida || "UN")),
+        plu_balanza: isPeso && form.plu_balanza ? Number(form.plu_balanza) : null,
         costo_promedio: Number(form.costo_promedio) || 0,
         precio_venta: Number(form.precio_venta) || 0,
         stock_minimo: Number(form.stock_minimo) || 0,
-        stock_maximo: form.stock_maximo ? Number(form.stock_maximo) : null,
+        stock_maximo: form.stock_maximo ? Number(form.stock_maximo) : undefined,
         iva_tasa: Number(form.iva_tasa) !== undefined ? Number(form.iva_tasa) : 10,
-        tiene_vencimiento: form.es_perecedero,
+        tiene_vencimiento: !!form.es_perecedero,
       }
       if (editingProduct) {
         await api.products.update(editingProduct.id, payload)
