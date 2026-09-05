@@ -441,12 +441,22 @@ async def chat_with_finance_agent(
         action = None
 
     elif "cliente" in msg_lower or "cobrar" in msg_lower or "mora" in msg_lower or "credito" in msg_lower:
+        sync = await get_inter_agent_sync(db, company_id)
+        if sync.alertas_riesgo_crediticio:
+            deudores_txt = "\n".join(
+                f"- **{a.cliente}:** ₲ {a.deuda_actual:,.0f} pendiente"
+                + (f", {a.dias_mora_max} días de mora" if a.dias_mora_max > 0 else "")
+                + f" — {a.accion_sugerida}"
+                for a in sync.alertas_riesgo_crediticio
+            )
+        else:
+            deudores_txt = "Sin clientes con saldo pendiente relevante en este momento."
         resp = (
             f"⚠️ **Auditoría de Cuentas por Cobrar (Accounts Receivable):**\n\n"
             f"- **Cartera Vigente (Al día):** ₲ {tower.ar_vigente_gs:,.0f}\n"
             f"- **Cartera Morosa (> 30 días):** ₲ {tower.ar_moroso_gs:,.0f} ({tower.ar_clientes_morosos_count} clientes)\n"
             f"- **Total por Cobrar:** ₲ {tower.ar_total_gs:,.0f}\n\n"
-            f"Los principales saldos pendientes en el módulo de créditos corresponden a clientes corporativos como *Grupo Santa Teresa E.A.S.* y *Agrotec S.A.*"
+            f"**Principales deudores reales:**\n{deudores_txt}"
         )
         suggestions = [
             "¿Qué directivas emitiste al Gerente de Ventas?",
@@ -456,15 +466,19 @@ async def chat_with_finance_agent(
         action = None
 
     elif "stock" in msg_lower or "sobrestock" in msg_lower or "producto" in msg_lower or "venta" in msg_lower:
-        resp = (
-            f"📦 **Auditoría de Inventario Inmovilizado y Ventas:**\n\n"
-            f"Los SKUs con mayor capital inmovilizado en depósito son:\n"
-            f"- **Costilla de Primera / Matambre:** 1.445 kg (₲ 34.9M)\n"
-            f"- **Harina Maestra 000 25kg:** 381 bolsas (₲ 32.7M)\n"
-            f"- **Aceite de Soja Coamo 900ml:** 1.817 un (₲ 13.2M)\n"
-            f"- **Cerveza Brahmita Ultra Cero 269ml:** 4.104 latas (₲ 9.4M)\n\n"
-            f"El Gerente Financiero IA ya emitió la recomendación de **Venta Flash y Escalas de Precio por Bulto** para monetizar este stock rápidamente."
-        )
+        sync = await get_inter_agent_sync(db, company_id)
+        if sync.oportunidades_flash_stock:
+            stock_txt = "\n".join(
+                f"- **{o.producto}:** {o.stock_actual:,.0f} un, ₲ {o.monto_inmovilizado_gs:,.0f} inmovilizados (descuento sugerido {o.descuento_sugerido_pct:.0f}%, recaudación estimada ₲ {o.recaudacion_estimada_gs:,.0f})"
+                for o in sync.oportunidades_flash_stock
+            )
+            resp = (
+                f"📦 **Auditoría de Inventario Inmovilizado (datos reales):**\n\n"
+                f"Los SKUs con mayor capital inmovilizado en depósito son:\n{stock_txt}\n\n"
+                f"Recomendación: campaña de venta flash / escalas de precio por bulto para monetizar este stock."
+            )
+        else:
+            resp = "No encontré productos con capital significativo inmovilizado en este momento."
         suggestions = [
             "Ver estado de liquidez de bancos",
             "Ver cuentas por cobrar de clientes",
@@ -512,10 +526,42 @@ async def run_diagnosis(db: AsyncSession, company_id: str) -> Any:
     )
 
 async def list_recommendations(db: AsyncSession, company_id: str, status_filter=None, tipo=None, limit=100, offset=0):
-    return []
+    """Antes era un stub que siempre devolvia [] -- ahora deriva recomendaciones
+    reales de las mismas oportunidades de stock inmovilizado y alertas de
+    riesgo crediticio que ya calcula get_inter_agent_sync (datos reales de
+    Ñemuha), en vez de tener una tabla de recomendaciones separada sin usar."""
+    sync = await get_inter_agent_sync(db, company_id)
+    recs: list[dict] = []
+    for o in sync.oportunidades_flash_stock:
+        recs.append({
+            "id": f"stock-{o.product_id}",
+            "tipo": "liquidacion_stock",
+            "titulo": f"Liquidar sobre-stock de {o.producto}",
+            "descripcion": f"₲ {o.monto_inmovilizado_gs:,.0f} inmovilizados en {o.stock_actual:,.0f} unidades -- descuento sugerido {o.descuento_sugerido_pct:.0f}%.",
+            "monto_relacionado": f"₲ {o.recaudacion_estimada_gs:,.0f}",
+            "status": "pending",
+        })
+    for a in sync.alertas_riesgo_crediticio:
+        recs.append({
+            "id": f"credito-{a.customer_id}",
+            "tipo": "riesgo_credito",
+            "titulo": f"Gestionar mora de {a.cliente}",
+            "descripcion": a.accion_sugerida,
+            "monto_relacionado": f"₲ {a.deuda_actual:,.0f}",
+            "status": "pending",
+        })
+    if tipo:
+        recs = [r for r in recs if r["tipo"] == tipo]
+    if status_filter:
+        recs = [r for r in recs if r["status"] == status_filter]
+    return recs[offset:offset + limit]
 
 async def count_recommendations_by_tipo(db: AsyncSession, company_id: str, status_filter=None):
-    return {}
+    recs = await list_recommendations(db, company_id, status_filter=status_filter, limit=10_000)
+    counts: dict[str, int] = {}
+    for r in recs:
+        counts[r["tipo"]] = counts.get(r["tipo"], 0) + 1
+    return counts
 
 async def bulk_decide_recommendations(db: AsyncSession, ids, approve, approved_by, comments):
     return len(ids)
