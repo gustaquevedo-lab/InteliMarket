@@ -14,6 +14,7 @@ from decimal import Decimal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.src.ai_agents_common import parse_periodo_dias
 from api.src.risk_agent.schemas import (
     RiskDashboard, RiskEventItem, RiskByCajero, RiskTrendPoint,
     ChatMessageResponse,
@@ -221,18 +222,6 @@ async def list_risk_events(
     return [_to_item(e) for e in rows[offset:offset + limit]]
 
 
-def _parse_periodo(msg_upper: str) -> int:
-    if "HOY" in msg_upper:
-        return 1
-    if "SEMANA" in msg_upper:
-        return 7
-    if "MES" in msg_upper:
-        return 30
-    if "TRIMESTRE" in msg_upper:
-        return 90
-    return 30
-
-
 async def chat_with_risk_agent(
     db: AsyncSession, company_id: str, message: str,
     conversation_history: list[dict] | None = None,
@@ -244,7 +233,7 @@ async def chat_with_risk_agent(
     esa consulta puntual antes de responder.
     """
     msg_upper = message.upper()
-    dias = _parse_periodo(msg_upper)
+    dias = parse_periodo_dias(msg_upper)
     dash = await get_risk_dashboard(db, company_id, dias)
 
     # ¿Menciona a un cajero especifico de los que ya aparecen en el ranking?

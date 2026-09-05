@@ -373,69 +373,82 @@ async def chat_with_sales_agent(
     context_tab: str = "general",
     conversation_history: list[dict] | None = None,
 ) -> ChatMessageResponse:
-    """Asistente comercial en vivo con memoria y conocimiento exhaustivo de las ventas del supermercado."""
+    """Asistente comercial en vivo -- responde consultando el analisis real
+    (analysis.propuestas_precios, ya calculado con datos de la base) en cada
+    pregunta, filtrando por categoria/palabra clave. Nunca cifras ni
+    product_id armados a mano: si no hay una propuesta real que matchee la
+    consulta, lo dice en vez de inventar una."""
     analysis = await get_executive_analysis(db, company_id)
     msg_upper = message.upper()
 
-    if "CARNICERIA" in msg_upper or "CARNE" in msg_upper or "COSTILLA" in msg_upper:
-        reply = (
-            f"🥩 **Diagnóstico de Carnicería (Mes en Curso):**\n\n"
-            f"El departamento de carnicería factura **Gs. 102M en el mes** con un margen del **12.9%** (el target ideal es **24.0%**).\n\n"
-            f"**Medida de acción inmediata:**\n"
-            f"1. Elevar `ML COSTILLA DE PRIMERA` a **Gs. 33.000/kg** (Margen 23.5%).\n"
-            f"2. Ajustar `ML CARA DE PALETA` a **Gs. 53.500/kg**.\n"
-            f"3. Sostener la carne molida de segunda a precio accesible como gancho de tráfico."
-        )
-        outcome = ActionOutcome(
-            tipo="price_adjustment",
-            titulo="Ajuste de Precios en Carnicería",
-            descripcion="Aplicar precios optimizados en cortes vacunos nobles en POS y góndola.",
-            data={"product_name": "ML COSTILLA DE PRIMERA", "precio_actual": 28580, "precio_sugerido": 33000, "product_id": "a44fb876-39d8-4ee9-8911-cf91dfb7e234"},
-        )
-        prompts = ["¿Cómo afectará el volumen en carnicería?", "Ver escala mayorista de carnes", "¿Qué combos podemos armar para el fin de semana?"]
+    KEYWORDS_CATEGORIA = {
+        "CARNICERIA": ["carn", "vacun", "costilla", "carnicer"],
+        "CARNE": ["carn", "vacun", "costilla", "carnicer"],
+        "COSTILLA": ["carn", "vacun", "costilla", "carnicer"],
+        "PARESA": ["bebida", "gaseosa", "cerveza", "coca", "cola"],
+        "COCA": ["bebida", "gaseosa", "cerveza", "coca", "cola"],
+        "BEBIDA": ["bebida", "gaseosa", "cerveza", "coca", "cola"],
+        "CERVEZA": ["bebida", "gaseosa", "cerveza", "coca", "cola"],
+    }
+    terminos: list[str] = []
+    for kw, catterms in KEYWORDS_CATEGORIA.items():
+        if kw in msg_upper:
+            terminos = catterms
+            break
 
-    elif "PARESA" in msg_upper or "COCA" in msg_upper or "BEBIDA" in msg_upper or "CERVEZA" in msg_upper:
-        reply = (
-            f"🥤 **Diagnóstico de Bebidas & PARESA (Mes en Curso):**\n\n"
-            f"PARESA lidera las ventas con **Gs. 105M facturados en el mes**, pero con un margen comprimido del **9.5%** debido a las gaseosas de 2L y 250ml.\n\n"
-            f"**Estrategia recomendada:**\n"
-            f"• Mantener `Coca Cola 250ml` como KVI Gancho a Gs. 2.950.\n"
-            f"• Reclamar bonificación por volumen a PARESA por superar las 9.000 unidades mensuales.\n"
-            f"• Elevar `Coca Cola 500ml` a Gs. 6.300 y `1L` a Gs. 8.100."
-        )
-        outcome = ActionOutcome(
-            tipo="price_adjustment",
-            titulo="Alineación de Precios en Gaseosas",
-            descripcion="Ajustar presentaciones individuales y medianas de gaseosas.",
-            data={"product_name": "COCA COLA PET 500ML", "precio_actual": 5600, "precio_sugerido": 6300, "product_id": "b11fb876-39d8-4ee9-8911-cf91dfb7e235"},
-        )
-        prompts = ["Ver propuesta para cervezas Brahma y Michelob", "¿Cómo negociamos con el proveedor de PARESA?", "Proyectar ganancia del mes"]
+    if terminos:
+        matches = [
+            p for p in analysis.propuestas_precios
+            if any(t in (p.categoria or "").lower() or t in p.nombre.lower() for t in terminos)
+        ]
+        if not matches:
+            reply = (
+                f"No tengo propuestas de precio pendientes para esa categoría en este momento "
+                f"(sobre {len(analysis.propuestas_precios)} propuestas totales del mes). "
+                f"Puede que ya estén todas aplicadas, o que el margen de esos productos ya esté saludable."
+            )
+            outcome = None
+            prompts = ["¿Cuáles son las propuestas con mayor impacto?", "Cómo llegar al 24% de margen", "Ver todas las categorías con oportunidad"]
+        else:
+            matches.sort(key=lambda p: p.impacto_mensual_gs, reverse=True)
+            top = matches[0]
+            lineas = "\n".join(
+                f"- `{p.nombre}`: Gs. {int(p.precio_actual):,d} → Gs. {int(p.precio_sugerido):,d} (margen {p.margen_sugerido_pct:.1f}%, +Gs. {int(p.impacto_mensual_gs):,d}/mes) — {p.motivo}"
+                for p in matches[:4]
+            )
+            reply = (
+                f"📋 **{len(matches)} propuesta(s) real(es) encontradas:**\n\n{lineas}"
+            )
+            outcome = ActionOutcome(
+                tipo="price_adjustment",
+                titulo=f"Ajuste de precio: {top.nombre}",
+                descripcion=top.motivo,
+                data={"product_name": top.nombre, "precio_actual": float(top.precio_actual), "precio_sugerido": float(top.precio_sugerido), "product_id": str(top.product_id)},
+            )
+            prompts = [f"Aplicar el ajuste de {top.nombre}", "¿Qué más tenemos en esta categoría?", "Cómo llegar al 24% de margen"]
 
     elif "GAP" in msg_upper or "24" in msg_upper or "RENTABILIDAD" in msg_upper:
+        top_impacto = sorted(analysis.propuestas_precios, key=lambda p: p.impacto_mensual_gs, reverse=True)[:3]
+        if top_impacto:
+            lineas = "\n".join(f"{i+1}. `{p.nombre}`: +Gs. {int(p.impacto_mensual_gs):,d}/mes ({p.motivo})" for i, p in enumerate(top_impacto))
+            plan = f"**Las {len(top_impacto)} propuestas de mayor impacto:**\n\n{lineas}"
+        else:
+            plan = "No hay propuestas de precio calculadas en este momento para armar un plan."
         reply = (
-            f"🎯 **Plan para Cerrar el Gap de Gs. {int(analysis.gap_para_24_pct_gs):,d} (Mes en Curso):**\n\n"
-            f"Actualmente capturamos **{analysis.margen_actual_pct}% de margen bruto**. La meta óptima es **24.0%**.\n\n"
-            f"**Plan en 3 Pasos:**\n"
-            f"1. **Remarcación en 6 SKUs clave** (+Gs. 16.1M/mes).\n"
-            f"2. **Ajuste de combos de alto margen** (+Gs. 8.5M/mes).\n"
-            f"3. **Control de merma en frescos y rotación de stock** (+Gs. 5.0M/mes)."
+            f"🎯 **Gap hacia el 24% de margen (mes en curso):** Gs. {int(analysis.gap_para_24_pct_gs):,d}\n\n"
+            f"Margen actual: **{analysis.margen_actual_pct}%**. {plan}"
         )
-        outcome = ActionOutcome(
-            tipo="daily_task",
-            titulo="Ejecución del Plan de Recuperación de Margen",
-            descripcion="Supervisar la aplicación de precios en POS y salón comercial.",
-            data={"area": "Gerencia Comercial"},
-        )
-        prompts = ["Aplicar todas las propuestas de precios a POS", "Ver simulador de impacto", "Diagnóstico de Carnicería"]
+        outcome = None
+        prompts = ["Aplicar la primera propuesta", "Ver todas las propuestas pendientes", "Diagnóstico por categoría"]
 
     else:
         reply = (
-            f"Entendido. En lo que va de Agosto 2026 llevamos **Gs. {int(analysis.facturacion_mes):,d} facturados** con un margen de **{analysis.margen_actual_pct}%**.\n\n"
-            f"Tengo listas **{len(analysis.propuestas_precios)} propuestas de precios con escalas de volumen de Ñemuha** listas para evaluar.\n\n"
+            f"Entendido. En lo que va del mes llevamos **Gs. {int(analysis.facturacion_mes):,d} facturados** con un margen de **{analysis.margen_actual_pct}%**.\n\n"
+            f"Tengo **{len(analysis.propuestas_precios)} propuestas de precio** calculadas con datos reales, listas para evaluar.\n\n"
             f"¿Querés que analicemos una categoría específica como Carnicería, Bebidas, Lácteos o Almacén?"
         )
         outcome = None
-        prompts = ["Estrategia en Carnicería", "Propuestas para PARESA y Cervezas", "Cómo llegar al 24% de margen", "Ver escalas de precio por bulto"]
+        prompts = ["Estrategia en Carnicería", "Propuestas para bebidas", "Cómo llegar al 24% de margen"]
 
     return ChatMessageResponse(
         reply=reply,
