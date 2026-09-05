@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import {
   Search, ShoppingCart, Package, DollarSign, TrendingDown, Users, CheckCircle2, Loader2,
   Plus, Eye, X, Trash2, Minus, FileText, Truck, Award, BarChart3, Download, Clock,
-  AlertTriangle, Filter, ChevronDown, ChevronUp, Edit3, Send, Ban, RefreshCw,
+  AlertTriangle, Filter, ChevronDown, ChevronUp, Edit, Edit3, Send, Ban, RefreshCw,
   UserPlus, FileSpreadsheet, ClipboardList, TrendingUp, ArrowUp, ArrowDown, ArrowRight,
   MessageSquare, Calendar, Hash, Percent, Printer, Link2, Check, Save, ExternalLink,
   Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle,
@@ -132,8 +132,10 @@ export default function PurchasesPage() {
   const [poDetailItems, setPoDetailItems] = useState<PurchaseOrderItem[]>([])
   const [loadingPODetail, setLoadingPODetail] = useState(false)
 
-  // Estados para Creación Manual de Orden de Compra
+  // Estados para Creación y Edición de Orden de Compra
   const [showManualPOModal, setShowManualPOModal] = useState(false)
+  const [editingPOId, setEditingPOId] = useState<string | null>(null)
+  const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null)
   const [manualPOSupplierId, setManualPOSupplierId] = useState("")
   const [manualPOFechaEntrega, setManualPOFechaEntrega] = useState("")
   const [manualPOPrioridad, setManualPOPrioridad] = useState("normal")
@@ -1013,8 +1015,10 @@ export default function PurchasesPage() {
     toast.success("Ítem Extraordinario Agregado", `${product.nombre} añadido para recepción extraordinaria.`)
   }
 
-  // ── Handlers Creación Manual de Orden de Compra ─────────────────────────────
+  // ── Handlers Creación y Edición Manual de Orden de Compra ────────────────────
   const handleOpenManualPOModal = () => {
+    setEditingPOId(null)
+    setEditingPO(null)
     setManualPOSupplierId(suppliers[0]?.id || "")
     const defDate = new Date()
     defDate.setDate(defDate.getDate() + 3)
@@ -1026,6 +1030,40 @@ export default function PurchasesPage() {
     setSearchProductPO("")
     setProductSearchResultsPO([])
     setShowManualPOModal(true)
+  }
+
+  const handleEditPO = async (po: PurchaseOrder) => {
+    if (!po.id) return
+    setEditingPOId(po.id)
+    setEditingPO(po)
+    setManualPOSupplierId(po.supplier_id || "")
+    setManualPOFechaEntrega(po.fecha_entrega_estimada ? po.fecha_entrega_estimada.split("T")[0] : "")
+    setManualPOPrioridad(po.prioridad || "normal")
+    setManualPOCondiciones(po.condiciones_pago || "30 Días")
+    setManualPOObservaciones(po.observaciones || "")
+    setSearchProductPO("")
+    setProductSearchResultsPO([])
+    setShowManualPOModal(true)
+
+    try {
+      const items = await api.purchases.getOrderItems(po.id)
+      setManualPOItems((items || []).map((it: any) => {
+        const cant = Number(it.cantidad || 1)
+        const prec = Number(it.precio_unitario || 0)
+        return {
+          product_id: it.product_id,
+          nombre: it.producto?.nombre || it.descripcion || "Producto",
+          sku: it.producto?.sku || it.sku || "",
+          codigo_barra: it.producto?.codigo_barra || it.codigo_barra || "",
+          cantidad: cant,
+          precio_unitario: prec,
+          iva_tasa: Number(it.iva_tasa || 10),
+          subtotal: Number(it.total || (cant * prec)),
+        }
+      }))
+    } catch (e: any) {
+      toast.error("Error al cargar ítems de la orden", e.message)
+    }
   }
 
   const handleSearchProductsPO = async (q: string) => {
@@ -1096,30 +1134,55 @@ export default function PurchasesPage() {
 
     setSavingManualPO(true)
     try {
-      const created = await api.purchases.createOrder({
-        supplier_id: manualPOSupplierId as any,
-        fecha_entrega_estimada: manualPOFechaEntrega ? manualPOFechaEntrega as any : undefined,
-        prioridad: manualPOPrioridad,
-        condiciones_pago: manualPOCondiciones,
-        observaciones: manualPOObservaciones || undefined,
-        user_id: user?.id as any,
-        created_by_name: user?.nombre || "Comprador",
-        items: manualPOItems.map(it => ({
-          product_id: it.product_id,
-          descripcion: it.nombre,
-          cantidad: Number(it.cantidad),
-          precio_unitario: Number(it.precio_unitario),
-          iva_tasa: Number(it.iva_tasa || 10),
-          total: Number(it.subtotal),
-        })) as any,
-      })
-      toast.success("¡Orden de Compra Emitida!", `Se creó la OC N° ${created.numero} con ${manualPOItems.length} ítems.`)
-      setShowManualPOModal(false)
-      fetchAll()
-      setTab("ordenes")
-      handleViewPO(created)
+      if (editingPOId) {
+        const updated = await api.purchases.updateOrder(editingPOId, {
+          supplier_id: manualPOSupplierId as any,
+          fecha_entrega_estimada: manualPOFechaEntrega ? manualPOFechaEntrega as any : undefined,
+          prioridad: manualPOPrioridad,
+          condiciones_pago: manualPOCondiciones,
+          observaciones: manualPOObservaciones || undefined,
+          items: manualPOItems.map(it => ({
+            product_id: it.product_id,
+            descripcion: it.nombre,
+            cantidad: Number(it.cantidad),
+            precio_unitario: Number(it.precio_unitario),
+            iva_tasa: Number(it.iva_tasa || 10),
+            total: Number(it.subtotal),
+          })) as any,
+        })
+        toast.success("¡Orden de Compra Actualizada!", `Se guardaron los cambios de la OC N° ${editingPO?.numero || updated.numero}.`)
+        setShowManualPOModal(false)
+        setEditingPOId(null)
+        setEditingPO(null)
+        await fetchAll()
+        setTab("ordenes")
+        handleViewPO(updated)
+      } else {
+        const created = await api.purchases.createOrder({
+          supplier_id: manualPOSupplierId as any,
+          fecha_entrega_estimada: manualPOFechaEntrega ? manualPOFechaEntrega as any : undefined,
+          prioridad: manualPOPrioridad,
+          condiciones_pago: manualPOCondiciones,
+          observaciones: manualPOObservaciones || undefined,
+          user_id: user?.id as any,
+          created_by_name: user?.nombre || "Comprador",
+          items: manualPOItems.map(it => ({
+            product_id: it.product_id,
+            descripcion: it.nombre,
+            cantidad: Number(it.cantidad),
+            precio_unitario: Number(it.precio_unitario),
+            iva_tasa: Number(it.iva_tasa || 10),
+            total: Number(it.subtotal),
+          })) as any,
+        })
+        toast.success("¡Orden de Compra Emitida!", `Se creó la OC N° ${created.numero} con ${manualPOItems.length} ítems.`)
+        setShowManualPOModal(false)
+        fetchAll()
+        setTab("ordenes")
+        handleViewPO(created)
+      }
     } catch (e: any) {
-      toast.error("Error al emitir orden de compra", e.message)
+      toast.error(editingPOId ? "Error al modificar orden" : "Error al emitir orden de compra", e.message)
     } finally {
       setSavingManualPO(false)
     }
@@ -2607,10 +2670,16 @@ export default function PurchasesPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                    {paginatedOrders.map((po) => {
+                    {paginatedOrders.map((po, idx) => {
                       const st = (po.estado && poStatusMap[po.estado]) ? poStatusMap[po.estado] : { label: po.estado || "Borrador", bg: "bg-slate-100", text: "text-slate-600" }
+                      const isEven = idx % 2 === 0
                       return (
-                        <tr key={po.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/30 transition-colors">
+                        <tr
+                          key={po.id}
+                          className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
+                            isEven ? "bg-white dark:bg-slate-900" : "bg-slate-100/60 dark:bg-slate-800/40"
+                          } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-sm`}
+                        >
                           <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
                             {po.numero}
                           </td>
@@ -2651,6 +2720,16 @@ export default function PurchasesPage() {
                               >
                                 <Eye className="w-3.5 h-3.5" />
                               </button>
+
+                              {["borrador", "confirmado", "enviada", "enviado"].includes(po.estado || "") && po.id && (
+                                <button
+                                  onClick={() => handleEditPO(po)}
+                                  className="p-1.5 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400 hover:bg-blue-100 transition-colors"
+                                  title="Modificar Orden de Compra"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                              )}
 
                               <button
                                 onClick={() => handleDownloadPOAsPdf(po)}
@@ -4343,8 +4422,14 @@ export default function PurchasesPage() {
                           const cant = Number(it.cantidad || 0)
                           const prec = Number(it.precio_unitario || 0)
                           const sub = Number(it.total || it.subtotal || (cant * prec))
+                          const isEven = idx % 2 === 0
                           return (
-                            <tr key={idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                            <tr
+                              key={idx}
+                              className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
+                                isEven ? "bg-white dark:bg-slate-900" : "bg-slate-100/70 dark:bg-slate-800/50"
+                              } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-sm`}
+                            >
                               <td className="p-2.5 text-center font-mono text-gray-400">{idx + 1}</td>
                               <td className="p-2.5 font-mono text-gray-700 dark:text-gray-300 font-semibold">
                                 {it.sku || it.producto?.sku || "—"}
@@ -4466,6 +4551,19 @@ export default function PurchasesPage() {
                     </button>
                   )}
                   <div className="flex items-center gap-2 ml-auto">
+                    {["borrador", "confirmado", "enviada", "enviado"].includes(selectedPO.estado || "") && selectedPO.id && (
+                      <button
+                        onClick={() => {
+                          const target = selectedPO
+                          setSelectedPO(null)
+                          handleEditPO(target)
+                        }}
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 flex items-center gap-1.5 transition-colors border border-blue-200 dark:border-blue-800/60"
+                        title="Modificar ítems, cantidades o costos de esta Orden"
+                      >
+                        <Edit className="w-4 h-4" /> Modificar Orden
+                      </button>
+                    )}
                     {selectedPO.estado === "borrador" && selectedPO.id && (
                       <button
                         onClick={() => handleConfirmPO(selectedPO.id!)}
@@ -5082,7 +5180,8 @@ export default function PurchasesPage() {
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-4xl w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
               <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
-                <ShoppingCart className="w-5 h-5 text-indigo-500" /> Emisión Manual de Orden de Compra
+                {editingPOId ? <Edit className="w-5 h-5 text-blue-500" /> : <ShoppingCart className="w-5 h-5 text-indigo-500" />}
+                {editingPOId ? `Modificar Orden de Compra N° ${editingPO?.numero}` : "Emisión Manual de Orden de Compra"}
               </h3>
               <button
                 onClick={() => setShowManualPOModal(false)}
@@ -5223,51 +5322,61 @@ export default function PurchasesPage() {
                         </td>
                       </tr>
                     ) : (
-                      manualPOItems.map((it, idx) => (
-                        <tr key={idx}>
-                          <td className="p-2.5">
-                            <div className="font-bold text-gray-900 dark:text-white">{it.nombre}</div>
-                            <div className="text-[10px] text-gray-400 font-mono">
-                              SKU: {it.sku || "—"} | Barra: {it.codigo_barra || "—"}
-                            </div>
-                          </td>
-                          <td className="p-2.5 text-right">
-                            <input
-                              type="number"
-                              min={1}
-                              value={it.cantidad}
-                              onChange={(e) => handleManualPOItemChange(idx, "cantidad", Math.max(1, Number(e.target.value)))}
-                              className="input-field w-24 p-1 text-right font-mono font-bold text-xs"
-                              required
-                            />
-                          </td>
-                          <td className="p-2.5 text-right">
-                            <input
-                              type="number"
-                              min={0}
-                              value={it.precio_unitario}
-                              onChange={(e) => handleManualPOItemChange(idx, "precio_unitario", Math.max(0, Number(e.target.value)))}
-                              className="input-field w-32 p-1 text-right font-mono font-bold text-xs"
-                              required
-                            />
-                          </td>
-                          <td className="p-2.5 text-right font-mono text-gray-500">
-                            {it.iva_tasa || 10}%
-                          </td>
-                          <td className="p-2.5 text-right font-mono font-extrabold text-gray-900 dark:text-white">
-                            {formatPYG(it.subtotal || 0)}
-                          </td>
-                          <td className="p-2.5 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveItemFromManualPO(idx)}
-                              className="p-1 text-red-500 hover:text-red-700 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                      manualPOItems.map((it, idx) => {
+                        const isEven = idx % 2 === 0
+                        return (
+                          <tr
+                            key={idx}
+                            className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-700/60 ${
+                              isEven
+                                ? "bg-white dark:bg-slate-900"
+                                : "bg-slate-100/70 dark:bg-slate-800/50"
+                            } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-sm`}
+                          >
+                            <td className="p-2.5">
+                              <div className="font-bold text-gray-900 dark:text-white">{it.nombre}</div>
+                              <div className="text-[10px] text-gray-400 font-mono">
+                                SKU: {it.sku || "—"} | Barra: {it.codigo_barra || "—"}
+                              </div>
+                            </td>
+                            <td className="p-2.5 text-right">
+                              <input
+                                type="number"
+                                min={1}
+                                value={it.cantidad}
+                                onChange={(e) => handleManualPOItemChange(idx, "cantidad", Math.max(1, Number(e.target.value)))}
+                                className="input-field w-24 p-1 text-right font-mono font-bold text-xs"
+                                required
+                              />
+                            </td>
+                            <td className="p-2.5 text-right">
+                              <input
+                                type="number"
+                                min={0}
+                                value={it.precio_unitario}
+                                onChange={(e) => handleManualPOItemChange(idx, "precio_unitario", Math.max(0, Number(e.target.value)))}
+                                className="input-field w-32 p-1 text-right font-mono font-bold text-xs"
+                                required
+                              />
+                            </td>
+                            <td className="p-2.5 text-right font-mono text-gray-500">
+                              {it.iva_tasa || 10}%
+                            </td>
+                            <td className="p-2.5 text-right font-mono font-extrabold text-gray-900 dark:text-white">
+                              {formatPYG(it.subtotal || 0)}
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItemFromManualPO(idx)}
+                                className="p-1 text-red-500 hover:text-red-700 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })
                     )}
                   </tbody>
                 </table>
@@ -5299,8 +5408,8 @@ export default function PurchasesPage() {
                   disabled={savingManualPO || manualPOItems.length === 0}
                   className="btn-primary text-xs flex items-center gap-2 px-5 py-2"
                 >
-                  {savingManualPO ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
-                  {savingManualPO ? "Emitiendo..." : "Emitir Orden de Compra"}
+                  {savingManualPO ? <Loader2 className="w-4 h-4 animate-spin" /> : editingPOId ? <Check className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
+                  {savingManualPO ? "Guardando..." : editingPOId ? "Guardar Cambios en la Orden" : "Emitir Orden de Compra"}
                 </button>
               </div>
             </form>

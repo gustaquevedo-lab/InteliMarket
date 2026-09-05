@@ -162,7 +162,7 @@ async def get_purchase_order(po_id: str, db: AsyncSession = Depends(get_db)):
 async def update_purchase_order(po_id: str, body: POUpdate, db: AsyncSession = Depends(get_db)):
     result = await service.update_purchase_order(db, po_id, body)
     if not result:
-        raise HTTPException(status_code=400, detail="No se pudo actualizar. Solo se permite en estado borrador")
+        raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
     return result
 
 

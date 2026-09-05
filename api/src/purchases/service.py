@@ -327,8 +327,23 @@ async def get_purchase_order_with_items(db: AsyncSession, po_id: str) -> Purchas
 
 async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) -> PurchaseOrder | None:
     order = await get_purchase_order(db, po_id)
-    if not order or order.estado != "borrador":
+    if not order:
         return None
+
+    if order.estado in ("cancelado", "recibido", "facturado"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede modificar una orden en estado '{order.estado}'."
+        )
+
+    # Si ya tiene recepciones activas en muelle, bloquear para proteger inventario
+    recs = (await db.execute(select(PurchaseReceipt).where(PurchaseReceipt.purchase_order_id == order.id))).scalars().all()
+    active_recs = [r for r in recs if r.estado != "cancelado"]
+    if active_recs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede modificar la orden {order.numero}: ya tiene recepciones activas en muelle."
+        )
 
     update_fields = data.model_dump(exclude_unset=True, exclude={"items"})
     for key, value in update_fields.items():
