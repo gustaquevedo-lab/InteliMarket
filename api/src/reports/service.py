@@ -893,6 +893,7 @@ async def get_chart_comparison(
     """Tres series de ventas + dos series de rentabilidad en Gs:
        actual | semana_pasada | meta | margen_real | margen_meta
        100% con datos reales sincronizados con el período."""
+    import calendar
     import zoneinfo
     from datetime import datetime, timedelta
 
@@ -917,7 +918,8 @@ async def get_chart_comparison(
 
         lm_month = fecha_desde.month - 1 if fecha_desde.month > 1 else 12
         lm_year = fecha_desde.year if fecha_desde.month > 1 else fecha_desde.year - 1
-        lm_start = datetime(lm_year, lm_month, min(fecha_desde.day, 28), 0, 0, 0, tzinfo=tz)
+        max_d_lm = calendar.monthrange(lm_year, lm_month)[1]
+        lm_start = datetime(lm_year, lm_month, min(fecha_desde.day, max_d_lm), 0, 0, 0, tzinfo=tz)
         lm_end = lm_start + timedelta(days=1)
 
         # Consulta con ventas y costos exactos por hora
@@ -972,6 +974,7 @@ async def get_chart_comparison(
             series.append({
                 "label": h,
                 "actual": actual_field,
+                "mes_pasado": lm_val,
                 "semana_pasada": lw_val,
                 "meta": meta_val,
                 "rentabilidad_real": margin_field,
@@ -984,6 +987,7 @@ async def get_chart_comparison(
             "series": series,
             "totales": {
                 "actual": sum((s["actual"] or 0) for s in series),
+                "mes_pasado": sum(s["mes_pasado"] for s in series),
                 "semana_pasada": sum(s["semana_pasada"] for s in series),
                 "meta": sum(s["meta"] for s in series),
                 "rentabilidad_real": sum((s["rentabilidad_real"] or 0) for s in series),
@@ -992,7 +996,6 @@ async def get_chart_comparison(
         }
 
     else:
-        num_days = (fecha_hasta - fecha_desde).days + 1
         d_start = datetime(fecha_desde.year, fecha_desde.month, fecha_desde.day, 0, 0, 0, tzinfo=tz)
         d_end = datetime(fecha_hasta.year, fecha_hasta.month, fecha_hasta.day, 0, 0, 0, tzinfo=tz) + timedelta(days=1)
 
@@ -1001,8 +1004,13 @@ async def get_chart_comparison(
 
         lm_month = fecha_desde.month - 1 if fecha_desde.month > 1 else 12
         lm_year = fecha_desde.year if fecha_desde.month > 1 else fecha_desde.year - 1
-        lm_start = datetime(lm_year, lm_month, min(fecha_desde.day, 28), 0, 0, 0, tzinfo=tz)
-        lm_end = lm_start + timedelta(days=num_days)
+        max_d_start = calendar.monthrange(lm_year, lm_month)[1]
+        lm_start = datetime(lm_year, lm_month, min(fecha_desde.day, max_d_start), 0, 0, 0, tzinfo=tz)
+
+        lm_hasta_m = fecha_hasta.month - 1 if fecha_hasta.month > 1 else 12
+        lm_hasta_y = fecha_hasta.year if fecha_hasta.month > 1 else fecha_hasta.year - 1
+        max_d_end = calendar.monthrange(lm_hasta_y, lm_hasta_m)[1]
+        lm_end = datetime(lm_hasta_y, lm_hasta_m, min(fecha_hasta.day, max_d_end), 0, 0, 0, tzinfo=tz) + timedelta(days=1)
 
         q_day_cost = text("""
             WITH sale_cost AS (
@@ -1041,7 +1049,8 @@ async def get_chart_comparison(
 
             lm_m = cur_day.month - 1 if cur_day.month > 1 else 12
             lm_y = cur_day.year if cur_day.month > 1 else cur_day.year - 1
-            lm_str = str(date(lm_y, lm_m, min(cur_day.day, 28)))
+            max_d = calendar.monthrange(lm_y, lm_m)[1]
+            lm_str = str(date(lm_y, lm_m, min(cur_day.day, max_d)))
 
             act_val, act_cost, tix = actual_by_day.get(d_str, (0.0, 0.0, 0))
             lw_val = lw_by_day.get(lw_str, 0.0)
@@ -1056,6 +1065,7 @@ async def get_chart_comparison(
                 "label": label,
                 "dia": d_str,
                 "actual": act_val,
+                "mes_pasado": lm_val,
                 "semana_pasada": lw_val,
                 "meta": meta_val,
                 "rentabilidad_real": real_margin,
@@ -1069,6 +1079,7 @@ async def get_chart_comparison(
             "series": series,
             "totales": {
                 "actual": sum(s["actual"] for s in series),
+                "mes_pasado": sum(s["mes_pasado"] for s in series),
                 "semana_pasada": sum(s["semana_pasada"] for s in series),
                 "meta": sum(s["meta"] for s in series),
                 "rentabilidad_real": sum(s["rentabilidad_real"] for s in series),

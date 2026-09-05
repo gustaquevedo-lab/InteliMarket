@@ -277,6 +277,7 @@ export default function Dashboard() {
           actual: monto,
           venta_real: monto,
           meta: Number(d.meta || 0),
+          mes_pasado: Number(d.mes_pasado ?? d.semana_pasada ?? 0),
           semana_pasada: Number(d.semana_pasada || 0),
           rentabilidad_real: Number(d.rentabilidad_real || 0),
           rentabilidad_meta: Number(d.rentabilidad_meta || 0),
@@ -299,6 +300,7 @@ export default function Dashboard() {
           actual: monto,
           venta_real: monto,
           meta: 0,
+          mes_pasado: 0,
           semana_pasada: 0,
           rentabilidad_real: 0,
           rentabilidad_meta: 0,
@@ -369,10 +371,12 @@ export default function Dashboard() {
     if (!salesTrendData || salesTrendData.length === 0) {
       return {
         totalActual: totalVentasMonto,
+        totalMesPasado: 0,
         totalSemanaPasada: 0,
         totalMeta: 0,
         totalMargenReal: margenBrutoGs,
         totalMargenMeta: Math.round(totalVentasMonto * 0.22),
+        pctVsMesPasado: 0,
         pctVsSemanaPasada: 0,
         pctMetaAlcanzada: 0,
         margenRealPct: margenBrutoPct,
@@ -381,12 +385,14 @@ export default function Dashboard() {
       }
     }
     const totActual = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.actual || 0), 0)
+    const totMes = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.mes_pasado || 0), 0)
     const totSemana = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.semana_pasada || 0), 0)
     const totMeta = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.meta || 0), 0)
     const totMargenReal = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.rentabilidad_real || 0), 0)
     const totMargenMeta = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.rentabilidad_meta || 0), 0)
     const totTickets = salesTrendData.reduce((acc: number, r: any) => acc + Number(r.tickets || 0), 0)
 
+    const pctVsMes = totMes > 0 ? ((totActual - totMes) / totMes) * 100 : 0
     const pctVsSemana = totSemana > 0 ? ((totActual - totSemana) / totSemana) * 100 : 0
     const pctMeta = totMeta > 0 ? (totActual / totMeta) * 100 : 0
     const avgTicket = totTickets > 0 ? Math.round(totActual / totTickets) : Number(salesSummary?.ticket_promedio || 0)
@@ -394,10 +400,12 @@ export default function Dashboard() {
 
     return {
       totalActual: totActual || totalVentasMonto,
+      totalMesPasado: totMes,
       totalSemanaPasada: totSemana,
       totalMeta: totMeta,
       totalMargenReal: totMargenReal || margenBrutoGs,
       totalMargenMeta: totMargenMeta || Math.round(totActual * 0.22),
+      pctVsMesPasado: Number(pctVsMes.toFixed(1)),
       pctVsSemanaPasada: Number(pctVsSemana.toFixed(1)),
       pctMetaAlcanzada: Number(pctMeta.toFixed(1)),
       margenRealPct: mPct,
@@ -644,10 +652,10 @@ export default function Dashboard() {
           )}
           <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
             <span>Tickets: <strong className="text-gray-700 dark:text-gray-200 font-mono">{totalTickets.toLocaleString()}</strong></span>
-            {chartSummaryKPIs.totalSemanaPasada > 0 && (
-              <span className={`font-bold font-mono flex items-center gap-0.5 ${chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
-                {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "+" : ""}{chartSummaryKPIs.pctVsSemanaPasada}%
+            {chartSummaryKPIs.totalMesPasado > 0 && (
+              <span className={`font-bold font-mono flex items-center gap-0.5 ${chartSummaryKPIs.pctVsMesPasado >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                {chartSummaryKPIs.pctVsMesPasado >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
+                {chartSummaryKPIs.pctVsMesPasado >= 0 ? "+" : ""}{chartSummaryKPIs.pctVsMesPasado}% vs mes ant.
               </span>
             )}
           </div>
@@ -772,10 +780,10 @@ export default function Dashboard() {
               <div>
                 <h3 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
                   <BarChart3 className="w-4 h-4 text-indigo-500" />
-                  Facturación: Período Actual vs Semana Pasada vs Meta
+                  Facturación: Período Actual vs Mes Pasado vs Meta
                 </h3>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Ventas reales en cajas POS · Comparativa semana anterior · Meta = mes pasado +10%
+                  Ventas reales en cajas POS · Comparativa mismo período mes pasado · Meta = mes pasado +10%
                 </p>
               </div>
 
@@ -784,7 +792,7 @@ export default function Dashboard() {
                   <span className="w-3 h-[3px] rounded-full bg-indigo-600 inline-block" /> Venta Real
                 </span>
                 <span className="flex items-center gap-1.5 text-emerald-500">
-                  <span className="w-3 h-[2px] rounded-full bg-emerald-400 inline-block" style={{borderTop: '2px dashed #34d399'}} /> Sem. Pasada
+                  <span className="w-3 h-[2px] rounded-full bg-emerald-400 inline-block" style={{borderTop: '2px dashed #34d399'}} /> Mes Pasado
                 </span>
                 <span className="flex items-center gap-1.5 text-amber-400">
                   <span className="w-3 h-3 rounded-sm bg-amber-400/40 inline-block" /> Meta (+10%)
@@ -838,7 +846,7 @@ export default function Dashboard() {
                       if (val === null || val === undefined) return ["En curso / Sin ventas", "Venta Real"]
                       return [
                         formatPYG(Number(val)),
-                        name === "meta" ? "★ Meta (+10% mes ant.)" : name === "semana_pasada" ? "Sem. Pasada (mismo tramo)" : "Venta Real"
+                        name === "meta" ? "★ Meta (+10% mes ant.)" : name === "mes_pasado" ? "Mes Pasado (mismo período)" : "Venta Real"
                       ]
                     }}
                     labelFormatter={(lbl: any) => `${timeRange === "hoy" ? "Tramo Horario: " : "Fecha: "}${lbl}`}
@@ -848,8 +856,8 @@ export default function Dashboard() {
                   <Bar dataKey="meta" name="meta" fill="#fbbf24" opacity={0.25} radius={[3, 3, 0, 0]} barSize={timeRange === "hoy" ? 12 : 20} />
                   <Line
                     type="monotone"
-                    dataKey="semana_pasada"
-                    name="semana_pasada"
+                    dataKey="mes_pasado"
+                    name="mes_pasado"
                     stroke="#34d399"
                     strokeWidth={2}
                     strokeDasharray="5 3"
@@ -958,7 +966,7 @@ export default function Dashboard() {
 
           {/* KPI Footer para balancear la tarjeta y eliminar el GAP inferior */}
           <div className="border-t border-slate-100 dark:border-slate-700/60 pt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {/* Bloque 1: Facturación vs Semana Pasada */}
+            {/* Bloque 1: Facturación vs Mes Pasado */}
             <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div>
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block leading-none">
@@ -968,13 +976,13 @@ export default function Dashboard() {
                   {formatPYG(chartSummaryKPIs.totalActual)}
                 </span>
               </div>
-              {chartSummaryKPIs.totalSemanaPasada > 0 && (
+              {chartSummaryKPIs.totalMesPasado > 0 && (
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-0.5 ${
-                  chartSummaryKPIs.pctVsSemanaPasada >= 0
+                  chartSummaryKPIs.pctVsMesPasado >= 0
                     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
                     : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
                 }`}>
-                  {chartSummaryKPIs.pctVsSemanaPasada >= 0 ? "+" : ""}{chartSummaryKPIs.pctVsSemanaPasada}% vs sem.
+                  {chartSummaryKPIs.pctVsMesPasado >= 0 ? "+" : ""}{chartSummaryKPIs.pctVsMesPasado}% vs mes ant.
                 </span>
               )}
             </div>
