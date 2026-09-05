@@ -2422,11 +2422,12 @@ async def calculate_smart_replenishment_preview(
             GROUP BY si.product_id
         ) sales_4m ON sales_4m.product_id = p.id
         LEFT JOIN (
-            SELECT DISTINCT unnest(pr.producto_ids) as product_id, true as en_promo_activa
+            SELECT DISTINCT unnest(pr.producto_ids)::uuid as product_id, true as en_promo_activa
             FROM promotions pr
             WHERE pr.company_id = :cid
-              AND pr.estado IN ('activa', 'finalizada_por_fecha')
-              AND (pr.fecha_fin IS NULL OR pr.fecha_fin >= CURRENT_DATE - INTERVAL '120 days')
+              AND (pr.estado = 'activa' OR pr.activo = true)
+              AND pr.producto_ids IS NOT NULL
+              AND (pr.valido_hasta IS NULL OR pr.valido_hasta >= CURRENT_DATE - INTERVAL '120 days')
         ) promo_flag ON promo_flag.product_id = p.id
         LEFT JOIN (
             SELECT DISTINCT ON (poi_last.product_id)
