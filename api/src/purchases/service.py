@@ -2348,7 +2348,9 @@ async def calculate_smart_replenishment_preview(
             COALESCE(sales_4m.v_m3, 0) as v_m3,
             COALESCE(sales_4m.v_m4, 0) as v_m4,
             COALESCE(sales_4m.v_promo_qty, 0) as v_promo_qty,
-            COALESCE(promo_flag.en_promo_activa, false) as en_promo_flag
+            COALESCE(promo_flag.en_promo_activa, false) as en_promo_flag,
+            last_sup.last_sup_id,
+            last_sup.last_sup_name
         FROM products p
         LEFT JOIN (
             SELECT product_id, SUM(cantidad) as total_stock
@@ -2386,6 +2388,17 @@ async def calculate_smart_replenishment_preview(
               AND pr.estado IN ('activa', 'finalizada_por_fecha')
               AND (pr.fecha_fin IS NULL OR pr.fecha_fin >= CURRENT_DATE - INTERVAL '120 days')
         ) promo_flag ON promo_flag.product_id = p.id
+        LEFT JOIN (
+            SELECT DISTINCT ON (poi_last.product_id)
+                poi_last.product_id,
+                po_last.supplier_id as last_sup_id,
+                sup_last.razon_social as last_sup_name
+            FROM purchase_order_items poi_last
+            JOIN purchase_orders po_last ON po_last.id = poi_last.purchase_order_id
+            JOIN suppliers sup_last ON sup_last.id = po_last.supplier_id
+            WHERE po_last.company_id = :cid
+            ORDER BY poi_last.product_id, po_last.fecha DESC
+        ) last_sup ON last_sup.product_id = p.id
         LEFT JOIN (
             SELECT poi.product_id, SUM(poi.cantidad - COALESCE(poi.cantidad_recibida, 0)) as total_en_transito
             FROM purchase_order_items poi
@@ -2431,6 +2444,8 @@ async def calculate_smart_replenishment_preview(
         vm4 = float(r[16])
         v_promo_qty = float(r[17])
         en_promo_flag = bool(r[18])
+        ultimo_proveedor_id = str(r[19]) if r[19] else None
+        ultimo_proveedor_nombre = str(r[20]) if r[20] else None
         
         # Variación porcentual de costo (Último costo vs Costo promedio)
         if costo_prom > Decimal("0") and costo_ult > Decimal("0"):
@@ -2587,6 +2602,8 @@ async def calculate_smart_replenishment_preview(
             "pulso_tendencia": pulso_tendencia,
             "tiene_promocion_detectada": tiene_promo,
             "promocion_info": promo_info,
+            "ultimo_proveedor_id": ultimo_proveedor_id,
+            "ultimo_proveedor_nombre": ultimo_proveedor_nombre,
             "demanda_diaria_base": float(demanda_diaria_base),
             "multiplicador_estacional": float(mult),
             "demanda_diaria_ajustada": float(demanda_ajustada),
@@ -2629,6 +2646,52 @@ async def create_po_from_replenishment(db: AsyncSession, data) -> PurchaseOrder:
         items=data.items,
     )
     return await create_purchase_order(db, po_create_data)
+
+
+async def create_multi_po_from_replenishment(db: AsyncSession, data) -> dict:
+    from api.src.purchases.schemas import POCreate
+    created_orders = []
+    
+    for grp in data.orders:
+        if not grp.items:
+            continue
+            
+        items_payload = [
+            {
+                "product_id": it.product_id,
+                "variant_id": it.variant_id,
+                "descripcion": it.descripcion or "Item sugerido",
+                "cantidad": it.cantidad,
+                "precio_unitario": it.precio_unitario,
+                "descuento_pct": it.descuento_pct or 0,
+                "iva_tasa": it.iva_tasa or 10,
+            }
+            for it in grp.items
+            if it.cantidad > 0
+        ]
+        
+        if not items_payload:
+            continue
+            
+        po_create_data = POCreate(
+            company_id=data.company_id,
+            supplier_id=grp.supplier_id,
+            fecha_entrega_estimada=grp.fecha_entrega_estimada,
+            moneda=grp.moneda or "PYG",
+            prioridad=grp.prioridad or "normal",
+            condiciones_pago=grp.condiciones_pago,
+            observaciones=grp.observaciones or "Generado mediante Emisión Múltiple por Proveedor (Asistente IA)",
+            user_id=data.user_id,
+            created_by_name=data.user_name,
+            items=items_payload,
+        )
+        order = await create_purchase_order(db, po_create_data)
+        created_orders.append(order)
+        
+    return {
+        "total_created": len(created_orders),
+        "orders": created_orders
+    }
 
 
 

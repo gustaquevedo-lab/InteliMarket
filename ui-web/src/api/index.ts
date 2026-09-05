@@ -223,6 +223,8 @@ export interface SmartReplenishmentItem {
   pulso_tendencia?: "acelerando" | "estable" | "desacelerando"
   tiene_promocion_detectada?: boolean
   promocion_info?: string | null
+  ultimo_proveedor_id?: string | null
+  ultimo_proveedor_nombre?: string | null
   demanda_diaria_base: number
   multiplicador_estacional: number
   demanda_diaria_ajustada: number
@@ -1170,6 +1172,27 @@ export const api = {
         iva_tasa?: number
       }[]
     }) => client.post<PurchaseOrder>("/v1/purchases/generate-po-from-replenishment", { ...data, company_id: COMPANY_ID }),
+    generateMultiPOFromReplenishment: (data: {
+      user_id?: string
+      user_name?: string
+      orders: {
+        supplier_id: string
+        fecha_entrega_estimada?: string
+        moneda?: string
+        prioridad?: string
+        condiciones_pago?: string
+        observaciones?: string
+        items: {
+          product_id: string
+          variant_id?: string
+          descripcion?: string
+          cantidad: number
+          precio_unitario: number
+          descuento_pct?: number
+          iva_tasa?: number
+        }[]
+      }[]
+    }) => client.post<{ total_created: number; orders: PurchaseOrder[] }>("/v1/purchases/generate-multi-po-from-replenishment", { ...data, company_id: COMPANY_ID }),
     getInboxConfig: (companyId?: string) =>
       client.get<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-inbox-config`),
     saveInboxConfig: (data: any, companyId?: string) =>

@@ -26,6 +26,7 @@ from api.src.purchases.schemas import (
     SpendBySupplierResponse, SpendByCategoryResponse, PriceVarianceResponse, PurchaseKPIsResponse,
     RfqCreate, RfqResponse, RfqWithDetail, RfqResponseSubmit, RfqAwardRequest,
     SmartReplenishmentRequest, SmartReplenishmentResponse, CreatePOFromReplenishmentRequest,
+    GenerateMultiPORequest, GenerateMultiPOResponse,
     LostDemandCreate, LostDemandResponse, LostDemandUpdate,
     PurchaseInboxConfigCreate, PurchaseInboxConfigUpdate, PurchaseInboxConfigResponse,
     SyncInboxResponse, UploadXmlResponse,
@@ -622,6 +623,11 @@ async def smart_replenishment_preview(body: SmartReplenishmentRequest, db: Async
 @router.post("/purchases/generate-po-from-replenishment", response_model=POResponse, status_code=status.HTTP_201_CREATED)
 async def generate_po_from_replenishment(body: CreatePOFromReplenishmentRequest, db: AsyncSession = Depends(get_db)):
     return await service.create_po_from_replenishment(db, body)
+
+
+@router.post("/purchases/generate-multi-po-from-replenishment", response_model=GenerateMultiPOResponse, status_code=status.HTTP_201_CREATED)
+async def generate_multi_po_from_replenishment(body: GenerateMultiPORequest, db: AsyncSession = Depends(get_db)):
+    return await service.create_multi_po_from_replenishment(db, body)
 
 
 

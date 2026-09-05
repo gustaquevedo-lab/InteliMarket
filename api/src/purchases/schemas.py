@@ -898,6 +898,8 @@ class SmartReplenishmentItem(BaseModel):
     pulso_tendencia: Optional[str] = "estable"  # "acelerando", "estable", "desacelerando"
     tiene_promocion_detectada: bool = False
     promocion_info: Optional[str] = None
+    ultimo_proveedor_id: Optional[UUID] = None
+    ultimo_proveedor_nombre: Optional[str] = None
     demanda_diaria_base: float
     multiplicador_estacional: float
     demanda_diaria_ajustada: float
@@ -935,6 +937,38 @@ class CreatePOFromReplenishmentRequest(BaseModel):
     user_id: Optional[UUID] = None
     user_name: Optional[str] = None
     items: list[POItemInput]
+
+
+class GenerateMultiPOItem(BaseModel):
+    product_id: UUID
+    variant_id: Optional[UUID] = None
+    descripcion: Optional[str] = None
+    cantidad: float
+    precio_unitario: float
+    descuento_pct: Optional[float] = 0.0
+    iva_tasa: Optional[float] = 10.0
+
+
+class MultiPOGroup(BaseModel):
+    supplier_id: UUID
+    fecha_entrega_estimada: Optional[date] = None
+    moneda: str = "PYG"
+    prioridad: str = "normal"
+    condiciones_pago: Optional[str] = None
+    observaciones: Optional[str] = None
+    items: list[GenerateMultiPOItem]
+
+
+class GenerateMultiPORequest(BaseModel):
+    company_id: UUID
+    user_id: Optional[UUID] = None
+    user_name: Optional[str] = None
+    orders: list[MultiPOGroup]
+
+
+class GenerateMultiPOResponse(BaseModel):
+    total_created: int
+    orders: list[POResponse]
 
 class LostDemandCreate(BaseModel):
     company_id: UUID

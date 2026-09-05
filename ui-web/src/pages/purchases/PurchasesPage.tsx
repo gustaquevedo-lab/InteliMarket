@@ -226,6 +226,16 @@ export default function PurchasesPage() {
     observaciones: "",
   })
   const [generatingPO, setGeneratingPO] = useState(false)
+  // Multi-Proveedor: división y asignación interactiva
+  const [itemAssignedSupplier, setItemAssignedSupplier] = useState<Record<string, string>>({})
+  const [includedSuppliers, setIncludedSuppliers] = useState<Record<string, boolean>>({})
+  const [supplierOrderSettings, setSupplierOrderSettings] = useState<Record<string, {
+    fecha_entrega_estimada: string
+    condiciones_pago: string
+    prioridad: string
+    observaciones: string
+  }>>({})
+  const [globalApplySupplierId, setGlobalApplySupplierId] = useState<string>("")
 
   // Modal de Recepción en Muelle
   const [showReceiptModal, setShowReceiptModal] = useState(false)
@@ -634,7 +644,7 @@ export default function PurchasesPage() {
 
   const handleOpenGenerateModal = () => {
     const itemsToOrder = (replenishmentData?.items || []).filter(
-      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] || 0) > 0
+      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
     )
     if (itemsToOrder.length === 0) {
       toast.error("Sin ítems seleccionados", "Marcá al menos un producto con cantidad mayor a cero.")
@@ -642,52 +652,140 @@ export default function PurchasesPage() {
     }
     const defaultDelivery = new Date()
     defaultDelivery.setDate(defaultDelivery.getDate() + (leadTimeDias || 3))
-    
-    setGeneratePOForm({
-      supplier_id: selectedSupplierIA || suppliers[0]?.id || "",
-      fecha_entrega_estimada: defaultDelivery.toISOString().split("T")[0],
-      prioridad: soloQuiebreIA ? "urgente" : "normal",
-      condiciones_pago: "30 Días",
-      observaciones: `Orden generada mediante Asistente IA de Abastecimiento (${diasCobertura} días de stock). Factores: FinSem=${factorFinSemana ? 'SI' : 'NO'}, FinMes=${factorFinMes ? 'SI' : 'NO'}, Clima=${factorClima}, Evento=${factorEvento}.`,
+    const defaultDeliveryStr = defaultDelivery.toISOString().split("T")[0]
+
+    const initialMap: Record<string, string> = {}
+    const initialIncluded: Record<string, boolean> = {}
+    const initialSettings: Record<string, any> = {}
+
+    itemsToOrder.forEach((it: any) => {
+      // Si se filtró por un proveedor específico, usar ese; de lo contrario su último proveedor, o el primero
+      const assigned = selectedSupplierIA || it.ultimo_proveedor_id || suppliers[0]?.id || ""
+      initialMap[it.product_id] = assigned
+      if (assigned) {
+        initialIncluded[assigned] = true
+        if (!initialSettings[assigned]) {
+          initialSettings[assigned] = {
+            fecha_entrega_estimada: defaultDeliveryStr,
+            condiciones_pago: "30 Días",
+            prioridad: soloQuiebreIA ? "urgente" : "normal",
+            observaciones: `Orden generada mediante Asistente IA (${diasCobertura}d cobertura). Factores: FinSem=${factorFinSemana ? 'SI' : 'NO'}, FinMes=${factorFinMes ? 'SI' : 'NO'}.`,
+          }
+        }
+      }
     })
+
+    setItemAssignedSupplier(initialMap)
+    setIncludedSuppliers(initialIncluded)
+    setSupplierOrderSettings(initialSettings)
+    setGlobalApplySupplierId(suppliers[0]?.id || "")
     setShowGenerateModal(true)
   }
 
-  const handleCreatePOFromReplenishment = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!generatePOForm.supplier_id) {
-      toast.error("Seleccione un proveedor")
-      return
-    }
+  const handleResetToLastSuppliers = () => {
     const itemsToOrder = (replenishmentData?.items || []).filter(
       (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
-    ).map((it: any) => ({
-      product_id: it.product_id,
-      descripcion: it.nombre,
-      cantidad: Number(editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida),
-      precio_unitario: Number(editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (it.costo_unitario_estimado || 0)),
-      iva_tasa: Number(it.iva_tasa || 10),
-    }))
+    )
+    const newMap: Record<string, string> = {}
+    const newIncluded: Record<string, boolean> = { ...includedSuppliers }
+    itemsToOrder.forEach((it: any) => {
+      const sup = it.ultimo_proveedor_id || suppliers[0]?.id || ""
+      newMap[it.product_id] = sup
+      if (sup) newIncluded[sup] = true
+    })
+    setItemAssignedSupplier(newMap)
+    setIncludedSuppliers(newIncluded)
+    toast.info("Proveedores restablecidos", "Cada producto fue asignado a su último proveedor habitual.")
+  }
+
+  const handleApplyGlobalSupplier = () => {
+    if (!globalApplySupplierId) return
+    const itemsToOrder = (replenishmentData?.items || []).filter(
+      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+    )
+    const newMap: Record<string, string> = {}
+    itemsToOrder.forEach((it: any) => {
+      newMap[it.product_id] = globalApplySupplierId
+    })
+    setItemAssignedSupplier(newMap)
+    setIncludedSuppliers(prev => ({ ...prev, [globalApplySupplierId]: true }))
+    toast.info("Proveedor unificado", "Todos los productos seleccionados fueron asignados al proveedor elegido.")
+  }
+
+  const handleCreatePOFromReplenishment = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const itemsToOrder = (replenishmentData?.items || []).filter(
+      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+    )
+
+    const groupsBySup: Record<string, any[]> = {}
+    for (const it of itemsToOrder) {
+      const supId = itemAssignedSupplier[it.product_id]
+      if (!supId || supId === "unassigned") {
+        toast.error("Producto sin proveedor", `El producto "${it.nombre}" no tiene proveedor asignado. Seleccioná un proveedor antes de emitir.`)
+        return
+      }
+      if (!groupsBySup[supId]) {
+        groupsBySup[supId] = []
+      }
+      groupsBySup[supId].push({
+        product_id: it.product_id,
+        descripcion: it.nombre,
+        cantidad: Number(editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida),
+        precio_unitario: Number(editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (it.costo_unitario_estimado || 0)),
+        iva_tasa: Number(it.iva_tasa || 10),
+      })
+    }
+
+    const activeSupplierIds = Object.keys(groupsBySup).filter(supId => includedSuppliers[supId] !== false)
+    if (activeSupplierIds.length === 0) {
+      toast.error("Sin órdenes marcadas", "Marcá la casilla de al menos un proveedor para emitir su orden de compra.")
+      return
+    }
+
+    const defaultDelivery = new Date()
+    defaultDelivery.setDate(defaultDelivery.getDate() + (leadTimeDias || 3))
+    const defaultDeliveryStr = defaultDelivery.toISOString().split("T")[0]
+
+    const ordersPayload = activeSupplierIds.map(supId => {
+      const settings = supplierOrderSettings[supId] || {
+        fecha_entrega_estimada: defaultDeliveryStr,
+        condiciones_pago: "30 Días",
+        prioridad: soloQuiebreIA ? "urgente" : "normal",
+        observaciones: `Orden generada mediante Asistente IA de Abastecimiento.`,
+      }
+      return {
+        supplier_id: supId,
+        fecha_entrega_estimada: settings.fecha_entrega_estimada || undefined,
+        condiciones_pago: settings.condiciones_pago || "30 Días",
+        prioridad: settings.prioridad || "normal",
+        observaciones: settings.observaciones || "Generado mediante Emisión Múltiple por Proveedor (Asistente IA)",
+        items: groupsBySup[supId],
+      }
+    })
 
     setGeneratingPO(true)
     try {
-      const created = await api.purchases.generatePOFromReplenishment({
-        supplier_id: generatePOForm.supplier_id,
-        fecha_entrega_estimada: generatePOForm.fecha_entrega_estimada || undefined,
-        prioridad: generatePOForm.prioridad,
-        condiciones_pago: generatePOForm.condiciones_pago,
-        observaciones: generatePOForm.observaciones,
+      const res = await api.purchases.generateMultiPOFromReplenishment({
         user_id: user?.id,
         user_name: user?.nombre || "Comprador",
-        items: itemsToOrder,
+        orders: ordersPayload,
       })
-      toast.success("¡Orden de Compra Generada!", `Se creó la OC N° ${created.numero} con ${itemsToOrder.length} ítems.`)
+
+      const totalCreated = res.total_created || res.orders?.length || 0
+      const orderNumbers = (res.orders || []).map((o: any) => o.numero).join(", ")
+      toast.success(
+        `¡${totalCreated} ${totalCreated > 1 ? 'Órdenes de Compra Emitidas' : 'Orden de Compra Emitida'}!`,
+        `Se crearon exitosamente: ${orderNumbers}`
+      )
       setShowGenerateModal(false)
-      fetchAll()
+      await fetchAll()
       setTab("ordenes")
-      handleViewPO(created)
+      if (res.orders && res.orders.length === 1) {
+        handleViewPO(res.orders[0])
+      }
     } catch (e: any) {
-      toast.error("Error al crear Orden de Compra", e.message)
+      toast.error("Error al emitir órdenes de compra", e.message)
     } finally {
       setGeneratingPO(false)
     }
@@ -1965,6 +2063,7 @@ export default function PurchasesPage() {
                             />
                           </th>
                           <th className="p-3 min-w-[200px]">Producto & SKU</th>
+                          <th className="p-2.5 min-w-[140px]" title="Último proveedor registrado para este producto">Último Proveedor</th>
                           <th className="p-3 text-right" title="Stock actual físico registrado en góndola/depósito">Stock Físico</th>
                           <th className="p-2.5 text-right font-mono" title={`Ventas mensuales registradas en ${labels4m[0]}`}>{labels4m[0]}</th>
                           <th className="p-2.5 text-right font-mono" title={`Ventas mensuales registradas en ${labels4m[1]}`}>{labels4m[1]}</th>
@@ -2026,6 +2125,18 @@ export default function PurchasesPage() {
                                     </span>
                                   )}
                                 </div>
+                              </td>
+
+                              {/* Último Proveedor Habitual */}
+                              <td className="p-2.5 min-w-[140px]">
+                                {it.ultimo_proveedor_nombre ? (
+                                  <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200" title={`Último Proveedor: ${it.ultimo_proveedor_nombre}`}>
+                                    <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                    <span className="text-[11px] font-semibold truncate max-w-[130px]">{it.ultimo_proveedor_nombre}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400 italic">Sin asignar</span>
+                                )}
                               </td>
 
                               {/* Stock Físico */}
@@ -3495,119 +3606,365 @@ export default function PurchasesPage() {
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: GENERAR ORDEN DE COMPRA DESDE ASISTENTE IA
+          MODAL: DIVISIÓN Y EMISIÓN DE ÓRDENES DE COMPRA POR PROVEEDOR (MULTI-PROVEEDOR)
       ────────────────────────────────────────────────────────────────────────── */}
-      {showGenerateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-indigo-500" /> Confirmar Emisión de Orden de Compra
-              </h3>
-              <button
-                onClick={() => setShowGenerateModal(false)}
-                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {showGenerateModal && (() => {
+        const itemsToOrder = (replenishmentData?.items || []).filter(
+          (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+        )
 
-            <form onSubmit={handleCreatePOFromReplenishment} className="space-y-4">
-              <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Proveedor</label>
-                <select
-                  value={generatePOForm.supplier_id}
-                  onChange={(e) => setGeneratePOForm(prev => ({ ...prev, supplier_id: e.target.value }))}
-                  className="input-field w-full text-xs font-semibold"
-                  required
-                >
-                  <option value="">Seleccione Proveedor</option>
-                  {suppliers.map(s => (
-                    <option key={s.id} value={s.id}>{s.razon_social} ({s.ruc || "Sin RUC"})</option>
-                  ))}
-                </select>
-              </div>
+        // Agrupación por proveedor asignado
+        const groups: Record<string, { supplier?: Supplier; items: any[]; total: number; totalUnits: number }> = {}
+        itemsToOrder.forEach((it: any) => {
+          const supId = itemAssignedSupplier[it.product_id] || "unassigned"
+          if (!groups[supId]) {
+            const supObj = suppliers.find(s => s.id === supId)
+            groups[supId] = { supplier: supObj, items: [], total: 0, totalUnits: 0 }
+          }
+          const qty = Number(editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida)
+          const cost = Number(editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (it.costo_unitario_estimado || 0))
+          groups[supId].items.push(it)
+          groups[supId].total += qty * cost
+          groups[supId].totalUnits += qty
+        })
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Entrega Esperada</label>
-                  <input
-                    type="date"
-                    value={generatePOForm.fecha_entrega_estimada}
-                    onChange={(e) => setGeneratePOForm(prev => ({ ...prev, fecha_entrega_estimada: e.target.value }))}
-                    className="input-field w-full text-xs"
-                    required
-                  />
+        const groupKeys = Object.keys(groups)
+        const validGroupKeys = groupKeys.filter(k => k !== "unassigned")
+        const hasUnassigned = groupKeys.includes("unassigned")
+        const activeGroupKeys = validGroupKeys.filter(k => includedSuppliers[k] !== false)
+
+        const totalActiveAmount = activeGroupKeys.reduce((acc, k) => acc + (groups[k]?.total || 0), 0)
+        const totalActiveItems = activeGroupKeys.reduce((acc, k) => acc + (groups[k]?.items.length || 0), 0)
+        const totalActiveUnits = activeGroupKeys.reduce((acc, k) => acc + (groups[k]?.totalUnits || 0), 0)
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full border border-slate-200 dark:border-slate-700 flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+              {/* Header Modal */}
+              <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/70 dark:bg-slate-900/40">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60">
+                    <Layers className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                      División y Emisión de Órdenes por Proveedor
+                      {validGroupKeys.length > 1 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                          {validGroupKeys.length} Proveedores Detectados
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Revisá la división de productos por proveedor, reasigná ítems según convenga o emití múltiples OC simultáneas.
+                    </p>
+                  </div>
                 </div>
-
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Condición de Pago</label>
-                  <select
-                    value={generatePOForm.condiciones_pago}
-                    onChange={(e) => setGeneratePOForm(prev => ({ ...prev, condiciones_pago: e.target.value }))}
-                    className="input-field w-full text-xs"
-                  >
-                    <option value="Contado">Contado</option>
-                    <option value="15 Días">Crédito 15 Días</option>
-                    <option value="30 Días">Crédito 30 Días</option>
-                    <option value="60 Días">Crédito 60 Días</option>
-                    <option value="90 Días">Crédito 90 Días</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/60 space-y-2">
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-500 font-medium">Ítems Seleccionados:</span>
-                  <span className="font-bold font-mono text-gray-800 dark:text-gray-200">
-                    {(replenishmentData?.items || []).filter((it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] || 0) > 0).length} productos
-                  </span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-500 font-medium">Total Unidades:</span>
-                  <span className="font-bold font-mono text-indigo-600 dark:text-indigo-400">
-                    {totalUnidadesIASugerida.toLocaleString()} un.
-                  </span>
-                </div>
-                <div className="flex justify-between text-xs pt-1 border-t border-slate-200 dark:border-slate-700">
-                  <span className="font-bold text-gray-800 dark:text-gray-200">Monto Total Estimado:</span>
-                  <span className="font-extrabold font-mono text-gray-900 dark:text-white text-sm">
-                    {formatPYG(totalOrdenIASugerida)}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Observaciones / Notas</label>
-                <textarea
-                  rows={2}
-                  value={generatePOForm.observaciones}
-                  onChange={(e) => setGeneratePOForm(prev => ({ ...prev, observaciones: e.target.value }))}
-                  className="input-field w-full text-xs"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
                 <button
-                  type="button"
                   onClick={() => setShowGenerateModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                  className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={generatingPO}
-                  className="btn-primary text-xs flex items-center gap-2 px-5 py-2"
-                >
-                  {generatingPO ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
-                  {generatingPO ? "Emitiendo..." : "Emitir Orden de Compra"}
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-            </form>
+
+              {/* Barra de Herramientas de Asignación Rápida */}
+              <div className="px-4 sm:px-5 py-3 bg-indigo-50/40 dark:bg-indigo-950/20 border-b border-indigo-100 dark:border-indigo-900/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    📦 <strong className="font-mono">{itemsToOrder.length}</strong> productos seleccionados
+                  </span>
+                  <span className="text-gray-300 dark:text-gray-600">|</span>
+                  <button
+                    type="button"
+                    onClick={handleResetToLastSuppliers}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 shadow-2xs hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors"
+                    title="Restablece cada producto a su último proveedor habitual de compra"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Restablecer a últimos proveedores
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-600 dark:text-gray-400 font-medium">Asignar todos a:</span>
+                  <select
+                    value={globalApplySupplierId}
+                    onChange={(e) => setGlobalApplySupplierId(e.target.value)}
+                    className="input-field py-1 px-2 text-xs font-semibold bg-white dark:bg-slate-800 border-indigo-200 dark:border-indigo-800 max-w-[220px]"
+                  >
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>{s.razon_social}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleApplyGlobalSupplier}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-2xs transition-colors"
+                  >
+                    Aplicar a todos
+                  </button>
+                </div>
+              </div>
+
+              {/* Contenido con Scroll: Divisiones por Proveedor */}
+              <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                {/* Alerta de productos sin proveedor asignado */}
+                {hasUnassigned && (
+                  <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-200 text-xs flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <strong className="block font-bold">Hay {groups["unassigned"].items.length} productos sin proveedor asignado</strong>
+                      <span>Seleccioná el proveedor destino en cada producto para poder emitir la orden correspondiente.</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Cards por Proveedor */}
+                {groupKeys.map(supId => {
+                  const grp = groups[supId]
+                  const isUnassigned = supId === "unassigned"
+                  const isIncluded = isUnassigned ? false : includedSuppliers[supId] !== false
+                  const supName = isUnassigned ? "Productos Sin Proveedor Asignado" : (grp.supplier?.razon_social || "Proveedor")
+                  const supRuc = grp.supplier?.ruc
+                  const settings = supplierOrderSettings[supId] || {
+                    fecha_entrega_estimada: new Date().toISOString().split("T")[0],
+                    condiciones_pago: "30 Días",
+                    prioridad: "normal",
+                    observaciones: "",
+                  }
+
+                  return (
+                    <div
+                      key={supId}
+                      className={`rounded-2xl border transition-all ${
+                        isUnassigned
+                          ? "border-amber-300 dark:border-amber-700/60 bg-amber-50/20 dark:bg-amber-950/10"
+                          : isIncluded
+                          ? "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 shadow-xs"
+                          : "border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 opacity-60"
+                      }`}
+                    >
+                      {/* Cabecera de la División */}
+                      <div className="p-3.5 sm:p-4 border-b border-slate-100 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-900/30 rounded-t-2xl">
+                        <div className="flex items-center gap-3">
+                          {!isUnassigned ? (
+                            <input
+                              type="checkbox"
+                              checked={isIncluded}
+                              onChange={(e) => setIncludedSuppliers(prev => ({ ...prev, [supId]: e.target.checked }))}
+                              className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4"
+                              title="Marcar para emitir esta orden"
+                            />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-amber-500" />
+                          )}
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-1.5">
+                                <Building2 className="w-4 h-4 text-indigo-500" />
+                                {supName}
+                              </h4>
+                              {supRuc && (
+                                <span className="text-[11px] font-mono text-gray-500 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.2 rounded font-semibold">
+                                  RUC: {supRuc}
+                                </span>
+                              )}
+                              <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/50 px-2 py-0.2 rounded-full">
+                                {grp.items.length} {grp.items.length === 1 ? "ítem" : "ítems"} ({grp.totalUnits.toLocaleString()} un.)
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-[10px] text-gray-400 block uppercase font-bold tracking-wider">Subtotal OC</span>
+                          <span className="font-mono font-extrabold text-sm sm:text-base text-gray-900 dark:text-white">
+                            {formatPYG(grp.total)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Parámetros de la OC para este proveedor */}
+                      {!isUnassigned && isIncluded && (
+                        <div className="p-3 bg-slate-50/70 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Entrega Esperada</label>
+                            <input
+                              type="date"
+                              value={settings.fecha_entrega_estimada}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setSupplierOrderSettings(prev => ({
+                                  ...prev,
+                                  [supId]: { ...(prev[supId] || settings), fecha_entrega_estimada: val }
+                                }))
+                              }}
+                              className="input-field w-full py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Condición de Pago</label>
+                            <select
+                              value={settings.condiciones_pago}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setSupplierOrderSettings(prev => ({
+                                  ...prev,
+                                  [supId]: { ...(prev[supId] || settings), condiciones_pago: val }
+                                }))
+                              }}
+                              className="input-field w-full py-1 text-xs font-semibold"
+                            >
+                              <option value="Contado">Contado</option>
+                              <option value="15 Días">Crédito 15 Días</option>
+                              <option value="30 Días">Crédito 30 Días</option>
+                              <option value="60 Días">Crédito 60 Días</option>
+                              <option value="90 Días">Crédito 90 Días</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">Prioridad</label>
+                            <select
+                              value={settings.prioridad}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setSupplierOrderSettings(prev => ({
+                                  ...prev,
+                                  [supId]: { ...(prev[supId] || settings), prioridad: val }
+                                }))
+                              }}
+                              className="input-field w-full py-1 text-xs font-semibold"
+                            >
+                              <option value="normal">Normal</option>
+                              <option value="urgente">Urgente (Quiebre)</option>
+                              <option value="baja">Baja / Rutinaria</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Lista de Productos en esta OC */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50/90 dark:bg-slate-900/60 text-gray-400 font-bold uppercase text-[9px] tracking-wider border-b border-slate-100 dark:border-slate-700/60">
+                            <tr>
+                              <th className="p-2.5 min-w-[200px]">Producto</th>
+                              <th className="p-2.5 text-right">Cantidad</th>
+                              <th className="p-2.5 text-right">Costo Unit.</th>
+                              <th className="p-2.5 text-right">Subtotal</th>
+                              <th className="p-2.5 min-w-[190px]">Reasignar Proveedor</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700/40 font-mono">
+                            {grp.items.map((it: any) => {
+                              const qty = Number(editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida)
+                              const cost = Number(editedCosts[it.product_id] !== undefined ? editedCosts[it.product_id] : (it.costo_unitario_estimado || 0))
+                              const subtotal = qty * cost
+
+                              return (
+                                <tr key={it.product_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/20">
+                                  <td className="p-2.5 font-sans font-medium text-gray-800 dark:text-gray-200">
+                                    <div className="font-bold truncate max-w-[240px]" title={it.nombre}>
+                                      {it.nombre}
+                                    </div>
+                                    <div className="text-[10px] text-gray-400 font-mono">
+                                      SKU: {it.sku || "—"} | {it.unidad_medida}
+                                    </div>
+                                  </td>
+                                  <td className="p-2.5 text-right font-bold text-indigo-600 dark:text-indigo-400">
+                                    {qty.toLocaleString()}
+                                  </td>
+                                  <td className="p-2.5 text-right text-gray-600 dark:text-gray-300">
+                                    {formatPYG(cost)}
+                                  </td>
+                                  <td className="p-2.5 text-right font-extrabold text-gray-900 dark:text-white">
+                                    {formatPYG(subtotal)}
+                                  </td>
+                                  <td className="p-2 font-sans">
+                                    <select
+                                      value={itemAssignedSupplier[it.product_id] || ""}
+                                      onChange={(e) => {
+                                        const newSup = e.target.value
+                                        setItemAssignedSupplier(prev => ({ ...prev, [it.product_id]: newSup }))
+                                        if (newSup && !includedSuppliers[newSup]) {
+                                          setIncludedSuppliers(prev => ({ ...prev, [newSup]: true }))
+                                        }
+                                      }}
+                                      className="input-field py-1 px-2 text-[11px] font-semibold w-full bg-white dark:bg-slate-800"
+                                    >
+                                      <option value="">Seleccione Proveedor...</option>
+                                      {suppliers.map(s => (
+                                        <option key={s.id} value={s.id}>
+                                          {s.razon_social} {s.id === it.ultimo_proveedor_id ? "★ (Último)" : ""}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Footer Modal con Totales y Acción */}
+              <div className="p-4 sm:p-5 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-4 text-xs">
+                  <div>
+                    <span className="text-gray-400 block text-[10px] uppercase font-bold">Órdenes a Generar</span>
+                    <span className="font-extrabold font-mono text-indigo-600 dark:text-indigo-400 text-sm">
+                      {activeGroupKeys.length} {activeGroupKeys.length === 1 ? "Orden" : "Órdenes"}
+                    </span>
+                  </div>
+                  <div className="border-l border-slate-200 dark:border-slate-700 pl-4">
+                    <span className="text-gray-400 block text-[10px] uppercase font-bold">Total Ítems</span>
+                    <span className="font-bold font-mono text-gray-700 dark:text-gray-300 text-sm">
+                      {totalActiveItems} prod. ({totalActiveUnits.toLocaleString()} un.)
+                    </span>
+                  </div>
+                  <div className="border-l border-slate-200 dark:border-slate-700 pl-4">
+                    <span className="text-gray-400 block text-[10px] uppercase font-bold">Monto Global</span>
+                    <span className="font-extrabold font-mono text-gray-900 dark:text-white text-base">
+                      {formatPYG(totalActiveAmount)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowGenerateModal(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreatePOFromReplenishment}
+                    disabled={generatingPO || activeGroupKeys.length === 0 || hasUnassigned}
+                    className="btn-primary text-xs flex items-center gap-2 px-6 py-2.5 font-bold shadow-md disabled:opacity-50"
+                  >
+                    {generatingPO ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ShoppingCart className="w-4 h-4" />
+                    )}
+                    {generatingPO
+                      ? "Emitiendo Órdenes..."
+                      : activeGroupKeys.length > 1
+                      ? `🚀 Emitir ${activeGroupKeys.length} Órdenes de Compra Separadas`
+                      : "Emitir Orden de Compra"}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* ──────────────────────────────────────────────────────────────────────────
           MODAL: DETALLE DE ORDEN DE COMPRA
