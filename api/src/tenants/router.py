@@ -5,11 +5,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.tenants.models import Tenant
 from api.src.tenants.schemas import TenantResponse
 from api.src.tenants.service import get_tenant_by_id, get_tenant_by_slug
 
-router = APIRouter(prefix="/api/v1/tenants", tags=["tenants"])
+router = APIRouter(prefix="/api/v1/tenants", tags=["tenants"], dependencies=[Depends(require_auth)])
 
 
 @router.get("/{tenant_id}", response_model=TenantResponse)

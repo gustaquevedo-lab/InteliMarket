@@ -4,10 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.backups import service
 from api.src.backups.models import Backup, BackupScheduleConfig
 
-router = APIRouter(prefix="/api/v1/backups", tags=["backups"])
+router = APIRouter(prefix="/api/v1/backups", tags=["backups"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/create")

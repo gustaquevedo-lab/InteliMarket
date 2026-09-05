@@ -5,11 +5,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.sifen.schemas import TimbradoCreate, TimbradoResponse, SifenResponseRecord, SifenSendRequest, CdcQueryResponse
 from api.src.sifen import service
 from api.src.sifen.qr_service import create_qr_response, generate_qr_base64
 
-router = APIRouter(prefix="/api/v1/sifen", tags=["sifen"])
+router = APIRouter(prefix="/api/v1/sifen", tags=["sifen"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/timbrados", response_model=TimbradoResponse, status_code=status.HTTP_201_CREATED)

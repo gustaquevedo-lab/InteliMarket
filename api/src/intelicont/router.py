@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.intelicont import service
 
-router = APIRouter(prefix="/api/v1/intelicont", tags=["intelicont"])
+router = APIRouter(prefix="/api/v1/intelicont", tags=["intelicont"], dependencies=[Depends(require_auth)])
 
 
 @router.get("/sync-config")
