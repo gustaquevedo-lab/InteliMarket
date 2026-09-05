@@ -4549,43 +4549,28 @@ export default function POSPage() {
     const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
     const W = ESCPOS_LINE_WIDTH
 
-    let companyData: any = {}
-    try {
-      const saved = localStorage.getItem("pos_company_data")
-      if (saved) companyData = JSON.parse(saved)
-    } catch (e) {}
-
-    const fantasia = companyData.nombre_fantasia || companyData.nombre || "Extra Supermercado Mayorista"
-    const razon = companyData.razon_social || "GRUPO SANTA TERESA E.A.S."
-    const rucEmpresa = companyData.ruc || "80150377-9"
-
     let t = ESCPOS_INIT
     t += ESCPOS_ALIGN_CENTER
-    t += ESCPOS_BOLD_ON + escposStripAccents(fantasia.toUpperCase()) + ESCPOS_BOLD_OFF + '\n'
-    t += `${escposStripAccents(razon)} - RUC: ${rucEmpresa}\n`
-    t += escposDashes(W) + '\n'
-    t += ESCPOS_BOLD_ON + '*** COMPROBANTE DE PAGO PIX ***' + ESCPOS_BOLD_OFF + '\n'
+    t += ESCPOS_BOLD_ON + 'COMPROBANTE PIX' + ESCPOS_BOLD_OFF + '\n'
+    t += 'EXTRA SUPERMERCADO\n'
     t += ESCPOS_ALIGN_LEFT
     t += escposDashes(W) + '\n'
-    t += `Fecha: ${new Date().toLocaleString("es-PY")}\n`
-    t += `Cajero: ${escposStripAccents(user?.nombre || '')} (${puntoEmision})\n`
-    if (cpf) t += `CPF Pagador: ${cpf}\n`
-    t += `ID Transaccion: ${pixData?.IdTransacao ?? '-'}\n`
-    if (pixData?.referenciaInterna) t += `Ref. Interna: ${pixData.referenciaInterna}\n`
+    t += `${new Date().toLocaleString("es-PY")} - Caja (${puntoEmision})\n`
+    t += `Cajero: ${escposStripAccents(user?.nombre || '')}\n`
+    if (cpf) t += `CPF: ${cpf}\n`
+    t += `ID: ${pixData?.IdTransacao ?? '-'} | Ref: ${pixData?.referenciaInterna ?? '-'}\n`
     t += escposDashes(W) + '\n'
-    t += escposTwoCol('TOTAL Gs.:', `PYG ${fmtGs(montoPyg)}`, W) + '\n'
+    t += escposTwoCol('TOTAL Gs.:', fmtGs(montoPyg), W) + '\n'
     const valBrl = pixData?.valueBRL || pixData?.valorEmBRL
     if (valBrl) {
-      t += escposTwoCol('TOTAL R$:', `BRL ${Number(valBrl).toFixed(2)}`, W) + '\n'
+      t += escposTwoCol('TOTAL R$:', Number(valBrl).toFixed(2), W) + '\n'
     }
     t += escposDashes(W) + '\n'
     t += ESCPOS_ALIGN_CENTER
-    t += ESCPOS_BOLD_ON + '✓ PAGO CONFIRMADO / APROBADO' + ESCPOS_BOLD_OFF + '\n'
-    t += 'Operacion procesada por Banco Central do Brasil / BS2\n'
-    t += escposDashes(W) + '\n'
+    t += ESCPOS_BOLD_ON + 'APROBADO' + ESCPOS_BOLD_OFF + '\n'
 
-    // Saltos antes de cortar para que la cuchilla no corte sobre el texto (saltos extra pedidos)
-    t += '\n'.repeat(5)
+    // Exactamente 2 saltos antes de cortar
+    t += '\n\n'
     t += GS + 'V' + '\x01'
 
     try {
