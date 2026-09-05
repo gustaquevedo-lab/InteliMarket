@@ -2366,8 +2366,8 @@ export default function PurchasesPage() {
                                   ? "bg-amber-50/30 dark:bg-amber-950/15"
                                   : isEven
                                   ? "bg-white dark:bg-slate-900"
-                                  : "bg-slate-50/60 dark:bg-slate-800/30"
-                              } hover:!bg-blue-100/80 dark:hover:!bg-indigo-950/70 hover:shadow-sm`}
+                                  : "bg-slate-100/60 dark:bg-slate-800/40"
+                              } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-md cursor-pointer`}
                             >
                               <td className="p-3 text-center">
                                 <input
@@ -2423,7 +2423,7 @@ export default function PurchasesPage() {
                               <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300 font-semibold">
                                 {Number(it.ventas_mes_2 || 0).toLocaleString()}
                               </td>
-                              <td className="p-2.5 text-right font-mono text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50/40 dark:bg-indigo-950/20">
+                              <td className="p-2.5 text-right font-mono text-indigo-600 dark:text-indigo-400 font-bold">
                                 {Number(it.ventas_mes_1 || 0).toLocaleString()}
                               </td>
 

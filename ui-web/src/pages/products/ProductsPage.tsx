@@ -5,7 +5,8 @@ import {
   TrendingUp, TrendingDown, Percent, Sparkles, Building2, ShoppingCart,
   ArrowUpDown, CheckCircle2, ShieldAlert, Scale, ChevronDown, ChevronRight,
   Filter, Calendar, Clock, RefreshCw, Box, ExternalLink, ArrowRight,
-  HelpCircle, Info, BookOpen, Gift, Check, Palette, Cpu, Zap, Copy
+  HelpCircle, Info, BookOpen, Gift, Check, Palette, Cpu, Zap, Copy,
+  Lock, Unlock, Calculator
 } from "lucide-react"
 import {
   api,
@@ -19,6 +20,8 @@ import {
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG } from "../../utils/format"
+import { Modal, ModalFooter } from "../../components/Modal"
+import { useAuth } from "../../context/AuthContext"
 
 // Presets rápidos para carga veloz de códigos de pack/caja
 const PACK_PRESETS = [
@@ -316,6 +319,13 @@ function ProductSearchPicker({
 export default function ProductsPage() {
   const toast = useToast()
   const confirm = useConfirm()
+  const { user } = useAuth()
+  const isManagerOrAdmin = Boolean(
+    user?.is_superadmin ||
+    user?.rol === "admin" ||
+    user?.rol === "gerente" ||
+    user?.rol === "supervisor"
+  )
 
   // Pestaña Principal
   const [mainTab, setMainTab] = useState<"catalogo" | "variantes" | "packs" | "kits" | "guia">("catalogo")
@@ -351,6 +361,7 @@ export default function ProductsPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [saving, setSaving] = useState(false)
+  const [costoUnlocked, setCostoUnlocked] = useState(false)
   const [formTab, setFormTab] = useState<"general" | "precios" | "perecederos">("general")
   const [form, setForm] = useState({
     sku: "",
@@ -361,10 +372,12 @@ export default function ProductsPage() {
     unidad_medida: "UN",
     iva_tasa: 10,
     stock_minimo: 5,
+    stock_maximo: 0,
     descripcion: "",
     costo_promedio: 0,
     precio_venta: 0,
     plu_codigo: "",
+    plu_balanza: null as number | null,
     es_perecedero: false,
     vida_util_dias: 0,
     tipo_venta: "unidad",
@@ -580,19 +593,32 @@ export default function ProductsPage() {
   }, [filteredAndSortedProducts, page, pageSize])
 
   // Guardar Formulario Alta / Edición
-  const handleSaveProduct = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!form.sku || !form.nombre) {
+  const handleSaveProduct = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    if (!form.sku?.trim() || !form.nombre?.trim()) {
       toast.error("Datos incompletos", "El SKU y Nombre del producto son obligatorios.")
       return
     }
     setSaving(true)
     try {
+      const payload: any = {
+        ...form,
+        sku: form.sku.trim(),
+        nombre: form.nombre.trim(),
+        categoria_id: form.categoria_id && form.categoria_id.trim() !== "" ? form.categoria_id : null,
+        plu_balanza: form.plu_balanza ? Number(form.plu_balanza) : null,
+        costo_promedio: Number(form.costo_promedio) || 0,
+        precio_venta: Number(form.precio_venta) || 0,
+        stock_minimo: Number(form.stock_minimo) || 0,
+        stock_maximo: form.stock_maximo ? Number(form.stock_maximo) : null,
+        iva_tasa: Number(form.iva_tasa) !== undefined ? Number(form.iva_tasa) : 10,
+        tiene_vencimiento: form.es_perecedero,
+      }
       if (editingProduct) {
-        await api.products.update(editingProduct.id, form as any)
+        await api.products.update(editingProduct.id, payload)
         toast.success("Producto Actualizado", `${form.nombre} guardado correctamente.`)
       } else {
-        await api.products.create(form as any)
+        await api.products.create(payload)
         toast.success("Producto Creado", `${form.nombre} registrado en el catálogo.`)
       }
       setShowForm(false)
@@ -608,22 +634,52 @@ export default function ProductsPage() {
 
   const handleEditClick = (p: Product) => {
     setEditingProduct(p)
+    setCostoUnlocked(false)
+    const isPesable = p.tipo_venta === "peso" || ["KG", "Kg", "kg"].includes(p.unidad_medida || "")
     setForm({
       sku: p.sku || "",
       nombre: p.nombre || "",
       codigo_barra: p.codigo_barra || "",
       categoria_id: p.categoria_id || "",
       tipo: p.tipo || "producto",
-      unidad_medida: p.unidad_medida || "UN",
-      iva_tasa: Number(p.iva_tasa) || 10,
+      unidad_medida: p.unidad_medida || (isPesable ? "KG" : "UN"),
+      iva_tasa: Number(p.iva_tasa) !== undefined ? Number(p.iva_tasa) : 10,
       stock_minimo: Number(p.stock_minimo) || 5,
+      stock_maximo: Number(p.stock_maximo) || 0,
       descripcion: p.descripcion || "",
       costo_promedio: Number(p.costo_promedio) || 0,
       precio_venta: Number(p.precio_venta) || 0,
       plu_codigo: (p as any).plu_codigo || "",
-      es_perecedero: !!(p as any).es_perecedero,
+      plu_balanza: (p as any).plu_balanza ? Number((p as any).plu_balanza) : null,
+      es_perecedero: !!(p as any).es_perecedero || !!(p as any).tiene_vencimiento,
       vida_util_dias: (p as any).vida_util_dias || 0,
-      tipo_venta: p.tipo_venta || "unidad",
+      tipo_venta: isPesable ? "peso" : (p.tipo_venta || "unidad"),
+    })
+    setFormTab("general")
+    setShowForm(true)
+  }
+
+  const handleNewClick = () => {
+    setEditingProduct(null)
+    setCostoUnlocked(true)
+    setForm({
+      sku: "",
+      nombre: "",
+      codigo_barra: "",
+      categoria_id: "",
+      tipo: "producto",
+      unidad_medida: "UN",
+      iva_tasa: 10,
+      stock_minimo: 5,
+      stock_maximo: 0,
+      descripcion: "",
+      costo_promedio: 0,
+      precio_venta: 0,
+      plu_codigo: "",
+      plu_balanza: null,
+      es_perecedero: false,
+      vida_util_dias: 0,
+      tipo_venta: "unidad",
     })
     setFormTab("general")
     setShowForm(true)
@@ -916,28 +972,7 @@ export default function ProductsPage() {
             </button>
 
             <button
-              onClick={() => {
-                setEditingProduct(null)
-                setForm({
-                  sku: "",
-                  nombre: "",
-                  codigo_barra: "",
-                  categoria_id: categories[0]?.id || "",
-                  tipo: "producto",
-                  unidad_medida: "UN",
-                  iva_tasa: 10,
-                  stock_minimo: 5,
-                  descripcion: "",
-                  costo_promedio: 0,
-                  precio_venta: 0,
-                  plu_codigo: "",
-                  es_perecedero: false,
-                  vida_util_dias: 0,
-                  tipo_venta: "unidad",
-                })
-                setFormTab("general")
-                setShowForm(true)
-              }}
+              onClick={handleNewClick}
               className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-500 hover:to-blue-400 transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
@@ -1178,17 +1213,20 @@ export default function ProductsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                    {paginatedProducts.map((p) => {
+                    {paginatedProducts.map((p, idx) => {
                       const costo = Number(p.costo_promedio || p.ultimo_costo || 0)
                       const precio = Number(p.precio_venta || 0)
                       const margenMonto = precio - costo
                       const margenPct = precio > 0 ? (margenMonto / precio) * 100 : 0
                       const esPesable = ["KG", "Kg", "kg", "LT", "Lt"].includes(p.unidad_medida || "") || p.tipo_venta === "peso"
+                      const isEven = idx % 2 === 0
 
                       return (
                         <tr
                           key={p.id}
-                          className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors group"
+                          className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
+                            isEven ? "bg-white dark:bg-slate-900" : "bg-slate-50/70 dark:bg-slate-800/40"
+                          } hover:!bg-slate-200 dark:hover:!bg-slate-700 hover:shadow-md cursor-pointer group`}
                         >
                           {/* Producto & SKU */}
                           <td className="p-3.5">
@@ -2592,149 +2630,383 @@ export default function ProductsPage() {
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: ALTA / EDICIÓN DE PRODUCTO
+          MODAL ESTÁNDAR: ALTA / EDICIÓN DE PRODUCTO (PORTAL LOCK)
       ────────────────────────────────────────────────────────────────────────── */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col">
-            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
-              <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                {editingProduct ? <Edit className="w-5 h-5 text-indigo-600" /> : <Plus className="w-5 h-5 text-indigo-600" />}
-                {editingProduct ? `Editar: ${editingProduct.nombre}` : "Nuevo Producto en Catálogo"}
-              </h3>
-              <button onClick={() => setShowForm(false)} className="p-1.5 text-slate-400 hover:text-slate-700">
-                <X className="w-5 h-5" />
-              </button>
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editingProduct ? `Editar Producto: ${editingProduct.nombre}` : "Nuevo Producto en Catálogo"}
+        subtitle={
+          editingProduct
+            ? `SKU: ${editingProduct.sku} ${editingProduct.codigo_barra ? `| EAN: ${editingProduct.codigo_barra}` : ""}`
+            : "Alta oficial de producto para Supermercado & Retail"
+        }
+        icon={editingProduct ? <Edit className="w-5 h-5 text-indigo-500" /> : <Plus className="w-5 h-5 text-indigo-500" />}
+        size="2xl"
+        footer={
+          <ModalFooter>
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSaveProduct()}
+              disabled={saving}
+              className="btn-primary text-xs px-5 py-2 flex items-center gap-2 shadow-md disabled:opacity-50"
+            >
+              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {editingProduct ? "Guardar Cambios" : "Crear Producto"}
+            </button>
+          </ModalFooter>
+        }
+      >
+        <form onSubmit={handleSaveProduct} className="space-y-4">
+          {/* SECCIÓN 1: IDENTIFICACIÓN Y DATOS BÁSICOS */}
+          <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              <Barcode className="w-4 h-4 text-indigo-500" />
+              <span>Identificación del Producto</span>
             </div>
 
-            <form onSubmit={handleSaveProduct} className="p-6 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">SKU / Código Interno *</label>
-                  <input
-                    type="text"
-                    required
-                    value={form.sku}
-                    onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                    className="input-field w-full text-xs font-mono font-bold"
-                    placeholder="Ej. 120550"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Código de Barras EAN</label>
-                  <input
-                    type="text"
-                    value={form.codigo_barra}
-                    onChange={(e) => setForm({ ...form, codigo_barra: e.target.value })}
-                    className="input-field w-full text-xs font-mono"
-                    placeholder="Ej. 7840001002345"
-                  />
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Nombre Comercial del Producto *</label>
+                <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  SKU / Código Interno *
+                </label>
                 <input
                   type="text"
                   required
-                  value={form.nombre}
-                  onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-                  className="input-field w-full text-xs font-bold"
-                  placeholder="Ej. BRAHMITA CERVEZA ULTRA CERO 269ML"
+                  value={form.sku}
+                  onChange={(e) => setForm({ ...form, sku: e.target.value })}
+                  className="input-field w-full text-xs font-mono font-bold"
+                  placeholder="Ej. 120550"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Categoría</label>
-                  <select
-                    value={form.categoria_id}
-                    onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}
-                    className="input-field w-full text-xs"
-                  >
-                    <option value="">Seleccionar Categoría...</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nombre}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Unidad de Medida</label>
-                  <select
-                    value={form.unidad_medida}
-                    onChange={(e) => setForm({ ...form, unidad_medida: e.target.value })}
-                    className="input-field w-full text-xs"
-                  >
-                    <option value="UN">Unidad (UN)</option>
-                    <option value="KG">Kilogramo (KG)</option>
-                    <option value="LT">Litro (LT)</option>
-                    <option value="PQ">Paquete (PQ)</option>
-                    <option value="CJ">Caja (CJ)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Costo Unitario (Gs.)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.costo_promedio}
-                    onChange={(e) => setForm({ ...form, costo_promedio: Number(e.target.value) })}
-                    className="input-field w-full text-xs font-mono font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Precio de Venta al Público (Gs.)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.precio_venta}
-                    onChange={(e) => setForm({ ...form, precio_venta: Number(e.target.value) })}
-                    className="input-field w-full text-xs font-mono font-bold text-indigo-600"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 pt-2">
-                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.es_perecedero}
-                    onChange={(e) => setForm({ ...form, es_perecedero: e.target.checked })}
-                    className="rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  Producto Perecedero / Vencimiento
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Código de Barras EAN-13
                 </label>
+                <input
+                  type="text"
+                  value={form.codigo_barra}
+                  onChange={(e) => setForm({ ...form, codigo_barra: e.target.value })}
+                  className="input-field w-full text-xs font-mono"
+                  placeholder="Ej. 7840001002345"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                Nombre Comercial del Producto *
+              </label>
+              <input
+                type="text"
+                required
+                value={form.nombre}
+                onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+                className="input-field w-full text-xs font-bold"
+                placeholder="Ej. BRAHMITA CERVEZA ULTRA CERO 269ML"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Categoría
+                </label>
+                <select
+                  value={form.categoria_id}
+                  onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}
+                  className="input-field w-full text-xs"
+                >
+                  <option value="">Seleccionar Categoría...</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 transition-colors"
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Unidad de Medida
+                </label>
+                <select
+                  value={form.unidad_medida}
+                  disabled={form.tipo_venta === "peso"}
+                  onChange={(e) => setForm({ ...form, unidad_medida: e.target.value })}
+                  className="input-field w-full text-xs disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="btn-primary text-xs px-5 py-2 flex items-center gap-2 shadow-md disabled:opacity-50"
-                >
-                  {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {editingProduct ? "Guardar Cambios" : "Crear Producto"}
-                </button>
+                  <option value="UN">Unidad (UN)</option>
+                  <option value="KG">Kilogramo (KG)</option>
+                  <option value="LT">Litro (LT)</option>
+                  <option value="PQ">Paquete (PQ)</option>
+                  <option value="CJ">Caja (CJ)</option>
+                  <option value="MT">Metro (MT)</option>
+                </select>
               </div>
-            </form>
+            </div>
           </div>
-        </div>
-      )}
+
+          {/* SECCIÓN 2: BALANZA Y PRODUCTOS PESABLES (SUPERMERCADO) */}
+          <div className="bg-amber-500/5 dark:bg-amber-950/20 rounded-2xl p-4 border border-amber-200/80 dark:border-amber-800/60 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/15 dark:bg-amber-500/25 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                  <Scale className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white">
+                    Venta Pesable & Balanza (Fiambrería, Verdulería, Carnicería)
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Venta por peso en balanzas etiquetadoras (Toledo / Systel / DIGI) y cajas POS
+                  </div>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={form.tipo_venta === "peso"}
+                  onChange={(e) => {
+                    const isPeso = e.target.checked
+                    setForm((prev) => ({
+                      ...prev,
+                      tipo_venta: isPeso ? "peso" : "unidad",
+                      unidad_medida: isPeso ? "KG" : (prev.unidad_medida === "KG" ? "UN" : prev.unidad_medida),
+                    }))
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+              </label>
+            </div>
+
+            {form.tipo_venta === "peso" && (
+              <div className="pt-3 border-t border-amber-200/60 dark:border-amber-800/40 space-y-3 animate-fade-in">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-amber-900 dark:text-amber-300 block mb-1">
+                      Código PLU Balanza (1 a 99999)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="99999"
+                      value={form.plu_balanza || ""}
+                      onChange={(e) => setForm({ ...form, plu_balanza: e.target.value ? parseInt(e.target.value) : null })}
+                      className="input-field w-full text-xs font-mono font-bold bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200"
+                      placeholder="Ej. 104"
+                    />
+                    <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                      Número de memoria en balanza para emitir etiqueta con código 20...
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-amber-100/60 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex items-start gap-2 text-[11px] text-amber-900 dark:text-amber-200 leading-snug">
+                    <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong>Regla de Balanza:</strong> En productos pesables, el <em>Precio de Venta</em> equivale al <strong>Precio por Kilogramo (Gs./KG)</strong>. Tanto la balanza como el POS fraccionan el peso automáticamente.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* SECCIÓN 3: PRECIOS, COSTO BLINDADO & RENTABILIDAD */}
+          <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                <DollarSign className="w-4 h-4 text-emerald-500" />
+                <span>Precios, Costo & Rentabilidad</span>
+              </div>
+
+              {editingProduct && !costoUnlocked && (
+                <div className="flex items-center gap-1.5">
+                  {isManagerOrAdmin ? (
+                    <button
+                      type="button"
+                      onClick={() => setCostoUnlocked(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 transition-colors"
+                    >
+                      <Unlock className="w-3.5 h-3.5" />
+                      Desbloquear Costo (Gerencia)
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
+                      <Lock className="w-3 h-3 text-slate-400" />
+                      Costo Protegido (Solo Gerencia)
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Costo Unitario */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                    Costo Promedio (Gs.)
+                  </label>
+                  {editingProduct && !costoUnlocked && (
+                    <span title="Bloqueado contra edición no autorizada">
+                      <Lock className="w-3 h-3 text-slate-400" />
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  disabled={editingProduct ? !costoUnlocked : false}
+                  value={form.costo_promedio}
+                  onChange={(e) => setForm({ ...form, costo_promedio: Number(e.target.value) })}
+                  className={`input-field w-full text-xs font-mono font-bold ${
+                    editingProduct && !costoUnlocked
+                      ? "bg-slate-100 dark:bg-slate-800/80 text-slate-500 cursor-not-allowed border-slate-200 dark:border-slate-700"
+                      : "bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-600 text-slate-900 dark:text-white"
+                  }`}
+                />
+                {costoUnlocked && editingProduct && (
+                  <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1 font-semibold">
+                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                    Edición manual de costo habilitada
+                  </div>
+                )}
+              </div>
+
+              {/* Precio de Venta al Público */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  {form.tipo_venta === "peso" ? "Precio Venta / KG (Gs.) *" : "Precio Venta Unitario (Gs.) *"}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={form.precio_venta}
+                  onChange={(e) => setForm({ ...form, precio_venta: Number(e.target.value) })}
+                  className="input-field w-full text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50/20 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-700"
+                />
+              </div>
+
+              {/* Tasa de IVA */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Tasa de IVA SIFEN
+                </label>
+                <select
+                  value={form.iva_tasa}
+                  onChange={(e) => setForm({ ...form, iva_tasa: Number(e.target.value) })}
+                  className="input-field w-full text-xs font-semibold"
+                >
+                  <option value={10}>10% (General Supermercado)</option>
+                  <option value={5}>5% (Canasta Básica / Frutas / Verduras)</option>
+                  <option value={0}>0% (Exenta)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Widget de Cálculo Dinámico de Margen */}
+            {(() => {
+              const costo = Number(form.costo_promedio) || 0
+              const precio = Number(form.precio_venta) || 0
+              const ganancia = precio - costo
+              const margenBruto = precio > 0 ? (ganancia / precio) * 100 : 0
+              const markup = costo > 0 ? (ganancia / costo) * 100 : 0
+              const badgeColor =
+                margenBruto >= 25
+                  ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-300 dark:border-emerald-800"
+                  : margenBruto >= 10
+                  ? "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-300 dark:border-amber-800"
+                  : "text-red-600 dark:text-red-400 bg-red-500/10 border-red-300 dark:border-red-800"
+
+              return (
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase text-slate-400">Ganancia Bruta</div>
+                    <div className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200 mt-0.5">
+                      {formatPYG(ganancia)}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] font-bold uppercase text-slate-400">Margen Bruto</div>
+                    <div className={`text-xs font-mono font-black mt-0.5 inline-block px-2 py-0.5 rounded-md border ${badgeColor}`}>
+                      {margenBruto.toFixed(1)}%
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] font-bold uppercase text-slate-400">Markup s/ Costo</div>
+                    <div className="text-xs font-mono font-semibold text-slate-600 dark:text-slate-300 mt-0.5">
+                      {markup > 0 ? `+${markup.toFixed(1)}%` : "0%"}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+
+          {/* SECCIÓN 4: INVENTARIO, MÍNIMOS & PERECEDEROS */}
+          <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              <Package className="w-4 h-4 text-blue-500" />
+              <span>Control de Stock & Perecederos</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Stock Mínimo de Alerta
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.stock_minimo}
+                  onChange={(e) => setForm({ ...form, stock_minimo: Number(e.target.value) })}
+                  className="input-field w-full text-xs font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                  Vida Útil Estimada (Días)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.vida_util_dias}
+                  onChange={(e) => setForm({ ...form, vida_util_dias: Number(e.target.value) })}
+                  className="input-field w-full text-xs font-mono"
+                  placeholder="0 = No perecedero"
+                />
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.es_perecedero}
+                  onChange={(e) => setForm({ ...form, es_perecedero: e.target.checked })}
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>Producto Perecedero / Exige control de fecha de vencimiento en recepción y góndola</span>
+              </label>
+            </div>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }
