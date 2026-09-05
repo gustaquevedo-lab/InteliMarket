@@ -20,6 +20,7 @@ export interface MeatProduct {
   destacado?: boolean
   descripcion?: string
   sku?: string
+  matched_real?: boolean
 }
 
 export interface TvCarniceriaConfig {
@@ -441,10 +442,15 @@ export default function CarniceriaTvDigitalPage() {
               ...c,
               precio: dbPrice,
               stock_kg: match.stock !== undefined ? match.stock : c.stock_kg,
-              foto_url: match.imagen_url || c.foto_url
+              foto_url: match.imagen_url || c.foto_url,
+              matched_real: true,
             }
           }
-          return c
+          // Sin match real: no mostrar un precio/stock que puede estar
+          // desactualizado hace tiempo -- se excluye de la pantalla en vez
+          // de arriesgar mostrar un precio viejo como si fuera vigente
+          // (ver auditoria de sidebar).
+          return { ...c, matched_real: false }
         })
       )
     } catch {}
@@ -460,7 +466,12 @@ export default function CarniceriaTvDigitalPage() {
   const activeCortes = useMemo(() => {
     return cortes.filter((c) => {
       const isVisibleInConfig = !config.productos_visibles_ids || config.productos_visibles_ids.includes(c.id)
-      return isVisibleInConfig
+      // c.matched_real === false: ya se intento sincronizar contra
+      // el catalogo real y no hubo coincidencia -- no mostrar un precio
+      // potencialmente viejo. undefined (todavia no se sincronizo ni una vez)
+      // se deja pasar para no vaciar la pantalla antes del primer fetch.
+      const isRealOrPending = c.matched_real !== false
+      return isVisibleInConfig && isRealOrPending
     })
   }, [cortes, config.productos_visibles_ids])
 
