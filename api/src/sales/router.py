@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.sales.schemas import (
     SaleCreate, SaleUpdate, SaleResponse, SaleWithItems,
     SaleAddPayment, SaleLinkQuote, SaleLinkOrder, SaleAttachTicket, SaleReopenCustomer, SaleReopenPayment,
@@ -15,7 +16,7 @@ from api.src.whatsapp.service import send_message_to_phone, get_wa_template, for
 from api.src.intelicont.service import generate_sale_entry
 from api.src.integrations.service import send_webhook_async
 
-router = APIRouter(prefix="/api/v1", tags=["sales"])
+router = APIRouter(prefix="/api/v1", tags=["sales"], dependencies=[Depends(require_auth)])
 
 
 async def _get_customer_email_phone(db: AsyncSession, customer_id: str) -> tuple:

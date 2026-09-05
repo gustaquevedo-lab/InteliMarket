@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.payments.schemas import (
     PaymentMethodCreate, PaymentMethodResponse,
     PaymentCreate, PaymentResponse,
@@ -13,7 +14,7 @@ from api.src.payments.schemas import (
 )
 from api.src.payments import service
 
-router = APIRouter(prefix="/api/v1", tags=["payments"])
+router = APIRouter(prefix="/api/v1", tags=["payments"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/payment-methods", response_model=PaymentMethodResponse, status_code=status.HTTP_201_CREATED)

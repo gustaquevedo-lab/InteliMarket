@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.supervisor_requests.schemas import (
     SupervisorAuthRequestCreate, SupervisorAuthRequestResolve, SupervisorAuthRequestResponse,
 )
 from api.src.supervisor_requests import service
 
-router = APIRouter(prefix="/api/v1/supervisor-requests", tags=["supervisor-requests"])
+router = APIRouter(prefix="/api/v1/supervisor-requests", tags=["supervisor-requests"], dependencies=[Depends(require_auth)])
 
 
 @router.post("", response_model=SupervisorAuthRequestResponse, status_code=status.HTTP_201_CREATED)

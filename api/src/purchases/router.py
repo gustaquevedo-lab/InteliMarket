@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.purchases import pdf_reports as purchases_pdf_reports
 from api.src.purchases.schemas import (
     SupplierCreate, SupplierUpdate, SupplierResponse,
@@ -37,7 +38,7 @@ from api.src.purchases import matching_service
 from api.src.purchases import sifen_xml_parser
 
 
-router = APIRouter(prefix="/api/v1", tags=["purchases"])
+router = APIRouter(prefix="/api/v1", tags=["purchases"], dependencies=[Depends(require_auth)])
 
 
 # ── Suppliers ─────────────────────────────────────────────────────────────────

@@ -2,13 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.commissions.schemas import (
     CommissionRuleCreate, CommissionRuleUpdate, CommissionRuleResponse,
     SalesCommissionResponse, CommissionSummary,
 )
 from api.src.commissions import service
 
-router = APIRouter(prefix="/api/v1", tags=["commissions"])
+router = APIRouter(prefix="/api/v1", tags=["commissions"], dependencies=[Depends(require_auth)])
 
 
 @router.post("/commission-rules", response_model=CommissionRuleResponse, status_code=status.HTTP_201_CREATED)
