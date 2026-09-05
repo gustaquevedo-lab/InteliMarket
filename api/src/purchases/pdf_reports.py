@@ -242,8 +242,8 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
     elements.append(info_table)
     elements.append(Spacer(1, 10))
 
-    # Tabla itemizada
-    header = ["#", "Código / SKU", "Descripción del Producto", "Cant.", "Precio Unit.", "IVA", "Subtotal (Gs.)"]
+    # Tabla itemizada con Código Interno y Código de Barra separados, Precios IVA Incluido
+    header = ["#", "Cód. Interno", "Cód. Barra", "Descripción del Producto", "Cant.", "Precio Unit. (IVA Inc.)", "IVA", "Subtotal (IVA Inc.)"]
     data = [header]
 
     subtotal_10 = Decimal("0")
@@ -262,19 +262,21 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
 
         if tasa == 10:
             subtotal_10 += sub
-            iva_10 += sub / Decimal("11")
+            iva_10 += (sub / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
         elif tasa == 5:
             subtotal_5 += sub
-            iva_5 += sub / Decimal("21")
+            iva_5 += (sub / Decimal("21")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
         else:
             subtotal_exenta += sub
 
         prod_desc = it.get("descripcion") or it.get("nombre") or (it.get("producto") or {}).get("nombre") or "Ítem"
-        sku_code = it.get("sku") or it.get("codigo_barra") or (it.get("producto") or {}).get("sku") or "—"
+        sku_code = it.get("sku") or (it.get("producto") or {}).get("sku") or "—"
+        barcode = it.get("codigo_barra") or (it.get("producto") or {}).get("codigo_barra") or "—"
 
         data.append([
             _cell(str(idx)),
             _cell(sku_code),
+            _cell(barcode),
             _cell(prod_desc, bold=True),
             _num(f"{cant:,.0f}".replace(",", ".")),
             _num(_fmt_gs(precio)),
@@ -282,22 +284,25 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
             _num(_fmt_gs(sub), bold=True),
         ])
 
-    items_table = Table(data, colWidths=[8 * mm, 26 * mm, 68 * mm, 16 * mm, 26 * mm, 12 * mm, 24 * mm], repeatRows=1)
+    items_table = Table(data, colWidths=[7 * mm, 23 * mm, 27 * mm, 52 * mm, 14 * mm, 27 * mm, 10 * mm, 27 * mm], repeatRows=1)
     items_table.setStyle(_table_style(3))
     elements.append(items_table)
     elements.append(Spacer(1, 8))
 
-    # Cuadro de liquidación impositiva y total general
+    # Cuadro de liquidación impositiva y total general (IVA Incluido)
     total_final = Decimal(str(order.get("total") or total_gral))
+    gravada_10 = subtotal_10 - iva_10
+    gravada_5 = subtotal_5 - iva_5
+
     summary_data = [
         [
-            Paragraph("<b>LIQUIDACIÓN IVA:</b>", styles["SmallBold"]),
-            Paragraph(f"Gravadas 10%: {_fmt_gs(subtotal_10)} | IVA 10%: {_fmt_gs(iva_10)}", styles["Small"]),
-            Paragraph(f"Gravadas 5%: {_fmt_gs(subtotal_5)} | IVA 5%: {_fmt_gs(iva_5)}", styles["Small"]),
+            Paragraph("<b>LIQUIDACIÓN IVA (INCLUIDO EN TOTAL):</b>", styles["SmallBold"]),
+            Paragraph(f"Gravadas 10%: {_fmt_gs(gravada_10)} | IVA 10%: {_fmt_gs(iva_10)}", styles["Small"]),
+            Paragraph(f"Gravadas 5%: {_fmt_gs(gravada_5)} | IVA 5%: {_fmt_gs(iva_5)}", styles["Small"]),
             Paragraph(f"Exentas: {_fmt_gs(subtotal_exenta)}", styles["Small"]),
         ],
         [
-            Paragraph("<b>TOTAL ORDEN DE COMPRA:</b>", styles["SmallBold"]),
+            Paragraph("<b>TOTAL ORDEN (IVA INCLUIDO):</b>", styles["SmallBold"]),
             Paragraph(f"<font size=11 color='#1E40AF'><b>{_fmt_gs(total_final)}</b></font>", styles["Normal"]),
             Paragraph(f"Condición: <b>{order.get('condiciones_pago') or '30 Días'}</b>", styles["Small"]),
             Paragraph(f"Moneda: <b>{order.get('moneda') or 'PYG'}</b>", styles["Small"]),

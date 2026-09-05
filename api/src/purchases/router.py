@@ -512,11 +512,11 @@ async def export_price_variance_pdf(company_id: str, db: AsyncSession = Depends(
 
 @router.get("/purchases/orders/{order_id}/pdf")
 async def export_purchase_order_pdf(order_id: str, db: AsyncSession = Depends(get_db)):
-    order = await service.get_order(db, order_id)
+    order = await service.get_purchase_order_with_items(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
     
-    items = await service.get_order_items(db, order_id)
+    items = await service.get_po_items(db, order_id)
     company = await _get_company_info(db, str(order.company_id))
     
     order_dict = {
@@ -542,13 +542,14 @@ async def export_purchase_order_pdf(order_id: str, db: AsyncSession = Depends(ge
     items_list = []
     for it in items:
         items_list.append({
-            "descripcion": it.descripcion or (it.producto.nombre if it.producto else "Ítem"),
-            "sku": it.producto.sku if it.producto else None,
-            "codigo_barra": it.producto.codigo_barra if it.producto else None,
-            "cantidad": float(it.cantidad or 0),
-            "precio_unitario": float(it.precio_unitario or 0),
-            "iva_tasa": float(it.iva_tasa or 10),
-            "total": float(it.total or (float(it.cantidad or 0) * float(it.precio_unitario or 0))),
+            "descripcion": it.get("descripcion") or "Ítem",
+            "sku": it.get("sku") or "—",
+            "codigo_barra": it.get("codigo_barra") or "—",
+            "unidad_medida": it.get("unidad_medida") or "UN",
+            "cantidad": float(it.get("cantidad") or 0),
+            "precio_unitario": float(it.get("precio_unitario") or 0),
+            "iva_tasa": float(it.get("iva_tasa") or 10),
+            "total": float(it.get("total") or 0),
         })
         
     pdf_bytes = purchases_pdf_reports.generate_purchase_order_pdf(company, order_dict, items_list)

@@ -533,7 +533,7 @@ export default function PurchasesPage() {
         ["RUC Proveedor:", po.supplier?.ruc || "—", "", "Condición Pago:", po.condiciones_pago || "30 Días"],
         ["Estado:", poStatusMap[po.estado || ""]?.label || po.estado || "Borrador", "", "Comprador:", po.created_by_name || "Departamento de Compras"],
         [],
-        ["#", "Código / SKU", "Descripción del Producto", "Cantidad", "Precio Unitario (Gs.)", "IVA %", "Subtotal (Gs.)"]
+        ["#", "Cód. Interno", "Cód. Barra", "Descripción del Producto", "Cantidad", "Precio Unitario (IVA Inc.)", "IVA %", "Subtotal (IVA Inc.)"]
       ]
 
       items.forEach((it, idx) => {
@@ -541,10 +541,12 @@ export default function PurchasesPage() {
         const precio = Number(it.precio_unitario || 0)
         const sub = Number(it.total || it.subtotal || (cant * precio))
         const desc = it.descripcion || it.producto?.nombre || "Ítem"
-        const code = it.producto?.codigo_barra || it.producto?.sku || it.sku || "—"
+        const sku = it.sku || it.producto?.sku || "—"
+        const barcode = it.codigo_barra || it.producto?.codigo_barra || "—"
         headerRows.push([
           idx + 1,
-          code,
+          sku,
+          barcode,
           desc,
           cant,
           precio,
@@ -554,7 +556,7 @@ export default function PurchasesPage() {
       })
 
       headerRows.push([])
-      headerRows.push(["", "", "", "", "", "TOTAL ORDEN (Gs.):", Number(po.total || 0)])
+      headerRows.push(["", "", "", "", "", "", "TOTAL ORDEN (Gs. IVA INCLUIDO):", Number(po.total || 0)])
 
       const ws = XLSX.utils.aoa_to_sheet(headerRows)
       const wb = XLSX.utils.book_new()
@@ -4122,13 +4124,14 @@ export default function PurchasesPage() {
                       <thead className="bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
                         <tr>
                           <th className="p-2.5 text-center w-8">#</th>
-                          <th className="p-2.5">Código / SKU</th>
+                          <th className="p-2.5 w-24">Cód. Interno</th>
+                          <th className="p-2.5 w-32">Cód. Barra</th>
                           <th className="p-2.5">Descripción del Producto</th>
                           <th className="p-2.5 text-right w-20">Cantidad</th>
                           <th className="p-2.5 text-right w-20">Recibido</th>
-                          <th className="p-2.5 text-right w-28">Precio Unit.</th>
+                          <th className="p-2.5 text-right w-28">Precio Unit. (IVA Inc.)</th>
                           <th className="p-2.5 text-center w-16">IVA %</th>
-                          <th className="p-2.5 text-right w-32">Subtotal (Gs.)</th>
+                          <th className="p-2.5 text-right w-32">Subtotal (IVA Inc.)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -4139,8 +4142,11 @@ export default function PurchasesPage() {
                           return (
                             <tr key={idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
                               <td className="p-2.5 text-center font-mono text-gray-400">{idx + 1}</td>
+                              <td className="p-2.5 font-mono text-gray-700 dark:text-gray-300 font-semibold">
+                                {it.sku || it.producto?.sku || "—"}
+                              </td>
                               <td className="p-2.5 font-mono text-gray-500">
-                                {it.producto?.codigo_barra || it.producto?.sku || it.sku || "—"}
+                                {it.codigo_barra || it.producto?.codigo_barra || "—"}
                               </td>
                               <td className="p-2.5 font-semibold text-gray-900 dark:text-white">
                                 {it.producto?.nombre || it.descripcion || "Ítem"}
@@ -4186,13 +4192,13 @@ export default function PurchasesPage() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs">
                         <div className="space-y-1 text-gray-600 dark:text-gray-400">
                           <div className="font-bold text-[10px] uppercase tracking-wider text-gray-700 dark:text-gray-300">
-                            Liquidación Impositiva del IVA
+                            Liquidación Impositiva del IVA (Incluido en Total)
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
-                            <div>Gravadas 10%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(sub10)}</strong></div>
-                            <div>IVA 10%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(iva10)}</strong></div>
-                            <div>Gravadas 5%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(sub5)}</strong></div>
-                            <div>IVA 5%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(iva5)}</strong></div>
+                            <div>Gravadas 10%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(sub10 - iva10)}</strong></div>
+                            <div>IVA 10% (Incluido): <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(iva10)}</strong></div>
+                            <div>Gravadas 5%: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(sub5 - iva5)}</strong></div>
+                            <div>IVA 5% (Incluido): <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(iva5)}</strong></div>
                             <div>Exentas: <strong className="font-mono text-gray-800 dark:text-gray-200">{formatPYG(subEx)}</strong></div>
                           </div>
                           {selectedPO.observaciones && (
@@ -4204,7 +4210,7 @@ export default function PurchasesPage() {
 
                         <div className="flex flex-col justify-center sm:text-right border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-700 md:pl-4 space-y-1">
                           <div className="text-gray-500 font-bold uppercase tracking-wider text-[10px]">
-                            Monto Total de la Orden de Compra
+                            Monto Total de la Orden de Compra (IVA Incluido)
                           </div>
                           <div className="text-2xl font-black font-mono text-indigo-600 dark:text-indigo-400">
                             {formatPYG(selectedPO.total || 0)}

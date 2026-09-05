@@ -214,6 +214,9 @@ class POItemResponse(BaseModel):
     fecha_entrega_real: Optional[date] = None
     warehouse_id: Optional[UUID] = None
     created_at: datetime
+    sku: Optional[str] = None
+    codigo_barra: Optional[str] = None
+    unidad_medida: Optional[str] = "UN"
 
     class Config:
         from_attributes = True

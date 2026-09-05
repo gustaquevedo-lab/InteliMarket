@@ -40,20 +40,27 @@ from api.src.inventory.models import Stock, StockLot, InventoryMovement
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def calculate_taxes(precio: Decimal, cantidad: Decimal, descuento_pct: Decimal, iva_tasa: Decimal) -> dict:
-    subtotal_bruto = precio * cantidad
-    descuento_monto = subtotal_bruto * (descuento_pct / Decimal("100"))
-    base = subtotal_bruto - descuento_monto
-    if iva_tasa == Decimal("0"):
-        iva_monto = Decimal("0")
-        total = base
+    # En Paraguay y retail de supermercados, los precios de compra se pactan IVA INCLUIDO.
+    # El total de la línea es precio * cantidad menos descuento.
+    # El IVA se liquida a partir del total (IVA 10% = Total/11, IVA 5% = Total/21), no se adiciona encima.
+    total_bruto = precio * cantidad
+    descuento_monto = total_bruto * (descuento_pct / Decimal("100"))
+    total_linea = total_bruto - descuento_monto
+    if iva_tasa == Decimal("10"):
+        iva_monto = (total_linea / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        base = total_linea - iva_monto
+    elif iva_tasa == Decimal("5"):
+        iva_monto = (total_linea / Decimal("21")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        base = total_linea - iva_monto
     else:
-        iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        total = base + iva_monto
+        iva_monto = Decimal("0")
+        base = total_linea
+
     return {
-        "subtotal_bruto": subtotal_bruto.quantize(Decimal("1")),
+        "subtotal_bruto": total_bruto.quantize(Decimal("1")),
         "descuento_monto": descuento_monto.quantize(Decimal("1")),
         "iva_monto": iva_monto,
-        "total": total.quantize(Decimal("1")),
+        "total": total_linea.quantize(Decimal("1")),
         "base": base.quantize(Decimal("1")),
     }
 
@@ -243,7 +250,7 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
 
     landed = shipping_total + subtotal - descuento_total
     order.costo_landed_total = landed.quantize(Decimal("1"))
-    order.total = (landed + iva_10 + iva_5).quantize(Decimal("1"))
+    order.total = landed.quantize(Decimal("1"))
 
     # Distribuye el costo landed (flete + seguro + aduana + otros) proporcionalmente
     # al peso de cada linea sobre el neto de la orden, para tener un costo unitario
@@ -367,7 +374,7 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) ->
         order.iva_5 = iva_5
         landed = shipping + subtotal - descuento_total
         order.costo_landed_total = landed.quantize(Decimal("1"))
-        order.total = (landed + iva_10 + iva_5).quantize(Decimal("1"))
+        order.total = landed.quantize(Decimal("1"))
 
     await db.flush()
     await db.refresh(order)
@@ -523,11 +530,44 @@ async def cancel_purchase_order(db: AsyncSession, po_id: str, motivo: str | None
     return order
 
 
-async def get_po_items(db: AsyncSession, po_id: str) -> list[PurchaseOrderItem]:
-    result = await db.execute(
-        select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == uuid.UUID(po_id))
+async def get_po_items(db: AsyncSession, po_id: str) -> list[dict]:
+    from api.src.products.models import Product
+    stmt = (
+        select(
+            PurchaseOrderItem,
+            Product.sku,
+            Product.codigo_barra,
+            Product.unidad_medida,
+        )
+        .outerjoin(Product, Product.id == PurchaseOrderItem.product_id)
+        .where(PurchaseOrderItem.purchase_order_id == uuid.UUID(po_id))
+        .order_by(PurchaseOrderItem.created_at.asc())
     )
-    return list(result.scalars().all())
+    result = await db.execute(stmt)
+    items = []
+    for poi, sku, barcode, unidad in result.all():
+        items.append({
+            "id": poi.id,
+            "purchase_order_id": poi.purchase_order_id,
+            "product_id": poi.product_id,
+            "variant_id": poi.variant_id,
+            "descripcion": poi.descripcion,
+            "cantidad": poi.cantidad,
+            "cantidad_recibida": poi.cantidad_recibida,
+            "precio_unitario": poi.precio_unitario,
+            "descuento_pct": poi.descuento_pct,
+            "iva_tasa": poi.iva_tasa,
+            "total": poi.total,
+            "costo_unitario_estimado": poi.costo_unitario_estimado,
+            "fecha_entrega_esperada": poi.fecha_entrega_esperada,
+            "fecha_entrega_real": poi.fecha_entrega_real,
+            "warehouse_id": poi.warehouse_id,
+            "created_at": poi.created_at,
+            "sku": sku or "—",
+            "codigo_barra": barcode or "—",
+            "unidad_medida": unidad or "UN",
+        })
+    return items
 
 
 async def get_po_history(db: AsyncSession, po_id: str) -> list[PurchaseOrderHistory]:
