@@ -292,6 +292,7 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
         nombre=nombre,
         iva_tasa=iva_tasa,
         unidad_medida=unidad_medida,
+        tipo_venta="peso" if unidad_medida == "KG" else "unidad",
         stock_minimo=stock_minimo,
         precio_venta=precio_venta,
     )
@@ -2217,26 +2218,60 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
         stock_min = int(r["QTD_MINIMA_EM_ESTOQUE"] or 0)
         codigo_barra_legacy = str(r.get("CODIGO_BARRA") or "").strip() or None
         plu_val = None
-        um = r["UNIDADE_MEDIDA"] or "UN"
-        nombre_prod = r["DS_PRODUTO"] or f"Producto {sku}"
+        raw_um = str(r.get("UNIDADE_MEDIDA") or "").strip().upper()
+        um = UNIDAD_MEDIDA_MAP.get(raw_um, "UN")
+        nombre_prod = str(r.get("DS_PRODUTO") or f"Producto {sku}").strip()
+        tipo_venta_val = "peso" if um == "KG" else "unidad"
 
-        # Detectar productos de balanza (formato 2000xxx)
+        # Detectar productos de balanza (formato 2000xxx) solo si la unidad es KG
         if codigo_barra_legacy and codigo_barra_legacy.startswith("2000") and len(codigo_barra_legacy) == 7 and codigo_barra_legacy[4:].isdigit():
-            plu_val = int(codigo_barra_legacy[4:])
-            if "KG" in nombre_prod.upper():
-                um = "KG"
+            if um == "KG":
+                plu_val = int(codigo_barra_legacy[4:])
+            else:
+                plu_val = None
 
         if sku in sku_to_prod:
             prod = sku_to_prod[sku]
             changed = False
-            # Si el producto no tenia codigo_barra en InteliMarket y viene en el legacy, enlazarlo
-            if codigo_barra_legacy and not prod.codigo_barra and activo:
-                prod.codigo_barra = codigo_barra_legacy
-                if plu_val and not prod.plu_balanza:
-                    prod.plu_balanza = plu_val
-                if um == "KG" and prod.unidad_medida != "KG":
-                    prod.unidad_medida = "KG"
+
+            # 1. Sincronizar descripción / nombre si cambió en el ERP legacy
+            if nombre_prod and prod.nombre != nombre_prod:
+                prod.nombre = nombre_prod
                 changed = True
+
+            # 2. Sincronizar unidad de medida y tipo de venta
+            if um and prod.unidad_medida != um:
+                prod.unidad_medida = um
+                prod.tipo_venta = tipo_venta_val
+                if um == "UN":
+                    prod.plu_balanza = None
+                elif um == "KG" and plu_val:
+                    prod.plu_balanza = plu_val
+                changed = True
+            elif prod.tipo_venta != tipo_venta_val:
+                prod.tipo_venta = tipo_venta_val
+                changed = True
+
+            # 3. Si el producto es UN pero aún tenía plu_balanza asignado previamente
+            if prod.unidad_medida == "UN" and prod.plu_balanza is not None:
+                prod.plu_balanza = None
+                changed = True
+
+            # 4. Enlazar o sincronizar código de barra legacy
+            if codigo_barra_legacy and activo:
+                if not prod.codigo_barra:
+                    prod.codigo_barra = codigo_barra_legacy
+                    if plu_val and um == "KG" and not prod.plu_balanza:
+                        prod.plu_balanza = plu_val
+                    changed = True
+                elif prod.codigo_barra != codigo_barra_legacy:
+                    prod.codigo_barra = codigo_barra_legacy
+                    if um == "KG" and plu_val:
+                        prod.plu_balanza = plu_val
+                    elif um == "UN":
+                        prod.plu_balanza = None
+                    changed = True
+
             # Protección: Si el precio en el legacy viene en 0 pero ya tenemos un precio
             # positivo válido en InteliMarket, no pisarlo con 0.
             if p_venta > 0 and prod.precio_venta != p_venta:
@@ -2269,13 +2304,14 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
                 sku=sku,
                 nombre=nombre_prod,
                 codigo_barra=codigo_barra_legacy,
-                plu_balanza=plu_val,
+                plu_balanza=plu_val if um == "KG" else None,
                 precio_venta=p_venta,
                 costo_promedio=p_costo,
                 ultimo_costo=p_costo,
                 stock_minimo=stock_min,
                 activo=True,
                 unidad_medida=um,
+                tipo_venta=tipo_venta_val,
             )
             db.add(new_prod)
             await db.flush()
