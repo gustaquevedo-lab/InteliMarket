@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
+    # Zona horaria del negocio (Paraguay). Se declara aca porque el .env la
+    # define y pydantic-settings rechaza variables que el modelo no conoce:
+    # agregarla al entorno sin declararla acá deja el API sin arrancar.
+    tz: str = "America/Asuncion"
+
     class Config:
         env_file = ".env"
 
