@@ -288,66 +288,36 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
 
 
 async def get_effective_exchange_rates_for_session(db: AsyncSession, session_id: uuid.UUID, fecha_apertura: datetime) -> tuple[Decimal, Decimal]:
-    """Retorna (tasa_brl, tasa_usd) para la sesión.
-    Usa la tasa con la que operó el POS en esa sesión (ventas con pago BRL/USD),
-    o la cotización oficial de exchange_rates del día, con fallback seguro."""
-    # 1. Tasa BRL de las ventas de la sesión
-    rate_b = await db.execute(
-        text("""
-            SELECT round((s.total / NULLIF(sp.monto, 0))::numeric, 0) as tasa, count(*) as cnt
-            FROM sales s
-            JOIN sale_payments sp ON s.id = sp.sale_id
-            WHERE s.session_id = :sid AND sp.moneda = 'BRL' AND sp.monto > 0 AND (s.total / sp.monto) BETWEEN 900 AND 1500
-            GROUP BY round((s.total / NULLIF(sp.monto, 0))::numeric, 0)
-            ORDER BY count(*) DESC
-            LIMIT 1
-        """),
-        {"sid": session_id}
-    )
-    rb = rate_b.first()
-    if rb and rb[0]:
-        tasa_brl = Decimal(str(rb[0]))
-    else:
-        er_b = await db.execute(
-            text("""
-                SELECT tasa_venta FROM exchange_rates
-                WHERE moneda = 'BRL' AND fecha <= :f_ape
-                ORDER BY fecha DESC, created_at DESC
-                LIMIT 1
-            """),
-            {"f_ape": fecha_apertura.date()}
-        )
-        erb = er_b.first()
-        tasa_brl = Decimal(str(erb[0])) if erb and erb[0] else Decimal("1105.00")
+    """Retorna (tasa_brl, tasa_usd) para la sesión basándose en las cotizaciones
+    oficiales registradas en exchange_rates para la fecha de la sesión (o la vigente
+    anterior más cercana). NUNCA inventa tasas dividiendo montos de ventas."""
+    f_ref = fecha_apertura.date() if fecha_apertura else datetime.now(timezone.utc).date()
 
-    # 2. Tasa USD
-    rate_u = await db.execute(
+    # 1. Tasa BRL oficial de exchange_rates
+    er_b = await db.execute(
         text("""
-            SELECT round((s.total / NULLIF(sp.monto, 0))::numeric, 0) as tasa, count(*) as cnt
-            FROM sales s
-            JOIN sale_payments sp ON s.id = sp.sale_id
-            WHERE s.session_id = :sid AND sp.moneda = 'USD' AND sp.monto > 0 AND (s.total / sp.monto) BETWEEN 5000 AND 9000
-            GROUP BY round((s.total / NULLIF(sp.monto, 0))::numeric, 0)
-            ORDER BY count(*) DESC
+            SELECT tasa_venta FROM exchange_rates
+            WHERE moneda = 'BRL' AND fecha <= :f_ape
+            ORDER BY fecha DESC, created_at DESC
             LIMIT 1
         """),
-        {"sid": session_id}
+        {"f_ape": f_ref}
     )
-    ru = rate_u.first()
-    if ru and ru[0]:
-        tasa_usd = Decimal(str(ru[0]))
-    else:
-        er_u = await db.execute(
-            text("""
-                SELECT tasa_venta FROM exchange_rates
-                WHERE moneda = 'USD' AND fecha <= :f_ape
-                ORDER BY fecha DESC, created_at DESC
-                LIMIT 1
-            """),
-            {"f_ape": fecha_apertura.date()}
-        )
-        eru = er_u.first()
-        tasa_usd = Decimal(str(eru[0])) if eru and eru[0] else Decimal("5840.00")
+    erb = er_b.first()
+    tasa_brl = Decimal(str(erb[0])) if erb and erb[0] else Decimal("1105.00")
+
+    # 2. Tasa USD oficial de exchange_rates
+    er_u = await db.execute(
+        text("""
+            SELECT tasa_venta FROM exchange_rates
+            WHERE moneda = 'USD' AND fecha <= :f_ape
+            ORDER BY fecha DESC, created_at DESC
+            LIMIT 1
+        """),
+        {"f_ape": f_ref}
+    )
+    eru = er_u.first()
+    tasa_usd = Decimal(str(eru[0])) if eru and eru[0] else Decimal("5840.00")
 
     return tasa_brl, tasa_usd
 
@@ -626,8 +596,13 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     fondo_usd_gs = fondo_usd * tasa_usd
     fondo_total_gs = fondo_pyg + fondo_brl_gs + fondo_usd_gs
 
-    # Ventas en efectivo consolidadas
-    ventas_ef_total_gs = efectivo_pyg + (efectivo_brl * tasa_brl) + (efectivo_usd * tasa_usd)
+    # Total recaudado por medios no efectivo (Tarjetas, QR, Extra Club, etc.)
+    total_no_efectivo_gs = sum(v["monto_gs"] for v in medios_individuales.values())
+    total_cobrado_gs = Decimal(str(sales_row.total_cobrado or 0))
+
+    # Ventas en efectivo netas consolidadas (el efectivo neto que ingresó a la gaveta por ventas,
+    # compensando automáticamente cualquier vuelto entregado en Guaraníes por cobros en divisa)
+    ventas_ef_total_gs = max(Decimal("0"), total_cobrado_gs - total_no_efectivo_gs)
 
     # Total esperado en gaveta
     esperado_total_gs = fondo_total_gs + ventas_ef_total_gs - total_drops_gs
