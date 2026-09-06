@@ -609,6 +609,14 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops if d.estado == "confirmado")
     total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
 
+    # Total recaudado por medios no efectivo (Tarjetas, QR, Extra Club, etc.)
+    total_no_efectivo_gs = sum(v["monto_gs"] for v in medios_individuales.values())
+    total_cobrado_gs = Decimal(str(sales_row.total_cobrado or 0))
+
+    # Ventas en efectivo netas consolidadas (el efectivo neto que ingresó a la gaveta por ventas,
+    # compensando automáticamente cualquier vuelto entregado en Guaraníes por cobros en divisa)
+    ventas_ef_total_gs = max(Decimal("0"), total_cobrado_gs - total_no_efectivo_gs)
+
     # Fondos iniciales (Regla inmutable: cajera no supervisora siempre abre con Gs. 500.000 y R$ 300; supervisoras abren sin inicial)
     user_res = await db.execute(select(User).where(User.id == session_obj.user_id)) if session_obj.user_id else None
     user_obj = user_res.scalar_one_or_none() if user_res else None
@@ -634,8 +642,6 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
             c_pyg = Decimal(str(count_obj.monto_efectivo or 0))
             c_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
             c_tot_gs = c_pyg + (c_brl * tasa_brl)
-            # Si el conteo coincide exactamente con las ventas en efectivo (margen < 25.000 Gs)
-            # significa que contó solo ventas y separó el fondo aparte
             if abs(c_tot_gs - ventas_ef_total_gs) < Decimal("25000") and c_tot_gs > Decimal("0"):
                 fondo_pyg = Decimal("0")
                 fondo_brl = Decimal("0.00")
@@ -649,14 +655,6 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     fondo_brl_gs = fondo_brl * tasa_brl
     fondo_usd_gs = fondo_usd * tasa_usd
     fondo_total_gs = fondo_pyg + fondo_brl_gs + fondo_usd_gs
-
-    # Total recaudado por medios no efectivo (Tarjetas, QR, Extra Club, etc.)
-    total_no_efectivo_gs = sum(v["monto_gs"] for v in medios_individuales.values())
-    total_cobrado_gs = Decimal(str(sales_row.total_cobrado or 0))
-
-    # Ventas en efectivo netas consolidadas (el efectivo neto que ingresó a la gaveta por ventas,
-    # compensando automáticamente cualquier vuelto entregado en Guaraníes por cobros en divisa)
-    ventas_ef_total_gs = max(Decimal("0"), total_cobrado_gs - total_no_efectivo_gs)
 
     # Total esperado en gaveta
     esperado_total_gs = fondo_total_gs + ventas_ef_total_gs - total_drops_gs
