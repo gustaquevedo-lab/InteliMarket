@@ -22,7 +22,13 @@ ALLOWED_TIPOS = {"pantum_rollo", "zebra_zpl"}
 
 
 @router.get("/qz-certificate", response_model=QzCertificateResponse)
-async def get_qz_certificate(user=Depends(require_auth)):
+async def get_qz_certificate():
+    # SIN autenticacion a proposito: un certificado publico esta hecho para
+    # distribuirse (no lleva la clave privada). Pedirle login solo agregaba un
+    # modo de falla confuso -- al expirar la sesion, QZ dejaba de recibir la
+    # identidad, volvia a tratar la conexion como anonima y reaparecia el
+    # dialogo de permiso, en vez de avisar que habia que loguearse de nuevo.
+    # Lo que si queda protegido es /qz-sign, que usa la clave privada.
     """Certificado publico de InteliMarket para QZ Tray -- permite que QZ
     identifique al sitio de forma persistente en vez de tratarlo como una
     conexion anonima (con anonima, QZ Tray no deja tildar "Remember")."""
