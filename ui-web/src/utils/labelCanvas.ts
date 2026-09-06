@@ -8,6 +8,20 @@
 
 import { code128Widths } from "./code128"
 
+/**
+ * Fuentes elegibles. Es una lista corta a propósito: en térmica a 203dpi las
+ * fuentes finas o con serifas se empastan y pierden legibilidad. Todas estas
+ * son de trazo grueso y existen en Windows, que es donde corre la estación.
+ */
+export const FUENTES_ETIQUETA = [
+  { id: "Arial Black, Arial, sans-serif", label: "Arial Black — máximo impacto" },
+  { id: "Impact, Haettenschweiler, sans-serif", label: "Impact — condensada, muy fuerte" },
+  { id: "Arial Narrow, Arial, sans-serif", label: "Arial Narrow — entra más texto" },
+  { id: "Arial, Helvetica, sans-serif", label: "Arial — neutra" },
+  { id: "Verdana, Geneva, sans-serif", label: "Verdana — legible en chico" },
+  { id: "Tahoma, Geneva, sans-serif", label: "Tahoma — compacta y clara" },
+] as const
+
 export interface DisenoGondola {
   mostrar_encabezado: boolean
   texto_encabezado: string
@@ -17,6 +31,11 @@ export interface DisenoGondola {
   mostrar_precio: boolean
   fuente_precio: number
   mostrar_escalas: boolean
+  mostrar_fecha: boolean
+  fuente_precio_unitario: number
+  familia_texto: string
+  familia_precio: string
+  unitario_afuera: boolean // el unitario fuera del bloque negro, más visible
   ancho_precio_pct: number // qué porción del ancho ocupa el bloque de precio
 }
 
@@ -29,7 +48,12 @@ export const DISENO_GONDOLA_DEFAULT: DisenoGondola = {
   mostrar_precio: true,
   fuente_precio: 72,
   mostrar_escalas: true,
-  ancho_precio_pct: 38,
+  mostrar_fecha: true,
+  fuente_precio_unitario: 34,
+  familia_texto: "Arial Narrow, Arial, sans-serif",
+  familia_precio: "Arial Black, Arial, sans-serif",
+  unitario_afuera: true,
+  ancho_precio_pct: 40,
 }
 
 export interface ItemEtiqueta {
@@ -89,30 +113,74 @@ export function renderGondola(
   const xPrecio = anchoDots - anchoPrecio
   const anchoTexto = (d.mostrar_precio ? xPrecio : anchoDots) - 40
 
-  let y = 14
+  let y = 10
   if (d.mostrar_encabezado) {
-    ctx.font = `bold 22px Arial, Helvetica, sans-serif`
+    ctx.font = `bold 22px ${d.familia_texto}`
     ctx.textBaseline = "top"
     ctx.fillText(d.texto_encabezado || "", 22, y)
-    y += 30
+    y += 28
   }
 
   if (d.mostrar_nombre) {
-    ctx.font = `bold ${d.fuente_nombre}px Arial, Helvetica, sans-serif`
+    ctx.font = `bold ${d.fuente_nombre}px ${d.familia_texto}`
     for (const linea of ajustarTexto(ctx, item.nombre, anchoTexto, 2)) {
       ctx.fillText(linea, 22, y)
-      y += d.fuente_nombre + 6
+      y += d.fuente_nombre + 4
     }
   }
 
+  const esc = d.mostrar_escalas ? item.escalas?.[0] : undefined
+
+  // JERARQUIA: el precio de escala es el gancho (es el mas barato), asi que
+  // se lleva el bloque negro. El unitario queda visible pero en segundo plano.
+  // Si el producto no tiene escala, el bloque negro lo ocupa el unitario.
+  if (d.mostrar_precio) {
+    ctx.fillStyle = "#000"
+    ctx.fillRect(xPrecio, 10, anchoPrecio - 16, altoDots - 20)
+
+    const destacado = esc ? esc.precio_unitario : item.precio_venta
+    const rotulo = esc ? `LLEVANDO ${esc.min_qty}+` : "PRECIO"
+
+    ctx.fillStyle = "#fff"
+    ctx.font = `bold 24px ${d.familia_texto}`
+    ctx.fillText(rotulo, xPrecio + 20, 22)
+
+    ctx.font = `bold 22px ${d.familia_precio}`
+    ctx.fillText("Gs.", xPrecio + 20, 56)
+
+    let tam = d.fuente_precio
+    const texto = fmtGs(destacado)
+    ctx.font = `bold ${tam}px ${d.familia_precio}`
+    while (ctx.measureText(texto).width > anchoPrecio - 44 && tam > 24) {
+      tam -= 2
+      ctx.font = `bold ${tam}px ${d.familia_precio}`
+    }
+    ctx.fillText(texto, xPrecio + 20, 80)
+
+    // el unitario adentro del bloque solo si se eligió no sacarlo afuera
+    if (esc && !d.unitario_afuera) {
+      ctx.font = `bold ${Math.min(d.fuente_precio_unitario, 26)}px ${d.familia_precio}`
+      ctx.fillText(`1 un: Gs. ${fmtGs(item.precio_venta)}`, xPrecio + 20, altoDots - 34)
+    }
+    ctx.fillStyle = "#000"
+  }
+
+  // Unitario afuera del bloque negro: se lee mucho mejor que metido adentro,
+  // y sigue quedando claro que el precio grande es el de escala.
+  if (d.mostrar_precio && esc && d.unitario_afuera) {
+    ctx.fillStyle = "#000"
+    ctx.font = `bold ${d.fuente_precio_unitario}px ${d.familia_precio}`
+    ctx.fillText(`1 un: Gs. ${fmtGs(item.precio_venta)}`, 22, y + 2)
+    y += d.fuente_precio_unitario + 6
+  }
+
+  // Codigo de barras con su numero: se usa para reponer y para auditar.
   if (d.mostrar_barcode && item.codigo_barra) {
     const anchos = code128Widths(item.codigo_barra)
     const modulos = anchos.reduce((a, b) => a + b, 0)
-    // el módulo se ajusta al espacio disponible, mínimo 2 dots para que el
-    // lector pueda resolverlo
-    const modulo = Math.max(2, Math.floor(anchoTexto / modulos))
-    const altoBarras = 44
-    const yBarras = Math.min(y + 6, altoDots - altoBarras - 34)
+    const modulo = Math.max(2, Math.floor((anchoTexto - 20) / modulos))
+    const altoBarras = 42
+    const yBarras = altoDots - altoBarras - 46
     let x = 22
     anchos.forEach((w, i) => {
       if (i % 2 === 0) ctx.fillRect(x, yBarras, w * modulo, altoBarras)
@@ -122,28 +190,11 @@ export function renderGondola(
     ctx.fillText(item.codigo_barra, 22, yBarras + altoBarras + 2)
   }
 
-  if (d.mostrar_precio) {
-    ctx.fillStyle = "#000"
-    ctx.fillRect(xPrecio, 12, anchoPrecio - 16, altoDots - 24)
-    ctx.fillStyle = "#fff"
-    ctx.font = `bold 26px Arial, Helvetica, sans-serif`
-    ctx.fillText("Gs.", xPrecio + 22, 28)
-    let tam = d.fuente_precio
-    const texto = fmtGs(item.precio_venta)
-    ctx.font = `bold ${tam}px Arial, Helvetica, sans-serif`
-    // si no entra, se achica sola en vez de desbordar el bloque
-    while (ctx.measureText(texto).width > anchoPrecio - 44 && tam > 24) {
-      tam -= 2
-      ctx.font = `bold ${tam}px Arial, Helvetica, sans-serif`
-    }
-    ctx.fillText(texto, xPrecio + 22, 58)
-    ctx.fillStyle = "#000"
-  }
-
-  const esc = item.escalas?.[0]
-  if (d.mostrar_escalas && esc) {
-    ctx.font = `bold 24px Arial, Helvetica, sans-serif`
-    ctx.fillText(`LLEVANDO ${esc.min_qty}+: Gs. ${fmtGs(esc.precio_unitario)}`, 22, altoDots - 34)
+  // Fecha de impresion: permite saber de cuando es el precio en la gondola.
+  if (d.mostrar_fecha) {
+    ctx.font = `bold 20px ${d.familia_texto}`
+    const f = new Date().toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "numeric" })
+    ctx.fillText(f, 22, altoDots - 26)
   }
 }
 

@@ -37,7 +37,7 @@ import {
 import { api, type Product, type Supplier, type Category } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
-import { renderGondola, DISENO_GONDOLA_DEFAULT, type DisenoGondola } from "../../utils/labelCanvas"
+import { renderGondola, DISENO_GONDOLA_DEFAULT, FUENTES_ETIQUETA, type DisenoGondola } from "../../utils/labelCanvas"
 
 // ── GENERADOR CODE128 VECTORIAL NATIVO (100% OFFLINE & ZERO-DEPENDENCY) ─────
 const CODE128_PATTERNS = [
@@ -527,6 +527,17 @@ export default function LabelsPage() {
     }
   }
 
+  // El tamaño se lee de la configuración real de cada impresora. Antes estaba
+  // escrito a mano en la pantalla y quedó desactualizado (decía 50x30 cuando la
+  // Zebra ya estaba en 105x30), que es justo el tipo de dato que confunde al
+  // que está calibrando.
+  const medidaTexto = useMemo(() => {
+    const a = Number(printerConfig?.ancho_mm) || (tipoImpresora === "pantum_rollo" ? 33 : 105)
+    const h = Number(printerConfig?.alto_mm) || (tipoImpresora === "pantum_rollo" ? 22 : 30)
+    const cols = Number(printerConfig?.columnas) || (tipoImpresora === "pantum_rollo" ? 3 : 1)
+    return `${a}×${h} mm${cols > 1 ? ` · ${cols} col` : ""}`
+  }, [printerConfig, tipoImpresora])
+
   const totalEtiquetas = useMemo(() => items.reduce((sum, i) => sum + i.cantidad, 0), [items])
 
   // ── IMPRESIÓN PANTUM (Rollo N Columnas) ──────────────────────────────────
@@ -718,7 +729,7 @@ export default function LabelsPage() {
               <div>
                 <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Formato</div>
                 <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                  {tipoImpresora === "pantum_rollo" ? "Pantum 3-Col (33×22)" : "Zebra Góndola (50×30)"}
+                  {tipoImpresora === "pantum_rollo" ? "Pantum" : "Zebra Góndola"} ({medidaTexto})
                 </div>
               </div>
             </div>
@@ -1140,6 +1151,36 @@ export default function LabelsPage() {
                     onChange={(e) => setDisenoGondola((d) => ({ ...d, fuente_precio: Number(e.target.value) }))}
                     className="w-full accent-amber-500 cursor-pointer" />
                 </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Precio unitario ({disenoGondola.fuente_precio_unitario}px)</label>
+                  <input type="range" min={20} max={48} value={disenoGondola.fuente_precio_unitario}
+                    onChange={(e) => setDisenoGondola((d) => ({ ...d, fuente_precio_unitario: Number(e.target.value) }))}
+                    className="w-full accent-amber-500 cursor-pointer" />
+                </div>
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 dark:text-slate-300 cursor-pointer">
+                    <input type="checkbox" checked={disenoGondola.unitario_afuera}
+                      onChange={(e) => setDisenoGondola((d) => ({ ...d, unitario_afuera: e.target.checked }))}
+                      className="rounded accent-amber-500 w-3.5 h-3.5" />
+                    Unitario fuera del bloque negro
+                  </label>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fuente del texto</label>
+                  <select value={disenoGondola.familia_texto}
+                    onChange={(e) => setDisenoGondola((d) => ({ ...d, familia_texto: e.target.value }))}
+                    className="w-full px-2 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] outline-none cursor-pointer">
+                    {FUENTES_ETIQUETA.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fuente del precio</label>
+                  <select value={disenoGondola.familia_precio}
+                    onChange={(e) => setDisenoGondola((d) => ({ ...d, familia_precio: e.target.value }))}
+                    className="w-full px-2 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] outline-none cursor-pointer">
+                    {FUENTES_ETIQUETA.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                  </select>
+                </div>
                 <div className="col-span-2">
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ancho del bloque de precio ({disenoGondola.ancho_precio_pct}%)</label>
                   <input type="range" min={25} max={50} value={disenoGondola.ancho_precio_pct}
@@ -1160,6 +1201,7 @@ export default function LabelsPage() {
                   ["mostrar_nombre", "Nombre"],
                   ["mostrar_barcode", "Código de barras"],
                   ["mostrar_escalas", "Precio mayorista"],
+                  ["mostrar_fecha", "Fecha de impresión"],
                 ] as const).map(([k, label]) => (
                   <label key={k} className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer ${
                     (disenoGondola as any)[k] ? "bg-amber-50/50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 font-bold" : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500"}`}>
@@ -1188,12 +1230,12 @@ export default function LabelsPage() {
               <div className="flex items-center gap-2">
                 <Eye className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 <h2 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider font-posDisplay">
-                  Simulador en Vivo de la Etiqueta
+                  {tipoImpresora === "pantum_rollo" ? "Así se imprime (solo lectura)" : "Simulador en Vivo de la Etiqueta"}
                 </h2>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-950 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-800">
-                  {tipoImpresora === "pantum_rollo" ? "33×22 mm (x3 Col)" : "50×30 mm (Zebra)"}
+                  {medidaTexto}
                 </span>
                 <div className="flex items-center bg-slate-100 dark:bg-slate-950 rounded-lg p-0.5 border border-slate-200 dark:border-slate-800">
                   {[2.5, 3.5, 4.5].map((z) => (
@@ -1212,6 +1254,14 @@ export default function LabelsPage() {
                 </div>
               </div>
             </div>
+
+            {tipoImpresora === "pantum_rollo" && (
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5">
+                La Pantum no acepta diseños libres: solo entiende texto y códigos con sus propias fuentes,
+                rechaza cualquier imagen. Por eso acá se muestra cómo queda pero no se puede rediseñar.
+                El diseño libre está disponible en la Zebra de góndola.
+              </p>
+            )}
 
             {/* Vista del Mockup Térmico */}
             <div className="p-6 rounded-2xl bg-slate-100/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-center overflow-x-auto min-h-[190px]">
