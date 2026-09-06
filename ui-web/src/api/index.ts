@@ -1501,6 +1501,9 @@ export const api = {
     updatePrinterConfig: (tipo: "pantum_rollo" | "zebra_zpl", data: Record<string, any>) => client.put<any>(`/v1/label-printing/printer-config/${tipo}`, data),
     listTemplates: (tipoImpresora?: string) => client.get<any[]>("/v1/label-printing/templates", tipoImpresora ? { tipo_impresora: tipoImpresora } : undefined),
     createTemplate: (data: Record<string, any>) => client.post<any>("/v1/label-printing/templates", data),
+    aprobarTemplate: (id: string) => client.post<any>(`/v1/label-printing/templates/${id}/aprobar`, {}),
+    getTemplateAprobada: (tipo: "pantum_rollo" | "zebra_zpl") =>
+      client.get<any | null>(`/v1/label-printing/templates/aprobada/${tipo}`),
     deleteTemplate: (id: string) => client.delete<void>(`/v1/label-printing/templates/${id}`),
     resolve: (filtro: Record<string, any>) => client.post<any[]>("/v1/label-printing/resolve", filtro),
     printZebra: (data: { items: any[]; template_id?: string }) => client.post<{ zpl: string; enviado_por_red: boolean }>("/v1/label-printing/print/zebra", data),

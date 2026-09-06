@@ -37,6 +37,7 @@ import {
 import { api, type Product, type Supplier, type Category } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
+import { renderGondola, DISENO_GONDOLA_DEFAULT, type DisenoGondola } from "../../utils/labelCanvas"
 
 // ── GENERADOR CODE128 VECTORIAL NATIVO (100% OFFLINE & ZERO-DEPENDENCY) ─────
 const CODE128_PATTERNS = [
@@ -455,6 +456,48 @@ export default function LabelsPage() {
         (e?.message || String(e)) +
         "\n\nVerificá que esté instalado y abierto en esta PC (ícono junto al reloj)."
       )
+    }
+  }
+
+  // ── DISEÑADOR DE GÓNDOLA (Zebra) ────────────────────────────────────────
+  // La vista previa se dibuja con el MISMO canvas que después se imprime, así
+  // que lo que se ve es literalmente lo que sale. Al aprobar, ese diseño queda
+  // congelado y es el único que imprime la estación del gondolero.
+  const [disenoGondola, setDisenoGondola] = useState<DisenoGondola>(DISENO_GONDOLA_DEFAULT)
+  const [aprobando, setAprobando] = useState(false)
+  const canvasPreviewRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    if (tipoImpresora !== "zebra_zpl") return
+    api.labelPrinting.getTemplateAprobada("zebra_zpl")
+      .then((t) => { if (t?.campos) setDisenoGondola({ ...DISENO_GONDOLA_DEFAULT, ...(t.campos as any) }) })
+      .catch(() => {})
+  }, [tipoImpresora])
+
+  useEffect(() => {
+    if (tipoImpresora !== "zebra_zpl" || !canvasPreviewRef.current) return
+    const dx = Number(printerConfig?.dpmm_x) || 8
+    const dy = Number(printerConfig?.dpmm_y) || 8
+    const w = Math.min(Math.round((Number(printerConfig?.ancho_mm) || 105) * dx), 832)
+    const h = Math.round((Number(printerConfig?.alto_mm) || 30) * dy)
+    renderGondola(canvasPreviewRef.current, (items[0] as any) || SAMPLE_ITEM, disenoGondola, w, h)
+  }, [tipoImpresora, disenoGondola, items, printerConfig])
+
+  const aprobarDiseno = async () => {
+    setAprobando(true)
+    try {
+      const tpl = await api.labelPrinting.createTemplate({
+        tipo_impresora: "zebra_zpl",
+        nombre: `Góndola ${new Date().toLocaleDateString("es-PY")} ${new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}`,
+        es_default: true,
+        campos: disenoGondola,
+      })
+      await api.labelPrinting.aprobarTemplate(tpl.id)
+      toast.success("Diseño aprobado", "La estación de góndola va a imprimir esta versión de ahora en más.")
+    } catch (e: any) {
+      toast.error("No se pudo aprobar", e?.message || "Error desconocido")
+    } finally {
+      setAprobando(false)
     }
   }
 
@@ -1069,6 +1112,76 @@ export default function LabelsPage() {
 
         {/* COLUMNA DERECHA: COLA DE IMPRESIÓN Y PREVIEW INTERACTIVO (7 COLS) */}
         <div className="lg:col-span-7 space-y-6">
+          {tipoImpresora === "zebra_zpl" && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-black uppercase tracking-wider font-posDisplay text-slate-900 dark:text-white">
+                  Diseño de Góndola
+                </h2>
+                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                  Lo que ves es lo que se imprime
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-x-auto">
+                <canvas ref={canvasPreviewRef} className="w-full max-w-full border border-slate-300 dark:border-slate-700 bg-white" style={{ imageRendering: "pixelated" }} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nombre ({disenoGondola.fuente_nombre}px)</label>
+                  <input type="range" min={28} max={64} value={disenoGondola.fuente_nombre}
+                    onChange={(e) => setDisenoGondola((d) => ({ ...d, fuente_nombre: Number(e.target.value) }))}
+                    className="w-full accent-amber-500 cursor-pointer" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Precio ({disenoGondola.fuente_precio}px)</label>
+                  <input type="range" min={40} max={100} value={disenoGondola.fuente_precio}
+                    onChange={(e) => setDisenoGondola((d) => ({ ...d, fuente_precio: Number(e.target.value) }))}
+                    className="w-full accent-amber-500 cursor-pointer" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ancho del bloque de precio ({disenoGondola.ancho_precio_pct}%)</label>
+                  <input type="range" min={25} max={50} value={disenoGondola.ancho_precio_pct}
+                    onChange={(e) => setDisenoGondola((d) => ({ ...d, ancho_precio_pct: Number(e.target.value) }))}
+                    className="w-full accent-amber-500 cursor-pointer" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Encabezado</label>
+                  <input type="text" value={disenoGondola.texto_encabezado}
+                    onChange={(e) => setDisenoGondola((d) => ({ ...d, texto_encabezado: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs outline-none" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {([
+                  ["mostrar_encabezado", "Encabezado"],
+                  ["mostrar_nombre", "Nombre"],
+                  ["mostrar_barcode", "Código de barras"],
+                  ["mostrar_escalas", "Precio mayorista"],
+                ] as const).map(([k, label]) => (
+                  <label key={k} className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer ${
+                    (disenoGondola as any)[k] ? "bg-amber-50/50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 font-bold" : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500"}`}>
+                    <input type="checkbox" checked={(disenoGondola as any)[k]}
+                      onChange={(e) => setDisenoGondola((d) => ({ ...d, [k]: e.target.checked }))}
+                      className="rounded accent-amber-500 w-3.5 h-3.5" />
+                    <span className="text-[11px]">{label}</span>
+                  </label>
+                ))}
+              </div>
+
+              <button onClick={aprobarDiseno} disabled={aprobando}
+                className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-black disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2">
+                {aprobando ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                Aprobar este diseño
+              </button>
+              <p className="text-[10px] text-slate-400 leading-snug">
+                Al aprobarlo queda congelado: la estación de góndola imprime solo esta versión y no puede modificarla.
+              </p>
+            </div>
+          )}
+
           {/* Card: Visor de Simulación Térmica en Vivo */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between">

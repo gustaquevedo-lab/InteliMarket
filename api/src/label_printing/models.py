@@ -50,6 +50,10 @@ class LabelTemplate(Base):
     nombre = Column(String(100), nullable=False)
     es_default = Column(Boolean, nullable=False, default=False)
     campos = Column(JSON, nullable=False, default=dict)
+    # Diseno congelado: la estacion del gondolero imprime solo el aprobado
+    aprobada = Column(Boolean, nullable=False, default=False)
+    aprobada_en = Column(DateTime(timezone=True), nullable=True)
+    aprobada_por = Column(String(200), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

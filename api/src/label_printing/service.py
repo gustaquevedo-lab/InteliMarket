@@ -239,3 +239,50 @@ async def send_zpl_over_tcp(host: str, puerto: int, zpl: str, timeout: float = 1
     finally:
         writer.close()
         await writer.wait_closed()
+
+
+async def aprobar_template(db: AsyncSession, company_id: str, template_id: str, quien: str):
+    """Congela un diseno como el vigente y desaprueba los demas del mismo tipo.
+
+    Solo puede haber uno aprobado por tipo de impresora: la estacion que
+    imprime no elige, toma el aprobado y punto.
+    """
+    from datetime import datetime, timezone as _tz
+
+    result = await db.execute(
+        select(LabelTemplate).where(
+            LabelTemplate.id == uuid.UUID(template_id),
+            LabelTemplate.company_id == uuid.UUID(company_id),
+        )
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        return None
+
+    otros = await db.execute(
+        select(LabelTemplate).where(
+            LabelTemplate.company_id == uuid.UUID(company_id),
+            LabelTemplate.tipo_impresora == tpl.tipo_impresora,
+            LabelTemplate.aprobada.is_(True),
+        )
+    )
+    for o in otros.scalars().all():
+        o.aprobada = False
+
+    tpl.aprobada = True
+    tpl.aprobada_en = datetime.now(_tz.utc)
+    tpl.aprobada_por = quien
+    await db.commit()
+    await db.refresh(tpl)
+    return tpl
+
+
+async def get_template_aprobada(db: AsyncSession, company_id: str, tipo_impresora: str):
+    result = await db.execute(
+        select(LabelTemplate).where(
+            LabelTemplate.company_id == uuid.UUID(company_id),
+            LabelTemplate.tipo_impresora == tipo_impresora,
+            LabelTemplate.aprobada.is_(True),
+        )
+    )
+    return result.scalar_one_or_none()

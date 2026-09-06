@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
-from api.src.label_printing import service, qz_signing, tspl, calibracion
+from api.src.label_printing import service, qz_signing, tspl, calibracion, zpl_gondola
 from api.src.label_printing.schemas import (
     LabelPrinterConfigUpsert, LabelPrinterConfigResponse,
     LabelTemplateCreate, LabelTemplateResponse,
@@ -86,14 +86,14 @@ async def print_zebra(data: PrintZebraRequest, db: AsyncSession = Depends(get_db
     if not printer_config:
         raise HTTPException(status_code=400, detail="No hay una impresora Zebra configurada para esta empresa")
 
-    campos = {}
+    campos = dict(getattr(data, "campos", None) or {})
     if data.template_id:
         templates = await service.list_templates(db, user["company_id"], "zebra_zpl")
         match = next((t for t in templates if t.id == data.template_id), None)
         if match:
             campos = match.campos
 
-    zpl = service.generate_zpl(data.items, campos, printer_config)
+    zpl = zpl_gondola.generate_zpl_gondola(data.items, campos, printer_config)
 
     if printer_config.conexion == "red_tcp" and printer_config.host and printer_config.puerto_tcp:
         await service.send_zpl_over_tcp(printer_config.host, printer_config.puerto_tcp, zpl)
@@ -143,3 +143,21 @@ async def imprimir_regla_calibracion(tipo: str, modo: str = "regla", db: AsyncSe
     else:
         comandos = calibracion.regla_tspl(cfg) if tipo == "pantum_rollo" else calibracion.regla_zpl(cfg)
     return {"comandos": comandos, "printer_name": cfg.qz_printer_name}
+
+
+@router.post("/templates/{template_id}/aprobar", response_model=LabelTemplateResponse)
+async def aprobar_template(template_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Congela este diseno como el vigente para su tipo de impresora."""
+    quien = user.get("email") or user.get("nombre") or str(user.get("id", ""))
+    tpl = await service.aprobar_template(db, user["company_id"], template_id, quien)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Plantilla no encontrada")
+    return tpl
+
+
+@router.get("/templates/aprobada/{tipo}", response_model=LabelTemplateResponse | None)
+async def get_template_aprobada(tipo: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """El diseno congelado que debe imprimir la estacion, sin posibilidad de editarlo."""
+    if tipo not in ALLOWED_TIPOS:
+        raise HTTPException(status_code=404, detail="Tipo de impresora desconocido")
+    return await service.get_template_aprobada(db, user["company_id"], tipo)

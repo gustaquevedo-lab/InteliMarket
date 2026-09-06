@@ -70,6 +70,9 @@ class LabelTemplateResponse(BaseModel):
     nombre: str
     es_default: bool
     campos: dict
+    aprobada: bool = False
+    aprobada_en: Optional[datetime] = None
+    aprobada_por: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -116,6 +119,7 @@ class ResolvedLabelItem(BaseModel):
 class PrintZebraRequest(BaseModel):
     items: list[ResolvedLabelItem]
     template_id: Optional[UUID] = None
+    campos: dict = Field(default_factory=dict)
 
 
 class PrintZebraResponse(BaseModel):
