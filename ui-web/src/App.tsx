@@ -148,10 +148,21 @@ function PageLoader() {
   )
 }
 
+// Roles que existen para una sola pantalla. El menu del ERP no filtra por rol
+// --solo lo muestra como etiqueta-- asi que sin esto un etiquetador entraria y
+// veria todo el sistema. Se lo manda a su estacion y no sale de ahi.
+const ROL_A_ESTACION: Record<string, string> = {
+  etiquetador: "/etiquetas-gondola",
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
   if (loading) return <PageLoader />
   if (!user) return <Navigate to="/login" replace />
+  const estacion = ROL_A_ESTACION[(user as any)?.rol]
+  if (estacion && window.location.pathname !== estacion) {
+    return <Navigate to={estacion} replace />
+  }
   return <>{children}</>
 }
 
