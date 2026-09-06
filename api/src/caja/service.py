@@ -612,10 +612,8 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     fondo_usd = Decimal(str(session_obj.monto_apertura_usd or 0))
 
     if not is_supervisora:
-        if fondo_pyg <= 0:
-            fondo_pyg = Decimal("500000")
-        if fondo_brl <= 0:
-            fondo_brl = Decimal("300.00")
+        fondo_pyg = Decimal("500000")
+        fondo_brl = Decimal("300.00")
 
     fondo_brl_gs = fondo_brl * tasa_brl
     fondo_usd_gs = fondo_usd * tasa_usd
@@ -2186,9 +2184,9 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
     count = count_res.scalar_one_or_none()
     recon = await get_session_reconciliation_data(db, s.id)
 
-    monto_apertura_pyg = float(s.monto_apertura or 0)
-    monto_apertura_usd = float(s.monto_apertura_usd or 0)
-    monto_apertura_brl = float(s.monto_apertura_brl or 0)
+    monto_apertura_pyg = float(recon["fondo_pyg"]) if recon else float(s.monto_apertura or 0)
+    monto_apertura_usd = float(recon["fondo_usd"]) if recon else float(s.monto_apertura_usd or 0)
+    monto_apertura_brl = float(recon["fondo_brl"]) if recon else float(s.monto_apertura_brl or 0)
 
     monto_cierre_esperado = float(recon["esperado_total_gs"]) if recon else monto_apertura_pyg
     monto_cierre_esperado_usd = monto_apertura_usd
@@ -2234,7 +2232,7 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         "efectivo_brl_esperado": 0.0,
         "monto_efectivo_usd": float(count.monto_efectivo_usd or 0) if count else 0,
         "monto_efectivo_brl": float(count.monto_efectivo_brl or 0) if count else 0,
-        "diferencia": float(count.diferencia or 0) if count else 0,
+        "diferencia": float(recon["diferencia_consolidada_gs"]) if recon else (float(count.diferencia or 0) if count else 0),
         "diferencia_usd": float(count.diferencia_usd or 0) if count else 0,
         "diferencia_brl": float(count.diferencia_brl or 0) if count else 0,
         "requiere_revision": count.requiere_revision if count else False,
