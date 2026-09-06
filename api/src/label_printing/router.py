@@ -161,3 +161,32 @@ async def get_template_aprobada(tipo: str, db: AsyncSession = Depends(get_db), u
     if tipo not in ALLOWED_TIPOS:
         raise HTTPException(status_code=404, detail="Tipo de impresora desconocido")
     return await service.get_template_aprobada(db, user["company_id"], tipo)
+
+
+@router.post("/station-token")
+async def generar_token_estacion(user=Depends(require_auth)):
+    """Credencial de larga duracion para una estacion dedicada de etiquetas.
+
+    La estacion del gondolero no debe tener pantalla de login --es una maquina
+    de un solo proposito, operada por alguien que no administra nada-- pero
+    tampoco puede quedar abierta: /qz-sign firma pedidos con la clave privada
+    del servidor, y sin credencial cualquiera en la red del local podria mandar
+    trabajos a las impresoras de la tienda.
+
+    Por eso la credencial se configura UNA vez y no vence, en vez de sacar la
+    autenticacion. El operador nunca ve un login.
+    """
+    from datetime import timedelta
+
+    from api.src.auth.jwt import create_access_token
+
+    token = create_access_token(
+        {
+            "sub": str(user.get("id")),
+            "id": str(user.get("id")),
+            "company_id": str(user.get("company_id")),
+            "estacion": "etiquetas_gondola",
+        },
+        expires_delta=timedelta(days=1825),  # 5 anios
+    )
+    return {"token": token, "ruta": "/etiquetas-gondola"}

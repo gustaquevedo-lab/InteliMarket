@@ -488,6 +488,17 @@ export default function LabelsPage() {
     renderGondola(canvasPreviewRef.current, (items[0] as any) || SAMPLE_ITEM, disenoGondola, w, h)
   }, [tipoImpresora, disenoGondola, items, printerConfig])
 
+  // Enlace de un solo uso para dejar configurada la estación del gondolero.
+  const [enlaceEstacion, setEnlaceEstacion] = useState<string | null>(null)
+  const generarEnlaceEstacion = async () => {
+    try {
+      const { token, ruta } = await api.labelPrinting.tokenEstacion()
+      setEnlaceEstacion(`${window.location.origin}${ruta}?token=${token}`)
+    } catch (e: any) {
+      toast.error("No se pudo generar el enlace", e?.message || "Error desconocido")
+    }
+  }
+
   const aprobarDiseno = async () => {
     setAprobando(true)
     try {
@@ -1149,6 +1160,27 @@ export default function LabelsPage() {
               <p className="text-[10px] text-slate-400 leading-snug">
                 Al aprobarlo queda congelado: la estación de góndola imprime solo esta versión y no puede modificarla.
               </p>
+
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <button onClick={generarEnlaceEstacion}
+                  className="w-full py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+                  Generar enlace para la estación del gondolero
+                </button>
+                {enlaceEstacion && (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-slate-500 leading-snug">
+                      Abrí este enlace <span className="font-bold">una sola vez</span> en la máquina de la Zebra.
+                      Queda configurada para siempre y el gondolero nunca ve una pantalla de login.
+                    </p>
+                    <div className="flex gap-1.5">
+                      <input readOnly value={enlaceEstacion} onFocus={(e) => e.currentTarget.select()}
+                        className="flex-1 px-2 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[10px] font-mono outline-none" />
+                      <button onClick={() => { navigator.clipboard.writeText(enlaceEstacion); toast.success("Copiado", "Pegalo en el navegador de la máquina de la Zebra.") }}
+                        className="px-3 rounded-lg bg-slate-800 text-white text-[10px] font-bold cursor-pointer">Copiar</button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

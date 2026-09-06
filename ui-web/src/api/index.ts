@@ -1504,6 +1504,7 @@ export const api = {
     aprobarTemplate: (id: string) => client.post<any>(`/v1/label-printing/templates/${id}/aprobar`, {}),
     getTemplateAprobada: (tipo: "pantum_rollo" | "zebra_zpl") =>
       client.get<any | null>(`/v1/label-printing/templates/aprobada/${tipo}`),
+    tokenEstacion: () => client.post<{ token: string; ruta: string }>("/v1/label-printing/station-token", {}),
     deleteTemplate: (id: string) => client.delete<void>(`/v1/label-printing/templates/${id}`),
     resolve: (filtro: Record<string, any>) => client.post<any[]>("/v1/label-printing/resolve", filtro),
     printZebra: (data: { items: any[]; template_id?: string }) => client.post<{ zpl: string; enviado_por_red: boolean }>("/v1/label-printing/print/zebra", data),
