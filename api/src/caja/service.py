@@ -273,17 +273,23 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
             return user_sess
 
     # 2. Si no es el mismo usuario, crear una sesión INDEPENDIENTE y limpia para este cajero
-    # Regla inmutable: toda cajera no supervisora abre siempre con Gs. 500.000 y R$ 300
+    user_res = await db.execute(select(User).where(User.id == uuid.UUID(str(user_id)))) if user_id else None
+    user_obj = user_res.scalar_one_or_none() if user_res else None
+    user_rol = (user_obj.rol if user_obj else "").lower()
     cajero_nom = (data.get("cajero_nombre") or "").lower()
-    is_supervisora = any(s in cajero_nom for s in ["supervisor", "zunilda", "admin"])
+    is_supervisora = (
+        user_rol in ["supervisor", "admin", "administrador"]
+        or any(s in cajero_nom for s in ["supervisor", "zunilda", "maristela", "admin"])
+    )
 
     raw_pyg = data.get("monto_apertura")
     raw_brl = data.get("monto_apertura_brl")
     raw_usd = data.get("monto_apertura_usd", 0)
 
     if is_supervisora:
-        monto_pyg = Decimal(str(raw_pyg or 0))
-        monto_brl = Decimal(str(raw_brl or 0))
+        monto_pyg = Decimal("0")
+        monto_brl = Decimal("0.00")
+        monto_usd = Decimal("0.00")
     else:
         monto_pyg = Decimal(str(raw_pyg)) if raw_pyg is not None and float(raw_pyg) > 0 else Decimal("500000")
         monto_brl = Decimal(str(raw_brl)) if raw_brl is not None and float(raw_brl) > 0 else Decimal("300.00")
@@ -603,17 +609,42 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops if d.estado == "confirmado")
     total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
 
-    # Fondos iniciales (Regla inmutable: cajera no supervisora siempre abre con Gs. 500.000 y R$ 300)
+    # Fondos iniciales (Regla inmutable: cajera no supervisora siempre abre con Gs. 500.000 y R$ 300; supervisoras abren sin inicial)
+    user_res = await db.execute(select(User).where(User.id == session_obj.user_id)) if session_obj.user_id else None
+    user_obj = user_res.scalar_one_or_none() if user_res else None
+    user_rol = (user_obj.rol if user_obj else "").lower()
     cajero_nom = (session_obj.cajero_nombre or "").lower()
-    is_supervisora = any(s in cajero_nom for s in ["supervisor", "zunilda", "admin"])
+    is_supervisora = (
+        user_rol in ["supervisor", "admin", "administrador"]
+        or any(s in cajero_nom for s in ["supervisor", "zunilda", "maristela", "admin"])
+    )
 
     fondo_pyg = Decimal(str(session_obj.monto_apertura or 0))
     fondo_brl = Decimal(str(session_obj.monto_apertura_brl or 0))
     fondo_usd = Decimal(str(session_obj.monto_apertura_usd or 0))
 
-    if not is_supervisora:
-        fondo_pyg = Decimal("500000")
-        fondo_brl = Decimal("300.00")
+    if is_supervisora:
+        fondo_pyg = Decimal("0")
+        fondo_brl = Decimal("0.00")
+        fondo_usd = Decimal("0.00")
+    else:
+        # Si la cajera contó exactamente su recaudación de ventas (sin incluir el fondo inicial en gaveta),
+        # o si la apertura no registró fondo, evitar clavarle un descuadre ficticio de 833.000 Gs
+        if count_obj:
+            c_pyg = Decimal(str(count_obj.monto_efectivo or 0))
+            c_brl = Decimal(str(count_obj.monto_efectivo_brl or 0))
+            c_tot_gs = c_pyg + (c_brl * tasa_brl)
+            # Si el conteo coincide exactamente con las ventas en efectivo (margen < 25.000 Gs)
+            # significa que contó solo ventas y separó el fondo aparte
+            if abs(c_tot_gs - ventas_ef_total_gs) < Decimal("25000") and c_tot_gs > Decimal("0"):
+                fondo_pyg = Decimal("0")
+                fondo_brl = Decimal("0.00")
+            else:
+                fondo_pyg = Decimal("500000")
+                fondo_brl = Decimal("300.00")
+        else:
+            fondo_pyg = Decimal("500000")
+            fondo_brl = Decimal("300.00")
 
     fondo_brl_gs = fondo_brl * tasa_brl
     fondo_usd_gs = fondo_usd * tasa_usd
