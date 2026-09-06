@@ -4,9 +4,19 @@ from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone, date, timedelta
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 import uuid
 import base64
+
+TZ_ASUNCION = ZoneInfo("America/Asuncion")
+
+def _to_asuncion_tz(dt: datetime | None) -> datetime | None:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(TZ_ASUNCION)
 
 from api.src.caja.models import (
     CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff,
@@ -639,8 +649,10 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     # Diferencia Consolidada
     diferencia_consolidada_gs = contado_total_gs - esperado_total_gs
 
-    fecha_ap_str = session_obj.fecha_apertura.strftime("%d/%m/%Y %H:%M") if session_obj.fecha_apertura else "-"
-    fecha_ci_str = session_obj.fecha_cierre.strftime("%d/%m/%Y %H:%M") if session_obj.fecha_cierre else "EN CURSO"
+    ap_loc = _to_asuncion_tz(session_obj.fecha_apertura)
+    ci_loc = _to_asuncion_tz(session_obj.fecha_cierre)
+    fecha_ap_str = ap_loc.strftime("%d/%m/%Y %H:%M") if ap_loc else "-"
+    fecha_ci_str = ci_loc.strftime("%d/%m/%Y %H:%M") if ci_loc else "EN CURSO"
 
     recon_data = {
         "session_id": str(session_obj.id),

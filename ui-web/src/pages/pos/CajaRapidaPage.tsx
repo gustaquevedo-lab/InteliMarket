@@ -3088,7 +3088,7 @@ export default function POSPage() {
   const [reimprimirLoading, setReimprimirLoading] = useState(false)
   const [reimprimirError, setReimprimirError] = useState("")
 
-  const filteredReimprimirSessions = useMemo(() => {
+  const validReimprimirSessions = useMemo(() => {
     const LEGACY_SESSION_IDS = new Set([
       "b3cf7fa8-dba3-4859-90d6-4bbac9e72f1c", // Liz Caja 2 legacy 31/08
       "f8217bfa-484b-419f-a973-f627ad328d99", // Nilda Caja 2 legacy 31/08
@@ -3096,18 +3096,34 @@ export default function POSPage() {
       "e93a5246-d1de-4de2-b016-b9bb86de0a15", // Zunilda Caja 2 legacy 31/08
       "0fca771a-860a-4e80-9513-d8ada4f7043d", // Tomasa Caja 2 apertura 29 seg
     ])
-    return reimprimirSessions.filter((s) => {
-      if (LEGACY_SESSION_IDS.has(s.id)) return false
+    return reimprimirSessions.filter((s) => !LEGACY_SESSION_IDS.has(s.id))
+  }, [reimprimirSessions])
+
+  const filteredReimprimirSessions = useMemo(() => {
+    const toLocalDateStr = (iso?: string | null) => {
+      if (!iso) return ""
+      try {
+        const d = new Date(iso)
+        if (isNaN(d.getTime())) return (iso || "").slice(0, 10)
+        return d.toLocaleDateString("en-CA", { timeZone: "America/Asuncion" })
+      } catch {
+        return (iso || "").slice(0, 10)
+      }
+    }
+    return validReimprimirSessions.filter((s) => {
       if (reimprimirCierreCajero && s.cajero_nombre !== reimprimirCierreCajero) {
         return false
       }
       if (reimprimirCierreFecha) {
-        const fechaStr = (s.fecha_cierre || s.fecha_apertura || "").slice(0, 10)
-        if (fechaStr !== reimprimirCierreFecha) return false
+        const cierreDateStr = toLocalDateStr(s.fecha_cierre)
+        const aperturaDateStr = toLocalDateStr(s.fecha_apertura)
+        if (cierreDateStr !== reimprimirCierreFecha && aperturaDateStr !== reimprimirCierreFecha) {
+          return false
+        }
       }
       return true
     })
-  }, [reimprimirSessions, reimprimirCierreCajero, reimprimirCierreFecha])
+  }, [validReimprimirSessions, reimprimirCierreCajero, reimprimirCierreFecha])
 
   const filteredReimprimirSales = useMemo(() => {
     const q = reimprimirSearch.trim().toLowerCase()
@@ -3620,7 +3636,7 @@ export default function POSPage() {
     setReimprimirLoading(true)
     setReimprimirError("")
     try {
-      const sessions = await api.caja.sessionsSummary({ estado: "cerrada", limit: 200, fecha_desde: "2026-08-31T00:00:00" })
+      const sessions = await api.caja.sessionsSummary({ estado: "cerrada", limit: 200, fecha_desde: "2026-08-30T00:00:00" })
       setReimprimirSessions(Array.isArray(sessions) ? sessions : [])
     } catch (e) {
       setReimprimirError("No se pudo cargar el historial de cierres de caja.")
@@ -10719,8 +10735,8 @@ export default function POSPage() {
                     onChange={(e) => setReimprimirCierreCajero(e.target.value)}
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-amber-500"
                   >
-                    <option value="">👤 Todas las cajeras ({Array.from(new Set(reimprimirSessions.map((s) => s.cajero_nombre).filter(Boolean))).length})</option>
-                    {Array.from(new Set(reimprimirSessions.map((s) => s.cajero_nombre).filter(Boolean))).map((nombre: any) => (
+                    <option value="">👤 Todas las cajeras ({Array.from(new Set(validReimprimirSessions.map((s) => s.cajero_nombre).filter(Boolean))).length})</option>
+                    {Array.from(new Set(validReimprimirSessions.map((s) => s.cajero_nombre).filter(Boolean))).map((nombre: any) => (
                       <option key={nombre} value={nombre}>{nombre}</option>
                     ))}
                   </select>
@@ -11211,7 +11227,7 @@ export default function POSPage() {
                             </span>
                           </div>
                           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                            Cierre: {ses.fecha_cierre ? new Date(ses.fecha_cierre).toLocaleString("es-PY") : "—"} · Gaveta: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(ses.monto_cierre || 0)}</strong>
+                            Cierre: {ses.fecha_cierre ? new Date(ses.fecha_cierre).toLocaleString("es-PY", { timeZone: "America/Asuncion" }) : "—"} · Gaveta: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(ses.monto_cierre || 0)}</strong>
                             {ses.monto_apertura_brl > 0 ? ` · R$ ${Number(ses.monto_apertura_brl).toFixed(2)}` : ""}
                           </div>
                         </div>

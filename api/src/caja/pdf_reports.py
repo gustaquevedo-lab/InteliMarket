@@ -2,7 +2,17 @@
 visuales compartidos de integrated_finance.pdf_reports (mismo estilo que
 Bancos, AP y AR) en vez de reimplementar estilos de tabla."""
 import io
-from datetime import date
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
+
+TZ_ASUNCION = ZoneInfo("America/Asuncion")
+
+def _to_asuncion_tz(dt: datetime | None) -> datetime | None:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(TZ_ASUNCION)
 
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
@@ -46,10 +56,11 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     data = [header]
     for s in sessiones:
         diferencia = s.get("diferencia")
+        fc_loc = _to_asuncion_tz(s.get("fecha_cierre"))
         data.append([
             s.get("cajero_nombre") or "—",
             s.get("register_nombre") or "—",
-            s["fecha_cierre"].strftime("%d/%m/%Y %H:%M") if s.get("fecha_cierre") else "—",
+            fc_loc.strftime("%d/%m/%Y %H:%M") if fc_loc else "—",
             _fmt_gs(s.get("monto_cierre_esperado") or 0),
             _fmt_gs(s.get("monto_cierre") or 0),
             _fmt_gs(diferencia) if diferencia is not None else "s/d",
@@ -103,9 +114,10 @@ def generate_boveda_movimientos_pdf(company: dict, entries: list[dict], fecha_de
     header = ["Origen", "Fecha", "Monto PYG", "Estado", "Fecha depósito"]
     data = [header]
     for e in entries:
+        e_created = _to_asuncion_tz(e.get("created_at"))
         data.append([
             e["origen"].replace("_", " ").title(),
-            e["created_at"].strftime("%d/%m/%Y %H:%M"),
+            e_created.strftime("%d/%m/%Y %H:%M") if e_created else "—",
             _fmt_gs(e["monto_pyg"]),
             "En bóveda" if e["estado"] == "en_boveda" else "Depositado",
             e["fecha_deposito"].strftime("%d/%m/%Y") if e.get("fecha_deposito") else "—",
@@ -149,8 +161,10 @@ def generate_cierre_sesion_individual_pdf(
     )
 
     # 1. METADATOS DE LA SESIÓN
-    apertura_str = apertura_dt.strftime("%d/%m/%Y %H:%M:%S") if apertura_dt else "—"
-    cierre_str = cierre_dt.strftime("%d/%m/%Y %H:%M:%S") if cierre_dt else "—"
+    ap_local = _to_asuncion_tz(apertura_dt)
+    ci_local = _to_asuncion_tz(cierre_dt)
+    apertura_str = ap_local.strftime("%d/%m/%Y %H:%M:%S") if ap_local else "—"
+    cierre_str = ci_local.strftime("%d/%m/%Y %H:%M:%S") if ci_local else "—"
     
     meta_data = [
         ["Cajero/a:", s.get("cajero_nombre") or "—", "Caja / Terminal:", s.get("register_nombre") or "—"],
@@ -312,7 +326,8 @@ def generate_cierre_sesion_individual_pdf(
         for cd in cash_drops:
             dt_str = cd.get("created_at")
             if hasattr(dt_str, "strftime"):
-                dt_fmt = dt_str.strftime("%H:%M:%S")
+                dt_loc = _to_asuncion_tz(dt_str)
+                dt_fmt = dt_loc.strftime("%H:%M:%S") if dt_loc else "—"
             else:
                 dt_fmt = str(dt_str)[11:19] if dt_str else "—"
             
@@ -383,7 +398,8 @@ def generate_treasury_remittance_pdf(
     fecha_envio_str = ""
     if remittance.get("fecha_envio"):
         fe = remittance["fecha_envio"]
-        fecha_envio_str = fe.strftime("%d/%m/%Y %H:%M") if hasattr(fe, "strftime") else str(fe)[:16]
+        fe_loc = _to_asuncion_tz(fe) if hasattr(fe, "strftime") else None
+        fecha_envio_str = fe_loc.strftime("%d/%m/%Y %H:%M") if fe_loc else str(fe)[:16]
 
     elements = _company_header(
         company,
