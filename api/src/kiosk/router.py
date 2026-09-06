@@ -9,6 +9,7 @@ from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.kiosk.schemas import (
     KioskBannerCreate, KioskBannerUpdate, KioskBannerResponse, ProductLookupResponse,
+    KioskBrandingResponse,
 )
 from api.src.kiosk import service
 
@@ -32,6 +33,18 @@ async def lookup_product(
 @router.get("/banners/active", response_model=list[KioskBannerResponse])
 async def list_active_banners(company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
     return await service.list_active_banners(db, company_id)
+
+
+@router.get("/branding", response_model=KioskBrandingResponse)
+async def get_branding(company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    """Logo, nombre y cotizaciones para la pantalla del salon.
+
+    Existe porque el verificador no tiene sesion: antes pedia /api/v1/companies,
+    que si requiere login, y desde que ese router se cerro por seguridad las
+    pantallas quedaron sin logo ni cotizaciones (fallando en silencio, ademas
+    de reintentar en bucle). Aca se expone solo lo que la pantalla muestra.
+    """
+    return await service.get_branding(db, company_id)
 
 
 # ── ADMINISTRACION -- panel de marketing, requiere sesion ───────────────────

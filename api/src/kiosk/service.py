@@ -134,3 +134,19 @@ async def delete_banner(db: AsyncSession, banner_id: str) -> bool:
     await db.delete(banner)
     await db.commit()
     return True
+
+
+async def get_branding(db: AsyncSession, company_id: str) -> dict:
+    """Datos de marca para la pantalla del verificador (sin login)."""
+    from api.src.companies.models import Company
+
+    result = await db.execute(select(Company).where(Company.id == uuid.UUID(company_id)))
+    comp = result.scalar_one_or_none()
+    if not comp:
+        return {"nombre": None, "logo_url": None, "currencies": {}}
+    config = comp.config or {}
+    return {
+        "nombre": comp.nombre_fantasia or comp.razon_social,
+        "logo_url": getattr(comp, "logo_url", None),
+        "currencies": config.get("currencies") or {},
+    }

@@ -104,15 +104,28 @@ export default function PriceCheckerKioskPage() {
   // empresa todavia no esta disponible), reintenta a los 5 segundos en vez
   // de esperar el ciclo normal de 5 minutos -- un corte pasajero se
   // autorepara en segundos, no queda la pantalla en blanco mientras tanto.
+  // Un solo reintento pendiente a la vez: antes cada fallo encadenaba un
+  // setTimeout nuevo y ademas el refresco de 5 min arrancaba otra cadena
+  // independiente, sin cancelar las anteriores. Con la pantalla varias horas
+  // prendida y el pedido fallando, se acumulaban decenas de cadenas latiendo
+  // cada 5s (se midieron ~17 pedidos por segundo contra el servidor).
+  const retryCompanyRef = useRef<any>(null)
+  const reintentarCompany = useCallback((fn: () => void) => {
+    if (retryCompanyRef.current) clearTimeout(retryCompanyRef.current)
+    retryCompanyRef.current = setTimeout(fn, 5000)
+  }, [])
+
+  // Se pide al endpoint publico del kiosko y no a /companies: esta pantalla
+  // no tiene sesion, y /companies exige login (por eso quedaba sin logo ni
+  // cotizaciones desde que ese router se cerro por seguridad).
   const fetchCompanyAndCurrencies = useCallback(() => {
-    api.companies.list().then((list) => {
-      const comp = list?.[0]
+    api.kiosk.branding().then((comp) => {
       if (!comp) {
-        setTimeout(fetchCompanyAndCurrencies, 5000)
+        reintentarCompany(fetchCompanyAndCurrencies)
         return
       }
-      setCompany(comp)
-      const dbCurrencies = (comp.config as any)?.currencies
+      setCompany(comp as any)
+      const dbCurrencies = (comp as any)?.currencies
       const base = { BRL: { venta: 0, activo: false }, USD: { venta: 0, activo: false }, ARS: { venta: 0, activo: false } }
       if (dbCurrencies) {
         for (const code of ["BRL", "USD", "ARS"] as const) {
@@ -126,26 +139,36 @@ export default function PriceCheckerKioskPage() {
         }
       }
       setCotizaciones(base)
-    }).catch(() => setTimeout(fetchCompanyAndCurrencies, 5000))
-  }, [])
+    }).catch(() => reintentarCompany(fetchCompanyAndCurrencies))
+  }, [reintentarCompany])
 
   useEffect(() => {
     fetchCompanyAndCurrencies()
     const interval = setInterval(fetchCompanyAndCurrencies, 5 * 60 * 1000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      if (retryCompanyRef.current) clearTimeout(retryCompanyRef.current)
+    }
   }, [fetchCompanyAndCurrencies])
 
   // Banners reales, cargados desde el panel de marketing -- sin fallback
   // inventado: si no hay ninguno cargado, simplemente no se muestra nada ahí.
   // Mismo reintento rapido que arriba ante un corte pasajero.
+  const retryBannersRef = useRef<any>(null)
   const fetchBanners = useCallback(() => {
-    api.kiosk.banners.active().then(setBanners).catch(() => setTimeout(fetchBanners, 5000))
+    api.kiosk.banners.active().then(setBanners).catch(() => {
+      if (retryBannersRef.current) clearTimeout(retryBannersRef.current)
+      retryBannersRef.current = setTimeout(fetchBanners, 5000)
+    })
   }, [])
 
   useEffect(() => {
     fetchBanners()
     const interval = setInterval(fetchBanners, 5 * 60 * 1000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      if (retryBannersRef.current) clearTimeout(retryBannersRef.current)
+    }
   }, [fetchBanners])
 
   useEffect(() => {

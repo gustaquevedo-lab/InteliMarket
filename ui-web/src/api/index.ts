@@ -3022,6 +3022,7 @@ export const api = {
   },
   kiosk: {
     lookup: (code: string) => client.get<KioskProductLookup>("/v1/kiosk/lookup", { code, company_id: COMPANY_ID }),
+    branding: () => client.get<{ nombre: string | null; logo_url: string | null; currencies: Record<string, any> }>("/v1/kiosk/branding", { company_id: COMPANY_ID }),
     banners: {
       active: () => client.get<KioskBanner[]>("/v1/kiosk/banners/active", { company_id: COMPANY_ID }),
       list: () => client.get<KioskBanner[]>("/v1/kiosk/banners"),

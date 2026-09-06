@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime, date
 from uuid import UUID
@@ -79,3 +79,12 @@ class ProductLookupResponse(BaseModel):
     mensaje_dias: Optional[str] = None
     es_activo_hoy: Optional[bool] = True
 
+
+
+class KioskBrandingResponse(BaseModel):
+    """Lo minimo que la pantalla del verificador muestra: logo, nombre y
+    cotizaciones. Se sirve sin login porque son datos que el cliente ya ve
+    en la pantalla del salon -- no hay nada reservado aca."""
+    nombre: Optional[str] = None
+    logo_url: Optional[str] = None
+    currencies: dict = Field(default_factory=dict)
