@@ -712,25 +712,24 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     fecha_ci_str = ci_loc.strftime("%d/%m/%Y %H:%M") if ci_loc else "EN CURSO"
 
     # Terminales / Puntos de emisión operados en esta sesión nómada
-    terminales_res = await db.execute(
-        select(
-            func.substring(Sale.numero, 5, 3).label("punto"),
-            func.count(Sale.id).label("tickets"),
-            func.coalesce(func.sum(Sale.total), 0).label("total"),
-        )
+    sales_num_res = await db.execute(
+        select(Sale.numero, Sale.total)
         .where(
             Sale.session_id == session_obj.id,
             Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
             Sale.numero.isnot(None),
         )
-        .group_by(func.substring(Sale.numero, 5, 3))
-        .order_by(func.count(Sale.id).desc())
     )
-    terminales_operadas = [
-        {"punto": row.punto, "tickets": int(row.tickets), "total": float(row.total)}
-        for row in terminales_res.all()
-        if row.punto
-    ]
+    terms_map: dict[str, dict] = {}
+    for num, tot in sales_num_res.all():
+        if num and "-" in num:
+            parts = num.split("-")
+            pto = parts[1] if len(parts) >= 2 else "001"
+            if pto not in terms_map:
+                terms_map[pto] = {"punto": pto, "tickets": 0, "total": 0.0}
+            terms_map[pto]["tickets"] += 1
+            terms_map[pto]["total"] += float(tot or 0)
+    terminales_operadas = sorted(terms_map.values(), key=lambda x: x["tickets"], reverse=True)
 
     recon_data = {
         "session_id": str(session_obj.id),
