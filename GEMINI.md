@@ -14,3 +14,8 @@
    - Está terminantemente PROHIBIDO ejecutar `git checkout` a otras ramas o hacer `git stash` de cambios sin confirmación previa del usuario.
    - Todo trabajo estable debe consolidarse con commits explícitos (`git commit`), nunca dejarse flotando en el stash.
    - Al iniciar cualquier tarea, se debe verificar que `HEAD` coincida con el último commit de `origin/vertical/supermercado`.
+5. **ZONA HORARIA INMUTABLE (AMERICA/ASUNCION - PARAGUAY):**
+   - Este sistema opera EXCLUSIVAMENTE para Extra Supermercado en Paraguay.
+   - La zona horaria del negocio es SIEMPRE `America/Asuncion` (UTC-4 / UTC-3).
+   - Queda TERMINANTEMENTE PROHIBIDO recortar cadenas de fecha directamente desde UTC (`.slice(0, 10)` en frontend) o imprimir fechas en tickets térmicos o reportes PDF con `.strftime()` en crudo sin convertir a `America/Asuncion`.
+   - Todo filtro de fechas, arqueos de caja, reportes fiscales y tickets de venta DEBEN procesarse sobre la hora local paraguaya.
