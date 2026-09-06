@@ -96,5 +96,7 @@ export function isQzAvailableError(e: any): boolean {
 export async function printRawViaQz(printerName: string, comandos: string): Promise<void> {
   const qz = await ensureQzConnected()
   const config = qz.configs.create(printerName)
-  await qz.print(config, [{ type: "raw", format: "plain", flavor: "plain", data: comandos }])
+  // format debe ser "command" (no "plain": eso es un flavor, y QZ tira
+  // "No enum constant PrintingUtilities.Format.PLAIN")
+  await qz.print(config, [{ type: "raw", format: "command", flavor: "plain", data: comandos }])
 }
