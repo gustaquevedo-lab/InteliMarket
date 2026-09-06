@@ -164,29 +164,45 @@ async def get_template_aprobada(tipo: str, db: AsyncSession = Depends(get_db), u
 
 
 @router.post("/station-token")
-async def generar_token_estacion(user=Depends(require_auth)):
-    """Credencial de larga duracion para una estacion dedicada de etiquetas.
+async def generar_token_estacion(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Credencial de larga duracion para la estacion de etiquetas.
 
-    La estacion del gondolero no debe tener pantalla de login --es una maquina
-    de un solo proposito, operada por alguien que no administra nada-- pero
-    tampoco puede quedar abierta: /qz-sign firma pedidos con la clave privada
-    del servidor, y sin credencial cualquiera en la red del local podria mandar
-    trabajos a las impresoras de la tienda.
+    El objetivo es que el gondolero NUNCA vea una pantalla de login: es una
+    maquina de un solo proposito y quien la opera no administra nada. Pero la
+    estacion tampoco puede quedar abierta, porque /qz-sign firma pedidos con la
+    clave privada del servidor y sin credencial cualquiera en la red del local
+    podria mandar trabajos a las impresoras de la tienda.
 
-    Por eso la credencial se configura UNA vez y no vence, en vez de sacar la
-    autenticacion. El operador nunca ve un login.
+    El token se emite a nombre del usuario ETIQUETADOR, no de quien genera el
+    enlace: si llevara la identidad del administrador, la estacion quedaria con
+    privilegios de administrador colgando de una maquina en la sala.
     """
     from datetime import timedelta
 
+    from sqlalchemy import select as _select
+
     from api.src.auth.jwt import create_access_token
+    from api.src.auth.models import User
+
+    res = await db.execute(
+        _select(User).where(User.rol == "etiquetador", User.activo.is_(True)).order_by(User.created_at)
+    )
+    etiquetador = res.scalars().first()
+    if not etiquetador:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay ningun usuario con rol 'etiquetador' activo. Crealo antes de generar el enlace.",
+        )
 
     token = create_access_token(
         {
-            "sub": str(user.get("id")),
-            "id": str(user.get("id")),
+            "sub": str(etiquetador.id),
+            "id": str(etiquetador.id),
+            "email": etiquetador.email,
+            "rol": etiquetador.rol,
             "company_id": str(user.get("company_id")),
             "estacion": "etiquetas_gondola",
         },
         expires_delta=timedelta(days=1825),  # 5 anios
     )
-    return {"token": token, "ruta": "/etiquetas-gondola"}
+    return {"token": token, "ruta": "/etiquetas-gondola", "usuario": etiquetador.email}

@@ -490,10 +490,12 @@ export default function LabelsPage() {
 
   // Enlace de un solo uso para dejar configurada la estación del gondolero.
   const [enlaceEstacion, setEnlaceEstacion] = useState<string | null>(null)
+  const [usuarioEstacion, setUsuarioEstacion] = useState<string | null>(null)
   const generarEnlaceEstacion = async () => {
     try {
-      const { token, ruta } = await api.labelPrinting.tokenEstacion()
+      const { token, ruta, usuario } = await api.labelPrinting.tokenEstacion() as any
       setEnlaceEstacion(`${window.location.origin}${ruta}?token=${token}`)
+      setUsuarioEstacion(usuario || null)
     } catch (e: any) {
       toast.error("No se pudo generar el enlace", e?.message || "Error desconocido")
     }
@@ -1171,6 +1173,7 @@ export default function LabelsPage() {
                     <p className="text-[10px] text-slate-500 leading-snug">
                       Abrí este enlace <span className="font-bold">una sola vez</span> en la máquina de la Zebra.
                       Queda configurada para siempre y el gondolero nunca ve una pantalla de login.
+                      {usuarioEstacion && <> El acceso es a nombre de <span className="font-bold">{usuarioEstacion}</span>, no del tuyo.</>}
                     </p>
                     <div className="flex gap-1.5">
                       <input readOnly value={enlaceEstacion} onFocus={(e) => e.currentTarget.select()}
