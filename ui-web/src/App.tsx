@@ -200,6 +200,8 @@ function AppRoutes() {
       <Route path="/deposito" element={<Suspense fallback={<PageLoader />}><DepositoRecepcionPage /></Suspense>} />
       <Route path="/dock" element={<Navigate to="/deposito" replace />} />
       <Route path="/pos" element={<ProtectedRoute><Suspense fallback={<PageLoader />}><POSPage /></Suspense></ProtectedRoute>} />
+      {/* Estacion dedicada: pantalla completa, sin el menu del ERP */}
+      <Route path="/etiquetas-gondola" element={<ProtectedRoute><Suspense fallback={<PageLoader />}><GondolaPage /></Suspense></ProtectedRoute>} />
       <Route path="/supervisor" element={<Suspense fallback={<PageLoader />}><SupervisorPage /></Suspense>} />
       <Route path="/pos/supervisor" element={<Navigate to="/supervisor" replace />} />
       <Route
@@ -315,7 +317,6 @@ function AppRoutes() {
         <Route path="forecast-avanzado" element={<Suspense fallback={<PageLoader />}><ForecastAvanzadoPage /></Suspense>} />
         <Route path="benchmarking" element={<Suspense fallback={<PageLoader />}><BenchmarkingPage /></Suspense>} />
         <Route path="ecommerce-sm" element={<Suspense fallback={<PageLoader />}><EcommerceSmPage /></Suspense>} />
-        <Route path="etiquetas-gondola" element={<Suspense fallback={<PageLoader />}><GondolaPage /></Suspense>} />
         <Route path="delivery-integrations" element={<Suspense fallback={<PageLoader />}><DeliveryIntegrationsPage /></Suspense>} />
         <Route path="suscripciones" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="suscripciones"><SuscripcionesPage /></FeatureRoute></Suspense>} />
         <Route path="retail" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="retail"><RetailPage /></FeatureRoute></Suspense>} />

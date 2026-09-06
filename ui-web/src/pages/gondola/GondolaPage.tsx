@@ -32,6 +32,7 @@ export default function GondolaPage() {
   const [diseno, setDiseno] = useState<DisenoGondola>(DISENO_GONDOLA_DEFAULT)
   const [nombreDiseno, setNombreDiseno] = useState<string>("por defecto")
   const inputRef = useRef<HTMLInputElement>(null)
+  const [puedeInstalar, setPuedeInstalar] = useState<any>(null)
 
   useEffect(() => {
     api.labelPrinting.getPrinterConfig("zebra_zpl").then(setPrinterConfig).catch(() => setPrinterConfig(null))
@@ -44,6 +45,23 @@ export default function GondolaPage() {
         }
       })
       .catch(() => {})
+  }, [])
+
+  // Manifiesto propio para que esta pantalla se instale como app aparte.
+  // La PWA principal apunta al depósito, así que sin esto se instalaría esa.
+  useEffect(() => {
+    const link = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null
+    const original = link?.getAttribute("href") || null
+    link?.setAttribute("href", "/etiquetas.webmanifest")
+    const onPrompt = (e: any) => {
+      e.preventDefault()
+      setPuedeInstalar(e)
+    }
+    window.addEventListener("beforeinstallprompt", onPrompt)
+    return () => {
+      if (original) link?.setAttribute("href", original)
+      window.removeEventListener("beforeinstallprompt", onPrompt)
+    }
   }, [])
 
   // El foco vuelve siempre al campo: el lector de código de barras escribe
@@ -155,9 +173,19 @@ export default function GondolaPage() {
           <p className="text-xs text-slate-400 mt-0.5">Escaneá un producto para agregarlo a la cola</p>
           <p className="text-[10px] text-slate-500 mt-0.5">Diseño aprobado: <span className="text-slate-300 font-bold">{nombreDiseno}</span></p>
         </div>
+        <div className="flex items-center gap-4">
+          {puedeInstalar && (
+            <button
+              onClick={async () => { puedeInstalar.prompt(); setPuedeInstalar(null) }}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold cursor-pointer"
+            >
+              Instalar como app
+            </button>
+          )}
         <div className="text-right">
           <div className="text-[10px] uppercase font-bold text-slate-500">En cola</div>
           <div className="text-3xl font-black text-amber-400 tabular-nums">{total}</div>
+        </div>
         </div>
       </div>
 
@@ -175,6 +203,16 @@ export default function GondolaPage() {
           onChange={(e) => setCodigo(e.target.value)}
           placeholder="Escaneá o escribí el código..."
           autoFocus
+          // El Enter se captura explícitamente en vez de confiar en el envío
+          // implícito del formulario: el lector de código de barras manda la
+          // tecla como parte de la ráfaga y el envío implícito no siempre se
+          // dispara, con lo cual el escaneo se perdía sin ningún aviso.
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              agregar(codigo)
+            }
+          }}
           className="w-full pl-14 pr-4 py-5 rounded-2xl bg-slate-900 border-2 border-slate-700 focus:border-amber-500 outline-none text-xl font-mono tracking-wide"
         />
         {buscando && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-6 h-6 animate-spin text-amber-400" />}
