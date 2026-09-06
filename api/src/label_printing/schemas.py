@@ -60,7 +60,12 @@ class LabelTemplateCreate(BaseModel):
     tipo_impresora: str
     nombre: str
     es_default: bool = False
-    campos: LabelTemplateFields
+    # dict libre a proposito: cada impresora tiene su propio conjunto de
+    # parametros de diseno y siguen evolucionando. Con un schema rigido
+    # (LabelTemplateFields) Pydantic descartaba EN SILENCIO todo lo que no
+    # reconocia, asi que aprobar un diseno de gondola guardaba solo los campos
+    # viejos de la Pantum y al recargar volvia a los valores por defecto.
+    campos: dict = Field(default_factory=dict)
 
 
 class LabelTemplateResponse(BaseModel):

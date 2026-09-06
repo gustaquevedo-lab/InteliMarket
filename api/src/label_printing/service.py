@@ -61,7 +61,9 @@ async def create_template(db: AsyncSession, company_id: str, data: LabelTemplate
         tipo_impresora=data.tipo_impresora,
         nombre=data.nombre,
         es_default=data.es_default,
-        campos=data.campos.model_dump(),
+        # campos es un dict libre: cada impresora tiene su propio conjunto
+        # de parametros de diseno y no hay un molde unico que sirva a las dos
+        campos=dict(data.campos or {}),
     )
     db.add(row)
     await db.commit()

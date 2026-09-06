@@ -107,7 +107,10 @@ interface ResolvedItem {
 const DEFAULT_CAMPOS = {
   mostrar_nombre: true,
   mostrar_precio: true,
-  mostrar_escalas: true,
+  // La etiqueta de producto (33x22mm) no tiene lugar para el precio de escala
+  // y el generador TSPL no lo imprime: mostrarlo en la previa seria prometer
+  // algo que no sale. El precio de escala vive en la etiqueta de gondola.
+  mostrar_escalas: false,
   jerarquia_precio: "minorista_gigante" as JerarquiaPrecio,
   mostrar_costo: false,
   mostrar_barcode: true,
@@ -908,145 +911,69 @@ export default function LabelsPage() {
             )}
           </div>
 
-          {/* Card: Control de Escalas y Jerarquía de Precios (NUEVO) */}
+          {/* Card: Contenido de la etiqueta (solo lo que la impresora respeta) */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-orange-500" />
-                <h2 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider font-posDisplay">
-                  2. Jerarquía de Precios en Góndola
-                </h2>
-              </div>
-              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">Escalas & Tamaños</span>
+            <div className="flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-orange-500" />
+              <h2 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider font-posDisplay">
+                2. Contenido de la Etiqueta
+              </h2>
             </div>
 
-            {/* Selector de Jerarquía Visual */}
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase block">
-                ¿Qué precio destacar en tamaño Gigante?
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {[
-                  {
-                    id: "minorista_gigante",
-                    title: "Minorista Gigante",
-                    desc: "1 un. Grande + Mayorista compacto",
-                  },
-                  {
-                    id: "mayorista_gigante",
-                    title: "Mayorista Gigante",
-                    desc: "x3+ Grande + Minorista chico",
-                  },
-                  {
-                    id: "doble_destacado",
-                    title: "Doble Precio",
-                    desc: "50% Minorista / 50% Mayorista",
-                  },
-                ].map((tier) => {
-                  const active = campos.jerarquia_precio === tier.id
-                  return (
-                    <button
-                      key={tier.id}
-                      type="button"
-                      onClick={() => setCampos((c) => ({ ...c, jerarquia_precio: tier.id as JerarquiaPrecio }))}
-                      className={`p-3 rounded-2xl border text-left transition cursor-pointer ${
-                        active
-                          ? "bg-amber-50 dark:bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/20 text-slate-900 dark:text-white"
-                          : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300"
+            {tipoImpresora === "pantum_rollo" ? (
+              <>
+                {/* Solo se ofrece lo que el generador TSPL realmente imprime.
+                    Antes había selectores de jerarquía y sliders de fuente que
+                    esta impresora ignora, y eso confundía al que diseñaba. */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase block">
+                    Texto del encabezado
+                  </label>
+                  <input
+                    type="text"
+                    value={campos.texto_encabezado}
+                    onChange={(e) => setCampos((prev) => ({ ...prev, texto_encabezado: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {[
+                    { key: "mostrar_encabezado", label: "Encabezado" },
+                    { key: "mostrar_nombre", label: "Nombre del producto" },
+                    { key: "mostrar_barcode", label: "Código de barras" },
+                    { key: "mostrar_precio", label: "Precio" },
+                  ].map(({ key, label }) => (
+                    <label
+                      key={key}
+                      className={`flex items-center gap-2 p-2 rounded-xl border transition cursor-pointer ${
+                        (campos as any)[key]
+                          ? "bg-amber-50/50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 text-slate-900 dark:text-white font-bold"
+                          : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400"
                       }`}
                     >
-                      <div className="font-bold text-xs flex items-center justify-between">
-                        <span>{tier.title}</span>
-                        {active && <Check className="w-3.5 h-3.5 text-amber-500" />}
-                      </div>
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{tier.desc}</div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+                      <input
+                        type="checkbox"
+                        checked={(campos as any)[key]}
+                        onChange={(e) => setCampos((prev) => ({ ...prev, [key]: e.target.checked }))}
+                        className="rounded accent-amber-500 w-3.5 h-3.5"
+                      />
+                      <span className="text-[11px] truncate">{label}</span>
+                    </label>
+                  ))}
+                </div>
 
-            {/* Sliders de Tamaño de Fuente */}
-            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
-                  Precio Ppal ({campos.fuente_tamano_precio}pt)
-                </label>
-                <input
-                  type="range"
-                  min={10}
-                  max={24}
-                  step={1}
-                  value={campos.fuente_tamano_precio}
-                  onChange={(e) => setCampos((c) => ({ ...c, fuente_tamano_precio: parseInt(e.target.value, 10) }))}
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
-                  Escala ({campos.fuente_tamano_escala}pt)
-                </label>
-                <input
-                  type="range"
-                  min={6}
-                  max={14}
-                  step={0.5}
-                  value={campos.fuente_tamano_escala}
-                  onChange={(e) => setCampos((c) => ({ ...c, fuente_tamano_escala: parseFloat(e.target.value) }))}
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
-                  Nombre ({campos.fuente_tamano_nombre}pt)
-                </label>
-                <input
-                  type="range"
-                  min={6}
-                  max={12}
-                  step={0.5}
-                  value={campos.fuente_tamano_nombre}
-                  onChange={(e) => setCampos((c) => ({ ...c, fuente_tamano_nombre: parseFloat(e.target.value) }))}
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-              </div>
-            </div>
-
-            {/* Toggles de Campos Visibles */}
-            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase block">
-                Elementos en la Etiqueta:
-              </label>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                {[
-                  { key: "mostrar_escalas", label: "Precios por Escala" },
-                  { key: "mostrar_encabezado", label: "Logo / Encabezado" },
-                  { key: "mostrar_barcode", label: "Código de Barras" },
-                  { key: "mostrar_sku", label: "Código SKU" },
-                  { key: "mostrar_fecha", label: "Fecha de Emisión" },
-                  { key: "mostrar_costo", label: "Costo Oculto" },
-                ].map(({ key, label }) => (
-                  <label
-                    key={key}
-                    className={`flex items-center gap-2 p-2 rounded-xl border transition cursor-pointer ${
-                      (campos as any)[key]
-                        ? "bg-amber-50/50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 text-slate-900 dark:text-white font-bold"
-                        : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={(campos as any)[key]}
-                      onChange={(e) => setCampos((prev) => ({ ...prev, [key]: e.target.checked }))}
-                      className="rounded accent-amber-500 w-3.5 h-3.5"
-                    />
-                    <span className="text-[11px] truncate">{label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
+                <p className="text-[10px] text-slate-400 leading-snug">
+                  La Pantum usa sus propias fuentes y no acepta diseños libres, así que solo se puede
+                  elegir qué elementos aparecen. El tamaño lo ajusta sola para que entre.
+                </p>
+              </>
+            ) : (
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                El diseño de la etiqueta de góndola se ajusta en el panel de la derecha, con vista previa
+                fiel a lo que sale impreso.
+              </p>
+            )}
 
             {/* Selector de Impresora */}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
@@ -1202,6 +1129,7 @@ export default function LabelsPage() {
                   ["mostrar_barcode", "Código de barras"],
                   ["mostrar_escalas", "Precio mayorista"],
                   ["mostrar_fecha", "Fecha de impresión"],
+                  ["mostrar_marco", "Recuadro del borde"],
                 ] as const).map(([k, label]) => (
                   <label key={k} className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer ${
                     (disenoGondola as any)[k] ? "bg-amber-50/50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 font-bold" : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500"}`}>

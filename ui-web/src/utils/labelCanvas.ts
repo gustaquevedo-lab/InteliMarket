@@ -32,6 +32,7 @@ export interface DisenoGondola {
   fuente_precio: number
   mostrar_escalas: boolean
   mostrar_fecha: boolean
+  mostrar_marco: boolean
   fuente_precio_unitario: number
   familia_texto: string
   familia_precio: string
@@ -49,6 +50,7 @@ export const DISENO_GONDOLA_DEFAULT: DisenoGondola = {
   fuente_precio: 72,
   mostrar_escalas: true,
   mostrar_fecha: true,
+  mostrar_marco: false,
   fuente_precio_unitario: 34,
   familia_texto: "Arial Narrow, Arial, sans-serif",
   familia_precio: "Arial Black, Arial, sans-serif",
@@ -105,9 +107,10 @@ export function renderGondola(
   ctx.fillStyle = "#000"
   ctx.strokeStyle = "#000"
 
-  // marco
-  ctx.lineWidth = 3
-  ctx.strokeRect(2, 2, anchoDots - 5, altoDots - 5)
+  if (d.mostrar_marco) {
+    ctx.lineWidth = 3
+    ctx.strokeRect(2, 2, anchoDots - 5, altoDots - 5)
+  }
 
   const anchoPrecio = d.mostrar_precio ? Math.round((anchoDots * d.ancho_precio_pct) / 100) : 0
   const xPrecio = anchoDots - anchoPrecio
@@ -131,47 +134,80 @@ export function renderGondola(
 
   const esc = d.mostrar_escalas ? item.escalas?.[0] : undefined
 
-  // JERARQUIA: el precio de escala es el gancho (es el mas barato), asi que
-  // se lleva el bloque negro. El unitario queda visible pero en segundo plano.
-  // Si el producto no tiene escala, el bloque negro lo ocupa el unitario.
+  // JERARQUIA DE PRECIOS
+  // El mayorista es el gancho (es el mas barato), asi que se lleva la mayor
+  // superficie y el fondo negro. El unitario va arriba en negativo --fondo
+  // blanco, letra negra-- para que se lea claro sin competirle al mayorista.
+  // Cada uno rotulado, para que el cliente no tenga que interpretar.
   if (d.mostrar_precio) {
-    ctx.fillStyle = "#000"
-    ctx.fillRect(xPrecio, 10, anchoPrecio - 16, altoDots - 20)
+    const bx = xPrecio
+    const bw = anchoPrecio - 16
+    const by = 10
+    const bh = altoDots - 20
 
-    const destacado = esc ? esc.precio_unitario : item.precio_venta
-    const rotulo = esc ? `LLEVANDO ${esc.min_qty}+` : "PRECIO"
-
-    ctx.fillStyle = "#fff"
-    ctx.font = `bold 24px ${d.familia_texto}`
-    ctx.fillText(rotulo, xPrecio + 20, 22)
-
-    ctx.font = `bold 22px ${d.familia_precio}`
-    ctx.fillText("Gs.", xPrecio + 20, 56)
-
-    let tam = d.fuente_precio
-    const texto = fmtGs(destacado)
-    ctx.font = `bold ${tam}px ${d.familia_precio}`
-    while (ctx.measureText(texto).width > anchoPrecio - 44 && tam > 24) {
-      tam -= 2
-      ctx.font = `bold ${tam}px ${d.familia_precio}`
+    const ajustar = (texto: string, maximo: number, anchoMax: number, familia: string) => {
+      let t = maximo
+      ctx.font = `bold ${t}px ${familia}`
+      while (ctx.measureText(texto).width > anchoMax && t > 16) {
+        t -= 2
+        ctx.font = `bold ${t}px ${familia}`
+      }
+      return t
     }
-    ctx.fillText(texto, xPrecio + 20, 80)
 
-    // el unitario adentro del bloque solo si se eligió no sacarlo afuera
     if (esc && !d.unitario_afuera) {
-      ctx.font = `bold ${Math.min(d.fuente_precio_unitario, 26)}px ${d.familia_precio}`
-      ctx.fillText(`1 un: Gs. ${fmtGs(item.precio_venta)}`, xPrecio + 20, altoDots - 34)
+      // Bloque partido: 40% unitario en blanco, 60% mayorista en negro.
+      const hUnit = Math.round(bh * 0.4)
+      const hMay = bh - hUnit
+
+      // --- unitario (fondo blanco, letras negras, con borde para delimitar)
+      ctx.fillStyle = "#fff"
+      ctx.fillRect(bx, by, bw, hUnit)
+      ctx.strokeStyle = "#000"
+      ctx.lineWidth = 3
+      ctx.strokeRect(bx + 1, by + 1, bw - 2, hUnit - 2)
+      ctx.fillStyle = "#000"
+      ctx.font = `bold 20px ${d.familia_texto}`
+      ctx.fillText("PRECIO UNITARIO", bx + 14, by + 8)
+      const tu = ajustar(fmtGs(item.precio_venta), d.fuente_precio_unitario, bw - 28, d.familia_precio)
+      ctx.fillText(`Gs. ${fmtGs(item.precio_venta)}`, bx + 14, by + hUnit - tu - 8)
+
+      // --- mayorista (fondo negro, letras blancas)
+      const my = by + hUnit
+      ctx.fillStyle = "#000"
+      ctx.fillRect(bx, my, bw, hMay)
+      ctx.fillStyle = "#fff"
+      ctx.font = `bold 20px ${d.familia_texto}`
+      ctx.fillText(`PRECIO MAYORISTA (${esc.min_qty}+)`, bx + 14, my + 8)
+      const tm = ajustar(fmtGs(esc.precio_unitario), d.fuente_precio, bw - 28, d.familia_precio)
+      ctx.fillText(`Gs. ${fmtGs(esc.precio_unitario)}`, bx + 14, my + hMay - tm - 10)
+      ctx.fillStyle = "#000"
+    } else {
+      // Sin escala (o con el unitario afuera): el bloque negro lleva el precio
+      // que corresponda destacar.
+      const destacado = esc ? esc.precio_unitario : item.precio_venta
+      const rotulo = esc ? `PRECIO MAYORISTA (${esc.min_qty}+)` : "PRECIO UNITARIO"
+      ctx.fillStyle = "#000"
+      ctx.fillRect(bx, by, bw, bh)
+      ctx.fillStyle = "#fff"
+      ctx.font = `bold 22px ${d.familia_texto}`
+      ctx.fillText(rotulo, bx + 16, by + 12)
+      ctx.font = `bold 22px ${d.familia_precio}`
+      ctx.fillText("Gs.", bx + 16, by + 44)
+      const t = ajustar(fmtGs(destacado), d.fuente_precio, bw - 32, d.familia_precio)
+      ctx.fillText(fmtGs(destacado), bx + 16, by + 70)
+      ctx.fillStyle = "#000"
     }
-    ctx.fillStyle = "#000"
   }
 
-  // Unitario afuera del bloque negro: se lee mucho mejor que metido adentro,
-  // y sigue quedando claro que el precio grande es el de escala.
+  // Unitario afuera del bloque: se lee mejor y no le compite al mayorista.
   if (d.mostrar_precio && esc && d.unitario_afuera) {
     ctx.fillStyle = "#000"
+    ctx.font = `bold 20px ${d.familia_texto}`
+    ctx.fillText("PRECIO UNITARIO", 22, y + 2)
     ctx.font = `bold ${d.fuente_precio_unitario}px ${d.familia_precio}`
-    ctx.fillText(`1 un: Gs. ${fmtGs(item.precio_venta)}`, 22, y + 2)
-    y += d.fuente_precio_unitario + 6
+    ctx.fillText(`Gs. ${fmtGs(item.precio_venta)}`, 22, y + 24)
+    y += d.fuente_precio_unitario + 30
   }
 
   // Codigo de barras con su numero: se usa para reponer y para auditar.
