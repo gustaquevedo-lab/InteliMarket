@@ -434,24 +434,53 @@ export default function LabelsPage() {
 
   // Calibracion accesible desde aca y no solo enterrada en Integraciones:
   // quien imprime etiquetas es quien necesita recalibrar si cambia el rollo.
-  const [calibrando, setCalibrando] = useState(false)
-  const handleCalibrar = async () => {
-    setCalibrando(true)
+  // Diagnostico de QZ: dice que impresoras ve realmente en ESTA PC y si el
+  // nombre configurado coincide. Sin esto hay que adivinar por que un trabajo
+  // "se envia" pero no sale nada.
+  const [diagnostico, setDiagnostico] = useState<string | null>(null)
+  const handleDiagnostico = async () => {
+    setDiagnostico("Consultando QZ Tray...")
     try {
-      const { comandos, printer_name } = await api.labelPrinting.calibracion(tipoImpresora)
+      const { listarImpresoras } = await import("../../utils/qzTray")
+      const impresoras = await listarImpresoras()
+      const buscada = printerConfig?.qz_printer_name || "(sin configurar)"
+      const coincide = impresoras.some((i) => i?.toLowerCase() === String(buscada).toLowerCase())
+      setDiagnostico(
+        `Configurada: "${buscada}" -> ${coincide ? "ENCONTRADA" : "NO ESTA EN ESTA PC"}\n\n` +
+        `Impresoras que ve QZ Tray acá:\n${impresoras.map((i) => `  • ${i}`).join("\n") || "  (ninguna)"}`
+      )
+    } catch (e: any) {
+      setDiagnostico(
+        "No se pudo hablar con QZ Tray.\n\n" +
+        (e?.message || String(e)) +
+        "\n\nVerificá que esté instalado y abierto en esta PC (ícono junto al reloj)."
+      )
+    }
+  }
+
+  const [calibrando, setCalibrando] = useState<string | null>(null)
+  const handleCalibrar = async (modo: "regla" | "medio" | "config" | "minimo" = "regla") => {
+    setCalibrando(modo)
+    try {
+      const { comandos, printer_name } = await api.labelPrinting.calibracion(tipoImpresora, modo)
       if (!printer_name) {
         toast.error("Falta el nombre de impresora", "Cargalo en Integraciones > Hardware de Caja y guardá antes de calibrar.")
         return
       }
       const { printRawViaQz } = await import("../../utils/qzTray")
       await printRawViaQz(printer_name, comandos)
-      toast.success("Regla enviada", "Medí con una regla dónde cae la última marca y si el marco coincide con el troquel.")
+      toast.success(
+        modo === "medio" ? "Calibración de medio enviada" : modo === "config" ? "Configuración solicitada" : "Regla enviada",
+        modo === "medio" ? "La impresora va a avanzar papel mientras aprende el paso del rollo."
+          : modo === "config" ? "La impresora imprime su propia hoja de configuración."
+          : "Medí con una regla dónde cae la última marca y si el marco coincide con el troquel."
+      )
     } catch (e: any) {
       toast.error("No se pudo imprimir la regla", e?.message?.includes("connect") || e?.message?.includes("WebSocket")
         ? "Verificá que QZ Tray esté instalado y abierto en esta PC."
         : e?.message || "Error desconocido.")
     } finally {
-      setCalibrando(false)
+      setCalibrando(null)
     }
   }
 
@@ -998,18 +1027,42 @@ export default function LabelsPage() {
                 </button>
               </div>
 
+              <div className="mt-3 grid grid-cols-2 gap-1.5">
+                {([
+                  { modo: "minimo" as const, label: "0. Prueba mínima" },
+                  { modo: "medio" as const, label: "1. Calibrar rollo" },
+                  { modo: "config" as const, label: "2. Ver config" },
+                  { modo: "regla" as const, label: "3. Regla" },
+                ]).map(({ modo, label }) => (
+                  <button
+                    key={modo}
+                    type="button"
+                    onClick={() => handleCalibrar(modo)}
+                    disabled={calibrando !== null}
+                    className="py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1"
+                  >
+                    {calibrando === modo ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1.5 leading-snug">
+                Si cambian de rollo o las etiquetas salen corridas: primero calibrá el rollo (la impresora aprende el troquel),
+                después la regla para medir la escala real.
+              </p>
+
               <button
                 type="button"
-                onClick={handleCalibrar}
-                disabled={calibrando}
-                className="mt-3 w-full py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                onClick={handleDiagnostico}
+                className="mt-2 w-full py-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-[10px] font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
               >
-                {calibrando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sliders className="w-3.5 h-3.5" />}
-                Imprimir regla de calibración
+                ¿Qué impresoras ve QZ Tray en esta PC?
               </button>
-              <p className="text-[10px] text-slate-400 mt-1.5 leading-snug">
-                Imprime una regla milimétrica para verificar que el diseño caiga exacto sobre el troquel. Usala si cambian de rollo o si las etiquetas salen corridas.
-              </p>
+              {diagnostico && (
+                <pre className="mt-2 p-2.5 rounded-xl bg-slate-900 text-slate-100 text-[10px] font-mono whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+{diagnostico}
+                </pre>
+              )}
             </div>
           </div>
         </div>

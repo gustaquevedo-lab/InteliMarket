@@ -34,6 +34,7 @@ class LabelPrinterConfig(Base):
     dpmm_x = Column(Numeric(6, 3), nullable=False, default=8)
     dpmm_y = Column(Numeric(6, 3), nullable=False, default=8)
     offsets_columnas_mm = Column(String(100), nullable=True)
+    offset_vertical_mm = Column(Numeric(6, 2), nullable=False, default=0)
     activa = Column(Boolean, nullable=False, default=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

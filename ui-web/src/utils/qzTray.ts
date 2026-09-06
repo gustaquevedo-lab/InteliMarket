@@ -95,8 +95,36 @@ export function isQzAvailableError(e: any): boolean {
  */
 export async function printRawViaQz(printerName: string, comandos: string): Promise<void> {
   const qz = await ensureQzConnected()
+  await verificarImpresora(printerName)
   const config = qz.configs.create(printerName)
   // format debe ser "command" (no "plain": eso es un flavor, y QZ tira
   // "No enum constant PrintingUtilities.Format.PLAIN")
   await qz.print(config, [{ type: "raw", format: "command", flavor: "plain", data: comandos }])
+}
+
+/** Impresoras que ve QZ Tray en ESTA PC. */
+export async function listarImpresoras(): Promise<string[]> {
+  const qz = await ensureQzConnected()
+  const res = await qz.printers.find()
+  return Array.isArray(res) ? res : [res]
+}
+
+/**
+ * Verifica que la impresora exista en esta PC antes de mandarle nada.
+ *
+ * QZ, si no encuentra el nombre pedido, cae silenciosamente en la impresora
+ * POR DEFECTO ("Matched default printer, skipping further search" en su log).
+ * Eso hace que un trabajo destinado a la Zebra pueda salir por la Pantum --o
+ * peor, por una impresora de papel-- sin ningun aviso. Preferimos fallar con
+ * un mensaje claro que imprimir en el lugar equivocado.
+ */
+export async function verificarImpresora(printerName: string): Promise<void> {
+  const disponibles = await listarImpresoras()
+  const existe = disponibles.some((p) => p?.toLowerCase() === printerName.toLowerCase())
+  if (!existe) {
+    throw new Error(
+      `En esta PC no hay ninguna impresora llamada "${printerName}". ` +
+      `Las disponibles son: ${disponibles.join(", ") || "(ninguna)"}.`
+    )
+  }
 }

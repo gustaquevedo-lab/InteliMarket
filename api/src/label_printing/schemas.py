@@ -22,6 +22,7 @@ class LabelPrinterConfigUpsert(BaseModel):
     dpmm_x: Decimal = Decimal("8")
     dpmm_y: Decimal = Decimal("8")
     offsets_columnas_mm: Optional[str] = None
+    offset_vertical_mm: Decimal = Decimal("0")
     activa: bool = True
 
 

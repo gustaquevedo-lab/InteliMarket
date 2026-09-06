@@ -13,6 +13,9 @@ escala real de cada eje.
 
 from decimal import Decimal
 
+# Ancho maximo del cabezal de la ZD220: 104mm a 203dpi
+MAX_ANCHO_DOTS = 832
+
 
 def _num(v, default=0.0) -> float:
     if v is None:
@@ -62,17 +65,25 @@ def regla_zpl(cfg) -> str:
     alto_mm = _num(getattr(cfg, "alto_mm", None), 30.0)
     dx = _num(getattr(cfg, "dpmm_x", None), 8.0) or 8.0
     dy = _num(getattr(cfg, "dpmm_y", None), 8.0) or 8.0
+    off_x = _num(getattr(cfg, "margen_izquierdo_mm", None), 0.0)
+    off_y = _num(getattr(cfg, "offset_vertical_mm", None), 0.0)
 
     def X(mm): return int(round(mm * dx))
     def Y(mm): return int(round(mm * dy))
 
+    # El cabezal de la ZD220 imprime hasta 104mm (832 dots a 203dpi). Pedirle
+    # mas ancho del que tiene fisicamente hace que rechace el trabajo (la luz
+    # parpadea y no sale nada), asi que se recorta al maximo real.
+    ancho_dots = min(X(ancho_mm), MAX_ANCHO_DOTS)
+
     L = [
         "^XA",
-        f"^PW{X(ancho_mm)}",
+        f"^PW{ancho_dots}",
         f"^LL{Y(alto_mm)}",
-        "^LH0,0",
+        # ^LH corre TODO el contenido: asi se centra sobre el troquel
+        f"^LH{X(off_x)},{Y(off_y)}",
         # marco del tamano declarado: deberia coincidir con el troquel
-        f"^FO0,0^GB{X(ancho_mm)-1},{Y(alto_mm)-1},2^FS",
+        f"^FO0,0^GB{ancho_dots-1},{Y(alto_mm)-1},2^FS",
     ]
     # marcas verticales rotuladas cada 5mm (escala del alto)
     mm = 5.0
@@ -82,9 +93,46 @@ def regla_zpl(cfg) -> str:
         mm += 5.0
     # marcas horizontales rotuladas cada 10mm (escala del ancho)
     mm = 10.0
-    while mm < ancho_mm:
+    while X(mm) < ancho_dots:
         L.append(f"^FO{X(mm)},0^GB3,26,3^FS")
         L.append(f'^FO{X(mm)+5},4^A0N,18,18^FD{mm:g}^FS')
         mm += 10.0
     L.append("^XZ")
     return "".join(L)
+
+
+def calibrar_medio(tipo: str) -> str:
+    """Le pide a la impresora que aprenda el paso del papel que tiene puesto.
+
+    Hace falta cada vez que se cambia de rollo: sin esto la impresora no
+    encuentra el troquel, y algunas (la Zebra) directamente rechazan el
+    trabajo -- parpadean y no imprimen.
+    """
+    if tipo == "zebra_zpl":
+        return "~JC"          # calibracion de medio de Zebra
+    return "GAPDETECT\r\n"   # equivalente en TSPL para la Pantum
+
+
+def config_impresora(tipo: str) -> str:
+    """Imprime la etiqueta de configuracion de la propia impresora.
+
+    Es la fuente mas confiable para saber su resolucion real, el largo de
+    etiqueta que detecto y en que lenguaje esta operando, sin depender de lo
+    que nosotros supongamos.
+    """
+    if tipo == "zebra_zpl":
+        return "~WC"
+    return "SELFTEST\r\n"
+
+
+def prueba_minima(tipo: str) -> str:
+    """El trabajo mas simple posible que la impresora deberia entender.
+
+    Sirve para separar dos causas cuando "no imprime": si esto SALE, el camino
+    (driver, spooler, QZ) esta sano y el problema esta en el contenido que
+    generamos; si NO sale, el problema es el camino y no vale la pena tocar el
+    diseno.
+    """
+    if tipo == "zebra_zpl":
+        return "^XA^FO40,40^A0N,40,40^FDPRUEBA OK^FS^XZ"
+    return 'SIZE 105 mm,22 mm\r\nGAP 2 mm,0\r\nCLS\r\nTEXT 40,40,"3",0,1,1,"PRUEBA OK"\r\nPRINT 1,1\r\n'

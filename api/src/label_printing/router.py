@@ -120,7 +120,7 @@ async def print_pantum(data: PrintPantumRequest, db: AsyncSession = Depends(get_
 
 
 @router.post("/calibracion/{tipo}")
-async def imprimir_regla_calibracion(tipo: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def imprimir_regla_calibracion(tipo: str, modo: str = "regla", db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     """Devuelve los comandos de una regla milimetrica para calibrar.
 
     Se mide con una regla comun sobre la etiqueta impresa: donde cae la ultima
@@ -134,5 +134,12 @@ async def imprimir_regla_calibracion(tipo: str, db: AsyncSession = Depends(get_d
     cfg = await service.get_printer_config(db, user["company_id"], tipo)
     if not cfg:
         raise HTTPException(status_code=400, detail="Esa impresora no esta configurada todavia")
-    comandos = calibracion.regla_tspl(cfg) if tipo == "pantum_rollo" else calibracion.regla_zpl(cfg)
+    if modo == "minimo":
+        comandos = calibracion.prueba_minima(tipo)
+    elif modo == "medio":
+        comandos = calibracion.calibrar_medio(tipo)
+    elif modo == "config":
+        comandos = calibracion.config_impresora(tipo)
+    else:
+        comandos = calibracion.regla_tspl(cfg) if tipo == "pantum_rollo" else calibracion.regla_zpl(cfg)
     return {"comandos": comandos, "printer_name": cfg.qz_printer_name}
