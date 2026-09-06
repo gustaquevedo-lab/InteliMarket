@@ -81,7 +81,21 @@ async def get_open_session(db: AsyncSession, register_id: str) -> CashSession | 
         .order_by(CashSession.fecha_apertura.desc())
         .limit(1)
     )
-    return result.scalar_one_or_none()
+    sess = result.scalar_one_or_none()
+    if not sess:
+        return None
+    # Blindaje contra turnos huérfanos de jornadas anteriores (>16h)
+    ahora_utc = datetime.now(timezone.utc)
+    apertura_utc = sess.fecha_apertura
+    if apertura_utc.tzinfo is None:
+        apertura_utc = apertura_utc.replace(tzinfo=timezone.utc)
+    if (ahora_utc - apertura_utc) > timedelta(hours=16):
+        sess.estado = "cerrada"
+        sess.fecha_cierre = ahora_utc
+        sess.observaciones = (sess.observaciones or "") + " [Cierre automático por vencimiento (>16h)]"
+        await db.commit()
+        return None
+    return sess
 
 
 async def list_sessions(
@@ -234,12 +248,12 @@ async def resume_session(
         return None
 
     prev_reg = str(session_obj.register_id)
-    if register_id and uuid.UUID(register_id) != session_obj.register_id:
-        session_obj.register_id = uuid.UUID(register_id)
+    if register_id and uuid.UUID(str(register_id)) != session_obj.register_id:
+        session_obj.register_id = uuid.UUID(str(register_id))
 
     session_obj.estado = "abierta"
-    ts = datetime.now(timezone.utc).isoformat()
-    nota = f"[{ts}] ▶️ TURNO REANUDADO / ACTIVO en Caja {register_id or prev_reg} (Punto {punto_emision or 'N/A'})"
+    hora_py = datetime.now(TZ_ASUNCION).strftime("%Y-%m-%d %H:%M:%S")
+    nota = f"[{hora_py}] ▶️ TURNO REANUDADO / ACTIVO en Caja {register_id or prev_reg} (Punto {punto_emision or 'N/A'})"
     session_obj.observaciones = f"{session_obj.observaciones}\n{nota}" if session_obj.observaciones else nota
     await db.commit()
     await db.refresh(session_obj)
@@ -247,14 +261,16 @@ async def resume_session(
 
 
 async def open_session(db: AsyncSession, data: dict) -> CashSession:
-    register_id = data["cash_register_id"]
-    user_id = data.get("user_id")
+    raw_reg = data.get("cash_register_id") or data.get("caja_id")
+    register_id = uuid.UUID(str(raw_reg)) if raw_reg else None
+    raw_user = data.get("user_id")
+    user_id = uuid.UUID(str(raw_user)) if raw_user else None
 
     # 1. Si este MISMO usuario ya tiene un turno abierto o pausado, reanudarlo/actualizarlo
     if user_id:
         existing_user_session = await db.execute(
             select(CashSession)
-            .where(CashSession.user_id == uuid.UUID(str(user_id)))
+            .where(CashSession.user_id == user_id)
             .where(CashSession.estado.in_(["abierta", "pausada"]))
             .order_by(CashSession.fecha_apertura.desc())
             .limit(1)
@@ -262,7 +278,10 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
         user_sess = existing_user_session.scalar_one_or_none()
         if user_sess:
             user_sess.estado = "abierta"
-            if register_id:
+            if register_id and user_sess.register_id != register_id:
+                hora_py = datetime.now(TZ_ASUNCION).strftime("%Y-%m-%d %H:%M:%S")
+                nota = f"[{hora_py}] 🔄 Rotación nómada: operando en Caja {register_id}"
+                user_sess.observaciones = f"{user_sess.observaciones}\n{nota}" if user_sess.observaciones else nota
                 user_sess.register_id = register_id
             if data.get("cajero_nombre"):
                 user_sess.cajero_nombre = data.get("cajero_nombre")
@@ -272,11 +291,11 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
             await db.refresh(user_sess)
             return user_sess
 
-    # 2. Si no es el mismo usuario, crear una sesión INDEPENDIENTE y limpia para este cajero
-    user_res = await db.execute(select(User).where(User.id == uuid.UUID(str(user_id)))) if user_id else None
+    # 2. Si no tiene turno previo de hoy, crear una sesión INDEPENDIENTE y limpia para este cajero
+    user_res = await db.execute(select(User).where(User.id == user_id)) if user_id else None
     user_obj = user_res.scalar_one_or_none() if user_res else None
     user_rol = (user_obj.rol if user_obj else "").lower()
-    cajero_nom = (data.get("cajero_nombre") or "").lower()
+    cajero_nom = (data.get("cajero_nombre") or (user_obj.nombre if user_obj else "")).lower()
     is_supervisora = (
         user_rol in ["supervisor", "admin", "administrador"]
         or any(s in cajero_nom for s in ["supervisor", "zunilda", "maristela", "admin"])
@@ -297,7 +316,7 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
     session_obj = CashSession(
         register_id=register_id,
         user_id=user_id,
-        cajero_nombre=data.get("cajero_nombre"),
+        cajero_nombre=data.get("cajero_nombre") or (user_obj.nombre if user_obj else "Cajero"),
         monto_apertura=monto_pyg,
         monto_apertura_usd=Decimal(str(raw_usd or 0)),
         monto_apertura_brl=monto_brl,
@@ -368,7 +387,11 @@ def generate_cierre_escpos(recon: dict) -> dict:
     
     # Metadata
     lines.append(f"Cajero/a:   {recon['cajero_nombre']}")
-    lines.append(f"Caja:       {recon['register_nombre']}")
+    if len(recon.get("terminales_operadas", [])) > 1:
+        pts = ", ".join(f"P.{t['punto']}" for t in recon["terminales_operadas"])
+        lines.append(f"Cajas (Nómada): {pts}")
+    else:
+        lines.append(f"Caja:       {recon['register_nombre']}")
     lines.append(f"Turno ID:   {recon['session_id'][:8].upper()}")
     lines.append(f"Apertura:   {recon['fecha_apertura_str']}")
     lines.append(f"Cierre:     {recon['fecha_cierre_str']}")
@@ -383,6 +406,13 @@ def generate_cierre_escpos(recon: dict) -> dict:
     lines.append("-" * W)
     lines.append(_format_two_col("TOTAL VENTAS COBRADAS:", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
     lines.append("-" * W)
+
+    # Terminales operadas (Modelo Nómada)
+    if len(recon.get("terminales_operadas", [])) > 1:
+        lines.append("[TERMINALES FISICAS OPERADAS]")
+        for t in recon["terminales_operadas"]:
+            lines.append(_format_two_col(f"  Punto {t['punto']} ({t['tickets']} tks):", f"{t['total']:,.0f} Gs.", W))
+        lines.append("-" * W)
     
     # Conciliación
     lines.append("[CONCILIACION EN GUARANIES]")
@@ -681,6 +711,27 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     fecha_ap_str = ap_loc.strftime("%d/%m/%Y %H:%M") if ap_loc else "-"
     fecha_ci_str = ci_loc.strftime("%d/%m/%Y %H:%M") if ci_loc else "EN CURSO"
 
+    # Terminales / Puntos de emisión operados en esta sesión nómada
+    terminales_res = await db.execute(
+        select(
+            func.substring(Sale.numero, 5, 3).label("punto"),
+            func.count(Sale.id).label("tickets"),
+            func.coalesce(func.sum(Sale.total), 0).label("total"),
+        )
+        .where(
+            Sale.session_id == session_obj.id,
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+            Sale.numero.isnot(None),
+        )
+        .group_by(func.substring(Sale.numero, 5, 3))
+        .order_by(func.count(Sale.id).desc())
+    )
+    terminales_operadas = [
+        {"punto": row.punto, "tickets": int(row.tickets), "total": float(row.total)}
+        for row in terminales_res.all()
+        if row.punto
+    ]
+
     recon_data = {
         "session_id": str(session_obj.id),
         "register_id": str(session_obj.register_id),
@@ -712,6 +763,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "diferencia_consolidada_gs": float(diferencia_consolidada_gs),
         "total_ventas_count": sales_row.total_ventas if sales_row else 0,
         "total_cobrado_gs": float(sales_row.total_cobrado if sales_row else 0),
+        "terminales_operadas": terminales_operadas,
         "medios_pago_detallados": desglose_detallado,
     }
 
@@ -734,7 +786,7 @@ async def close_session(
         select(CashSession).where(CashSession.id == uuid.UUID(session_id)).with_for_update()
     )
     session_obj = result.scalar_one_or_none()
-    if not session_obj or session_obj.estado != "abierta":
+    if not session_obj or session_obj.estado not in ("abierta", "pausada"):
         return None
 
     # Registrar el cierre

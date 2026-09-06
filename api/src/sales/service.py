@@ -195,79 +195,117 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     iva_10 = Decimal("0")
     iva_5 = Decimal("0")
 
-    # ── PROTECCIÓN ANTI-HUÉRFANAS: RESOLUCIÓN INTELIGENTE DE SESIÓN ──────
-    effective_session_id = data.session_id
-    if effective_session_id:
-        sess_check = await db.execute(
-            select(CashSession.id, CashSession.estado)
-            .where(CashSession.id == effective_session_id)
-        )
-        sess_row = sess_check.first()
-        if not sess_row or sess_row[1] == "cerrada":
-            # La sesión enviada por el frontend no existe o ya fue cerrada previamente
-            effective_session_id = None
+    # ── PROTECCIÓN ANTI-HUÉRFANAS Y CAJERA NÓMADA: RESOLUCIÓN INTELIGENTE DE SESIÓN ──
+    # Prioridad 1: Si tenemos data.user_id, buscar la sesión ACTIVA ("abierta" o "pausada") del cajero autenticado.
+    # Esto garantiza que cualquier cajera pueda sentarse a operar en cualquier terminal física
+    # manteniendo su gaveta y sesión única de jornada sin interferencias.
+    effective_session_id = None
+    active_user_sess = None
 
-    if not effective_session_id and data.user_id:
-        active_user_sess = await db.execute(
-            select(CashSession.id)
-            .where(CashSession.user_id == data.user_id, CashSession.estado == "abierta")
+    # Detectar la caja física correspondiente al punto de emisión del comprobante (ej: 015 -> Caja 5)
+    punto_emision_code = None
+    if numero and "-" in numero:
+        parts = numero.split("-")
+        if len(parts) >= 2:
+            punto_emision_code = parts[1]  # ej: "015"
+
+    reg_id = None
+    if punto_emision_code:
+        clean_num = punto_emision_code.lstrip("0")
+        reg_res = await db.execute(
+            select(CashRegister.id)
+            .where(
+                CashRegister.activo == True,
+                or_(
+                    CashRegister.codigo.ilike(f"%{punto_emision_code}%"),
+                    CashRegister.nombre.ilike(f"%Caja {clean_num}%") if clean_num else False,
+                )
+            )
+            .limit(1)
+        )
+        reg_id = reg_res.scalar_one_or_none()
+
+    if data.user_id:
+        u_sess_stmt = (
+            select(CashSession)
+            .where(
+                CashSession.user_id == data.user_id,
+                CashSession.estado.in_(["abierta", "pausada"])
+            )
             .order_by(CashSession.fecha_apertura.desc())
             .limit(1)
         )
-        found_sess = active_user_sess.scalar_one_or_none()
-        if found_sess:
-            effective_session_id = found_sess
-        else:
-            # Auto-abrir sesión para que ninguna venta quede huérfana,
-            # buscando la caja que coincide con el punto de emisión del ticket (ej: 015 -> Caja 5)
-            punto_emision_code = None
-            if numero and "-" in numero:
-                parts = numero.split("-")
-                if len(parts) >= 2:
-                    punto_emision_code = parts[1]  # ej: "015"
+        u_sess_res = await db.execute(u_sess_stmt)
+        active_user_sess = u_sess_res.scalar_one_or_none()
 
-            reg_id = None
-            if punto_emision_code:
-                clean_num = punto_emision_code.lstrip("0")
-                reg_res = await db.execute(
-                    select(CashRegister.id)
-                    .where(
-                        CashRegister.activo == True,
-                        or_(
-                            CashRegister.codigo.ilike(f"%{punto_emision_code}%"),
-                            CashRegister.nombre.ilike(f"%Caja {clean_num}%") if clean_num else False,
-                        )
-                    )
-                    .limit(1)
-                )
-                reg_id = reg_res.scalar_one_or_none()
+    if active_user_sess:
+        effective_session_id = active_user_sess.id
+        # Si estaba pausada, se reactiva automáticamente al registrar venta
+        if active_user_sess.estado == "pausada":
+            active_user_sess.estado = "abierta"
+        # Si la cajera rotó a otra terminal física, sincronizar register_id
+        if reg_id and active_user_sess.register_id != reg_id:
+            active_user_sess.register_id = reg_id
+    elif data.session_id:
+        # Si no se encontró por user_id, verificar si la sesión enviada existe y está activa
+        sess_check = await db.execute(
+            select(CashSession)
+            .where(CashSession.id == data.session_id)
+        )
+        sess_row = sess_check.scalar_one_or_none()
+        if sess_row and sess_row.estado in ("abierta", "pausada"):
+            # Si se especificó user_id pero la sesión pertenece a otro usuario, NO contaminar
+            if data.user_id and sess_row.user_id != data.user_id:
+                effective_session_id = None
+            else:
+                effective_session_id = sess_row.id
+                if sess_row.estado == "pausada":
+                    sess_row.estado = "abierta"
+                if reg_id and sess_row.register_id != reg_id:
+                    sess_row.register_id = reg_id
 
-            if not reg_id:
-                # Fallback: primera caja activa de producción
-                reg_res = await db.execute(
-                    select(CashRegister.id)
-                    .where(CashRegister.activo == True)
-                    .order_by(CashRegister.nombre.asc())
-                    .limit(1)
-                )
-                reg_id = reg_res.scalar_one_or_none()
+    # Si aún no tiene sesión y tenemos user_id, auto-abrir la sesión de jornada para el cajero
+    if not effective_session_id and data.user_id:
+        if not reg_id:
+            reg_res = await db.execute(
+                select(CashRegister.id)
+                .where(CashRegister.activo == True)
+                .order_by(CashRegister.nombre.asc())
+                .limit(1)
+            )
+            reg_id = reg_res.scalar_one_or_none()
 
-            if reg_id:
-                u_res = await db.execute(select(User.nombre).where(User.id == data.user_id))
-                u_nombre = u_res.scalar_one_or_none() or "Cajero"
-                auto_sess = CashSession(
-                    register_id=reg_id,
-                    user_id=data.user_id,
-                    cajero_nombre=u_nombre,
-                    monto_apertura=Decimal("0"),
-                    monto_apertura_usd=Decimal("0"),
-                    monto_apertura_brl=Decimal("0"),
-                    estado="abierta",
-                    observaciones=f"Apertura automática de emergencia al emitir comprobante {numero} sin sesión previa.",
-                )
-                db.add(auto_sess)
-                await db.flush()
-                effective_session_id = auto_sess.id
+        if reg_id:
+            u_res = await db.execute(select(User).where(User.id == data.user_id))
+            user_obj = u_res.scalar_one_or_none()
+            user_rol = (user_obj.rol if user_obj else "").lower()
+            u_nombre = user_obj.nombre if user_obj else "Cajero"
+            is_supervisora = (
+                user_rol in ["supervisor", "admin", "administrador"]
+                or any(s in (u_nombre or "").lower() for s in ["supervisor", "zunilda", "maristela", "admin"])
+            )
+            if is_supervisora:
+                m_pyg = Decimal("0")
+                m_brl = Decimal("0.00")
+                m_usd = Decimal("0.00")
+            else:
+                m_pyg = Decimal("500000")
+                m_brl = Decimal("300.00")
+                m_usd = Decimal("0.00")
+
+            auto_sess = CashSession(
+                register_id=reg_id,
+                user_id=data.user_id,
+                cajero_nombre=u_nombre,
+                monto_apertura=m_pyg,
+                monto_apertura_usd=m_usd,
+                monto_apertura_brl=m_brl,
+                estado="abierta",
+                observaciones=f"Apertura automática de turno nómada al emitir comprobante {numero}.",
+            )
+            db.add(auto_sess)
+            await db.flush()
+            effective_session_id = auto_sess.id
 
     # ── Validación de cordura previa para productos pesables (> 300 KG requiere autorización) ──
     for item_data in data.items:
