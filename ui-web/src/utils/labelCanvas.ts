@@ -216,7 +216,8 @@ export function renderGondola(
     const modulos = anchos.reduce((a, b) => a + b, 0)
     const modulo = Math.max(2, Math.floor((anchoTexto - 20) / modulos))
     const altoBarras = 42
-    const yBarras = altoDots - altoBarras - 46
+    // 2mm mas arriba (16 dots): pegado al borde quedaba muy al filo del troquel
+    const yBarras = altoDots - altoBarras - 62
     let x = 22
     anchos.forEach((w, i) => {
       if (i % 2 === 0) ctx.fillRect(x, yBarras, w * modulo, altoBarras)
@@ -230,7 +231,7 @@ export function renderGondola(
   if (d.mostrar_fecha) {
     ctx.font = `bold 20px ${d.familia_texto}`
     const f = new Date().toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "numeric" })
-    ctx.fillText(f, 22, altoDots - 26)
+    ctx.fillText(f, 22, altoDots - 42)
   }
 }
 
