@@ -427,6 +427,10 @@ export default function POSPage() {
     }
     return null
   })
+  const cajaAbiertaRef = useRef<boolean>(cajaAbierta)
+  cajaAbiertaRef.current = cajaAbierta
+  const cashSessionIdRef = useRef<string | null>(cashSessionId)
+  cashSessionIdRef.current = cashSessionId
   const [cashRegisterId, setCashRegisterId] = useState<string | null>(null)
   // Logo real del supermercado para el header -- mismo cache que ya usa el
   // ticket (pos_logo_data_url), asi no se vuelve a bajar por red.
@@ -2297,7 +2301,7 @@ export default function POSPage() {
 
   // ── AGREGAR AL CARRITO ────────────────────────────────────────────────────
   const addToCart = useCallback((product: Product, quantityOverride?: number, origenBalanza?: "balmak_bck30" | "etiqueta_plu") => {
-    if (!cajaAbierta || !cashSessionId) {
+    if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
       toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
       setShowAperturaModal(true)
       return
@@ -2420,7 +2424,7 @@ export default function POSPage() {
     if (promoPrice === null) {
       applyTieredPrice(product.id, newQty, customer.id)
     }
-  }, [currentScaleWeight, cart, customer.id])
+  }, [currentScaleWeight, cart, customer.id, cajaAbierta, cashSessionId])
 
   // ── ESCALA DE PRECIOS POR CANTIDAD (sp_tiered_prices) ──────────────────────
   // Recalcula el precio unitario de la línea no pesable de `productId` contra
@@ -2589,6 +2593,8 @@ export default function POSPage() {
         cashSessionId: session.id,
       }
       localStorage.setItem(userCajaKey, JSON.stringify(registro))
+      cajaAbiertaRef.current = true
+      cashSessionIdRef.current = session.id
       setCashSessionId(session.id)
       setCajaAbierta(true)
       setShowAperturaModal(false)
@@ -2615,6 +2621,8 @@ export default function POSPage() {
           // Si el backend confirma que NO hay sesión activa en base de datos para este usuario,
           // limpiar inmediatamente cualquier residuo local de turnos anteriores
           localStorage.removeItem(userCajaKey)
+          cajaAbiertaRef.current = false
+          cashSessionIdRef.current = null
           setCashSessionId(null)
           setCajaAbierta(false)
           setShowAperturaModal(true)
@@ -2628,6 +2636,8 @@ export default function POSPage() {
           setShowAperturaModal(false)
         } else if (active.estado === "abierta") {
           // Sesión abierta detectada en backend
+          cajaAbiertaRef.current = true
+          cashSessionIdRef.current = active.id
           setCashSessionId(active.id)
           setCajaAbierta(true)
           setShowAperturaModal(false)
@@ -2685,6 +2695,8 @@ export default function POSPage() {
         cashSessionId: targetSession.id,
       }
       localStorage.setItem(userCajaKey, JSON.stringify(registro))
+      cajaAbiertaRef.current = true
+      cashSessionIdRef.current = targetSession.id
       setCashSessionId(targetSession.id)
       setCajaAbierta(true)
       setShowReanudarModal(false)
@@ -3933,7 +3945,7 @@ export default function POSPage() {
   // ── ESCANEO DIRECTO Y DECODIFICACIÓN DE BALANZAS DE GÓNDOLA (EAN-13 PREFIJO 2) ─
   const handleBarcodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!cajaAbierta || !cashSessionId) {
+    if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
       toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
       setShowAperturaModal(true)
       return
@@ -5353,7 +5365,7 @@ export default function POSPage() {
 
   // ── PROCESAMIENTO DE COBRO (FACTURACIÓN E IMPRESIÓN 80MM) ──────────────────
   const handleOpenPayment = () => {
-    if (!cajaAbierta || !cashSessionId) {
+    if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
       toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
       setShowAperturaModal(true)
       return
@@ -5420,7 +5432,7 @@ export default function POSPage() {
   }
 
   const handleProcessCheckout = async () => {
-    if (!cajaAbierta || !cashSessionId) {
+    if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
       toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para emitir comprobantes.")
       setShowAperturaModal(true)
       return
