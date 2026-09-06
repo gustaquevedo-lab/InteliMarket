@@ -3552,7 +3552,7 @@ export default function POSPage() {
     setReimprimirLoading(true)
     setReimprimirError("")
     try {
-      const sessions = await api.caja.sessionsSummary({ estado: "cerrada", limit: 200 })
+      const sessions = await api.caja.sessionsSummary({ estado: "cerrada", limit: 200, fecha_desde: "2026-08-31T00:00:00" })
       setReimprimirSessions(Array.isArray(sessions) ? sessions : [])
     } catch (e) {
       setReimprimirError("No se pudo cargar el historial de cierres de caja.")
