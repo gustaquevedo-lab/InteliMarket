@@ -96,6 +96,26 @@ export default function GondolaPage() {
         mostrar("error", `No encontré ningún producto con "${limpio}"`)
         return
       }
+      // Segunda llamada a propósito: products.list NO trae las escalas de
+      // precio (viven en otra tabla). Sin esto la etiqueta salía siempre sin
+      // el precio mayorista, que es justamente lo que más se destaca.
+      let escalas: { min_qty: number; precio_unitario: number }[] = []
+      try {
+        const resueltos = await api.labelPrinting.resolve({
+          producto_ids: [{ product_id: p.id, cantidad: 1 }],
+        })
+        escalas = ((resueltos?.[0] as any)?.escalas || []).map((e: any) => ({
+          min_qty: Number(e.min_qty),
+          precio_unitario: Number(e.precio_unitario),
+        }))
+      } catch {
+        // si falla, la etiqueta sale igual con el precio unitario
+      }
+      // Solo cuenta como mayorista si de verdad es más barato: hay productos
+      // con una escala cargada al mismo precio, y mostrarla sería engañoso.
+      const precio = Number(p.precio_venta) || 0
+      escalas = escalas.filter((e) => e.precio_unitario > 0 && e.precio_unitario < precio)
+
       setCola((prev) => {
         const ya = prev.find((i) => i.product_id === p.id)
         if (ya) return prev.map((i) => (i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i))
@@ -105,9 +125,9 @@ export default function GondolaPage() {
             nombre: p.nombre,
             sku: p.sku,
             codigo_barra: p.codigo_barra,
-            precio_venta: Number(p.precio_venta) || 0,
+            precio_venta: precio,
             cantidad: 1,
-            escalas: (p as any).escalas || [],
+            escalas,
           },
           ...prev,
         ]
@@ -259,6 +279,11 @@ export default function GondolaPage() {
                 <div className="font-bold truncate">{i.nombre}</div>
                 <div className="text-xs text-slate-400 font-mono">
                   {i.codigo_barra || i.sku} · Gs. {i.precio_venta.toLocaleString("es-PY")}
+                  {i.escalas?.[0] ? (
+                    <span className="text-amber-400"> · {i.escalas[0].min_qty}+ Gs. {i.escalas[0].precio_unitario.toLocaleString("es-PY")}</span>
+                  ) : (
+                    <span className="text-slate-600"> · sin mayorista</span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
