@@ -2297,6 +2297,12 @@ export default function POSPage() {
 
   // ── AGREGAR AL CARRITO ────────────────────────────────────────────────────
   const addToCart = useCallback((product: Product, quantityOverride?: number, origenBalanza?: "balmak_bck30" | "etiqueta_plu") => {
+    if (!cajaAbierta || !cashSessionId) {
+      toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
+      setShowAperturaModal(true)
+      return
+    }
+
     setLastScannedProduct(product)
 
     const isPesable = isPesableProduct(product)
@@ -2604,7 +2610,17 @@ export default function POSPage() {
     let isCancelled = false
     api.caja.sessions.activeUser()
       .then((active) => {
-        if (isCancelled || !active) return
+        if (isCancelled) return
+        if (!active) {
+          // Si el backend confirma que NO hay sesión activa en base de datos para este usuario,
+          // limpiar inmediatamente cualquier residuo local de turnos anteriores
+          localStorage.removeItem(userCajaKey)
+          setCashSessionId(null)
+          setCajaAbierta(false)
+          setShowAperturaModal(true)
+          setActiveUserSessionInfo(null)
+          return
+        }
         setActiveUserSessionInfo(active)
         if (active.estado === "pausada") {
           // Sesión pausada (Modelo A: Relevo / Almuerzo) -> Mostrar modal para reanudar
@@ -2612,10 +2628,10 @@ export default function POSPage() {
           setShowAperturaModal(false)
         } else if (active.estado === "abierta") {
           // Sesión abierta detectada en backend
+          setCashSessionId(active.id)
+          setCajaAbierta(true)
+          setShowAperturaModal(false)
           if (!cashSessionId || cashSessionId !== active.id) {
-            setCashSessionId(active.id)
-            setCajaAbierta(true)
-            setShowAperturaModal(false)
             toast.info(
               "Turno Activo Detectado",
               `Continuando turno de ${active.cajero_nombre || user?.nombre} (${active.total_ventas} ventas hoy).`
@@ -3917,6 +3933,11 @@ export default function POSPage() {
   // ── ESCANEO DIRECTO Y DECODIFICACIÓN DE BALANZAS DE GÓNDOLA (EAN-13 PREFIJO 2) ─
   const handleBarcodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!cajaAbierta || !cashSessionId) {
+      toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
+      setShowAperturaModal(true)
+      return
+    }
     let code = search.trim()
     if (!code) return
 
@@ -5332,6 +5353,11 @@ export default function POSPage() {
 
   // ── PROCESAMIENTO DE COBRO (FACTURACIÓN E IMPRESIÓN 80MM) ──────────────────
   const handleOpenPayment = () => {
+    if (!cajaAbierta || !cashSessionId) {
+      toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
+      setShowAperturaModal(true)
+      return
+    }
     setActiveMethods(new Set(["cash"]))
     setAllowMixedPayment(false)
     setPayCashPyg(totalPyg.toLocaleString("es-PY"))
@@ -5394,6 +5420,11 @@ export default function POSPage() {
   }
 
   const handleProcessCheckout = async () => {
+    if (!cajaAbierta || !cashSessionId) {
+      toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para emitir comprobantes.")
+      setShowAperturaModal(true)
+      return
+    }
     if (saldoRestantePyg > 0 && !(activeMethods.size === 1 && activeMethods.has("qr"))) {
       toast.warning("Saldo Pendiente", `Falta saldar ${formatPYG(saldoRestantePyg)} para completar el cobro.`)
       return
