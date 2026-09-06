@@ -1508,6 +1508,8 @@ export const api = {
     signQzRequest: (request: string) => client.post<{ signature: string }>("/v1/label-printing/qz-sign", { request }),
     printPantum: (data: { items: any[]; campos: Record<string, any> }) =>
       client.post<{ tspl: string; etiquetas: number }>("/v1/label-printing/print/pantum", data),
+    calibracion: (tipo: "pantum_rollo" | "zebra_zpl") =>
+      client.post<{ comandos: string; printer_name: string | null }>(`/v1/label-printing/calibracion/${tipo}`, {}),
   },
   intelifact: {
     getConfig: () => client.get<any | null>("/v1/intelifact/config"),

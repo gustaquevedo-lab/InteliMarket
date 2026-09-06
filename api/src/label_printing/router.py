@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
-from api.src.label_printing import service, qz_signing, tspl
+from api.src.label_printing import service, qz_signing, tspl, calibracion
 from api.src.label_printing.schemas import (
     LabelPrinterConfigUpsert, LabelPrinterConfigResponse,
     LabelTemplateCreate, LabelTemplateResponse,
@@ -117,3 +117,22 @@ async def print_pantum(data: PrintPantumRequest, db: AsyncSession = Depends(get_
     comandos = tspl.generate_tspl(data.items, data.campos, cfg)
     total = sum(max(1, int(i.cantidad or 1)) for i in data.items)
     return PrintPantumResponse(tspl=comandos, etiquetas=total)
+
+
+@router.post("/calibracion/{tipo}")
+async def imprimir_regla_calibracion(tipo: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Devuelve los comandos de una regla milimetrica para calibrar.
+
+    Se mide con una regla comun sobre la etiqueta impresa: donde cae la ultima
+    marca da la escala real del eje, y si el marco coincide con el troquel
+    confirma el tamano declarado. Es la unica forma confiable de sacar los
+    dots/mm -- asumirlos deforma la etiqueta (a la Pantum le medimos 8 en el
+    eje horizontal pero 8.889 en el vertical).
+    """
+    if tipo not in ALLOWED_TIPOS:
+        raise HTTPException(status_code=404, detail="Tipo de impresora desconocido")
+    cfg = await service.get_printer_config(db, user["company_id"], tipo)
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Esa impresora no esta configurada todavia")
+    comandos = calibracion.regla_tspl(cfg) if tipo == "pantum_rollo" else calibracion.regla_zpl(cfg)
+    return {"comandos": comandos, "printer_name": cfg.qz_printer_name}

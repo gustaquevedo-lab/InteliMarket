@@ -132,6 +132,30 @@ export default function IntegrationsPage() {
     if (tab === "hardware") loadLabelPrinters()
   }, [tab, loadLabelPrinters])
 
+  // Imprime una regla milimetrica para medir la escala real de la impresora
+  // contra el papel. Asumir la resolucion en vez de medirla fue lo que hizo
+  // imposible calibrar la Pantum durante toda una sesion.
+  const [calibrando, setCalibrando] = useState<string | null>(null)
+  async function handleCalibrar(tipo: "pantum_rollo" | "zebra_zpl") {
+    setCalibrando(tipo)
+    try {
+      const { comandos, printer_name } = await api.labelPrinting.calibracion(tipo)
+      if (!printer_name) {
+        toast.error("Falta el nombre de impresora", "Cargá el nombre exacto que figura en Windows y guardá antes de calibrar.")
+        return
+      }
+      const { printRawViaQz } = await import("../../utils/qzTray")
+      await printRawViaQz(printer_name, comandos)
+      toast.success("Regla enviada", "Medí con una regla dónde cae la última marca y si el marco coincide con el troquel.")
+    } catch (e: any) {
+      toast.error("No se pudo imprimir la regla", e?.message?.includes("connect") || e?.message?.includes("WebSocket")
+        ? "Verificá que QZ Tray esté instalado y abierto en esta PC."
+        : e?.message || "Error desconocido.")
+    } finally {
+      setCalibrando(null)
+    }
+  }
+
   async function handleSavePantum() {
     setSavingPantum(true)
     try {
@@ -680,6 +704,12 @@ export default function IntegrationsPage() {
                   -- instalalo y dejalo abierto en la PC donde está la Pantum. El nombre debe coincidir exactamente con el que aparece en "Impresoras y escáneres" de Windows.
                   Si se deja vacío, sigue imprimiendo con el diálogo normal del navegador.
                 </p>
+                <div className="flex items-center gap-2">
+                <button onClick={() => handleCalibrar("pantum_rollo")} disabled={calibrando === "pantum_rollo"} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-60 cursor-pointer">
+                  {calibrando === "pantum_rollo" ? <RefreshCcw className="w-4 h-4 animate-spin" /> : null}
+                  Imprimir regla de calibración
+                </button>
+                </div>
                 <button onClick={handleSavePantum} disabled={savingPantum} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold disabled:opacity-60 cursor-pointer">
                   {savingPantum ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   Guardar Pantum
@@ -727,6 +757,12 @@ export default function IntegrationsPage() {
                 {zebraConfig.conexion === "qz_tray" && (
                   <p className="text-[11px] text-gray-500 dark:text-gray-400">Requiere tener <a href="https://qz.io/download/" target="_blank" rel="noreferrer" className="underline font-bold">QZ Tray</a> instalado y corriendo en la PC donde está conectada la Zebra por USB.</p>
                 )}
+                <div className="flex items-center gap-2">
+                <button onClick={() => handleCalibrar("zebra_zpl")} disabled={calibrando === "zebra_zpl"} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-60 cursor-pointer">
+                  {calibrando === "zebra_zpl" ? <RefreshCcw className="w-4 h-4 animate-spin" /> : null}
+                  Imprimir regla de calibración
+                </button>
+                </div>
                 <button onClick={handleSaveZebra} disabled={savingZebra} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold disabled:opacity-60 cursor-pointer">
                   {savingZebra ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   Guardar Zebra
