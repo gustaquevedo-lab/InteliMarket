@@ -432,6 +432,29 @@ export default function LabelsPage() {
     toast.success("Escalas actualizadas", "Se aplicaron los nuevos precios por cantidad para este producto.")
   }
 
+  // Calibracion accesible desde aca y no solo enterrada en Integraciones:
+  // quien imprime etiquetas es quien necesita recalibrar si cambia el rollo.
+  const [calibrando, setCalibrando] = useState(false)
+  const handleCalibrar = async () => {
+    setCalibrando(true)
+    try {
+      const { comandos, printer_name } = await api.labelPrinting.calibracion(tipoImpresora)
+      if (!printer_name) {
+        toast.error("Falta el nombre de impresora", "Cargalo en Integraciones > Hardware de Caja y guardá antes de calibrar.")
+        return
+      }
+      const { printRawViaQz } = await import("../../utils/qzTray")
+      await printRawViaQz(printer_name, comandos)
+      toast.success("Regla enviada", "Medí con una regla dónde cae la última marca y si el marco coincide con el troquel.")
+    } catch (e: any) {
+      toast.error("No se pudo imprimir la regla", e?.message?.includes("connect") || e?.message?.includes("WebSocket")
+        ? "Verificá que QZ Tray esté instalado y abierto en esta PC."
+        : e?.message || "Error desconocido.")
+    } finally {
+      setCalibrando(false)
+    }
+  }
+
   const totalEtiquetas = useMemo(() => items.reduce((sum, i) => sum + i.cantidad, 0), [items])
 
   // ── IMPRESIÓN PANTUM (Rollo N Columnas) ──────────────────────────────────
@@ -974,6 +997,19 @@ export default function LabelsPage() {
                   <div className="text-[10px] text-slate-500">1 Columna · 50×30 mm (ZPL)</div>
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={handleCalibrar}
+                disabled={calibrando}
+                className="mt-3 w-full py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+              >
+                {calibrando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sliders className="w-3.5 h-3.5" />}
+                Imprimir regla de calibración
+              </button>
+              <p className="text-[10px] text-slate-400 mt-1.5 leading-snug">
+                Imprime una regla milimétrica para verificar que el diseño caiga exacto sobre el troquel. Usala si cambian de rollo o si las etiquetas salen corridas.
+              </p>
             </div>
           </div>
         </div>
