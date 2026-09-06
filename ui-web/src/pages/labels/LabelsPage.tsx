@@ -38,6 +38,9 @@ import { api, type Product, type Supplier, type Category } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
 import { renderGondola, DISENO_GONDOLA_DEFAULT, FUENTES_ETIQUETA, type DisenoGondola } from "../../utils/labelCanvas"
+// Estático: ver el comentario en GondolaPage -- el import dinámico rompía la
+// impresión en pestañas abiertas desde antes de un despliegue.
+import { printRawViaQz, listarImpresoras } from "../../utils/qzTray"
 
 // ── GENERADOR CODE128 VECTORIAL NATIVO (100% OFFLINE & ZERO-DEPENDENCY) ─────
 const CODE128_PATTERNS = [
@@ -445,7 +448,6 @@ export default function LabelsPage() {
   const handleDiagnostico = async () => {
     setDiagnostico("Consultando QZ Tray...")
     try {
-      const { listarImpresoras } = await import("../../utils/qzTray")
       const impresoras = await listarImpresoras()
       const buscada = printerConfig?.qz_printer_name || "(sin configurar)"
       const coincide = impresoras.some((i) => i?.toLowerCase() === String(buscada).toLowerCase())
@@ -513,7 +515,6 @@ export default function LabelsPage() {
         toast.error("Falta el nombre de impresora", "Cargalo en Integraciones > Hardware de Caja y guardá antes de calibrar.")
         return
       }
-      const { printRawViaQz } = await import("../../utils/qzTray")
       await printRawViaQz(printer_name, comandos)
       toast.success(
         modo === "medio" ? "Calibración de medio enviada" : modo === "config" ? "Configuración solicitada" : "Regla enviada",
@@ -617,8 +618,7 @@ export default function LabelsPage() {
           })),
           campos,
         })
-        const { printRawViaQz } = await import("../../utils/qzTray")
-        await printRawViaQz(printerConfig.qz_printer_name, tspl)
+          await printRawViaQz(printerConfig.qz_printer_name, tspl)
         toast.success("Impresión Enviada", `Se enviaron ${etiquetas} etiquetas a "${printerConfig.qz_printer_name}".`)
       } catch (e: any) {
         toast.error(

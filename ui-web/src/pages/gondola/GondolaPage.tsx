@@ -2,6 +2,11 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { Barcode, Trash2, Printer, Loader2, CheckCircle2, AlertCircle, Plus, Minus } from "lucide-react"
 import { api } from "../../api"
 import { renderGondola, canvasAZplGrafico, DISENO_GONDOLA_DEFAULT, type DisenoGondola } from "../../utils/labelCanvas"
+// Import estático a propósito: con import dinámico, una estación que quedó
+// abierta desde antes de un despliegue fallaba justo al imprimir ("Failed to
+// fetch dynamically imported module"), porque el chunk cambia de nombre en
+// cada build. Cargarlo junto con la página elimina esa ventana de rotura.
+import { printRawViaQz } from "../../utils/qzTray"
 
 /**
  * Estación de etiquetas de góndola.
@@ -153,12 +158,24 @@ export default function GondolaPage() {
       }
       const zpl = partes.join("")
 
-      const { printRawViaQz } = await import("../../utils/qzTray")
       await printRawViaQz(nombre, zpl)
       mostrar("ok", `${total} etiqueta${total === 1 ? "" : "s"} enviada${total === 1 ? "" : "s"}`)
       setCola([])
     } catch (e: any) {
-      mostrar("error", e?.message || "No se pudo imprimir")
+      // Mensajes por etapa: "no se pudo imprimir" a secas obliga a adivinar
+      // si falló el servidor, QZ Tray o la impresora.
+      const msg = String(e?.message || e)
+      if (msg.includes("dynamically imported module")) {
+        mostrar("error", "Hay una versión nueva del sistema. Recargá la página (Ctrl+Shift+R) y volvé a intentar.")
+      } else if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        mostrar("error", "No se pudo hablar con el servidor. Verificá que la dirección de esta pantalla sea la del sistema (no una copia local) y que haya red.")
+      } else if (msg.includes("WebSocket") || msg.toLowerCase().includes("connect")) {
+        mostrar("error", "QZ Tray no responde en esta PC. Verificá que esté abierto (ícono junto al reloj).")
+      } else if (msg.includes("no hay ninguna impresora")) {
+        mostrar("error", msg)
+      } else {
+        mostrar("error", msg)
+      }
     } finally {
       setImprimiendo(false)
       devolverFoco()
