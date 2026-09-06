@@ -100,7 +100,7 @@ export default function IntegrationsPage() {
   const [dinelcoEnabled, setDinelcoEnabled] = useState(true)
   const [savingDinelco, setSavingDinelco] = useState(false)
 
-  const [pantumConfig, setPantumConfig] = useState({ nombre: "Pantum PT-D160", ancho_mm: 33, alto_mm: 22, columnas: 3, activa: true })
+  const [pantumConfig, setPantumConfig] = useState({ nombre: "Pantum PT-D160", qz_printer_name: "", ancho_mm: 33, alto_mm: 22, columnas: 3, gap_horizontal_mm: 0, gap_vertical_mm: 0, margen_izquierdo_mm: 0, activa: true })
   const [zebraConfig, setZebraConfig] = useState({ nombre: "Zebra ZD-220", conexion: "qz_tray", qz_printer_name: "", host: "", puerto_tcp: 9100, ancho_mm: 50, alto_mm: 30, columnas: 1, activa: true })
   const [loadingPrinters, setLoadingPrinters] = useState(false)
   const [savingPantum, setSavingPantum] = useState(false)
@@ -113,7 +113,11 @@ export default function IntegrationsPage() {
         api.labelPrinting.getPrinterConfig("pantum_rollo").catch(() => null),
         api.labelPrinting.getPrinterConfig("zebra_zpl").catch(() => null),
       ])
-      if (pantum) setPantumConfig({ nombre: pantum.nombre, ancho_mm: Number(pantum.ancho_mm), alto_mm: Number(pantum.alto_mm), columnas: pantum.columnas, activa: pantum.activa })
+      if (pantum) setPantumConfig({
+        nombre: pantum.nombre, qz_printer_name: pantum.qz_printer_name || "", ancho_mm: Number(pantum.ancho_mm), alto_mm: Number(pantum.alto_mm), columnas: pantum.columnas,
+        gap_horizontal_mm: Number(pantum.gap_horizontal_mm || 0), gap_vertical_mm: Number(pantum.gap_vertical_mm || 0), margen_izquierdo_mm: Number(pantum.margen_izquierdo_mm || 0),
+        activa: pantum.activa,
+      })
       if (zebra) setZebraConfig({
         nombre: zebra.nombre, conexion: zebra.conexion || "qz_tray", qz_printer_name: zebra.qz_printer_name || "",
         host: zebra.host || "", puerto_tcp: zebra.puerto_tcp || 9100, ancho_mm: Number(zebra.ancho_mm), alto_mm: Number(zebra.alto_mm),
@@ -638,6 +642,10 @@ export default function IntegrationsPage() {
                     <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Nombre</label>
                     <input type="text" value={pantumConfig.nombre} onChange={(e) => setPantumConfig((p) => ({ ...p, nombre: e.target.value }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs outline-none" />
                   </div>
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Nombre de impresora en QZ Tray / Windows</label>
+                    <input type="text" value={pantumConfig.qz_printer_name} onChange={(e) => setPantumConfig((p) => ({ ...p, qz_printer_name: e.target.value }))} placeholder="Pantum PT-D160" className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
                   <div>
                     <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Ancho etiqueta (mm)</label>
                     <input type="number" value={pantumConfig.ancho_mm} onChange={(e) => setPantumConfig((p) => ({ ...p, ancho_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
@@ -650,8 +658,28 @@ export default function IntegrationsPage() {
                     <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Columnas</label>
                     <input type="number" value={pantumConfig.columnas} onChange={(e) => setPantumConfig((p) => ({ ...p, columnas: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
                   </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Gap horizontal (mm)</label>
+                    <input type="number" step="0.5" value={pantumConfig.gap_horizontal_mm} onChange={(e) => setPantumConfig((p) => ({ ...p, gap_horizontal_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Gap vertical (mm)</label>
+                    <input type="number" step="0.5" value={pantumConfig.gap_vertical_mm} onChange={(e) => setPantumConfig((p) => ({ ...p, gap_vertical_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Margen izquierdo (mm)</label>
+                    <input type="number" step="0.5" value={pantumConfig.margen_izquierdo_mm} onChange={(e) => setPantumConfig((p) => ({ ...p, margen_izquierdo_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
                 </div>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">Se imprime desde el diálogo normal del navegador ("Imprimir") en la PC donde está instalada la Pantum -- no necesita más configuración acá.</p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Gap y margen calibran el troquelado real del rollo (la separación física entre etiquetas) -- probá imprimir y ajustá estos valores hasta que coincida exactamente con los cortes del rollo.
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Con el nombre de impresora completo, se imprime en silencio (sin diálogo de Windows) vía{" "}
+                  <a href="https://qz.io/download/" target="_blank" rel="noreferrer" className="underline font-bold">QZ Tray</a>{" "}
+                  -- instalalo y dejalo abierto en la PC donde está la Pantum. El nombre debe coincidir exactamente con el que aparece en "Impresoras y escáneres" de Windows.
+                  Si se deja vacío, sigue imprimiendo con el diálogo normal del navegador.
+                </p>
                 <button onClick={handleSavePantum} disabled={savingPantum} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold disabled:opacity-60 cursor-pointer">
                   {savingPantum ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   Guardar Pantum

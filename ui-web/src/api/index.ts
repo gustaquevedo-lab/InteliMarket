@@ -1504,6 +1504,10 @@ export const api = {
     deleteTemplate: (id: string) => client.delete<void>(`/v1/label-printing/templates/${id}`),
     resolve: (filtro: Record<string, any>) => client.post<any[]>("/v1/label-printing/resolve", filtro),
     printZebra: (data: { items: any[]; template_id?: string }) => client.post<{ zpl: string; enviado_por_red: boolean }>("/v1/label-printing/print/zebra", data),
+    getQzCertificate: () => client.get<{ certificate: string }>("/v1/label-printing/qz-certificate"),
+    signQzRequest: (request: string) => client.post<{ signature: string }>("/v1/label-printing/qz-sign", { request }),
+    printPantum: (data: { items: any[]; campos: Record<string, any> }) =>
+      client.post<{ tspl: string; etiquetas: number }>("/v1/label-printing/print/pantum", data),
   },
   intelifact: {
     getConfig: () => client.get<any | null>("/v1/intelifact/config"),

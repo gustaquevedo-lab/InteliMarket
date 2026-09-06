@@ -16,6 +16,12 @@ class LabelPrinterConfigUpsert(BaseModel):
     ancho_mm: Decimal
     alto_mm: Decimal
     columnas: int = 1
+    gap_horizontal_mm: Decimal = Decimal("0")
+    gap_vertical_mm: Decimal = Decimal("0")
+    margen_izquierdo_mm: Decimal = Decimal("0")
+    dpmm_x: Decimal = Decimal("8")
+    dpmm_y: Decimal = Decimal("8")
+    offsets_columnas_mm: Optional[str] = None
     activa: bool = True
 
 
@@ -114,3 +120,27 @@ class PrintZebraRequest(BaseModel):
 class PrintZebraResponse(BaseModel):
     zpl: str
     enviado_por_red: bool
+
+
+# ── Identidad digital para QZ Tray (impresión silenciosa) ──────────────────
+
+class QzCertificateResponse(BaseModel):
+    certificate: str
+
+
+class QzSignRequest(BaseModel):
+    request: str
+
+
+class QzSignResponse(BaseModel):
+    signature: str
+
+
+class PrintPantumRequest(BaseModel):
+    items: list[ResolvedLabelItem]
+    campos: dict = Field(default_factory=dict)
+
+
+class PrintPantumResponse(BaseModel):
+    tspl: str
+    etiquetas: int

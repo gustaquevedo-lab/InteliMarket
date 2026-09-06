@@ -6,17 +6,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
-from api.src.label_printing import service
+from api.src.label_printing import service, qz_signing, tspl
 from api.src.label_printing.schemas import (
     LabelPrinterConfigUpsert, LabelPrinterConfigResponse,
     LabelTemplateCreate, LabelTemplateResponse,
     LabelSourceFilter, ResolvedLabelItem,
     PrintZebraRequest, PrintZebraResponse,
+    PrintPantumRequest, PrintPantumResponse,
+    QzSignRequest, QzSignResponse, QzCertificateResponse,
 )
 
 router = APIRouter(prefix="/api/v1/label-printing", tags=["label-printing"])
 
 ALLOWED_TIPOS = {"pantum_rollo", "zebra_zpl"}
+
+
+@router.get("/qz-certificate", response_model=QzCertificateResponse)
+async def get_qz_certificate(user=Depends(require_auth)):
+    """Certificado publico de InteliMarket para QZ Tray -- permite que QZ
+    identifique al sitio de forma persistente en vez de tratarlo como una
+    conexion anonima (con anonima, QZ Tray no deja tildar "Remember")."""
+    return QzCertificateResponse(certificate=qz_signing.get_certificate_pem())
+
+
+@router.post("/qz-sign", response_model=QzSignResponse)
+async def sign_qz_request(data: QzSignRequest, user=Depends(require_auth)):
+    """Firma un pedido de impresion con la clave privada del servidor -- la
+    clave nunca sale de aca, solo la firma resultante viaja al navegador."""
+    return QzSignResponse(signature=qz_signing.sign_request(data.request))
 
 
 @router.get("/printer-config/{tipo}", response_model=LabelPrinterConfigResponse | None)
@@ -77,3 +94,20 @@ async def print_zebra(data: PrintZebraRequest, db: AsyncSession = Depends(get_db
         return PrintZebraResponse(zpl=zpl, enviado_por_red=True)
 
     return PrintZebraResponse(zpl=zpl, enviado_por_red=False)
+
+
+@router.post("/print/pantum", response_model=PrintPantumResponse)
+async def print_pantum(data: PrintPantumRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Genera los comandos TSPL de la cola de etiquetas para la Pantum.
+
+    El frontend los manda tal cual a la impresora via QZ Tray en modo raw. No
+    se rasteriza nada: TSPL posiciona en dots contra la calibracion real del
+    rollo, y el codigo de barras lo dibuja el firmware de la impresora.
+    """
+    cfg = await service.get_printer_config(db, user["company_id"], "pantum_rollo")
+    if not cfg:
+        raise HTTPException(status_code=400, detail="No hay una impresora Pantum configurada para esta empresa")
+
+    comandos = tspl.generate_tspl(data.items, data.campos, cfg)
+    total = sum(max(1, int(i.cantidad or 1)) for i in data.items)
+    return PrintPantumResponse(tspl=comandos, etiquetas=total)

@@ -27,6 +27,13 @@ class LabelPrinterConfig(Base):
     ancho_mm = Column(Numeric(6, 2), nullable=False)
     alto_mm = Column(Numeric(6, 2), nullable=False)
     columnas = Column(Integer, nullable=False, default=1)
+    gap_horizontal_mm = Column(Numeric(6, 2), nullable=False, default=0)
+    gap_vertical_mm = Column(Numeric(6, 2), nullable=False, default=0)
+    margen_izquierdo_mm = Column(Numeric(6, 2), nullable=False, default=0)
+    # Calibracion TSPL medida en la impresora real -- ver label_printing/tspl.py
+    dpmm_x = Column(Numeric(6, 3), nullable=False, default=8)
+    dpmm_y = Column(Numeric(6, 3), nullable=False, default=8)
+    offsets_columnas_mm = Column(String(100), nullable=True)
     activa = Column(Boolean, nullable=False, default=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

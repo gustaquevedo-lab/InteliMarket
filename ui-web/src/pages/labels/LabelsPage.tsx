@@ -122,6 +122,86 @@ const DEFAULT_CAMPOS = {
 
 const MM_TO_PX = 3.7795
 
+// ── RENDERIZADOR ÚNICO DE LA ETIQUETA (HTML autocontenido) ──────────────────
+// Fuente de verdad única para TODO: el simulador en pantalla, la ventana de
+// impresión y el envío a QZ Tray. Así el diseño y lo impreso son siempre
+// exactamente lo mismo -- ver LabelPreviewCell (usa esto para el preview) y
+// handlePrintPantum (usa esto para imprimir).
+function renderLabelCellHtml(item: ResolvedItem, campos: typeof DEFAULT_CAMPOS, anchoMm: number, altoMm: number): string {
+  const anchoPx = anchoMm * MM_TO_PX
+  const altoPx = altoMm * MM_TO_PX
+  const escalaMayorista = item.escalas && item.escalas.length > 0 ? item.escalas[0] : null
+  const escalaFardo = item.escalas && item.escalas.length > 1 ? item.escalas[1] : null
+  const esc = (s: string) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+  let priceBlock = ""
+  if (campos.mostrar_precio) {
+    if (campos.jerarquia_precio === "minorista_gigante") {
+      priceBlock = `
+        <div style="width:100%;background:#0f172a;color:#fff;border-radius:2px;padding:1px 0;text-align:center;display:flex;align-items:center;justify-content:center;gap:2px;">
+          <span style="font-size:5.5px;font-weight:700;">Gs.</span>
+          <span style="font-weight:900;font-size:${campos.fuente_tamano_precio}px;letter-spacing:-0.2px;">${esc(formatPYG(item.precio_venta).replace("₲", "").trim())}</span>
+          <span style="font-size:5px;font-weight:600;color:#cbd5e1;">/un</span>
+        </div>
+        ${campos.mostrar_escalas && escalaMayorista ? `
+        <div style="width:100%;background:#fef3c7;border:1px solid #d97706;color:#451a03;border-radius:2px;padding:0.5px 2px;display:flex;align-items:center;justify-content:space-between;font-weight:900;font-size:${campos.fuente_tamano_escala}px;">
+          <span style="font-weight:700;text-transform:uppercase;font-size:5px;">Llevando ${escalaMayorista.min_qty}+:</span>
+          <span>${esc(formatPYG(escalaMayorista.precio_unitario))} c/u</span>
+        </div>` : ""}
+      `
+    } else if (campos.jerarquia_precio === "mayorista_gigante") {
+      const may = escalaMayorista ? escalaMayorista.precio_unitario : item.precio_venta * 0.9
+      priceBlock = `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:0 2px;color:#1e293b;font-size:5.5px;font-weight:700;">
+          <span>Minorista (1 un):</span>
+          <span style="font-weight:900;">${esc(formatPYG(item.precio_venta))}</span>
+        </div>
+        <div style="width:100%;background:#f59e0b;color:#0f172a;border:1px solid #b45309;border-radius:2px;padding:1px 0;text-align:center;display:flex;align-items:center;justify-content:center;gap:2px;">
+          <span style="font-weight:900;text-transform:uppercase;font-size:5px;">MAYORISTA (${escalaMayorista?.min_qty || 3}+):</span>
+          <span style="font-weight:900;font-size:${campos.fuente_tamano_precio}px;letter-spacing:-0.2px;">${esc(formatPYG(may).replace("₲", "").trim())}</span>
+        </div>
+      `
+    } else {
+      const may = escalaMayorista ? escalaMayorista.precio_unitario : item.precio_venta * 0.9
+      priceBlock = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;width:100%;">
+          <div style="background:#0f172a;color:#fff;border-radius:2px;padding:0.5px;text-align:center;">
+            <div style="font-size:4.5px;font-weight:700;text-transform:uppercase;color:#cbd5e1;">1 Unidad</div>
+            <div style="font-weight:900;font-size:${campos.fuente_tamano_precio * 0.75}px;">${esc(formatPYG(item.precio_venta).replace("₲", "").trim())}</div>
+          </div>
+          <div style="background:#f59e0b;color:#0f172a;border:1px solid #b45309;border-radius:2px;padding:0.5px;text-align:center;">
+            <div style="font-size:4.5px;font-weight:900;text-transform:uppercase;">${escalaMayorista?.min_qty || 3}+ Unidades</div>
+            <div style="font-weight:900;font-size:${campos.fuente_tamano_precio * 0.75}px;">${esc(formatPYG(may).replace("₲", "").trim())}</div>
+          </div>
+        </div>
+      `
+    }
+    if (campos.mostrar_escalas && escalaFardo) {
+      priceBlock += `<div style="font-size:4.5px;text-align:center;font-weight:700;color:#475569;">Pack ${escalaFardo.min_qty}+: ${esc(formatPYG(escalaFardo.precio_unitario))} c/u</div>`
+    }
+  }
+
+  return `
+    <div style="box-sizing:border-box;width:${anchoPx}px;height:${altoPx}px;padding:2.5px 3px;background:#fff;color:#0f172a;display:flex;flex-direction:column;justify-content:space-between;align-items:center;overflow:hidden;font-family:'Helvetica Neue',Arial,sans-serif;">
+      ${campos.mostrar_encabezado ? `<div style="width:100%;text-align:center;letter-spacing:0.5px;border-bottom:1px solid #000;padding-bottom:0.5px;text-transform:uppercase;font-size:5.5px;font-weight:900;">${esc(campos.texto_encabezado || "EXTRA SUPERMERCADO")}</div>` : ""}
+      ${campos.mostrar_nombre ? `<div style="width:100%;text-align:center;line-height:1.05;font-weight:800;text-transform:uppercase;padding:0 1px;margin-top:1px;font-size:${campos.fuente_tamano_nombre}px;max-height:${campos.fuente_tamano_nombre * 2.2}px;overflow:hidden;">${esc(item.nombre)}</div>` : ""}
+      <div style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:0 2px;color:#334155;font-size:5px;font-weight:600;">
+        ${campos.mostrar_sku && item.sku ? `<span>SKU: ${esc(item.sku)}</span>` : ""}
+        ${campos.mostrar_proveedor && item.proveedor_nombre ? `<span style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(item.proveedor_nombre)}</span>` : ""}
+        ${campos.mostrar_fecha ? `<span>${esc(item.fecha || new Date().toISOString().slice(0, 10))}</span>` : ""}
+      </div>
+      ${campos.mostrar_barcode && item.codigo_barra ? `
+        <div style="width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:1px 0;overflow:hidden;">
+          <div style="width:100%;display:flex;justify-content:center;padding:0 2px;">${renderCode128Svg(item.codigo_barra)}</div>
+          <div style="font-family:monospace;text-align:center;letter-spacing:1px;font-size:5.5px;font-weight:700;">${esc(item.codigo_barra)}</div>
+        </div>
+      ` : ""}
+      ${campos.mostrar_precio ? `<div style="width:100%;margin-top:auto;display:flex;flex-direction:column;gap:1px;">${priceBlock}</div>` : ""}
+      ${campos.mostrar_costo && item.costo_unitario != null ? `<div style="font-family:monospace;color:#64748b;text-align:right;width:100%;padding-right:1px;font-size:5px;">Costo: ${esc(formatPYG(item.costo_unitario))}</div>` : ""}
+    </div>
+  `
+}
+
 // ── CELDA DE PREVIEW REALISTA DE ALTA FIDELIDAD ─────────────────────────────
 function LabelPreviewCell({
   item,
@@ -140,9 +220,6 @@ function LabelPreviewCell({
 }) {
   const anchoPx = anchoMm * MM_TO_PX
   const altoPx = altoMm * MM_TO_PX
-
-  const escalaMayorista = item.escalas && item.escalas.length > 0 ? item.escalas[0] : null
-  const escalaFardo = item.escalas && item.escalas.length > 1 ? item.escalas[1] : null
 
   return (
     <div className="relative flex flex-col items-center">
@@ -165,130 +242,13 @@ function LabelPreviewCell({
         }}
       >
         <div
-          className="bg-white flex flex-col justify-between items-center text-slate-900 select-none h-full"
+          className="select-none"
           style={{
-            width: anchoPx,
-            height: altoPx,
-            padding: "2.5px 3px",
             transform: `scale(${scale})`,
             transformOrigin: "top left",
           }}
-        >
-          {/* Encabezado de Fantasía */}
-          {campos.mostrar_encabezado && (
-            <div className="w-full text-center tracking-wider text-slate-900 border-b border-black pb-0.5 uppercase" style={{ fontSize: 5.5, fontWeight: 900 }}>
-              {campos.texto_encabezado || "EXTRA SUPERMERCADO"}
-            </div>
-          )}
-
-          {/* Nombre del Producto */}
-          {campos.mostrar_nombre && (
-            <div
-              className="text-center w-full leading-tight font-black uppercase text-black line-clamp-2 px-0.5 mt-0.5"
-              style={{ fontSize: campos.fuente_tamano_nombre, lineHeight: "1.05" }}
-            >
-              {item.nombre}
-            </div>
-          )}
-
-          {/* Metadata secundaria (SKU / Proveedor / Fecha) */}
-          <div className="flex items-center justify-between w-full px-1 text-slate-700" style={{ fontSize: 5, fontWeight: 600 }}>
-            {campos.mostrar_sku && item.sku && <span>SKU: {item.sku}</span>}
-            {campos.mostrar_proveedor && item.proveedor_nombre && (
-              <span className="truncate max-w-[70px]">{item.proveedor_nombre}</span>
-            )}
-            {campos.mostrar_fecha && <span>{item.fecha || new Date().toISOString().slice(0, 10)}</span>}
-          </div>
-
-          {/* Código de Barras Vectorial Nativo */}
-          {campos.mostrar_barcode && item.codigo_barra && (
-            <div className="w-full flex flex-col items-center justify-center my-0.5 overflow-hidden">
-              <div
-                className="w-full flex justify-center px-1"
-                dangerouslySetInnerHTML={{ __html: renderCode128Svg(item.codigo_barra) }}
-              />
-              <div className="font-mono text-center tracking-widest text-black" style={{ fontSize: 5.5, fontWeight: 700 }}>
-                {item.codigo_barra}
-              </div>
-            </div>
-          )}
-
-          {/* ── BLOQUE DE PRECIOS CON ESCALAS CONFIGURABLES ────────────────────── */}
-          {campos.mostrar_precio && (
-            <div className="w-full mt-auto space-y-0.5">
-              {/* CASO 1: MINORISTA GIGANTE (Mayorista abajo en badge más chico) */}
-              {campos.jerarquia_precio === "minorista_gigante" && (
-                <>
-                  <div className="w-full bg-slate-900 text-white rounded-[2px] py-0.5 text-center flex items-center justify-center gap-1 shadow-xs">
-                    <span style={{ fontSize: 5.5, fontWeight: 700 }}>Gs.</span>
-                    <span className="font-black tracking-tight" style={{ fontSize: campos.fuente_tamano_precio }}>
-                      {formatPYG(item.precio_venta).replace("₲", "").trim()}
-                    </span>
-                    <span style={{ fontSize: 5, fontWeight: 600 }} className="text-slate-300">/un</span>
-                  </div>
-
-                  {campos.mostrar_escalas && escalaMayorista && (
-                    <div className="w-full bg-amber-100 border border-amber-400 text-amber-950 rounded-[2px] px-1 py-0.2 flex items-center justify-between text-center font-black" style={{ fontSize: campos.fuente_tamano_escala }}>
-                      <span className="font-bold uppercase text-[5px]">Llevando {escalaMayorista.min_qty}+:</span>
-                      <span>{formatPYG(escalaMayorista.precio_unitario)} c/u</span>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* CASO 2: MAYORISTA GIGANTE (Para Supermercado Mayorista) */}
-              {campos.jerarquia_precio === "mayorista_gigante" && (
-                <>
-                  <div className="flex items-center justify-between px-1 text-slate-800" style={{ fontSize: 5.5, fontWeight: 700 }}>
-                    <span>Minorista (1 un):</span>
-                    <span className="font-black">{formatPYG(item.precio_venta)}</span>
-                  </div>
-
-                  <div className="w-full bg-amber-500 text-slate-950 rounded-[2px] py-0.5 text-center flex items-center justify-center gap-1 shadow-xs border border-amber-600">
-                    <span className="font-black uppercase" style={{ fontSize: 5 }}>MAYORISTA ({escalaMayorista?.min_qty || 3}+):</span>
-                    <span className="font-black tracking-tight" style={{ fontSize: campos.fuente_tamano_precio }}>
-                      {formatPYG(escalaMayorista ? escalaMayorista.precio_unitario : item.precio_venta * 0.9).replace("₲", "").trim()}
-                    </span>
-                  </div>
-                </>
-              )}
-
-              {/* CASO 3: DOBLE PRECIO EQUITATIVO (50 / 50) */}
-              {campos.jerarquia_precio === "doble_destacado" && (
-                <div className="grid grid-cols-2 gap-1 w-full">
-                  <div className="bg-slate-900 text-white rounded-[2px] p-0.5 text-center">
-                    <div style={{ fontSize: 4.5 }} className="uppercase text-slate-300 font-bold">1 Unidad</div>
-                    <div className="font-black" style={{ fontSize: campos.fuente_tamano_precio * 0.75 }}>
-                      {formatPYG(item.precio_venta).replace("₲", "").trim()}
-                    </div>
-                  </div>
-                  <div className="bg-amber-500 text-slate-950 rounded-[2px] p-0.5 text-center border border-amber-600">
-                    <div style={{ fontSize: 4.5 }} className="uppercase font-black text-slate-900">
-                      {escalaMayorista?.min_qty || 3}+ Unidades
-                    </div>
-                    <div className="font-black" style={{ fontSize: campos.fuente_tamano_precio * 0.75 }}>
-                      {formatPYG(escalaMayorista ? escalaMayorista.precio_unitario : item.precio_venta * 0.9).replace("₲", "").trim()}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Fardo / Escala 2 adicional si existe */}
-              {campos.mostrar_escalas && escalaFardo && (
-                <div className="text-[4.5px] text-center font-bold text-slate-600">
-                  Pack {escalaFardo.min_qty}+: {formatPYG(escalaFardo.precio_unitario)} c/u
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Costo oculto / referencia */}
-          {campos.mostrar_costo && item.costo_unitario != null && (
-            <div className="text-[5px] font-mono text-slate-500 text-right w-full pr-1">
-              Costo: {formatPYG(item.costo_unitario)}
-            </div>
-          )}
-        </div>
+          dangerouslySetInnerHTML={{ __html: renderLabelCellHtml(item, campos, anchoMm, altoMm) }}
+        />
       </div>
 
       {/* Cota Lateral */}
@@ -474,8 +434,46 @@ export default function LabelsPage() {
 
   const totalEtiquetas = useMemo(() => items.reduce((sum, i) => sum + i.cantidad, 0), [items])
 
-  // ── IMPRESIÓN PANTUM (Rollo 3 Columnas) ──────────────────────────────────
-  const handlePrintPantum = () => {
+  // ── IMPRESIÓN PANTUM (Rollo N Columnas) ──────────────────────────────────
+  // Arma la grilla con el MISMO renderer que el simulador (renderLabelCellHtml),
+  // así lo impreso es siempre idéntico a lo que se ve en el diseñador.
+  // gapHMm/gapVMm/margenIzqMm calibran el troquelado real del rollo (la
+  // separación física entre etiquetas y el margen antes de la 1ª columna) --
+  // configurables en Integraciones > Hardware, no hardcodeados.
+  const buildPantumGridHtml = (
+    anchoMm: number,
+    altoMm: number,
+    columnas: number,
+    gapHMm: number,
+    gapVMm: number,
+    margenIzqMm: number
+  ) => {
+    const celdas: ResolvedItem[] = []
+    items.forEach((item) => {
+      for (let i = 0; i < item.cantidad; i++) celdas.push(item)
+    })
+    const filas = Math.ceil(celdas.length / columnas)
+    // El ancho físico de página nunca se achica por un margen negativo -- un
+    // margen negativo solo corre el contenido hacia la izquierda DENTRO del
+    // mismo ancho (compensa un offset mecánico de la impresora), un margen
+    // positivo sí agranda la página para no recortar la última columna.
+    const anchoContenidoMm = columnas * anchoMm + (columnas - 1) * gapHMm
+    const anchoTotalMm = Math.max(0, margenIzqMm) + anchoContenidoMm
+    const altoTotalMm = filas * altoMm + (filas - 1) * gapVMm
+    const cellsHtml = celdas
+      .map((item) => `<div style="width:${anchoMm}mm;height:${altoMm}mm;overflow:hidden;">${renderLabelCellHtml(item, campos, anchoMm, altoMm)}</div>`)
+      .join("")
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>
+      @page { size: ${anchoTotalMm}mm ${altoTotalMm}mm; margin: 0; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: #fff; }
+      .page { width: ${anchoTotalMm}mm; height: ${altoTotalMm}mm; overflow: hidden; }
+      .grid { display: grid; grid-template-columns: repeat(${columnas}, ${anchoMm}mm); column-gap: ${gapHMm}mm; row-gap: ${gapVMm}mm; width: ${anchoContenidoMm}mm; margin-left: ${margenIzqMm}mm; }
+    </style></head><body><div class="page"><div class="grid">${cellsHtml}</div></div></body></html>`
+    return { html, anchoTotalMm, altoTotalMm, count: celdas.length }
+  }
+
+  const handlePrintPantum = async () => {
     if (!items.length) {
       toast.warning("Sin productos", "Agregá al menos un producto antes de imprimir.")
       return
@@ -483,164 +481,59 @@ export default function LabelsPage() {
     const anchoMm = printerConfig?.ancho_mm ? Number(printerConfig.ancho_mm) : 33
     const altoMm = printerConfig?.alto_mm ? Number(printerConfig.alto_mm) : 22
     const columnas = printerConfig?.columnas || 3
-    const anchoTotalMm = anchoMm * columnas
+    const gapHMm = printerConfig?.gap_horizontal_mm ? Number(printerConfig.gap_horizontal_mm) : 0
+    const gapVMm = printerConfig?.gap_vertical_mm ? Number(printerConfig.gap_vertical_mm) : 0
+    const margenIzqMm = printerConfig?.margen_izquierdo_mm ? Number(printerConfig.margen_izquierdo_mm) : 0
+    const { html, anchoTotalMm, altoTotalMm, count } = buildPantumGridHtml(anchoMm, altoMm, columnas, gapHMm, gapVMm, margenIzqMm)
 
-    const celdas: { item: ResolvedItem }[] = []
-    items.forEach((item) => {
-      for (let i = 0; i < item.cantidad; i++) celdas.push({ item })
-    })
+    // Camino real: comandos TSPL nativos vía QZ Tray en modo raw.
+    // El backend arma los comandos contra la calibración medida del rollo
+    // (ver api/src/label_printing/tspl.py). No se rasteriza nada: rasterizar
+    // obliga a pasar por el driver, que reescala el diseño y descalibra la
+    // etiqueta -- es lo que hacía imposible ajustarla.
+    if (printerConfig?.qz_printer_name) {
+      setPrinting(true)
+      try {
+        const { tspl, etiquetas } = await api.labelPrinting.printPantum({
+          items: items.map((i) => ({
+            product_id: i.product_id,
+            nombre: i.nombre,
+            sku: i.sku,
+            codigo_barra: i.codigo_barra,
+            precio_venta: i.precio_venta,
+            costo_unitario: i.costo_unitario,
+            proveedor_nombre: i.proveedor_nombre,
+            cantidad: i.cantidad,
+            escalas: i.escalas,
+          })),
+          campos,
+        })
+        const { printRawViaQz } = await import("../../utils/qzTray")
+        await printRawViaQz(printerConfig.qz_printer_name, tspl)
+        toast.success("Impresión Enviada", `Se enviaron ${etiquetas} etiquetas a "${printerConfig.qz_printer_name}".`)
+      } catch (e: any) {
+        toast.error(
+          "No se pudo imprimir",
+          e?.message?.includes("connect") || e?.message?.includes("WebSocket")
+            ? "Verificá que QZ Tray esté instalado y abierto en esta PC (qz.io/download)."
+            : e?.message || "Error desconocido al enviar el trabajo de impresión."
+        )
+      } finally {
+        setPrinting(false)
+      }
+      return
+    }
 
+    // Camino de respaldo (sin QZ Tray configurado todavía): diálogo nativo del
+    // navegador. Configurá el nombre de la impresora en Integraciones > Hardware
+    // para pasar a impresión silenciosa.
     const win = window.open("", "_blank", "width=800,height=600")
     if (!win) {
       toast.error("Error", "El navegador bloqueó la ventana emergente de impresión.")
       return
     }
-
-    win.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Impresión de Etiquetas — InteliMarket</title>
-          <style>
-            @page { size: ${anchoTotalMm}mm auto; margin: 0; }
-            * { box-sizing: border-box; }
-            body { margin: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background: #fff; }
-            .grid {
-              display: grid;
-              grid-template-columns: repeat(${columnas}, ${anchoMm}mm);
-              width: ${anchoTotalMm}mm;
-            }
-            .cell {
-              width: ${anchoMm}mm;
-              height: ${altoMm}mm;
-              padding: 2px 2.5px;
-              display: flex;
-              flex-direction: column;
-              justify-content: space-between;
-              align-items: center;
-              overflow: hidden;
-              page-break-inside: avoid;
-            }
-            .header-title {
-              font-size: 5.5pt;
-              font-weight: 900;
-              text-align: center;
-              border-bottom: 0.5px solid #000;
-              width: 100%;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-            }
-            .prod-name {
-              font-size: ${campos.fuente_tamano_nombre}pt;
-              font-weight: 800;
-              text-align: center;
-              line-height: 1.05;
-              text-transform: uppercase;
-              max-height: 8mm;
-              overflow: hidden;
-            }
-            .barcode-box {
-              width: 100%;
-              text-align: center;
-              margin: 1px 0;
-            }
-            .barcode-num {
-              font-family: monospace;
-              font-size: 5.5pt;
-              font-weight: 700;
-              letter-spacing: 1px;
-            }
-            .price-pill {
-              background: #000;
-              color: #fff;
-              font-size: ${campos.fuente_tamano_precio}pt;
-              font-weight: 900;
-              border-radius: 2px;
-              width: 100%;
-              text-align: center;
-              padding: 1px 0;
-              line-height: 1;
-            }
-            .scale-pill {
-              background: #fef3c7;
-              border: 0.5px solid #d97706;
-              color: #78350f;
-              font-size: ${campos.fuente_tamano_escala}pt;
-              font-weight: 900;
-              border-radius: 2px;
-              width: 100%;
-              display: flex;
-              justify-content: space-between;
-              padding: 0.5px 2px;
-            }
-            .meta {
-              font-size: 5pt;
-              font-weight: 600;
-              color: #333;
-              display: flex;
-              justify-content: space-between;
-              width: 100%;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="grid">
-            ${celdas
-              .map((c) => {
-                const esc1 = c.item.escalas && c.item.escalas.length > 0 ? c.item.escalas[0] : null
-                return `
-              <div class="cell">
-                ${campos.mostrar_encabezado ? `<div class="header-title">${campos.texto_encabezado || "EXTRA SUPERMERCADO"}</div>` : ""}
-                ${campos.mostrar_nombre ? `<div class="prod-name">${c.item.nombre}</div>` : ""}
-                
-                <div class="meta">
-                  ${campos.mostrar_sku && c.item.sku ? `<span>SKU: ${c.item.sku}</span>` : ""}
-                  ${campos.mostrar_fecha ? `<span>${c.item.fecha || new Date().toISOString().slice(0, 10)}</span>` : ""}
-                </div>
-
-                ${
-                  campos.mostrar_barcode && c.item.codigo_barra
-                    ? `
-                  <div class="barcode-box">
-                    ${renderCode128Svg(c.item.codigo_barra)}
-                    <div class="barcode-num">${c.item.codigo_barra}</div>
-                  </div>
-                `
-                    : ""
-                }
-
-                ${
-                  campos.mostrar_precio
-                    ? `
-                  <div class="price-pill">
-                    <span style="font-size: 5pt; font-weight: 700;">Gs.</span> ${formatPYG(c.item.precio_venta).replace("₲", "").trim()}
-                  </div>
-                  ${
-                    campos.mostrar_escalas && esc1
-                      ? `
-                    <div class="scale-pill">
-                      <span>Llevando ${esc1.min_qty}+:</span>
-                      <span>${formatPYG(esc1.precio_unitario)}</span>
-                    </div>
-                  `
-                      : ""
-                  }
-                `
-                    : ""
-                }
-              </div>
-            `
-              })
-              .join("")}
-          </div>
-          <script>
-            window.onload = function() {
-              setTimeout(function() { window.print(); window.close(); }, 250);
-            }
-          </script>
-        </body>
-      </html>
-    `)
+    toast.info("Sin QZ Tray configurado", "Usando el diálogo de impresión del navegador. Configurá el nombre de la impresora en Integraciones > Hardware para imprimir sin diálogo y al tamaño exacto del rollo.")
+    win.document.write(html.replace("</body>", `<script>window.onload=function(){setTimeout(function(){window.print();window.close();},250);}</script></body>`))
     win.document.close()
   }
 

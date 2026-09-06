@@ -99,3 +99,6 @@ Bancos/
 .claude/
 BALANZA_ELECTRON_DIAGNOSTICO.md
 
+
+# Certificados/claves de firma (QZ Tray, etc.) -- nunca al repo
+secrets/
