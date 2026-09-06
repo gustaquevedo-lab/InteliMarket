@@ -3083,8 +3083,23 @@ export default function POSPage() {
   const [reimprimirSales, setReimprimirSales] = useState<Sale[]>([])
   const [reimprimirReturns, setReimprimirReturns] = useState<any[]>([])
   const [reimprimirSessions, setReimprimirSessions] = useState<any[]>([])
+  const [reimprimirCierreCajero, setReimprimirCierreCajero] = useState("")
+  const [reimprimirCierreFecha, setReimprimirCierreFecha] = useState("")
   const [reimprimirLoading, setReimprimirLoading] = useState(false)
   const [reimprimirError, setReimprimirError] = useState("")
+
+  const filteredReimprimirSessions = useMemo(() => {
+    return reimprimirSessions.filter((s) => {
+      if (reimprimirCierreCajero && s.cajero_nombre !== reimprimirCierreCajero) {
+        return false
+      }
+      if (reimprimirCierreFecha) {
+        const fechaStr = (s.fecha_cierre || s.fecha_apertura || "").slice(0, 10)
+        if (fechaStr !== reimprimirCierreFecha) return false
+      }
+      return true
+    })
+  }, [reimprimirSessions, reimprimirCierreCajero, reimprimirCierreFecha])
 
   const filteredReimprimirSales = useMemo(() => {
     const q = reimprimirSearch.trim().toLowerCase()
@@ -3597,7 +3612,7 @@ export default function POSPage() {
     setReimprimirLoading(true)
     setReimprimirError("")
     try {
-      const sessions = await api.caja.sessionsSummary({ estado: "cerrada", limit: 20 })
+      const sessions = await api.caja.sessionsSummary({ estado: "cerrada", limit: 200 })
       setReimprimirSessions(Array.isArray(sessions) ? sessions : [])
     } catch (e) {
       setReimprimirError("No se pudo cargar el historial de cierres de caja.")
@@ -10688,6 +10703,46 @@ export default function POSPage() {
               </div>
             )}
 
+            {reimprimirTab === "cierres" && (
+              <div className="px-2 pt-2 flex flex-wrap items-center gap-2">
+                <div className="flex-1 min-w-[150px]">
+                  <select
+                    value={reimprimirCierreCajero}
+                    onChange={(e) => setReimprimirCierreCajero(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-amber-500"
+                  >
+                    <option value="">👤 Todas las cajeras ({Array.from(new Set(reimprimirSessions.map((s) => s.cajero_nombre).filter(Boolean))).length})</option>
+                    {Array.from(new Set(reimprimirSessions.map((s) => s.cajero_nombre).filter(Boolean))).map((nombre: any) => (
+                      <option key={nombre} value={nombre}>{nombre}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={reimprimirCierreFecha}
+                    onChange={(e) => setReimprimirCierreFecha(e.target.value)}
+                    title="Filtrar por fecha de cierre"
+                    className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1 text-xs text-slate-900 dark:text-white font-medium outline-none focus:border-amber-500"
+                  />
+                  {(reimprimirCierreCajero || reimprimirCierreFecha) && (
+                    <button
+                      type="button"
+                      onClick={() => { setReimprimirCierreCajero(""); setReimprimirCierreFecha("") }}
+                      className="text-xs text-amber-600 dark:text-amber-400 hover:underline font-bold px-1"
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 ml-auto font-medium">
+                  {filteredReimprimirSessions.length} cierres
+                </div>
+              </div>
+            )}
+
             <div className="overflow-y-auto flex-1 p-2">
               {reimprimirLoading && (
                 <div className="flex items-center justify-center py-12">
@@ -11127,10 +11182,14 @@ export default function POSPage() {
 
               {reimprimirTab === "cierres" && !reimprimirLoading && !reimprimirError && (
                 <>
-                  {reimprimirSessions.length === 0 && (
-                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">No hay cierres de turno anteriores para mostrar.</div>
+                  {filteredReimprimirSessions.length === 0 && (
+                    <div className="text-center text-sm text-slate-500 dark:text-slate-400 py-12">
+                      {reimprimirSessions.length === 0
+                        ? "No hay cierres de turno anteriores para mostrar."
+                        : "No hay cierres que coincidan con los filtros seleccionados."}
+                    </div>
                   )}
-                  {reimprimirSessions.map((ses) => (
+                  {filteredReimprimirSessions.map((ses) => (
                     <div
                       key={ses.id}
                       className="p-3 mx-1 my-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 border border-transparent hover:border-slate-300 dark:hover:border-slate-700"
