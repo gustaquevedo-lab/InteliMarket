@@ -3089,7 +3089,15 @@ export default function POSPage() {
   const [reimprimirError, setReimprimirError] = useState("")
 
   const filteredReimprimirSessions = useMemo(() => {
+    const LEGACY_SESSION_IDS = new Set([
+      "b3cf7fa8-dba3-4859-90d6-4bbac9e72f1c", // Liz Caja 2 legacy 31/08
+      "f8217bfa-484b-419f-a973-f627ad328d99", // Nilda Caja 2 legacy 31/08
+      "6552392f-6844-4ba7-9cce-ca792b52a41b", // Tomasa Caja 4 legacy 31/08
+      "e93a5246-d1de-4de2-b016-b9bb86de0a15", // Zunilda Caja 2 legacy 31/08
+      "0fca771a-860a-4e80-9513-d8ada4f7043d", // Tomasa Caja 2 apertura 29 seg
+    ])
     return reimprimirSessions.filter((s) => {
+      if (LEGACY_SESSION_IDS.has(s.id)) return false
       if (reimprimirCierreCajero && s.cajero_nombre !== reimprimirCierreCajero) {
         return false
       }
