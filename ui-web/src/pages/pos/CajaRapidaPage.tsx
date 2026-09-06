@@ -2574,6 +2574,8 @@ export default function POSPage() {
   const handleConfirmAperturaCaja = async (e: React.FormEvent) => {
     e.preventDefault()
     const fondoPyg = parseInt(montoAperturaPyg.replace(/\D/g, "") || "0", 10)
+    const fondoBrl = parseFloat(montoAperturaBrl.replace(/,/g, ".") || "0") || 300
+    const fondoUsd = parseFloat(montoAperturaUsd.replace(/,/g, ".") || "0") || 0
     setSubmittingApertura(true)
     try {
       const session = await api.caja.sessions.create({
@@ -2581,6 +2583,8 @@ export default function POSPage() {
         user_id: user?.id,
         cajero_nombre: user?.nombre || "Cajero",
         monto_apertura: fondoPyg,
+        monto_apertura_brl: fondoBrl,
+        monto_apertura_usd: fondoUsd,
       })
       const registro = {
         puntoEmision,
@@ -2734,9 +2738,17 @@ export default function POSPage() {
       toast.warning("No hay sesión de caja activa", "")
       return
     }
+    const parseForeignCurr = (v: string): number => {
+      const c = v.trim()
+      if (!c) return 0
+      if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(c)) return parseFloat(c.replace(/\./g, "").replace(",", ".")) || 0
+      if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(c)) return parseFloat(c.replace(/,/g, "")) || 0
+      if (/^\d{1,3}\.\d{3}$/.test(c)) return parseFloat(c.replace(/\./g, "")) || 0
+      return parseFloat(c.replace(/,/g, ".")) || 0
+    }
     const contado = parseInt(montoCierreReal.replace(/\D/g, "") || "0", 10)
-    const contadoUsd = parseFloat(montoCierreUsd.replace(/,/g, ".") || "0") || 0
-    const contadoBrl = parseFloat(montoCierreBrl.replace(/,/g, ".") || "0") || 0
+    const contadoUsd = parseForeignCurr(montoCierreUsd)
+    const contadoBrl = parseForeignCurr(montoCierreBrl)
     const currentSessionId = cashSessionId
     setSubmittingCierre(true)
     try {

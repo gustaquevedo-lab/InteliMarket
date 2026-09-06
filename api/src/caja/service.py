@@ -273,13 +273,28 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
             return user_sess
 
     # 2. Si no es el mismo usuario, crear una sesión INDEPENDIENTE y limpia para este cajero
+    # Regla inmutable: toda cajera no supervisora abre siempre con Gs. 500.000 y R$ 300
+    cajero_nom = (data.get("cajero_nombre") or "").lower()
+    is_supervisora = any(s in cajero_nom for s in ["supervisor", "zunilda", "admin"])
+
+    raw_pyg = data.get("monto_apertura")
+    raw_brl = data.get("monto_apertura_brl")
+    raw_usd = data.get("monto_apertura_usd", 0)
+
+    if is_supervisora:
+        monto_pyg = Decimal(str(raw_pyg or 0))
+        monto_brl = Decimal(str(raw_brl or 0))
+    else:
+        monto_pyg = Decimal(str(raw_pyg)) if raw_pyg is not None and float(raw_pyg) > 0 else Decimal("500000")
+        monto_brl = Decimal(str(raw_brl)) if raw_brl is not None and float(raw_brl) > 0 else Decimal("300.00")
+
     session_obj = CashSession(
         register_id=register_id,
         user_id=user_id,
         cajero_nombre=data.get("cajero_nombre"),
-        monto_apertura=data.get("monto_apertura", 0),
-        monto_apertura_usd=data.get("monto_apertura_usd", 0),
-        monto_apertura_brl=data.get("monto_apertura_brl", 0),
+        monto_apertura=monto_pyg,
+        monto_apertura_usd=Decimal(str(raw_usd or 0)),
+        monto_apertura_brl=monto_brl,
     )
     db.add(session_obj)
     await db.flush()
@@ -588,10 +603,20 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops if d.estado == "confirmado")
     total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
 
-    # Fondos iniciales
+    # Fondos iniciales (Regla inmutable: cajera no supervisora siempre abre con Gs. 500.000 y R$ 300)
+    cajero_nom = (session_obj.cajero_nombre or "").lower()
+    is_supervisora = any(s in cajero_nom for s in ["supervisor", "zunilda", "admin"])
+
     fondo_pyg = Decimal(str(session_obj.monto_apertura or 0))
     fondo_brl = Decimal(str(session_obj.monto_apertura_brl or 0))
     fondo_usd = Decimal(str(session_obj.monto_apertura_usd or 0))
+
+    if not is_supervisora:
+        if fondo_pyg <= 0:
+            fondo_pyg = Decimal("500000")
+        if fondo_brl <= 0:
+            fondo_brl = Decimal("300.00")
+
     fondo_brl_gs = fondo_brl * tasa_brl
     fondo_usd_gs = fondo_usd * tasa_usd
     fondo_total_gs = fondo_pyg + fondo_brl_gs + fondo_usd_gs
