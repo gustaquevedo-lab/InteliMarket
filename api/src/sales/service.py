@@ -16,6 +16,7 @@ from api.src.auth.models import User
 from api.src.caja.models import CashSession, CashRegister
 from api.src.sales.schemas import SaleCreate, SaleUpdate, SaleAddPayment
 from api.src.inventory.models import Stock, StockLot, InventoryMovement
+from api.src.products.models import Product
 from api.src.fiscal import service as fiscal_service
 
 logger = logging.getLogger(__name__)
@@ -268,6 +269,27 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                 await db.flush()
                 effective_session_id = auto_sess.id
 
+    # ── Validación de cordura previa para productos pesables (> 300 KG requiere autorización) ──
+    for item_data in data.items:
+        if item_data.cantidad > Decimal("300"):
+            prod_stmt = select(Product).where(Product.id == item_data.product_id)
+            prod_res = await db.execute(prod_stmt)
+            prod_row = prod_res.scalar_one_or_none()
+            if prod_row and (
+                (prod_row.unidad_medida or "").upper() in ("KG", "KILO", "KILOS")
+                or (prod_row.tipo_venta or "").lower() == "peso"
+            ):
+                if not getattr(data, "override_gran_volumen", False):
+                    raise ValueError(
+                        f"Cantidad inusualmente alta ({item_data.cantidad} KG) para '{prod_row.nombre}'. "
+                        "Pesajes superiores a 300 KG requieren confirmación explícita de supervisor/gerente."
+                    )
+
+    is_credito = (
+        (data.condicion or "").lower() == "credito"
+        or any(p.forma_pago in ("EXTRA_CLUB", "CREDITO") for p in (data.payments or []))
+    )
+
     sale = Sale(
         id=uuid.uuid4(),
         company_id=data.company_id,
@@ -277,7 +299,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         numero=numero,
         numero_interno=numero_interno,
         tipo_comprobante=data.tipo_comprobante,
-        condicion=data.condicion,
+        condicion="credito" if is_credito else (data.condicion or "contado"),
         moneda=data.moneda,
         tipo_cambio=data.tipo_cambio,
         estado="confirmado",
@@ -384,16 +406,18 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             # Fallback seguro: no bloquear la venta si falla el log de donación
             print(f"[DONACIONES] Advertencia registrando donacion: {don_err}")
 
-    if data.condicion == "credito" and data.customer_id:
+    if is_credito:
+        if not data.customer_id:
+            raise ValueError("No se puede registrar una venta a crédito o Extra Club sin un cliente identificado.")
         from api.src.credit_accounts.service import get_credit_check, create_approval_request, process_purchase
         from api.src.credit_accounts.models import CreditAccount
 
-        # ── Pago mixto: solo la porcion EXTRA_CLUB va a credito real -- antes
+        # ── Pago mixto: solo la porcion EXTRA_CLUB / CREDITO va a credito real -- antes
         # esto siempre usaba sale.total entero, asi que una venta mitad
         # efectivo mitad Extra Club le habria descontado el TOTAL de la
         # linea de credito, no solo la parte que realmente se pidio fiado.
         monto_credito = sum(
-            (p.monto for p in data.payments if p.forma_pago == "EXTRA_CLUB"), Decimal("0")
+            (p.monto for p in data.payments if p.forma_pago in ("EXTRA_CLUB", "CREDITO")), Decimal("0")
         ) or sale.total
 
         check = await get_credit_check(db, str(data.company_id), str(data.customer_id), monto_credito)

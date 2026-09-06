@@ -2304,6 +2304,22 @@ export default function POSPage() {
 
     let finalQty = 1
     if (quantityOverride !== undefined) {
+      if (isPesable) {
+        if (quantityOverride >= 1000) {
+          toast.warning(
+            "Posible confusión Gramos / Guaraníes",
+            `Ingresó ${quantityOverride.toLocaleString("es-PY")} KG (${(quantityOverride / 1000).toFixed(3)} Toneladas). Si el cliente lleva ${(quantityOverride / 1000).toFixed(3)} KG, corrija el valor.`
+          )
+          return
+        }
+        if (quantityOverride > 300) {
+          toast.warning(
+            "Cantidad Excesiva (> 300 KG)",
+            `La cantidad ingresada (${quantityOverride} KG) para ${product.nombre} requiere autorización de supervisor para pesajes industriales.`
+          )
+          return
+        }
+      }
       finalQty = quantityOverride
     } else if (isPesable) {
       if (currentScaleWeight > 0.015) {
@@ -2492,8 +2508,23 @@ export default function POSPage() {
 
   const handleConfirmManualWeight = () => {
     if (!targetWeighProduct) return
-    const w = parseFloat(manualWeightInput.replace(/,/g, "."))
+    const clean = manualWeightInput.replace(/,/g, ".").trim()
+    const w = parseFloat(clean)
     if (!isNaN(w) && w > 0) {
+      if (w >= 1000) {
+        toast.warning(
+          "Posible confusión Gramos / Guaraníes",
+          `Ingresó ${w.toLocaleString("es-PY")} KG (${(w / 1000).toFixed(3)} Toneladas). Si el cliente lleva ${(w / 1000).toFixed(3)} KG, ingrese ${(w / 1000).toFixed(3)}.`
+        )
+        return
+      }
+      if (w > 300) {
+        toast.warning(
+          "Cantidad Excesiva (> 300 KG)",
+          `El peso ingresado (${w} KG) excede 300 KG. Requiere autorización de supervisor para pesajes industriales.`
+        )
+        return
+      }
       addToCart(targetWeighProduct, w)
       setShowManualWeightModal(false)
       setTargetWeighProduct(null)
@@ -4402,6 +4433,10 @@ export default function POSPage() {
       const res = await api.auth.verifySupervisor({ email: supervisorEmail, password: supervisorPin })
       if (!res?.valid) {
         toast.warning("Autorización Rechazada", "Contraseña incorrecta o la cuenta no tiene nivel de supervisor.")
+        return
+      }
+      if (res?.id && user?.id && res.id === user.id) {
+        toast.error("Auto-autorización no permitida", "El cajero que opera la caja no puede autorizarse a sí mismo. Debe autorizar otro supervisor o gerente.")
         return
       }
       setShowSupervisorModal(false)

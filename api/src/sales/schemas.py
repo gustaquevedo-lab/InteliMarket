@@ -42,6 +42,7 @@ class SaleCreate(BaseModel):
     recibo_html: Optional[str] = None
     recibo_escpos_b64: Optional[str] = None
     admin_override_credito: bool = False
+    override_gran_volumen: bool = False
     monto_donacion: Optional[Decimal] = Decimal("0")
     donacion_campana: Optional[str] = None
     donacion_ong: Optional[str] = None
