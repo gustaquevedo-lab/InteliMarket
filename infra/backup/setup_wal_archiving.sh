@@ -35,7 +35,9 @@ echo "==> 1/5 Creando directorios de archivado..."
 mkdir -p "$ARCHIVE_DIR" "$BASE_DIR"
 chown postgres:"$USUARIO" "$ARCHIVE_DIR"
 chmod 2770 "$ARCHIVE_DIR"
-chown root:"$USUARIO" "$BASE_DIR"
+# Quien ESCRIBE la copia fisica es postgres (pg_basebackup corre como ese
+# usuario), no root. Ponerlo como root:intellihouse da "Permission denied".
+chown postgres:"$USUARIO" "$BASE_DIR"
 chmod 2770 "$BASE_DIR"
 echo "    $ARCHIVE_DIR y $BASE_DIR listos."
 
