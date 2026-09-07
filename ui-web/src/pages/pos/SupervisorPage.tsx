@@ -12,7 +12,6 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { useTheme } from "../../context/ThemeContext"
 import { api, COMPANY_ID } from "../../api"
-import { applyPwaUpdateIfPending } from "../../utils/pwaUpdate"
 
 const SUPERVISOR_ROLES = ["supervisor", "admin"]
 
@@ -987,7 +986,7 @@ try {
   const handleLogout = async () => {
     try { await api.auth.endPosShift() } catch {}
     logout()
-    applyPwaUpdateIfPending()
+    window.location.reload()
     setSelectedStaff(null)
     setLoginPassword("")
   }

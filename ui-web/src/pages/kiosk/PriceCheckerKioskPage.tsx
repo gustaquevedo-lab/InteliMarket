@@ -5,7 +5,6 @@ import {
 } from "lucide-react"
 import { api, type KioskProductLookup, type KioskBanner, type Company } from "../../api"
 import { useTheme } from "../../context/ThemeContext"
-import { useRegisterSW } from "virtual:pwa-register/react"
 
 // Banderas SVG en alta definición
 function FlagBR() {
@@ -183,43 +182,22 @@ export default function PriceCheckerKioskPage() {
     return () => clearInterval(clock)
   }, [])
 
-  // Auto-actualizacion real del Service Worker -- el registro global (usado
-  // tambien por el POS) es registerType:'prompt' a proposito, para no
-  // interrumpir una venta en curso: solo avisa con un toast y espera a que
-  // alguien cierre sesion. Esta pantalla nunca tiene una venta en curso, asi
-  // que un simple window.location.reload() (como se hacia antes) NO
-  // alcanzaba -- el Service Worker activo seguia siendo el viejo, sirviendo
-  // los mismos assets cacheados de siempre pase lo que pase. Se necesita
-  // updateServiceWorker(true) (skipWaiting real) para que la version nueva
-  // tome control. Se revisa periodicamente y se aplica en cuanto la pantalla
-  // esta idle (nadie mirando un precio), sin esperar a la madrugada.
-  const { needRefresh, updateServiceWorker } = useRegisterSW({
-    immediate: true,
-    onRegisteredSW(_swUrl, registration) {
-      if (!registration) return
-      setInterval(() => registration.update().catch(() => {}), 5 * 60 * 1000)
-    },
-  })
+  // Auto-actualizacion -- esta pantalla se sirve por HTTP plano en la LAN
+  // (http://192.168.0.10:5173/verificador, nunca HTTPS), asi que el
+  // Service Worker/PWA NUNCA se registra aca (el navegador lo bloquea fuera
+  // de un contexto seguro) -- toda la logica de updateServiceWorker() de
+  // versiones anteriores era codigo muerto, jamas pudo tener efecto en esta
+  // terminal. El servidor ya manda `Cache-Control: no-cache` en `/` y
+  // `/verificador` (confirmado con curl), asi que no hace falta nada mas
+  // sofisticado que recargar la pagina de tanto en tanto mientras esta
+  // idle -- un reload comun ya trae el build mas nuevo, sin ningun
+  // obstaculo de cache de por medio.
   useEffect(() => {
     const idle = !scannedProduct && !notFoundCode && !connError
-    if (needRefresh[0] && idle) {
-      updateServiceWorker(true)
-    }
-  }, [needRefresh, scannedProduct, notFoundCode, connError, updateServiceWorker])
-
-  // Recarga de respaldo a la madrugada -- por si algo dejo la pestaña en un
-  // estado raro que el chequeo de arriba no pudo destrabar solo.
-  const reloadedRef = useRef(false)
-  useEffect(() => {
-    const hour = currentTime.getHours()
-    const minute = currentTime.getMinutes()
-    const idle = !scannedProduct && !notFoundCode && !connError
-    if (hour === 4 && minute === 0 && idle && !reloadedRef.current) {
-      reloadedRef.current = true
-      window.location.reload()
-    }
-    if (hour !== 4) reloadedRef.current = false
-  }, [currentTime, scannedProduct, notFoundCode, connError])
+    if (!idle) return
+    const t = setTimeout(() => window.location.reload(), 10 * 60 * 1000)
+    return () => clearTimeout(t)
+  }, [scannedProduct, notFoundCode, connError])
 
   const resetToStandby = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)

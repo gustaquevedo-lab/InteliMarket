@@ -9,7 +9,6 @@ import {
 } from "lucide-react"
 import { api, type PurchaseOrder, type Product } from "../../api"
 import { useAuth } from "../../context/AuthContext"
-import { applyPwaUpdateIfPending } from "../../utils/pwaUpdate"
 import { useToast } from "../../context/ToastContext"
 import { useTheme } from "../../context/ThemeContext"
 import { formatPYG, formatDate } from "../../utils/format"
@@ -808,7 +807,7 @@ export default function DepositoRecepcionPage() {
               onClick={() => {
                 if (window.confirm("¿Cerrar sesión de depósito?")) {
                   logout()
-                  applyPwaUpdateIfPending()
+                  window.location.reload()
                 }
               }}
               className="p-2.5 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-red-500 active:scale-95 transition-all"

@@ -13,7 +13,6 @@ import {
 } from "lucide-react"
 import { api, type Product, type Customer, type Sale, type Warehouse, API_ORIGIN, COMPANY_ID } from "../../api"
 import { useAuth } from "../../context/AuthContext"
-import { applyPwaUpdateIfPending } from "../../utils/pwaUpdate"
 import { useTheme } from "../../context/ThemeContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
@@ -2650,7 +2649,7 @@ export default function POSPage() {
       )
       // Salir de la sesión de usuario para dejar la pantalla lista para la siguiente cajera
       logout()
-      applyPwaUpdateIfPending()
+      window.location.reload()
     } catch (e: any) {
       toast.error("No se pudo pausar el turno", e?.message || "Intente nuevamente.")
     } finally {
@@ -6574,7 +6573,7 @@ export default function POSPage() {
             </div>
 
             <button
-              onClick={() => { api.auth.endPosShift().catch(() => {}); logout(); applyPwaUpdateIfPending() }}
+              onClick={() => { api.auth.endPosShift().catch(() => {}); logout(); window.location.reload() }}
               title="Cerrar Sesión"
               className={`flex items-center justify-center w-7 h-7 rounded-lg border text-xs font-bold transition-colors cursor-pointer shrink-0 ml-1 ${
                 dark ? "bg-slate-800 text-rose-400 border-slate-700 hover:bg-rose-900/40" : "bg-slate-200 text-rose-600 border-slate-300 hover:bg-rose-100"
