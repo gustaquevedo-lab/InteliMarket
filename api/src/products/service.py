@@ -1,7 +1,7 @@
 """Product and category service with rich 360 view, stats and full data integration"""
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -216,7 +216,16 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
         except (ValueError, TypeError):
             c_uuid = UUID("00000000-0000-0000-0000-000000000010")
 
-    today = date.today()
+    try:
+        from zoneinfo import ZoneInfo
+        asuncion_tz = ZoneInfo("America/Asuncion")
+    except Exception:
+        asuncion_tz = None
+
+    if asuncion_tz:
+        today = datetime.now(asuncion_tz).date()
+    else:
+        today = date.today()
     # Python weekday(): 0=Lun..6=Dom -> convertir a 0=Dom..6=Sab del legacy
     sunday_dow = (today.weekday() + 1) % 7
 
@@ -256,12 +265,17 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
 
     for p in products:
         info = promo_map.get(p.id)
-        if info and info["precio"] and info["precio"] < (p.precio_venta or Decimal("0")):
-            p.precio_promo = info["precio"]
+        if info and info["precio"]:
+            promo_p = info["precio"]
+            p.precio_promo = promo_p
             p.en_promocion = True
             p.promocion_id = info["id"]
             p.promocion_nombre = info["nombre"]
             p.promo_dias_semana = info["dias"]
+            # Preservar precio regular si precio_venta ya está en promo o si falta
+            if getattr(p, "precio_regular", None) is None or getattr(p, "precio_regular", None) <= promo_p:
+                if p.precio_venta and p.precio_venta > promo_p:
+                    p.precio_regular = p.precio_venta
         else:
             p.precio_promo = None
             p.en_promocion = False

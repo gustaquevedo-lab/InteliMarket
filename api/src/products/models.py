@@ -46,6 +46,7 @@ class Product(Base):
     ultimo_costo = Column(Numeric(15, 2), default=0, server_default=text("0"), comment="Último costo de compra/importación (en moneda local)")
     costo_landed = Column(Numeric(15, 2), default=0, server_default=text("0"), comment="Costo landed total por unidad (importados)")
     precio_venta = Column(Numeric(15, 2), default=0, server_default=text("0"), comment="Precio de venta al público")
+    precio_regular = Column(Numeric(15, 2), nullable=True, comment="Precio regular/base antes de aplicar promoción")
     peso_kg = Column(Numeric(10, 3))
     plu_balanza = Column(Integer, nullable=True, comment="Numero de PLU (7 digitos) ya cargado en la balanza Balmak Edge (software SDL) para este producto")
     imagen_url = Column(String(500), nullable=True)

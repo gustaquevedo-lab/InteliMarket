@@ -665,6 +665,14 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
     imported_count = 0
     updated_count = 0
 
+    try:
+        from zoneinfo import ZoneInfo
+        asuncion_tz = ZoneInfo("America/Asuncion")
+    except Exception:
+        asuncion_tz = None
+    today = datetime.now(asuncion_tz).date() if asuncion_tz else date.today()
+    today_dow = (today.weekday() + 1) % 7
+
     with conn.cursor() as cursor:
         cursor.execute("""
             SELECT * FROM ven_promocao 
@@ -691,7 +699,7 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
         if r.get("BO_SEXTA"): dias_semana.append(5)
         if r.get("BO_SABADO"): dias_semana.append(6)
 
-        dt_inicio = r.get("DT_INICIO_PROMOCAO") or date.today()
+        dt_inicio = r.get("DT_INICIO_PROMOCAO") or today
         dt_fim = r.get("DT_FIM_PROMOCAO")
         if isinstance(dt_fim, datetime):
             valido_hasta = dt_fim.date()
@@ -711,7 +719,7 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
         matched_prod = p_res.scalar_one_or_none()
         prod_ids = [matched_prod.id] if matched_prod else None
 
-        is_active = valido_hasta >= date.today()
+        is_active = valido_hasta >= today
 
         if not existing:
             promo = Promotion(
@@ -746,6 +754,40 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
             updated_count += 1
 
     await db.flush()
+
+    # Conciliar precios en catálogo de products para todas las promociones vigentes hoy
+    act_promos_q = await db.execute(
+        select(Promotion).where(
+            Promotion.company_id == cid,
+            Promotion.activo == True,
+            Promotion.estado == "activa",
+            Promotion.tipo == "precio_fijo_oferta",
+            Promotion.precio_fijo_promocional > 0,
+            Promotion.valido_desde <= today,
+            Promotion.valido_hasta >= today,
+        ).order_by(Promotion.precio_fijo_promocional.asc())
+    )
+    all_act = act_promos_q.scalars().all()
+    best_promo_by_pid: dict[UUID, Decimal] = {}
+    for p_obj in all_act:
+        dias = p_obj.dias_semana or []
+        if dias and today_dow not in dias:
+            continue
+        for pid in (p_obj.producto_ids or []):
+            if pid not in best_promo_by_pid or p_obj.precio_fijo_promocional < best_promo_by_pid[pid]:
+                best_promo_by_pid[pid] = p_obj.precio_fijo_promocional
+
+    if best_promo_by_pid:
+        target_pids = list(best_promo_by_pid.keys())
+        prods_res = await db.execute(select(Product).where(Product.id.in_(target_pids)))
+        for p in prods_res.scalars().all():
+            promo_p = best_promo_by_pid[p.id]
+            if getattr(p, "precio_regular", None) is None and p.precio_venta and p.precio_venta > promo_p:
+                p.precio_regular = p.precio_venta
+            if p.precio_venta != promo_p:
+                p.precio_venta = promo_p
+                p.updated_at = func.now()
+
     await db.commit()
     return {"importados": imported_count, "actualizados": updated_count, "total_evaluados": len(rows)}
 

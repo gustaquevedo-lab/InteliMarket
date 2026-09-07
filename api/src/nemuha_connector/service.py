@@ -2207,6 +2207,35 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
     pg_prods = res.scalars().all()
     sku_to_prod = {p.sku.strip(): p for p in pg_prods if p.sku}
 
+    try:
+        from zoneinfo import ZoneInfo
+        asuncion_tz = ZoneInfo("America/Asuncion")
+    except Exception:
+        asuncion_tz = None
+    today_asuncion = datetime.now(asuncion_tz).date() if asuncion_tz else date.today()
+    today_dow = (today_asuncion.weekday() + 1) % 7
+
+    # Cargar mapa de promociones vigentes hoy para no pisar el precio de oferta en caja
+    res_active_promos = await db.execute(
+        select(Promotion).where(
+            Promotion.company_id == cid,
+            Promotion.activo == True,
+            Promotion.estado == "activa",
+            Promotion.tipo == "precio_fijo_oferta",
+            Promotion.precio_fijo_promocional > 0,
+            Promotion.valido_desde <= today_asuncion,
+            Promotion.valido_hasta >= today_asuncion,
+        ).order_by(Promotion.precio_fijo_promocional.asc())
+    )
+    active_promo_pid_map: dict[UUID, Decimal] = {}
+    for pr in res_active_promos.scalars().all():
+        dias = pr.dias_semana or []
+        if dias and today_dow not in dias:
+            continue
+        for pid in (pr.producto_ids or []):
+            if pid not in active_promo_pid_map or pr.precio_fijo_promocional < active_promo_pid_map[pid]:
+                active_promo_pid_map[pid] = pr.precio_fijo_promocional
+
     count = 0
     precio_cambiado_pesables: list[Product] = []
 
@@ -2274,11 +2303,30 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
 
             # Protección: Si el precio en el legacy viene en 0 pero ya tenemos un precio
             # positivo válido en InteliMarket, no pisarlo con 0.
-            if p_venta > 0 and prod.precio_venta != p_venta:
-                prod.precio_venta = p_venta
-                changed = True
-                if prod.plu_balanza:
-                    precio_cambiado_pesables.append(prod)
+            # Además: Si el producto está en promoción activa vigente hoy, mantener su precio_venta
+            # con el valor de oferta y respaldar el precio regular del ERP en prod.precio_regular.
+            has_active_promo = prod.id in active_promo_pid_map
+            promo_price_val = active_promo_pid_map.get(prod.id)
+
+            if p_venta > 0:
+                if has_active_promo and promo_price_val is not None:
+                    if prod.precio_regular != p_venta:
+                        prod.precio_regular = p_venta
+                        changed = True
+                    if prod.precio_venta != promo_price_val:
+                        prod.precio_venta = promo_price_val
+                        changed = True
+                        if prod.plu_balanza:
+                            precio_cambiado_pesables.append(prod)
+                else:
+                    if prod.precio_regular is not None:
+                        prod.precio_regular = None
+                        changed = True
+                    if prod.precio_venta != p_venta:
+                        prod.precio_venta = p_venta
+                        changed = True
+                        if prod.plu_balanza:
+                            precio_cambiado_pesables.append(prod)
             if prod.activo != activo:
                 prod.activo = activo
                 # Si el producto se inactiva, desasociar codigo de barra para no colisionar en POS
@@ -2390,16 +2438,27 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
     """
     rows = await _fetch(sql)
 
-    # 2. Mapear productos por SKU
-    res_p = await db.execute(select(Product.id, Product.sku, Product.nombre).where(Product.company_id == cid))
-    sku_to_prod = {str(p[1]).strip(): (p[0], p[2]) for p in res_p.fetchall() if p[1]}
+    # 2. Mapear productos por SKU y Código de Barra
+    res_p = await db.execute(select(Product.id, Product.sku, Product.codigo_barra, Product.nombre).where(Product.company_id == cid))
+    sku_to_prod = {}
+    for p in res_p.fetchall():
+        if p[1]:
+            sku_to_prod[str(p[1]).strip()] = (p[0], p[3])
+        if p[2]:
+            sku_to_prod[str(p[2]).strip()] = (p[0], p[3])
 
     # 3. Mapear promociones existentes por legacy_id
     res_exist = await db.execute(select(Promotion).where(Promotion.company_id == cid, Promotion.legacy_id != None))
     existing_map = {p.legacy_id: p for p in res_exist.scalars().all()}
 
     count = 0
-    today = date.today()
+    try:
+        from zoneinfo import ZoneInfo
+        asuncion_tz = ZoneInfo("America/Asuncion")
+    except Exception:
+        asuncion_tz = None
+    today = datetime.now(asuncion_tz).date() if asuncion_tz else date.today()
+    today_dow = (today.weekday() + 1) % 7
 
     for r in rows:
         legacy_id = r["ID_PROMOCAO"]
@@ -2473,6 +2532,42 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
             db.add(new_promo)
             existing_map[legacy_id] = new_promo
             count += 1
+
+    await db.flush()
+
+    # 4. Conciliar precios en catálogo de products para todas las promociones vigentes hoy
+    act_promos_q = await db.execute(
+        select(Promotion).where(
+            Promotion.company_id == cid,
+            Promotion.activo == True,
+            Promotion.estado == "activa",
+            Promotion.tipo == "precio_fijo_oferta",
+            Promotion.precio_fijo_promocional > 0,
+            Promotion.valido_desde <= today,
+            Promotion.valido_hasta >= today,
+        ).order_by(Promotion.precio_fijo_promocional.asc())
+    )
+    all_act = act_promos_q.scalars().all()
+    best_promo_by_pid: dict[UUID, Decimal] = {}
+    for p_obj in all_act:
+        dias = p_obj.dias_semana or []
+        if dias and today_dow not in dias:
+            continue
+        for pid in (p_obj.producto_ids or []):
+            if pid not in best_promo_by_pid or p_obj.precio_fijo_promocional < best_promo_by_pid[pid]:
+                best_promo_by_pid[pid] = p_obj.precio_fijo_promocional
+
+    if best_promo_by_pid:
+        target_pids = list(best_promo_by_pid.keys())
+        prods_res = await db.execute(select(Product).where(Product.id.in_(target_pids)))
+        for p in prods_res.scalars().all():
+            promo_p = best_promo_by_pid[p.id]
+            # Guardar precio_regular si aún no estaba guardado y precio_venta es el original
+            if getattr(p, "precio_regular", None) is None and p.precio_venta and p.precio_venta > promo_p:
+                p.precio_regular = p.precio_venta
+            if p.precio_venta != promo_p:
+                p.precio_venta = promo_p
+                p.updated_at = func.now()
 
     return count
 
