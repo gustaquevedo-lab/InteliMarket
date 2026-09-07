@@ -5,13 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
+from api.src.auth.middleware import require_auth
 from api.src.sales_agent import service
 from api.src.sales_agent.schemas import (
     TriggerRunRequest, SalesAgentRunResponse, SalesRecommendationResponse, DecisionRequest,
     SalesRentabilidadExecutive, ChatMessageRequest, ChatMessageResponse, ApplyPriceRequest
 )
 
-router = APIRouter(prefix="/api/v1/sales-agent", tags=["sales-agent"])
+router = APIRouter(prefix="/api/v1/sales-agent", tags=["sales-agent"], dependencies=[Depends(require_auth)])
 
 
 @router.get("/analysis", response_model=SalesRentabilidadExecutive)
