@@ -24,6 +24,47 @@ interface ItemCola {
   precio_venta: number
   cantidad: number
   escalas?: { min_qty: number; precio_unitario: number }[]
+  // null = no se pudo consultar. Se distingue de 0, que es un dato real y
+  // justamente el que el gondolero necesita ver.
+  stock: number | null
+  stock_reservado: number
+  stock_minimo: number
+}
+
+/**
+ * Stock a la vista del gondolero. Va destacado a proposito: es lo que decide
+ * si ademas de cambiar el cartel hay que reponer la gondola.
+ *
+ * Se muestra el disponible (total menos reservado). El cero es un dato, no un
+ * error, asi que se distingue de "no se pudo consultar".
+ */
+function StockBadge({ item }: { item: ItemCola }) {
+  const s = item.stock
+  const desconocido = s === null
+  const agotado = !desconocido && s <= 0
+  const bajo = !desconocido && !agotado && s <= item.stock_minimo
+
+  const tono = desconocido
+    ? "bg-slate-800 border-slate-700 text-slate-500"
+    : agotado
+      ? "bg-rose-500/15 border-rose-500/40 text-rose-300"
+      : bajo
+        ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+        : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+
+  return (
+    <div className={`shrink-0 w-24 px-2 py-1.5 rounded-xl border text-center ${tono}`}>
+      <div className="text-[9px] uppercase font-bold tracking-wider opacity-70">
+        {agotado ? "Sin stock" : bajo ? "Stock bajo" : "Stock"}
+      </div>
+      <div className="text-2xl font-black tabular-nums leading-tight">
+        {desconocido ? "—" : s.toLocaleString("es-PY")}
+      </div>
+      {!desconocido && item.stock_reservado > 0 && (
+        <div className="text-[9px] opacity-70 tabular-nums">{item.stock_reservado} reservadas</div>
+      )}
+    </div>
+  )
 }
 
 export default function GondolaPage() {
@@ -99,18 +140,23 @@ export default function GondolaPage() {
       // Segunda llamada a propósito: products.list NO trae las escalas de
       // precio (viven en otra tabla). Sin esto la etiqueta salía siempre sin
       // el precio mayorista, que es justamente lo que más se destaca.
+      // Las dos consultas van juntas: el gondolero escanea en rafaga y una
+      // detras de otra se le nota la espera.
+      const [resueltos, stockResp] = await Promise.all([
+        api.labelPrinting
+          .resolve({ producto_ids: [{ product_id: p.id, cantidad: 1 }] })
+          .catch(() => null), // si falla, la etiqueta sale igual con el precio unitario
+        api.inventory.getProductStock(p.id).catch(() => null),
+      ])
+
       let escalas: { min_qty: number; precio_unitario: number }[] = []
-      try {
-        const resueltos = await api.labelPrinting.resolve({
-          producto_ids: [{ product_id: p.id, cantidad: 1 }],
-        })
-        escalas = ((resueltos?.[0] as any)?.escalas || []).map((e: any) => ({
-          min_qty: Number(e.min_qty),
-          precio_unitario: Number(e.precio_unitario),
-        }))
-      } catch {
-        // si falla, la etiqueta sale igual con el precio unitario
-      }
+      escalas = ((resueltos?.[0] as any)?.escalas || []).map((e: any) => ({
+        min_qty: Number(e.min_qty),
+        precio_unitario: Number(e.precio_unitario),
+      }))
+
+      const stock = stockResp ? Number(stockResp.cantidad_disponible) : null
+      const stockReservado = stockResp ? Number(stockResp.cantidad_reservada) || 0 : 0
       // Solo cuenta como mayorista si de verdad es más barato: hay productos
       // con una escala cargada al mismo precio, y mostrarla sería engañoso.
       const precio = Number(p.precio_venta) || 0
@@ -128,6 +174,9 @@ export default function GondolaPage() {
             precio_venta: precio,
             cantidad: 1,
             escalas,
+            stock: Number.isFinite(stock as number) ? stock : null,
+            stock_reservado: stockReservado,
+            stock_minimo: Number(p.stock_minimo) || 0,
           },
           ...prev,
         ]
@@ -286,6 +335,7 @@ export default function GondolaPage() {
                   )}
                 </div>
               </div>
+              <StockBadge item={i} />
               <div className="flex items-center gap-1.5">
                 <button onClick={() => cambiarCantidad(i.product_id, -1)} className="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 font-black cursor-pointer">
                   <Minus className="w-4 h-4 mx-auto" />
