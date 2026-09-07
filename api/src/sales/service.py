@@ -1433,9 +1433,15 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
 
 async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
     from api.src.returns.models import Return, ReturnItem
+    from api.src.products.models import Product
 
-    result = await db.execute(select(SaleItem).where(SaleItem.sale_id == uuid.UUID(sale_id)))
-    items = result.scalars().all()
+    result = await db.execute(
+        select(SaleItem, Product)
+        .outerjoin(Product, SaleItem.product_id == Product.id)
+        .where(SaleItem.sale_id == uuid.UUID(sale_id))
+        .order_by(SaleItem.created_at.asc())
+    )
+    rows = result.all()
 
     # Cuanto de cada item ya tiene una devolucion pendiente o aprobada --
     # sin esto la pantalla de devolucion en caja no tiene forma de saber
@@ -1454,7 +1460,10 @@ async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
             "id": str(i.id),
             "sale_id": str(i.sale_id),
             "product_id": str(i.product_id),
-            "descripcion": i.descripcion,
+            "descripcion": i.descripcion or (p.nombre if p else None) or "Producto",
+            "product_name": p.nombre if p else (i.descripcion or "Producto"),
+            "product_sku": p.sku if p else None,
+            "codigo_barra": p.codigo_barra if p else None,
             "cantidad": float(i.cantidad),
             "cantidad_devuelta": devueltos.get(str(i.id), 0.0),
             "cantidad_disponible": max(0.0, float(i.cantidad) - devueltos.get(str(i.id), 0.0)),
@@ -1467,7 +1476,7 @@ async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
             "costo_unitario": int(i.costo_unitario) if i.costo_unitario else None,
             "created_at": i.created_at,
         }
-        for i in items
+        for i, p in rows
     ]
 
 

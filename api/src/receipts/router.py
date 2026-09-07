@@ -48,10 +48,13 @@ async def get_sale_receipt_pdf(
             raise HTTPException(status_code=404, detail="Venta no encontrada")
 
         items_result = await db.execute(text("""
-            SELECT si.cantidad, si.precio_unitario, p.nombre as product_name, p.iva_tasa
+            SELECT si.cantidad, si.precio_unitario,
+                   COALESCE(si.descripcion, p.nombre, 'Producto') as product_name,
+                   p.sku as product_sku, p.codigo_barra, p.iva_tasa
             FROM sale_items si
             LEFT JOIN products p ON si.product_id = p.id
             WHERE si.sale_id = :sale_id
+            ORDER BY si.created_at ASC
         """), {"sale_id": sale_id})
         items = [dict(row._mapping) for row in items_result.fetchall()]
 
