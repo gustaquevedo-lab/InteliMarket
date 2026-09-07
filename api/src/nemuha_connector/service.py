@@ -279,11 +279,18 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
     # primera vez via una venta/compra (en vez de por el import de catalogo)
     # quedaba con precio_venta=0 para siempre (11.4% del catalogo activo,
     # verificado 2026-08-25 -- ver MOLTO DURAZNO ENLATADO, ID_PRODUTO 126020).
-    rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO, UNIDADE_MEDIDA, QTD_MINIMA_EM_ESTOQUE, VL_PRECO_VENDA_VAREJO FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
+    rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO, UNIDADE_MEDIDA, QTD_MINIMA_EM_ESTOQUE, VL_PRECO_VENDA_VAREJO, ID_FORNECEDOR FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
     nombre = rows[0]["DS_PRODUTO"] if rows else f"Producto legacy #{id_produto}"
     unidad_medida = UNIDAD_MEDIDA_MAP.get(rows[0]["UNIDADE_MEDIDA"], "UN") if rows else "UN"
     stock_minimo = int(rows[0]["QTD_MINIMA_EM_ESTOQUE"] or 0) if rows else 0
     precio_venta = Decimal(str(rows[0]["VL_PRECO_VENDA_VAREJO"] or 0)) if rows else Decimal(0)
+
+    supplier_id = None
+    if rows and rows[0].get("ID_FORNECEDOR"):
+        try:
+            supplier_id = await _resolve_pessoa(db, company_id, rows[0]["ID_FORNECEDOR"], "supplier")
+        except Exception:
+            supplier_id = None
 
     product = Product(
         company_id=company_id,
@@ -295,6 +302,7 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
         tipo_venta="peso" if unidad_medida == "KG" else "unidad",
         stock_minimo=stock_minimo,
         precio_venta=precio_venta,
+        supplier_id=supplier_id,
     )
     db.add(product)
     await db.flush()
@@ -1365,6 +1373,23 @@ async def _resolve_deposito(db: AsyncSession, company_id: str, id_filial: int) -
 async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> int:
     rows = await _fetch("SELECT * FROM view_estoque_catalogo WHERE produtoAtivo = 1")
 
+    # Opción B: Obtener las ventas netas realizadas en Intelimarket (POS nuevo) desde el 31/08/2026.
+    # Excluimos las ventas importadas del legado (source_table = 'ven_venda').
+    # Esto asegura que las compras que entren en Ñemuha sumen, sin anular las ventas del POS nuevo.
+    ventas_res = await db.execute(
+        text("""
+            SELECT si.product_id, coalesce(sum(si.cantidad), 0) as cant_vendida
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            LEFT JOIN nemuha_record_map m ON m.target_id = s.id AND m.source_table = 'ven_venda'
+            WHERE m.id IS NULL
+              AND s.created_at >= '2026-08-31 00:00:00-04'
+              AND s.estado != 'anulada'
+            GROUP BY si.product_id
+        """)
+    )
+    ventas_intelimarket = {r.product_id: Decimal(str(r.cant_vendida)) for r in ventas_res}
+
     count = 0
     warehouse_cache: dict[int, UUID] = {}
     for r in rows:
@@ -1380,7 +1405,10 @@ async def sync_stock(db: AsyncSession, company_id: str, since: date | None) -> i
             select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id)
         )
         stock = result.scalar_one_or_none()
-        cantidad = round(Decimal(str(r["qtdAtual"])))
+        qtd_legacy = Decimal(str(r["qtdAtual"] or 0))
+        qty_vendida = ventas_intelimarket.get(product_id, Decimal("0"))
+        # Stock neto: lo que tiene el legacy menos lo que vendió Intelimarket desde que arrancó el POS nuevo
+        cantidad = max(0, round(qtd_legacy - qty_vendida))
         costo = Decimal(str(r["vlCustoMedioGs"] or 0))
 
         if stock:

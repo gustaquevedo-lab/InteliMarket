@@ -66,6 +66,10 @@ export default function InventoryPage() {
   const [kardexSummary, setKardexSummary] = useState<any>(null)
   const [loadingKardexSummary, setLoadingKardexSummary] = useState(false)
   const [exportingKardex, setExportingKardex] = useState<"xlsx" | "pdf" | null>(null)
+  const [showProductKardexPicker, setShowProductKardexPicker] = useState(false)
+  const [pickerProductSearch, setPickerProductSearch] = useState("")
+  const [pickerProductResults, setPickerProductResults] = useState<any[]>([])
+  const [loadingPickerProducts, setLoadingPickerProducts] = useState(false)
 
   const loadKardexSummary = useCallback(async () => {
     setLoadingKardexSummary(true)
@@ -146,13 +150,17 @@ export default function InventoryPage() {
     }
   }, [selectedWarehouse])
 
-  const loadMovementsData = useCallback(async () => {
+  const loadMovementsData = useCallback(async (customSearch?: string, customTipo?: string) => {
     setLoadingMovements(true)
     setKardexOffset(0)
     try {
+      const searchVal = customSearch !== undefined ? customSearch : kardexSearch
+      const tipoVal = customTipo !== undefined ? customTipo : kardexTipo
       const m = await api.inventory.listMovements({
         limit: 200,
         offset: 0,
+        search: searchVal ? searchVal.trim() : undefined,
+        tipo: tipoVal || undefined,
         fecha_desde: kardexFechaDesde || undefined,
         fecha_hasta: kardexFechaHasta || undefined,
       })
@@ -163,7 +171,7 @@ export default function InventoryPage() {
     } finally {
       setLoadingMovements(false)
     }
-  }, [kardexFechaDesde, kardexFechaHasta])
+  }, [kardexFechaDesde, kardexFechaHasta, kardexSearch, kardexTipo])
 
   const loadMoreMovements = async () => {
     const nextOffset = kardexOffset + 200
@@ -172,6 +180,8 @@ export default function InventoryPage() {
       const m = await api.inventory.listMovements({
         limit: 200,
         offset: nextOffset,
+        search: kardexSearch ? kardexSearch.trim() : undefined,
+        tipo: kardexTipo || undefined,
         fecha_desde: kardexFechaDesde || undefined,
         fecha_hasta: kardexFechaHasta || undefined,
       })
@@ -250,8 +260,36 @@ export default function InventoryPage() {
   useEffect(() => {
     if (activeTab === "stock") loadStockData()
     if (activeTab === "vencimientos") loadExpiriesData()
-    if (activeTab === "kardex") { loadMovementsData(); loadKardexSummary() }
-  }, [activeTab, loadStockData, loadExpiriesData, loadMovementsData, loadKardexSummary, kardexFechaDesde, kardexFechaHasta])
+  }, [activeTab, loadStockData, loadExpiriesData])
+
+  useEffect(() => {
+    if (activeTab !== "kardex") return
+    loadKardexSummary()
+    const timer = setTimeout(() => {
+      loadMovementsData(kardexSearch, kardexTipo)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [activeTab, loadKardexSummary, loadMovementsData, kardexSearch, kardexTipo, kardexFechaDesde, kardexFechaHasta])
+
+  useEffect(() => {
+    if (!showProductKardexPicker) return
+    if (!pickerProductSearch.trim()) {
+      setPickerProductResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setLoadingPickerProducts(true)
+      try {
+        const prods = await api.products.list({ search: pickerProductSearch.trim(), limit: 10 })
+        setPickerProductResults(prods || [])
+      } catch (err) {
+        setPickerProductResults([])
+      } finally {
+        setLoadingPickerProducts(false)
+      }
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [pickerProductSearch, showProductKardexPicker])
 
   // Filtrado de stock
   const filteredStock = useMemo(() => {
@@ -278,21 +316,8 @@ export default function InventoryPage() {
     return filteredStock.slice(start, start + pageSizeStock)
   }, [filteredStock, pageStock, pageSizeStock])
 
-  // Filtrado Kardex
-  const filteredMovements = useMemo(() => {
-    return movements.filter(m => {
-      if (kardexTipo && m.tipo !== kardexTipo) return false
-      if (kardexSearch) {
-        const q = kardexSearch.toLowerCase()
-        return (
-          m.product_nombre?.toLowerCase().includes(q) ||
-          m.motivo?.toLowerCase().includes(q) ||
-          m.product_sku?.toLowerCase().includes(q)
-        )
-      }
-      return true
-    })
-  }, [movements, kardexTipo, kardexSearch])
+  // Movimientos de Kardex provistos directamente por la Base de Datos (con filtros de búsqueda en SQL)
+  const filteredMovements = movements
 
   // Crear Depósito
   const handleCreateWarehouse = async (e: React.FormEvent) => {
@@ -1032,7 +1057,15 @@ export default function InventoryPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 font-mono">{filteredMovements.length} movimientos cargados</span>
+              <button
+                onClick={() => { setShowProductKardexPicker(true); setPickerProductSearch("") }}
+                className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-950/70 cursor-pointer flex items-center gap-1.5 shadow-xs"
+                title="Buscar cualquier producto en toda la base de datos para ver su Kardex"
+              >
+                <Search className="w-3.5 h-3.5" />
+                Consultar Producto BD
+              </button>
+              <span className="text-xs text-gray-400 font-mono hidden md:inline">{filteredMovements.length} movimientos</span>
               <button
                 onClick={() => handleExportKardex("xlsx")}
                 disabled={exportingKardex !== null}
@@ -1051,6 +1084,75 @@ export default function InventoryPage() {
               </button>
             </div>
           </div>
+
+          {/* Modal Picker para consultar Kardex de cualquier producto en la Base de Datos */}
+          {showProductKardexPicker && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-5 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 flex items-center justify-center font-bold">
+                      <Search className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">Consultar Kardex en Base de Datos</h3>
+                      <p className="text-[10px] text-slate-400">Buscá entre todos los productos de la empresa en la BD</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowProductKardexPicker(false)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="relative mb-3">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    autoFocus
+                    value={pickerProductSearch}
+                    onChange={(e) => setPickerProductSearch(e.target.value)}
+                    placeholder="Escribí nombre, código de barras o SKU..."
+                    className="input-field pl-9 py-2 text-xs w-full"
+                  />
+                </div>
+
+                <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                  {loadingPickerProducts ? (
+                    <div className="p-6 text-center text-slate-400 flex items-center justify-center gap-2 text-xs">
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-500" /> Consultando base de datos...
+                    </div>
+                  ) : pickerProductResults.length === 0 ? (
+                    <div className="p-6 text-center text-slate-400 text-xs">
+                      {pickerProductSearch.trim() ? "No se encontraron productos coincidentes" : "Escribí para buscar en los 11.000+ productos"}
+                    </div>
+                  ) : (
+                    pickerProductResults.map((p) => (
+                      <div
+                        key={p.id}
+                        onClick={() => {
+                          setShowProductKardexPicker(false)
+                          openKardexProductoDetalle(p.id, p.nombre, p.sku)
+                        }}
+                        className="p-2.5 hover:bg-indigo-50/60 dark:hover:bg-indigo-950/40 cursor-pointer flex items-center justify-between rounded-lg transition"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <p className="font-bold text-xs text-slate-900 dark:text-white truncate">{p.nombre}</p>
+                          <div className="text-[10px] text-slate-400 flex items-center gap-2 font-mono">
+                            <span>SKU: {p.sku}</span>
+                            {p.codigo_barra && <span>CB: {p.codigo_barra}</span>}
+                            {p.supplier_nombre && <span className="text-slate-500 font-sans truncate max-w-[150px]">Prov: {p.supplier_nombre}</span>}
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 shrink-0">
+                          Ver Kardex →
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
             {loadingMovements ? (

@@ -560,9 +560,15 @@ export default function ProductsPage() {
 
     // Filtro por Tags de Estado de Stock
     if (filterStockTag === "con_stock") {
-      list = list.filter(p => (Number(p.stock_minimo) || 0) >= 0)
+      list = list.filter(p => (Number((p as any).stock_actual) || 0) > 0)
     } else if (filterStockTag === "quiebre") {
-      // productos con stock <= 0
+      list = list.filter(p => (Number((p as any).stock_actual) || 0) <= 0)
+    } else if (filterStockTag === "bajo_stock") {
+      list = list.filter(p => {
+        const s = Number((p as any).stock_actual) || 0
+        const min = Number(p.stock_minimo) || 0
+        return s > 0 && s <= min
+      })
     } else if (filterStockTag === "pesables") {
       list = list.filter(p => ["KG", "Kg", "kg", "LT", "Lt"].includes(p.unidad_medida || "") || p.tipo_venta === "peso")
     } else if (filterStockTag === "perecederos") {
@@ -1207,9 +1213,11 @@ export default function ProductsPage() {
                 <table className="w-full text-left text-xs min-w-[900px]">
                   <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-800">
                     <tr>
-                      <th className="p-3.5 min-w-[260px]">Producto & SKU</th>
+                      <th className="p-3.5 min-w-[240px]">Producto & SKU</th>
                       <th className="p-3.5">Categoría</th>
+                      <th className="p-3.5">Proveedor</th>
                       <th className="p-3.5">Código de Barras / PLU</th>
+                      <th className="p-3.5 text-center">Stock Físico</th>
                       <th className="p-3.5 text-center">Unidad</th>
                       <th className="p-3.5 text-right">Costo Promedio</th>
                       <th className="p-3.5 text-right">Precio de Venta</th>
@@ -1250,7 +1258,6 @@ export default function ProductsPage() {
                                 </div>
                                 <div className="text-[10px] text-slate-400 font-mono flex items-center gap-2 mt-0.5">
                                   <span>SKU: <strong className="text-slate-600 dark:text-slate-300">{p.sku}</strong></span>
-                                  {p.stock_minimo && <span>Min: {p.stock_minimo}</span>}
                                 </div>
                               </div>
                             </div>
@@ -1261,6 +1268,17 @@ export default function ProductsPage() {
                             <span className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                               {p.categoria?.nombre || "Sin Categoría"}
                             </span>
+                          </td>
+
+                          {/* Proveedor */}
+                          <td className="p-3.5">
+                            {p.supplier_nombre ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 block truncate max-w-[130px]" title={p.supplier_nombre}>
+                                {p.supplier_nombre}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600 text-[10px] italic">Sin asignar</span>
+                            )}
                           </td>
 
                           {/* Código de Barras / PLU */}
@@ -1277,6 +1295,26 @@ export default function ProductsPage() {
                             ) : (
                               <span className="text-slate-300 dark:text-slate-600">—</span>
                             )}
+                          </td>
+
+                          {/* Stock Físico Real */}
+                          <td className="p-3.5 text-center">
+                            <div className="flex flex-col items-center">
+                              {Number((p as any).stock_actual || 0) <= 0 ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60 font-mono">
+                                  0 {p.unidad_medida || "UN"} (Quiebre)
+                                </span>
+                              ) : Number((p as any).stock_actual || 0) <= Number(p.stock_minimo || 0) ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 font-mono">
+                                  {Number((p as any).stock_actual).toLocaleString("es-PY")} {p.unidad_medida || "UN"} (Bajo)
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 font-mono">
+                                  {Number((p as any).stock_actual).toLocaleString("es-PY")} {p.unidad_medida || "UN"}
+                                </span>
+                              )}
+                              <span className="text-[9px] text-slate-400 mt-0.5">Mín reposición: {p.stock_minimo || 0}</span>
+                            </div>
                           </td>
 
                           {/* Unidad de Medida */}

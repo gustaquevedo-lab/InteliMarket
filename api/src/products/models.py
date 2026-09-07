@@ -6,6 +6,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 
 from api.src.db import Base
+from api.src.purchases.models import Supplier
 
 
 class ProductCategory(Base):
@@ -28,6 +29,7 @@ class Product(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     categoria_id = Column(UUID(as_uuid=True), ForeignKey("product_categories.id"))  # nombre real de la columna en la tabla (antes mapeada como category_id, que no existe)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True, index=True)
     sku = Column(String(50), nullable=False)
     codigo_barra = Column(String(50), index=True)
     nombre = Column(String(200), nullable=False)
@@ -55,6 +57,7 @@ class Product(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     categoria = relationship("ProductCategory")
+    supplier = relationship("Supplier", foreign_keys=[supplier_id], lazy="select")
 
 
 # Alias expected by some modules (customer360, etc.)

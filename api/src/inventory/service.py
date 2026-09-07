@@ -318,6 +318,7 @@ async def list_movements(
     fecha_hasta: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    search: str | None = None,
 ) -> list[dict]:
     from sqlalchemy import text
     import uuid
@@ -344,6 +345,9 @@ async def list_movements(
     if tipo:
         outer_where += " AND sub.tipo = :tipo"
         params["tipo"] = tipo
+    if search and search.strip():
+        outer_where += " AND (sub.product_nombre ILIKE :search OR sub.product_sku ILIKE :search OR sub.motivo ILIKE :search)"
+        params["search"] = f"%{search.strip()}%"
     if fecha_desde:
         outer_where += " AND sub.created_at >= CAST(:fecha_desde AS date)"
         params["fecha_desde"] = date_type.fromisoformat(fecha_desde)

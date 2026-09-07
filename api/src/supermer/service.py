@@ -45,8 +45,8 @@ async def _get_user_name(db: AsyncSession, user_id: UUID) -> Optional[str]:
 
 
 async def _get_supplier_name(db: AsyncSession, supplier_id: UUID) -> Optional[str]:
-    from api.src.suppliers.models import Supplier
-    r = await db.execute(select(Supplier.nombre).where(Supplier.id == supplier_id))
+    from api.src.purchases.models import Supplier
+    r = await db.execute(select(Supplier.razon_social).where(Supplier.id == supplier_id))
     row = r.scalar_one_or_none()
     return str(row) if row else None
 

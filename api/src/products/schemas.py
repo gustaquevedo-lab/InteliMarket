@@ -30,6 +30,7 @@ class CategoryResponse(BaseModel):
 class ProductCreate(BaseModel):
     company_id: UUID
     categoria_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None
     sku: str = Field(min_length=1, max_length=50)
     codigo_barra: Optional[str] = Field(default=None, max_length=50)
     nombre: str = Field(min_length=1, max_length=200)
@@ -55,6 +56,7 @@ class ProductCreate(BaseModel):
 
 class ProductUpdate(BaseModel):
     categoria_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None
     codigo_barra: Optional[str] = None
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
@@ -98,6 +100,8 @@ class ProductResponse(BaseModel):
     tiene_serial: bool
     stock_minimo: int
     stock_maximo: Optional[int] = None
+    stock_actual: Optional[int] = 0
+    stock_disponible: Optional[int] = 0
     peso_kg: Optional[Decimal] = None
     plu_balanza: Optional[int] = None
     imagen_url: Optional[str] = None

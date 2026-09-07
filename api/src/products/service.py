@@ -179,25 +179,60 @@ async def list_products(
     result = await db.execute(query)
     products = list(result.scalars().all())
 
-    # Asociar Proveedor Principal / Último proveedor a cada producto en lote
     if products:
         p_ids = [p.id for p in products]
-        supp_map_res = await db.execute(
+
+        # 1. Asociar Stock Físico Real y Disponible en lote
+        stock_map_res = await db.execute(
             text("""
-                SELECT DISTINCT ON (poi.product_id) poi.product_id, po.supplier_id, s.razon_social as supplier_nombre
-                FROM purchase_order_items poi
-                JOIN purchase_orders po ON po.id = poi.purchase_order_id
-                JOIN suppliers s ON s.id = po.supplier_id
-                WHERE poi.product_id = ANY(:p_ids)
-                ORDER BY poi.product_id, poi.created_at DESC
+                SELECT product_id,
+                       coalesce(sum(cantidad), 0) as stock_total,
+                       coalesce(sum(cantidad - coalesce(cantidad_reservada, 0)), 0) as stock_disponible
+                FROM stock
+                WHERE product_id = ANY(:p_ids)
+                GROUP BY product_id
             """),
             {"p_ids": p_ids}
         )
-        supp_map = {r.product_id: (r.supplier_id, r.supplier_nombre) for r in supp_map_res}
+        stock_map = {r.product_id: (int(r.stock_total), int(r.stock_disponible)) for r in stock_map_res}
         for p in products:
-            if p.id in supp_map:
-                setattr(p, "supplier_id", supp_map[p.id][0])
-                setattr(p, "supplier_nombre", supp_map[p.id][1])
+            st, sd = stock_map.get(p.id, (0, 0))
+            setattr(p, "stock_actual", st)
+            setattr(p, "stock_disponible", sd)
+
+        # 2. Asociar Proveedor (directo del producto o por órdenes de compra)
+        direct_supp_ids = [p.supplier_id for p in products if getattr(p, "supplier_id", None)]
+        suppliers_by_id = {}
+        if direct_supp_ids:
+            supp_rows = await db.execute(
+                text("SELECT id, razon_social FROM suppliers WHERE id = ANY(:s_ids)"),
+                {"s_ids": list(set(direct_supp_ids))}
+            )
+            suppliers_by_id = {r.id: r.razon_social for r in supp_rows}
+
+        # Fallback para productos sin supplier_id asignado: buscar en purchase_orders
+        missing_supp_pids = [p.id for p in products if not getattr(p, "supplier_id", None)]
+        po_supp_map = {}
+        if missing_supp_pids:
+            po_supp_res = await db.execute(
+                text("""
+                    SELECT DISTINCT ON (poi.product_id) poi.product_id, po.supplier_id, s.razon_social as supplier_nombre
+                    FROM purchase_order_items poi
+                    JOIN purchase_orders po ON po.id = poi.purchase_order_id
+                    JOIN suppliers s ON s.id = po.supplier_id
+                    WHERE poi.product_id = ANY(:p_ids)
+                    ORDER BY poi.product_id, poi.created_at DESC
+                """),
+                {"p_ids": missing_supp_pids}
+            )
+            po_supp_map = {r.product_id: (r.supplier_id, r.supplier_nombre) for r in po_supp_res}
+
+        for p in products:
+            if getattr(p, "supplier_id", None) and p.supplier_id in suppliers_by_id:
+                setattr(p, "supplier_nombre", suppliers_by_id[p.supplier_id])
+            elif p.id in po_supp_map:
+                setattr(p, "supplier_id", po_supp_map[p.id][0])
+                setattr(p, "supplier_nombre", po_supp_map[p.id][1])
 
     return products
 
