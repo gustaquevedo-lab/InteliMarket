@@ -9,7 +9,7 @@ import {
   Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle,
   HelpCircle, AlertCircle, Box, Layers, Building2, Phone, Mail, MapPin, SlidersHorizontal,
   ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star,
-  Lock, Unlock, FileCheck
+  Lock, Unlock, FileCheck, Barcode
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import {
@@ -1402,7 +1402,8 @@ export default function PurchasesPage() {
     const filtered = replenishmentData.items.filter((it: any) => {
       const matchSearch = !searchProductIA ||
         it.nombre?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
-        it.sku?.toLowerCase().includes(searchProductIA.toLowerCase())
+        it.sku?.toLowerCase().includes(searchProductIA.toLowerCase()) ||
+        it.codigo_barra?.toLowerCase().includes(searchProductIA.toLowerCase())
 
       if (!matchSearch) return false
 
@@ -2387,15 +2388,20 @@ export default function PurchasesPage() {
                                   className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                                 />
                               </td>
-                              <td className="p-3">
-                                <div className="font-bold text-gray-900 dark:text-white line-clamp-1" title={it.nombre}>
+                              <td className="p-3 min-w-[220px] max-w-[340px]">
+                                <div className="font-black text-sm text-slate-900 dark:text-white line-clamp-2 leading-snug tracking-tight" title={it.nombre}>
                                   {it.nombre}
                                 </div>
-                                <div className="text-[11px] text-gray-400 font-mono flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                  <span>SKU: {it.sku || "—"}</span>
-                                  <span className="px-1 bg-slate-100 dark:bg-slate-700 rounded text-[10px] font-bold">{it.unidad_medida}</span>
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1.5 mt-1 flex-wrap">
+                                  <span className="inline-flex items-center gap-1 font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 shadow-2xs" title={`Código de barras: ${it.codigo_barra || it.sku || "Sin código"}`}>
+                                    <Barcode className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                                    <span>{it.codigo_barra || it.sku || "—"}</span>
+                                  </span>
+                                  <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-[10px] font-bold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                    {it.unidad_medida}
+                                  </span>
                                   {it.punto_reorden !== undefined && (
-                                    <span className="px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] text-amber-700 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800/50" title="Punto de Reorden">
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] text-amber-700 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800/50" title="Punto de Reorden (ROP)">
                                       ROP: {Math.round(it.punto_reorden).toLocaleString()}
                                     </span>
                                   )}
@@ -4164,11 +4170,13 @@ export default function PurchasesPage() {
                               return (
                                 <tr key={it.product_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/20">
                                   <td className="p-2.5 font-sans font-medium text-gray-800 dark:text-gray-200">
-                                    <div className="font-bold truncate max-w-[240px]" title={it.nombre}>
+                                    <div className="font-bold text-sm text-slate-900 dark:text-white truncate max-w-[260px]" title={it.nombre}>
                                       {it.nombre}
                                     </div>
-                                    <div className="text-[10px] text-gray-400 font-mono">
-                                      SKU: {it.sku || "—"} | {it.unidad_medida}
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                                      <Barcode className="w-3 h-3 text-indigo-500 shrink-0" />
+                                      <span>{it.codigo_barra || it.sku || "—"}</span>
+                                      <span className="text-gray-400">| {it.unidad_medida}</span>
                                     </div>
                                   </td>
                                   <td className="p-2.5 text-right font-bold text-indigo-600 dark:text-indigo-400">
