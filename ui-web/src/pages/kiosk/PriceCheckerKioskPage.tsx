@@ -630,13 +630,13 @@ export default function PriceCheckerKioskPage() {
                 ) : scannedProduct.escalas.length > 0 ? (
                   <div className="rounded-xl bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100 dark:from-slate-800/90 dark:via-slate-800/60 dark:to-orange-950/40 border-2 border-amber-400 dark:border-amber-500/50 shadow-md overflow-hidden">
                     <div className="px-2 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-[11px] sm:text-xs font-black uppercase tracking-wider text-center flex items-center justify-center gap-1">
-                      <Layers className="w-3.5 h-3.5" /> Mayorista desde {scannedProduct.escalas[0].min_qty}+ un.
+                      <Layers className="w-3.5 h-3.5" /> Mayorista: {scannedProduct.escalas[0].min_qty} un.
                     </div>
                     <div className="p-2 sm:p-2.5 text-center">
                       <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black tracking-tight" style={monoFont}>
-                        Gs. {Math.round(scannedProduct.escalas[0].precio_unitario).toLocaleString("es-PY")}
+                        Gs. {Math.round(scannedProduct.escalas[0].precio_unitario * scannedProduct.escalas[0].min_qty).toLocaleString("es-PY")}
                       </div>
-                      <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">Precio Mayorista / un.</div>
+                      <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">Precio por {scannedProduct.escalas[0].min_qty} un.</div>
                     </div>
                   </div>
                 ) : null}

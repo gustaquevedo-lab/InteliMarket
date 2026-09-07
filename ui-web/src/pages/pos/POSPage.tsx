@@ -10589,9 +10589,9 @@ export default function POSPage() {
                       <div className="inline-flex items-center gap-2 mt-2 bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 rounded-lg px-2.5 py-1.5">
                         <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                         <div>
-                          <div className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">Mayorista desde {priceCheckTiers[0].min_qty}+ un.</div>
+                          <div className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">Mayorista: {priceCheckTiers[0].min_qty} un.</div>
                           <div className="font-black text-sm text-amber-700 dark:text-amber-300 font-posMono tabular-nums">
-                            {formatPYG(Number(priceCheckTiers[0].precio_unitario) || 0)}
+                            {formatPYG((Number(priceCheckTiers[0].precio_unitario) || 0) * priceCheckTiers[0].min_qty)}
                           </div>
                         </div>
                       </div>
