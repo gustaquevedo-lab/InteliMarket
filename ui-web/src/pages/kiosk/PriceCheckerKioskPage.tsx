@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, Fragment } from "react"
 import {
   Barcode, Sparkles, ShoppingBag, ArrowDown, Clock, CheckCircle2, DollarSign,
   Star, Layers, Maximize2, Sun, Moon, WifiOff, XCircle, Package,
@@ -642,44 +642,57 @@ export default function PriceCheckerKioskPage() {
                     </span>
                   )}
                 </div>
-                <div className={`grid grid-cols-1 gap-2 ${scannedProduct.escalas.length >= 3 ? "sm:grid-cols-3" : scannedProduct.escalas.length === 2 ? "sm:grid-cols-2" : ""}`}>
+                <div className={`grid grid-cols-1 gap-2 ${scannedProduct.escalas.length >= 2 ? "sm:grid-cols-3" : ""}`}>
                   {scannedProduct.escalas.map((t, i) => {
                     const unitGs = Math.round(t.precio_unitario)
                     const baseGs = Math.round(precioUnitarioGs)
                     const ahorroMay = baseGs > unitGs ? baseGs - unitGs : 0
+                    const totalGs = Math.round(t.precio_unitario * t.min_qty)
                     return (
-                      <div key={i} className="rounded-xl bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100 dark:from-slate-800/90 dark:via-slate-800/60 dark:to-orange-950/40 border-2 border-amber-400 dark:border-amber-500/50 shadow-md overflow-hidden">
-                        <div className="px-2 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-[11px] sm:text-xs font-black uppercase tracking-wider text-center flex items-center justify-center gap-1">
-                          <span>📦 {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} un.` : `Mayorista: ${t.min_qty}+ un.`}</span>
-                        </div>
-                        <div className="p-2 sm:p-2.5 text-center space-y-0.5">
-                          <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black tracking-tight" style={monoFont}>
-                            Gs. {unitGs.toLocaleString("es-PY")}
+                      <Fragment key={i}>
+                        <div className="rounded-xl bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100 dark:from-slate-800/90 dark:via-slate-800/60 dark:to-orange-950/40 border-2 border-amber-400 dark:border-amber-500/50 shadow-md overflow-hidden">
+                          <div className="px-2 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-[11px] sm:text-xs font-black uppercase tracking-wider text-center flex items-center justify-center gap-1">
+                            <span>📦 {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} un.` : `Mayorista: ${t.min_qty}+ un.`}</span>
                           </div>
-                          <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">
-                            Precio Mayorista / un.
+                          <div className="p-2 sm:p-2.5 text-center space-y-0.5">
+                            <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black tracking-tight" style={monoFont}>
+                              Gs. {unitGs.toLocaleString("es-PY")}
+                            </div>
+                            <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">
+                              Precio Mayorista / un.
+                            </div>
+                            {ahorroMay > 0 && (
+                              <div className="inline-block px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-black">
+                                Ahorrás Gs. {ahorroMay.toLocaleString("es-PY")}
+                              </div>
+                            )}
+                            {activeCurrencies.length > 0 && (
+                              <div className="flex items-center justify-center gap-2 pt-1 border-t border-amber-200 dark:border-amber-500/20">
+                                {activeCurrencies.map((c) => (
+                                  <span key={c.code} className={`text-sm sm:text-base font-mono font-black ${colorText[c.color]}`}>
+                                    {c.symbol} {convert(unitGs, c.rate).toFixed(2)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                          {i === 0 && (
-                            <div className="text-xs sm:text-sm font-black text-amber-700 dark:text-amber-300 bg-amber-500/10 rounded-md py-1 mt-1">
-                              Total por {t.min_qty} un.: Gs. {Math.round(t.precio_unitario * t.min_qty).toLocaleString("es-PY")}
-                            </div>
-                          )}
-                          {ahorroMay > 0 && (
-                            <div className="inline-block px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-black">
-                              Ahorrás Gs. {ahorroMay.toLocaleString("es-PY")}
-                            </div>
-                          )}
-                          {activeCurrencies.length > 0 && (
-                            <div className="flex items-center justify-center gap-2 pt-1 border-t border-amber-200 dark:border-amber-500/20">
-                              {activeCurrencies.map((c) => (
-                                <span key={c.code} className={`text-sm sm:text-base font-mono font-black ${colorText[c.color]}`}>
-                                  {c.symbol} {convert(unitGs, c.rate).toFixed(2)}
-                                </span>
-                              ))}
-                            </div>
-                          )}
                         </div>
-                      </div>
+                        {i === 0 && (
+                          <div className="rounded-xl bg-gradient-to-br from-sky-50 via-blue-50 to-sky-100 dark:from-slate-800/90 dark:via-slate-800/60 dark:to-blue-950/40 border-2 border-sky-400 dark:border-sky-500/50 shadow-md overflow-hidden">
+                            <div className="px-2 py-1 bg-gradient-to-r from-sky-500 to-blue-500 text-white text-[11px] sm:text-xs font-black uppercase tracking-wider text-center flex items-center justify-center gap-1">
+                              <Layers className="w-3.5 h-3.5" /> Total por {t.min_qty} un.
+                            </div>
+                            <div className="p-2 sm:p-2.5 text-center">
+                              <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black tracking-tight" style={monoFont}>
+                                Gs. {totalGs.toLocaleString("es-PY")}
+                              </div>
+                              <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">
+                                Llevando {t.min_qty} unidades
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </Fragment>
                     )
                   })}
                 </div>

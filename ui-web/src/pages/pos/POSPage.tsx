@@ -10644,28 +10644,34 @@ export default function POSPage() {
                 ) : (
                   <div className="space-y-1.5">
                     {priceCheckTiers.map((t, i) => (
-                      <div
-                        key={t.id}
-                        className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2"
-                      >
-                        <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                          {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} unidades` : `${t.min_qty}+ unidades`}
+                      <React.Fragment key={t.id}>
+                        <div
+                          className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2"
+                        >
+                          <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                            {t.max_qty ? `De ${t.min_qty} a ${t.max_qty} unidades` : `${t.min_qty}+ unidades`}
+                          </div>
+                          <div className="text-right">
+                            <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums">{formatPYG(Number(t.precio_unitario) || 0)}</div>
+                            {(rates.BRL > 0 || rates.USD > 0) && (
+                              <div className="flex items-center gap-2 justify-end mt-1">
+                                {rates.BRL > 0 && <span className="text-sm font-black text-amber-600 dark:text-amber-400 font-posMono tabular-nums">R$ {(Number(t.precio_unitario) / rates.BRL).toFixed(2)}</span>}
+                                {rates.USD > 0 && <span className="text-sm font-black text-blue-600 dark:text-blue-400 font-posMono tabular-nums">US$ {(Number(t.precio_unitario) / rates.USD).toFixed(2)}</span>}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums">{formatPYG(Number(t.precio_unitario) || 0)}</div>
-                          {i === 0 && (
-                            <div className="text-[10px] font-black text-amber-600 dark:text-amber-400 mt-0.5">
-                              Total por {t.min_qty} un.: {formatPYG((Number(t.precio_unitario) || 0) * t.min_qty)}
+                        {i === 0 && (
+                          <div className="flex items-center justify-between bg-sky-50 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/40 rounded-lg px-3 py-2">
+                            <div className="text-sm font-bold text-sky-700 dark:text-sky-300 flex items-center gap-1.5">
+                              <Layers className="w-3.5 h-3.5" /> Total llevando {t.min_qty} un.
                             </div>
-                          )}
-                          {(rates.BRL > 0 || rates.USD > 0) && (
-                            <div className="flex items-center gap-2 justify-end mt-1">
-                              {rates.BRL > 0 && <span className="text-sm font-black text-amber-600 dark:text-amber-400 font-posMono tabular-nums">R$ {(Number(t.precio_unitario) / rates.BRL).toFixed(2)}</span>}
-                              {rates.USD > 0 && <span className="text-sm font-black text-blue-600 dark:text-blue-400 font-posMono tabular-nums">US$ {(Number(t.precio_unitario) / rates.USD).toFixed(2)}</span>}
+                            <div className="font-black text-sky-700 dark:text-sky-300 font-posMono tabular-nums">
+                              {formatPYG((Number(t.precio_unitario) || 0) * t.min_qty)}
                             </div>
-                          )}
-                        </div>
-                      </div>
+                          </div>
+                        )}
+                      </React.Fragment>
                     ))}
                   </div>
                 )}
