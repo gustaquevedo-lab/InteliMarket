@@ -11,7 +11,7 @@ from api.src.nemuha_connector import service
 from api.src.nemuha_connector.models import NemuhaSyncRun
 from api.src.nemuha_connector.schemas import NemuhaSyncRunResponse, TriggerSyncRequest
 
-router = APIRouter(prefix="/api/v1/nemuha-connector", tags=["nemuha-connector"], dependencies=[Depends(require_auth)])
+router = APIRouter(prefix="/api/v1/nemuha-connector", tags=["nemuha-connector"])
 
 
 def _require_intellizapp_key(x_api_key: str = Header(...)) -> None:
@@ -19,13 +19,13 @@ def _require_intellizapp_key(x_api_key: str = Header(...)) -> None:
         raise HTTPException(status_code=401, detail="API key inválida")
 
 
-@router.post("/sync", response_model=NemuhaSyncRunResponse)
+@router.post("/sync", response_model=NemuhaSyncRunResponse, dependencies=[Depends(require_auth)])
 async def trigger_sync(body: TriggerSyncRequest, db: AsyncSession = Depends(get_db)):
     run = await service.run_sync(db, str(body.company_id), body.since)
     return run
 
 
-@router.get("/runs", response_model=list[NemuhaSyncRunResponse])
+@router.get("/runs", response_model=list[NemuhaSyncRunResponse], dependencies=[Depends(require_auth)])
 async def list_runs(company_id: str = Query(), limit: int = Query(20, ge=1, le=100), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(NemuhaSyncRun)
