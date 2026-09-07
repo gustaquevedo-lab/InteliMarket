@@ -70,6 +70,18 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
 
     effective_price = promo_info.precio_promocional if promo_info.en_promocion else base_price
 
+    def _precio_para_cantidad(qty: float) -> float:
+        """El pack casi siempre alcanza o supera el minimo de alguna escala
+        mayorista (una caja de 6 ya califica para "6+ unidades") -- usar el
+        precio unitario al contado ahi seria mostrarle al cliente un total
+        mas caro del que realmente le corresponde pagar. Se toma la escala
+        mas favorable (min_qty mas alto) que la cantidad del pack alcance."""
+        aplicables = [t for t in escalas if qty >= t.min_qty and (t.max_qty is None or qty <= t.max_qty)]
+        if aplicables:
+            mejor = max(aplicables, key=lambda t: t.min_qty)
+            return mejor.precio_unitario
+        return effective_price
+
     packs_result = await db.execute(
         select(ProductPackBarcode)
         .where(ProductPackBarcode.company_id == cid, ProductPackBarcode.product_id == product.id, ProductPackBarcode.activo == True)
@@ -79,7 +91,7 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
         PackPriceInfo(
             etiqueta=p.etiqueta,
             unidades_por_paquete=float(p.unidades_por_paquete),
-            precio_pack=round(effective_price * float(p.unidades_por_paquete), 0),
+            precio_pack=round(_precio_para_cantidad(float(p.unidades_por_paquete)) * float(p.unidades_por_paquete), 0),
         )
         for p in packs_result.scalars().all()
     ]

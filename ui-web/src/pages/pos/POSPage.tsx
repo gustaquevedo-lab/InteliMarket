@@ -5037,6 +5037,18 @@ export default function POSPage() {
     }
   }
 
+  // El pack casi siempre alcanza o supera el minimo de alguna escala mayorista
+  // (una caja de 6 ya califica para "6+ unidades") -- usar el precio unitario
+  // al contado ahi seria mostrarle al cliente un total mas caro del que
+  // realmente le corresponde pagar. Se toma la escala mas favorable (min_qty
+  // mas alto) que la cantidad del pack alcance, igual criterio que el backend
+  // del verificador (kiosk/service.py::lookup_product).
+  const precioParaCantidad = (qty: number, tiers: any[], precioBase: number) => {
+    const aplicables = tiers.filter((t) => qty >= (t.min_qty || 0) && (t.max_qty == null || qty <= t.max_qty))
+    if (aplicables.length === 0) return precioBase
+    return aplicables.reduce((best, t) => (t.min_qty > best.min_qty ? t : best), aplicables[0]).precio_unitario
+  }
+
   const handlePriceCheckSelect = async (p: Product, scannedAsPack?: string) => {
     setPriceCheckSelected(p)
     setPriceCheckTiers([])
@@ -10569,7 +10581,7 @@ export default function POSPage() {
                         <div>
                           <div className="text-[9px] font-black text-sky-600 dark:text-sky-400 uppercase tracking-wider">{priceCheckPacks[0].etiqueta} ({priceCheckPacks[0].unidades_por_paquete % 1 === 0 ? priceCheckPacks[0].unidades_por_paquete.toFixed(0) : priceCheckPacks[0].unidades_por_paquete} un.)</div>
                           <div className="font-black text-sm text-sky-700 dark:text-sky-300 font-posMono tabular-nums">
-                            {formatPYG((priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) * priceCheckPacks[0].unidades_por_paquete)}
+                            {formatPYG(precioParaCantidad(priceCheckPacks[0].unidades_por_paquete, priceCheckTiers, priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) * priceCheckPacks[0].unidades_por_paquete)}
                           </div>
                         </div>
                       </div>
