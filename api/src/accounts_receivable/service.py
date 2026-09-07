@@ -438,11 +438,15 @@ async def list_payments_for_customer(db: AsyncSession, company_id: str, customer
 
 # ── Reportes (Excel / PDF) ──────────────────────────────────────────────
 
-async def get_aging_for_report(db: AsyncSession, company_id: str, fecha_desde: date | None, fecha_hasta: date | None, customer_id: str | None = None) -> dict:
+async def get_aging_for_report(
+    db: AsyncSession, company_id: str, fecha_desde: date | None, fecha_hasta: date | None,
+    customer_id: str | None = None, empresa_vinculada: str | None = None,
+) -> dict:
     """Igual a get_aging_report, pero acota los documentos incluidos por fecha
     de emision (para el reporte exportable con rango de fechas) — la mora se
     sigue calculando contra hoy, es el mismo criterio que ya usa la pantalla.
-    customer_id opcional acota el reporte a un solo cliente."""
+    customer_id acota a un solo cliente; empresa_vinculada filtra por el
+    nombre de la empresa vinculada del cliente (busqueda parcial)."""
     today = date.today()
     query = """
         SELECT
@@ -464,6 +468,9 @@ async def get_aging_for_report(db: AsyncSession, company_id: str, fecha_desde: d
     if customer_id:
         query += " AND ar.customer_id = :customer_id"
         params["customer_id"] = customer_id
+    if empresa_vinculada:
+        query += " AND c.empresa_vinculada_nombre ILIKE :empresa_vinculada"
+        params["empresa_vinculada"] = f"%{empresa_vinculada}%"
     query += " ORDER BY ar.fecha_vencimiento ASC NULLS LAST"
 
     result = await db.execute(text(query), params)

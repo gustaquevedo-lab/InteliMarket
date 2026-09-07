@@ -54,10 +54,10 @@ async def aging_report(company_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/companies/{company_id}/accounts-receivable/export/aging.xlsx")
 async def export_aging_xlsx(
     company_id: str, fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None),
-    customer_id: str | None = Query(None),
+    customer_id: str | None = Query(None), empresa_vinculada: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    aging = await service.get_aging_for_report(db, company_id, fecha_desde, fecha_hasta, customer_id)
+    aging = await service.get_aging_for_report(db, company_id, fecha_desde, fecha_hasta, customer_id, empresa_vinculada)
     xlsx = ar_export_service.export_aging_excel(aging, fecha_desde, fecha_hasta)
     return StreamingResponse(
         iter([xlsx]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -68,10 +68,10 @@ async def export_aging_xlsx(
 @router.get("/companies/{company_id}/accounts-receivable/export/aging.pdf")
 async def export_aging_pdf(
     company_id: str, fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None),
-    customer_id: str | None = Query(None),
+    customer_id: str | None = Query(None), empresa_vinculada: str | None = Query(None),
     db: AsyncSession = Depends(get_db), user=Depends(require_auth),
 ):
-    aging = await service.get_aging_for_report(db, company_id, fecha_desde, fecha_hasta, customer_id)
+    aging = await service.get_aging_for_report(db, company_id, fecha_desde, fecha_hasta, customer_id, empresa_vinculada)
     company = await _get_company_info(db, company_id)
     generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
     pdf_bytes = ar_pdf_reports.generate_aging_report_pdf(company, aging, fecha_desde, fecha_hasta, generated_by)

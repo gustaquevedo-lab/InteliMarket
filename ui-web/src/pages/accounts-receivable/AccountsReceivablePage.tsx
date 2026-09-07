@@ -112,6 +112,13 @@ export default function AccountsReceivablePage() {
   })
   const [reportFechaHasta, setReportFechaHasta] = useState(() => new Date().toISOString().split("T")[0])
   const [reportCustomerId, setReportCustomerId] = useState("")
+  const [reportCustomerName, setReportCustomerName] = useState("")
+  const [reportEmpresaVinculada, setReportEmpresaVinculada] = useState("")
+  const [showReportModal, setShowReportModal] = useState(false)
+  const [customerSearchInput, setCustomerSearchInput] = useState("")
+  const [customerSearchResults, setCustomerSearchResults] = useState<{ id: string; razon_social: string; ruc?: string }[]>([])
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false)
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false)
 
   // Registrar pago
   const [showPaymentModal, setShowPaymentModal] = useState<string | null>(null)
@@ -141,6 +148,19 @@ export default function AccountsReceivablePage() {
     const t = setTimeout(() => setDebouncedSearch(search), 300)
     return () => clearTimeout(t)
   }, [search])
+
+  // Buscador de cliente (typeahead) del modal de reporte
+  useEffect(() => {
+    if (!customerSearchInput.trim()) { setCustomerSearchResults([]); return }
+    setCustomerSearchLoading(true)
+    const t = setTimeout(() => {
+      api.customers.list({ search: customerSearchInput.trim(), limit: 20 })
+        .then(rows => setCustomerSearchResults(rows.map(r => ({ id: r.id, razon_social: r.razon_social || "Cliente sin nombre", ruc: r.ruc }))))
+        .catch(() => setCustomerSearchResults([]))
+        .finally(() => setCustomerSearchLoading(false))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [customerSearchInput])
 
   const fetchData = async () => {
     setLoading(true)
@@ -308,9 +328,20 @@ export default function AccountsReceivablePage() {
   }
 
   const reportParams = { fecha_desde: reportFechaDesde, fecha_hasta: reportFechaHasta }
-  const agingReportParams = { ...reportParams, ...(reportCustomerId ? { customer_id: reportCustomerId } : {}) }
+  const agingReportParams = {
+    ...reportParams,
+    ...(reportCustomerId ? { customer_id: reportCustomerId } : {}),
+    ...(reportEmpresaVinculada.trim() ? { empresa_vinculada: reportEmpresaVinculada.trim() } : {}),
+  }
   const handleDownloadAgingExcel = () => api.accountsReceivable.downloadAgingExcel(agingReportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadAgingPdf = () => api.accountsReceivable.downloadAgingPdf(agingReportParams).catch((e: any) => toast.error("Error", e.message))
+  const resetReportFilters = () => {
+    setReportCustomerId("")
+    setReportCustomerName("")
+    setReportEmpresaVinculada("")
+    setCustomerSearchInput("")
+    setCustomerSearchResults([])
+  }
   const handleDownloadCobranzasExcel = () => api.accountsReceivable.downloadCobranzasExcel(reportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadCobranzasPdf = () => api.accountsReceivable.downloadCobranzasPdf(reportParams).catch((e: any) => toast.error("Error", e.message))
 
@@ -395,50 +426,12 @@ export default function AccountsReceivablePage() {
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-400" : ""}`} />
             </button>
-            <div className="flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/80 rounded-xl px-2.5 py-1.5">
-              <input
-                type="date"
-                value={reportFechaDesde}
-                onChange={e => setReportFechaDesde(e.target.value)}
-                max={reportFechaHasta}
-                className="bg-transparent text-[11px] font-mono text-slate-200 outline-none [color-scheme:dark]"
-                title="Desde"
-              />
-              <span className="text-slate-500 text-xs">→</span>
-              <input
-                type="date"
-                value={reportFechaHasta}
-                onChange={e => setReportFechaHasta(e.target.value)}
-                min={reportFechaDesde}
-                max={new Date().toISOString().split("T")[0]}
-                className="bg-transparent text-[11px] font-mono text-slate-200 outline-none [color-scheme:dark]"
-                title="Hasta"
-              />
-            </div>
-            <select
-              value={reportCustomerId}
-              onChange={e => setReportCustomerId(e.target.value)}
-              className="bg-slate-800/80 border border-slate-700/80 rounded-xl px-2.5 py-2.5 text-[11px] font-bold text-slate-200 outline-none max-w-[160px]"
-              title="Filtrar reporte por cliente"
-            >
-              <option value="">Todos los clientes</option>
-              {(aging?.por_clientes || []).map(c => (
-                <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>
-              ))}
-            </select>
             <button
-              onClick={handleDownloadAgingPdf}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+              onClick={() => setShowReportModal(true)}
+              className="px-3.5 py-2.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
             >
-              <FileDown className="w-4 h-4 text-rose-400" />
-              <span>Aging PDF</span>
-            </button>
-            <button
-              onClick={handleDownloadAgingExcel}
-              className="px-3.5 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-              <span>Aging Excel</span>
+              <FileDown className="w-4 h-4 text-indigo-400" />
+              <span>Generar Reporte</span>
             </button>
           </div>
         </div>
@@ -1018,6 +1011,122 @@ export default function AccountsReceivablePage() {
               <button onClick={handleSubmitPayment} disabled={submittingPayment || montoTotalPago <= 0} className="btn-primary text-xs disabled:opacity-50 flex items-center gap-2">
                 {submittingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar Cobro"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Generar Reporte de Cuentas por Cobrar */}
+      {showReportModal && (
+        <div className="modal-overlay" onClick={() => setShowReportModal(false)}>
+          <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <FileDown className="w-5 h-5 text-primary" />
+                Generar Reporte de Cuentas por Cobrar
+              </h3>
+              <p className="text-xs text-gray-500 mt-1">Antigüedad de saldos (aging) con desglose por cliente, filtrable por período, cliente y empresa vinculada</p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label-field">Fecha Desde</label>
+                  <input
+                    type="date" className="input-field text-xs"
+                    value={reportFechaDesde}
+                    onChange={e => setReportFechaDesde(e.target.value)}
+                    max={reportFechaHasta}
+                  />
+                </div>
+                <div>
+                  <label className="label-field">Fecha Hasta</label>
+                  <input
+                    type="date" className="input-field text-xs"
+                    value={reportFechaHasta}
+                    onChange={e => setReportFechaHasta(e.target.value)}
+                    min={reportFechaDesde}
+                    max={new Date().toISOString().split("T")[0]}
+                  />
+                </div>
+              </div>
+
+              <div className="relative">
+                <label className="label-field">Cliente (opcional — dejar vacío trae todos)</label>
+                {reportCustomerId ? (
+                  <div className="input-field text-xs flex items-center justify-between">
+                    <span className="font-semibold text-gray-800 dark:text-gray-200">{reportCustomerName}</span>
+                    <button
+                      onClick={() => { setReportCustomerId(""); setReportCustomerName(""); setCustomerSearchInput("") }}
+                      className="text-gray-400 hover:text-red-500"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      className="input-field text-xs pl-8"
+                      placeholder="Buscar por nombre, razón social o RUC..."
+                      value={customerSearchInput}
+                      onChange={e => { setCustomerSearchInput(e.target.value); setCustomerSearchOpen(true) }}
+                      onFocus={() => setCustomerSearchOpen(true)}
+                    />
+                    {customerSearchOpen && customerSearchInput.trim() && (
+                      <div className="absolute z-10 mt-1 w-full max-h-52 overflow-y-auto bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg">
+                        {customerSearchLoading ? (
+                          <div className="p-3 text-center"><Loader2 className="w-4 h-4 animate-spin mx-auto text-gray-400" /></div>
+                        ) : customerSearchResults.length === 0 ? (
+                          <div className="p-3 text-xs text-gray-400 text-center">Sin resultados</div>
+                        ) : (
+                          customerSearchResults.map(c => (
+                            <button
+                              key={c.id}
+                              onClick={() => {
+                                setReportCustomerId(c.id); setReportCustomerName(c.razon_social)
+                                setCustomerSearchOpen(false); setCustomerSearchInput("")
+                              }}
+                              className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center justify-between gap-2"
+                            >
+                              <span className="font-semibold text-gray-800 dark:text-gray-200">{c.razon_social}</span>
+                              {c.ruc && <span className="text-gray-400 font-mono text-[10px]">{c.ruc}</span>}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="label-field">Empresa Vinculada (opcional)</label>
+                <input
+                  className="input-field text-xs"
+                  placeholder="Ej: convenio con empresa X..."
+                  value={reportEmpresaVinculada}
+                  onChange={e => setReportEmpresaVinculada(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="p-6 border-t flex items-center justify-between gap-3">
+              <button onClick={resetReportFilters} className="btn-ghost text-xs">Limpiar filtros</button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { handleDownloadAgingExcel(); setShowReportModal(false) }}
+                  className="btn-outline text-xs flex items-center gap-2"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-500" /> Excel
+                </button>
+                <button
+                  onClick={() => { handleDownloadAgingPdf(); setShowReportModal(false) }}
+                  className="btn-primary text-xs flex items-center gap-2"
+                >
+                  <FileDown className="w-4 h-4" /> Descargar PDF
+                </button>
+              </div>
             </div>
           </div>
         </div>
