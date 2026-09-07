@@ -1139,7 +1139,7 @@ export default function LabelsPage() {
                 {([
                   ["mostrar_encabezado", "Encabezado"],
                   ["mostrar_nombre", "Nombre"],
-                  ["mostrar_barcode", "Código de barras"],
+                  ["mostrar_barcode", "Barras del código"],
                   ["mostrar_escalas", "Precio mayorista"],
                   ["mostrar_fecha", "Fecha de impresión"],
                   ["mostrar_marco", "Recuadro del borde"],
@@ -1153,6 +1153,9 @@ export default function LabelsPage() {
                   </label>
                 ))}
               </div>
+              <p className="text-[10px] text-slate-400 leading-snug -mt-1">
+                Sin las barras, el número del código y la fecha se imprimen más grandes y el nombre del producto gana una línea.
+              </p>
 
               <button onClick={aprobarDiseno} disabled={aprobando}
                 className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-black disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2">

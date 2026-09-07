@@ -106,6 +106,9 @@ export function renderGondola(
   ctx.fillRect(0, 0, anchoDots, altoDots)
   ctx.fillStyle = "#000"
   ctx.strokeStyle = "#000"
+  // Siempre arriba: si se dependia de que lo fijara el encabezado, ocultarlo
+  // desplazaba todo lo demas.
+  ctx.textBaseline = "top"
 
   if (d.mostrar_marco) {
     ctx.lineWidth = 3
@@ -119,14 +122,17 @@ export function renderGondola(
   let y = 10
   if (d.mostrar_encabezado) {
     ctx.font = `bold 22px ${d.familia_texto}`
-    ctx.textBaseline = "top"
     ctx.fillText(d.texto_encabezado || "", 22, y)
     y += 28
   }
 
+  // Sin las barras se libera la franja inferior, asi que el nombre --lo primero
+  // que mira el cliente-- gana una linea entera.
+  const conBarras = d.mostrar_barcode && !!item.codigo_barra
+
   if (d.mostrar_nombre) {
     ctx.font = `bold ${d.fuente_nombre}px ${d.familia_texto}`
-    for (const linea of ajustarTexto(ctx, item.nombre, anchoTexto, 2)) {
+    for (const linea of ajustarTexto(ctx, item.nombre, anchoTexto, conBarras ? 2 : 3)) {
       ctx.fillText(linea, 22, y)
       y += d.fuente_nombre + 4
     }
@@ -135,9 +141,9 @@ export function renderGondola(
   const esc = d.mostrar_escalas ? item.escalas?.[0] : undefined
 
   // JERARQUIA DE PRECIOS
-  // El mayorista es el gancho (es el mas barato), asi que se lleva la mayor
-  // superficie y el fondo negro. El unitario va arriba en negativo --fondo
-  // blanco, letra negra-- para que se lea claro sin competirle al mayorista.
+  // El mayorista es el gancho (es el mas barato), asi que va ARRIBA, con la
+  // mayor superficie y el fondo negro: es lo primero que cae el ojo. El
+  // unitario queda debajo en blanco, legible pero sin competirle.
   // Cada uno rotulado, para que el cliente no tenga que interpretar.
   if (d.mostrar_precio) {
     const bx = xPrecio
@@ -156,31 +162,31 @@ export function renderGondola(
     }
 
     if (esc && !d.unitario_afuera) {
-      // Bloque partido: 40% unitario en blanco, 60% mayorista en negro.
-      const hUnit = Math.round(bh * 0.4)
-      const hMay = bh - hUnit
-
-      // --- unitario (fondo blanco, letras negras, con borde para delimitar)
-      ctx.fillStyle = "#fff"
-      ctx.fillRect(bx, by, bw, hUnit)
-      ctx.strokeStyle = "#000"
-      ctx.lineWidth = 3
-      ctx.strokeRect(bx + 1, by + 1, bw - 2, hUnit - 2)
-      ctx.fillStyle = "#000"
-      ctx.font = `bold 20px ${d.familia_texto}`
-      ctx.fillText("PRECIO UNITARIO", bx + 14, by + 8)
-      const tu = ajustar(fmtGs(item.precio_venta), d.fuente_precio_unitario, bw - 28, d.familia_precio)
-      ctx.fillText(`Gs. ${fmtGs(item.precio_venta)}`, bx + 14, by + hUnit - tu - 8)
+      // Bloque partido: 60% mayorista en negro arriba, 40% unitario en blanco abajo.
+      const hMay = Math.round(bh * 0.6)
+      const hUnit = bh - hMay
 
       // --- mayorista (fondo negro, letras blancas)
-      const my = by + hUnit
       ctx.fillStyle = "#000"
-      ctx.fillRect(bx, my, bw, hMay)
+      ctx.fillRect(bx, by, bw, hMay)
       ctx.fillStyle = "#fff"
       ctx.font = `bold 20px ${d.familia_texto}`
-      ctx.fillText(`PRECIO MAYORISTA (${esc.min_qty}+)`, bx + 14, my + 8)
+      ctx.fillText(`PRECIO MAYORISTA (${esc.min_qty}+)`, bx + 14, by + 8)
       const tm = ajustar(fmtGs(esc.precio_unitario), d.fuente_precio, bw - 28, d.familia_precio)
-      ctx.fillText(`Gs. ${fmtGs(esc.precio_unitario)}`, bx + 14, my + hMay - tm - 10)
+      ctx.fillText(`Gs. ${fmtGs(esc.precio_unitario)}`, bx + 14, by + hMay - tm - 10)
+
+      // --- unitario (fondo blanco, letras negras, con borde para delimitar)
+      const uy = by + hMay
+      ctx.fillStyle = "#fff"
+      ctx.fillRect(bx, uy, bw, hUnit)
+      ctx.strokeStyle = "#000"
+      ctx.lineWidth = 3
+      ctx.strokeRect(bx + 1, uy + 1, bw - 2, hUnit - 2)
+      ctx.fillStyle = "#000"
+      ctx.font = `bold 20px ${d.familia_texto}`
+      ctx.fillText("PRECIO UNITARIO", bx + 14, uy + 8)
+      const tu = ajustar(fmtGs(item.precio_venta), d.fuente_precio_unitario, bw - 28, d.familia_precio)
+      ctx.fillText(`Gs. ${fmtGs(item.precio_venta)}`, bx + 14, uy + hUnit - tu - 8)
       ctx.fillStyle = "#000"
     } else {
       // Sin escala (o con el unitario afuera): el bloque negro lleva el precio
@@ -211,8 +217,8 @@ export function renderGondola(
   }
 
   // Codigo de barras con su numero: se usa para reponer y para auditar.
-  if (d.mostrar_barcode && item.codigo_barra) {
-    const anchos = code128Widths(item.codigo_barra)
+  if (conBarras) {
+    const anchos = code128Widths(item.codigo_barra!)
     const modulos = anchos.reduce((a, b) => a + b, 0)
     const modulo = Math.max(2, Math.floor((anchoTexto - 20) / modulos))
     const altoBarras = 42
@@ -224,14 +230,31 @@ export function renderGondola(
       x += w * modulo
     })
     ctx.font = `bold 20px monospace`
-    ctx.fillText(item.codigo_barra, 22, yBarras + altoBarras + 2)
+    ctx.fillText(item.codigo_barra!, 22, yBarras + altoBarras + 2)
   }
 
   // Fecha de impresion: permite saber de cuando es el precio en la gondola.
-  if (d.mostrar_fecha) {
-    ctx.font = `bold 20px ${d.familia_texto}`
-    const f = new Date().toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "numeric" })
-    ctx.fillText(f, 22, altoDots - 42)
+  const fecha = new Date().toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "numeric" })
+
+  if (conBarras) {
+    if (d.mostrar_fecha) {
+      ctx.font = `bold 20px ${d.familia_texto}`
+      ctx.fillText(fecha, 22, altoDots - 42)
+    }
+  } else {
+    // Sin barras: el numero y la fecha comparten una sola linea al pie y van
+    // mas grandes. Se leen de lejos, que es para lo que se usan en la gondola,
+    // y ocupan menos alto que las barras.
+    const yPie = altoDots - 40
+    if (item.codigo_barra) {
+      ctx.font = `bold 30px monospace`
+      ctx.fillText(item.codigo_barra, 22, yPie)
+    }
+    if (d.mostrar_fecha) {
+      ctx.font = `bold 26px ${d.familia_texto}`
+      const w = ctx.measureText(fecha).width
+      ctx.fillText(fecha, Math.max(22, anchoTexto + 22 - w), yPie + 3)
+    }
   }
 }
 
