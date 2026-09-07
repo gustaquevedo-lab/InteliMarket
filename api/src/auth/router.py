@@ -1,9 +1,10 @@
 """Auth API router"""
 
 import secrets
+import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy import select, update, text
+from sqlalchemy import select, update, delete, text
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -655,25 +656,35 @@ async def admin_delete_user(
     if current_uid and str(user_id) == current_uid:
         raise HTTPException(status_code=400, detail="No puede eliminar su propia cuenta de usuario en uso actual.")
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    try:
+        user_uuid = uuid.UUID(str(user_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de usuario inválido")
+
+    result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
+    user_nombre = str(user.nombre or "Usuario")
+    uid_str = str(user_uuid)
+
     try:
-        await db.execute(text("DELETE FROM rbac_user_roles WHERE user_id = :uid"), {"uid": str(user_id)})
-        await db.execute(text("DELETE FROM user_tenants WHERE user_id = :uid"), {"uid": str(user_id)})
-        await db.execute(text("DELETE FROM staff_shifts WHERE user_id = :uid"), {"uid": str(user_id)})
-        await db.execute(delete(User).where(User.id == user_id))
+        await db.execute(text("DELETE FROM rbac_user_roles WHERE user_id = :uid"), {"uid": uid_str})
+        await db.execute(text("DELETE FROM user_tenants WHERE user_id = :uid"), {"uid": uid_str})
+        await db.execute(text("DELETE FROM staff_shifts WHERE user_id = :uid"), {"uid": uid_str})
+        await db.execute(text("DELETE FROM user_notification_preferences WHERE user_id = :uid"), {"uid": uid_str})
+        await db.execute(text("DELETE FROM notifications WHERE user_id = :uid"), {"uid": uid_str})
+        await db.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": uid_str})
         await db.commit()
-        return {"success": True, "message": f"Usuario {user.nombre} eliminado correctamente."}
+        return {"success": True, "message": f"Usuario {user_nombre} eliminado correctamente."}
     except Exception as e:
         await db.rollback()
-        # Fallback de seguridad si hay ventas asociadas
+        # Fallback de seguridad si hay ventas o registros de auditoría asociados
         try:
-            await db.execute(update(User).where(User.id == user_id).values(activo=False))
+            await db.execute(text("UPDATE users SET activo = false, updated_at = NOW() WHERE id = :uid"), {"uid": uid_str})
             await db.commit()
-            return {"success": True, "message": f"Usuario {user.nombre} desactivado por integridad referencial de auditoría."}
+            return {"success": True, "message": f"Usuario {user_nombre} desactivado por integridad referencial de auditoría."}
         except Exception as e2:
             raise HTTPException(status_code=500, detail=f"Error al eliminar usuario: {str(e2)}")
 
