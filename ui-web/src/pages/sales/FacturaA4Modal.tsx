@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect, useMemo, useRef } from "react"
 import {
   Printer, FileDown, X, ShieldCheck, Check, Loader2, QrCode, Receipt, Layers
 } from "lucide-react"
@@ -99,8 +99,9 @@ function numeroALetras(monto: number): string {
   return resultado.trim()
 }
 
-// Cantidad reglamentaria de ítems por hoja A4 para mantener márgenes y legibilidad SET
-const ITEMS_PER_PAGE = 18
+// 24 ítems por hoja A4 aprovechan el alto del papel sin dejar gaps excesivos
+// y garantizan que el pie de página nunca se corte.
+const ITEMS_PER_PAGE = 24
 
 export default function FacturaA4Modal({
   sale,
@@ -111,10 +112,10 @@ export default function FacturaA4Modal({
 }: FacturaA4ModalProps) {
   const [items, setItems] = useState<any[]>(sale.items || [])
   const [loadingItems, setLoadingItems] = useState(false)
-  const [printMode, setPrintMode] = useState<"a4" | "ticket">("a4")
+  const printContainerRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
 
-  // Cierre con Escape
+  // Cierre con tecla Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose()
@@ -123,7 +124,7 @@ export default function FacturaA4Modal({
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [onClose])
 
-  // Carga reactiva de los ítems reales de la venta (con nombres y SKUs cruzados con products)
+  // Carga reactiva de los ítems reales de la venta (con nombres y SKUs cruzados desde products)
   useEffect(() => {
     let cancelled = false
     setLoadingItems(true)
@@ -209,9 +210,6 @@ export default function FacturaA4Modal({
   }, [items, sale])
 
   // ── DIVISIÓN MULTIPÁGINA REGLAMENTARIA (SET / DNIT) ──────────────────────
-  // Cuando los ítems sobrepasan el alto del A4, la SET exige foliado correlativo
-  // ("Hoja 1 de N", "Hoja 2 de N"), arrastre tributario ("VAN AL FOLIO SIGUIENTE"
-  // y "VIENEN DEL FOLIO ANTERIOR") y totalización legal en la última hoja.
   const pagesData = useMemo(() => {
     if (items.length === 0) {
       return [{
@@ -263,17 +261,113 @@ export default function FacturaA4Modal({
     return pages
   }, [items])
 
+  // ── IMPRESIÓN AISLADA BULLETPROOF (IFRAME LIMPIO) ────────────────────────
+  // Resuelve el problema donde Chrome/Edge corta después de la hoja 1 cuando se
+  // imprime desde un modal que tiene position:fixed / overflow-y:auto en React.
   const handlePrint = (mode: "a4" | "ticket" = "a4") => {
-    setPrintMode(mode)
-    setTimeout(() => {
+    const container = printContainerRef.current
+    if (!container) {
       window.print()
+      return
+    }
+
+    let iframe = document.getElementById("factura-print-iframe") as HTMLIFrameElement
+    if (!iframe) {
+      iframe = document.createElement("iframe")
+      iframe.id = "factura-print-iframe"
+      iframe.style.position = "fixed"
+      iframe.style.right = "0"
+      iframe.style.bottom = "0"
+      iframe.style.width = "0"
+      iframe.style.height = "0"
+      iframe.style.border = "0"
+      iframe.style.opacity = "0"
+      iframe.style.pointerEvents = "none"
+      document.body.appendChild(iframe)
+    }
+
+    const doc = iframe.contentWindow?.document
+    if (!doc) {
+      window.print()
+      return
+    }
+
+    const printableHtml = container.innerHTML
+
+    doc.open()
+    doc.write(`
+      <!DOCTYPE html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8">
+          <title>Factura ${sale.numero || sale.id}</title>
+          <style>
+            @page {
+              size: ${mode === "ticket" ? "80mm auto" : "A4 portrait"};
+              margin: ${mode === "ticket" ? "0" : "5mm 7mm 5mm 7mm"};
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              color-adjust: exact !important;
+            }
+            html, body {
+              margin: 0;
+              padding: 0;
+              background: #fff !important;
+              color: #000 !important;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+              font-size: 9px;
+              line-height: 1.2;
+            }
+            .factura-a4-page {
+              width: 100%;
+              min-height: 278mm;
+              max-height: 282mm;
+              page-break-after: always;
+              break-after: page;
+              page-break-inside: avoid;
+              break-inside: avoid;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              padding: 2mm 2mm 3mm 2mm;
+              box-sizing: border-box;
+              overflow: hidden;
+              background: #fff !important;
+            }
+            .factura-a4-page:last-child {
+              page-break-after: auto;
+              break-after: auto;
+            }
+            table {
+              border-collapse: collapse;
+              width: 100%;
+            }
+            .no-print {
+              display: none !important;
+            }
+          </style>
+          <link rel="stylesheet" href="/index.css">
+        </head>
+        <body>
+          ${printableHtml}
+        </body>
+      </html>
+    `)
+    doc.close()
+
+    iframe.contentWindow?.focus()
+    setTimeout(() => {
+      iframe.contentWindow?.print()
       toast.success(
         "Impresión enviada",
         mode === "a4"
-          ? `Imprimiendo Factura A4 (${pagesData.length} hoja${pagesData.length > 1 ? "s" : ""})...`
+          ? `Factura A4 (${pagesData.length} hoja${pagesData.length > 1 ? "s" : ""}) enviada a la impresora.`
           : "Enviando comprobante térmico..."
       )
-    }, 100)
+    }, 200)
   }
 
   const handleDownloadPdf = async () => {
@@ -310,38 +404,38 @@ export default function FacturaA4Modal({
       <style>{`
         @media print {
           @page {
-            size: ${printMode === "ticket" ? "80mm auto" : "A4 portrait"};
-            margin: ${printMode === "ticket" ? "0" : "6mm 8mm 6mm 8mm"};
+            size: A4 portrait;
+            margin: 5mm 7mm 5mm 7mm;
           }
-          body * {
-            visibility: hidden !important;
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
-          #facturas-print-container, #facturas-print-container * {
-            visibility: visible !important;
+          html, body, #root, .fixed, .overflow-y-auto {
+            position: static !important;
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+            background: white !important;
+          }
+          body > *:not(#facturas-print-container) {
+            display: none !important;
           }
           #facturas-print-container {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
+            display: block !important;
             width: 100% !important;
-            max-width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
-            background: white !important;
-            color: black !important;
-            box-shadow: none !important;
-            border: none !important;
-            z-index: 999999 !important;
           }
           .factura-a4-page {
             page-break-after: always !important;
             break-after: page !important;
+            height: 280mm !important;
+            max-height: 282mm !important;
             box-shadow: none !important;
             border: none !important;
-            margin: 0 0 0 0 !important;
-            padding: 4mm 6mm !important;
-            min-height: 285mm !important;
-            background: white !important;
+            margin: 0 !important;
+            padding: 2mm 2mm 3mm 2mm !important;
             box-sizing: border-box !important;
           }
           .factura-a4-page:last-child {
@@ -357,7 +451,7 @@ export default function FacturaA4Modal({
       {/* Tarjeta Envolvente del Modal */}
       <div
         className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl md:rounded-3xl shadow-2xl w-full max-w-5xl my-auto flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
-        style={{ maxHeight: "min(92vh, 900px)" }}
+        style={{ maxHeight: "min(92vh, 920px)" }}
       >
         {/* Barra Superior de Herramientas (no-print) */}
         <div className="no-print bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 px-4 py-3 sm:px-6 flex items-center justify-between gap-3 flex-shrink-0">
@@ -373,14 +467,12 @@ export default function FacturaA4Modal({
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 font-mono">
                   Timbrado #{timbrado}
                 </span>
-                {pagesData.length > 1 && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-mono flex items-center gap-1">
-                    <Layers className="w-3 h-3" /> {pagesData.length} Hojas
-                  </span>
-                )}
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-mono flex items-center gap-1">
+                  <Layers className="w-3 h-3" /> {pagesData.length} Hoja{pagesData.length > 1 ? "s" : ""}
+                </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                Comprobante oficial con foliado correlativo y arrastre tributario
+                {items.length} ítems registrados · Foliado correlativo SET con arrastre de saldos
               </p>
             </div>
           </div>
@@ -392,7 +484,7 @@ export default function FacturaA4Modal({
               title="Imprimir documento oficial en hoja A4"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>Imprimir A4</span>
+              <span>Imprimir A4 ({pagesData.length} hoja{pagesData.length > 1 ? "s" : ""})</span>
             </button>
 
             <button
@@ -425,70 +517,78 @@ export default function FacturaA4Modal({
 
         {/* Contenedor del Visor / Hojas A4 */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-200/70 dark:bg-slate-900/90 flex flex-col items-center gap-6">
-          <div id="facturas-print-container" className="w-full flex flex-col items-center gap-6">
+          <div ref={printContainerRef} id="facturas-print-container" className="w-full flex flex-col items-center gap-6">
             {pagesData.map((page) => (
               <div
                 key={`page-${page.pageNumber}`}
-                className="factura-a4-page bg-white text-black w-full max-w-[210mm] min-h-[285mm] p-6 sm:p-8 shadow-xl border border-slate-300 font-sans text-xs flex flex-col justify-between"
+                className="factura-a4-page bg-white text-black w-full max-w-[210mm] min-h-[278mm] max-h-[282mm] p-5 sm:p-7 shadow-xl border border-slate-300 font-sans text-xs flex flex-col justify-between"
                 style={{ boxSizing: "border-box" }}
               >
                 <div>
                   {/* ── 1. ENCABEZADO: DATOS DE LA EMPRESA & TIMBRADO SET ── */}
-                  <div className="grid grid-cols-12 gap-3 pb-3 border-b-2 border-black">
+                  <div className="grid grid-cols-12 gap-3 pb-2 border-b-2 border-black">
                     {/* Lado Izquierdo: Emisor */}
                     <div className="col-span-7 sm:col-span-8 flex items-start gap-3">
                       <img
                         src="/logo_extra.png"
                         alt="Extra Supermercado Mayorista"
-                        className="h-16 w-auto object-contain flex-shrink-0"
+                        className="h-12 w-auto object-contain flex-shrink-0"
                         onError={(e) => {
                           (e.target as HTMLElement).style.display = "none"
                         }}
                       />
                       <div className="min-w-0">
-                        <h1 className="font-black text-sm uppercase tracking-tight text-black leading-tight">
+                        <h1 className="font-black text-[13px] uppercase tracking-tight text-black leading-tight">
                           {emisor.razonSocial}
                         </h1>
-                        <p className="font-bold text-xs text-black">
+                        <p className="font-bold text-[11px] text-black">
                           {emisor.nombreFantasia}
                         </p>
-                        <p className="text-[10px] text-gray-700 leading-tight mt-0.5">
+                        <p className="text-[9.5px] text-gray-700 leading-tight mt-0.5">
                           {emisor.actividad}
                         </p>
-                        <p className="text-[10px] text-gray-700 leading-tight mt-0.5">
+                        <p className="text-[9px] text-gray-700 leading-tight mt-0.5">
                           {emisor.direccion} · {emisor.ciudad}
                         </p>
-                        <p className="text-[10px] text-gray-700 font-mono">
+                        <p className="text-[9px] text-gray-700 font-mono">
                           Tel: {emisor.telefono}
                         </p>
                       </div>
                     </div>
 
                     {/* Lado Derecho: Recuadro Oficial Timbrado SET con Foliado */}
-                    <div className="col-span-5 sm:col-span-4 border-2 border-black rounded-lg p-2 text-center flex flex-col justify-center bg-gray-50/50 relative">
+                    <div className="col-span-5 sm:col-span-4 border-2 border-black rounded p-1.5 text-center flex flex-col justify-center bg-gray-50/50 relative">
                       {page.totalPages > 1 && (
-                        <div className="absolute -top-3 right-2 bg-black text-white text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">
+                        <div className="absolute -top-3 right-2 border-2 border-black bg-white text-black font-black text-[9px] px-2 py-0.5 rounded uppercase tracking-wider shadow-xs">
                           Hoja {page.pageNumber} de {page.totalPages}
                         </div>
                       )}
-                      <div className="text-[10px] font-bold">TIMBRADO Nº {timbrado}</div>
-                      <div className="text-[9px] text-gray-600">
+                      <div className="text-[9.5px] font-bold">TIMBRADO Nº {timbrado}</div>
+                      <div className="text-[8.5px] text-gray-600">
                         Válido hasta: {timbradoVencimiento}
                       </div>
-                      <div className="text-[11px] font-mono font-black mt-0.5">
+                      <div className="text-[10px] font-mono font-black mt-0.5">
                         RUC: {emisor.ruc}
                       </div>
-                      <div className="bg-black text-white text-xs font-black py-0.5 my-1 uppercase tracking-widest">
+                      <div
+                        style={{
+                          backgroundColor: "#000",
+                          color: "#fff",
+                          WebkitPrintColorAdjust: "exact",
+                          printColorAdjust: "exact",
+                        }}
+                        className="border border-black font-black text-[11px] py-0.5 my-0.5 uppercase tracking-widest text-center"
+                      >
                         FACTURA
                       </div>
-                      <div className="font-mono font-black text-sm tracking-tight">
+                      <div className="font-mono font-black text-xs tracking-tight">
                         Nº {sale.numero || `001-011-00${sale.id.slice(-5)}`}
                       </div>
                     </div>
                   </div>
 
                   {/* ── 2. DATOS DEL CLIENTE / RECEPTOR (RECUADRO LEGAL) ── */}
-                  <div className="mt-3 border border-black rounded-lg p-2.5 text-[11px] space-y-1 bg-white">
+                  <div className="mt-2 border border-black rounded p-2 text-[10px] space-y-0.5 bg-white">
                     <div className="grid grid-cols-12 gap-2">
                       <div className="col-span-7">
                         <span className="font-bold">Fecha de Emisión: </span>
@@ -498,14 +598,14 @@ export default function FacturaA4Modal({
                       </div>
                       <div className="col-span-5 flex items-center justify-end gap-3">
                         <span className="font-bold">Condición:</span>
-                        <label className="flex items-center gap-1 font-mono text-[10px]">
-                          <span className="inline-block w-3.5 h-3.5 border border-black text-center leading-3 font-bold text-[9px]">
+                        <label className="flex items-center gap-1 font-mono text-[9.5px]">
+                          <span className="inline-block w-3 h-3 border border-black text-center leading-2.5 font-bold text-[8.5px]">
                             {!isCredito ? "X" : ""}
                           </span>
                           CONTADO
                         </label>
-                        <label className="flex items-center gap-1 font-mono text-[10px]">
-                          <span className="inline-block w-3.5 h-3.5 border border-black text-center leading-3 font-bold text-[9px]">
+                        <label className="flex items-center gap-1 font-mono text-[9.5px]">
+                          <span className="inline-block w-3 h-3 border border-black text-center leading-2.5 font-bold text-[8.5px]">
                             {isCredito ? "X" : ""}
                           </span>
                           CRÉDITO
@@ -524,7 +624,7 @@ export default function FacturaA4Modal({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-12 gap-2 pt-0.5 text-[10px] text-gray-800">
+                    <div className="grid grid-cols-12 gap-2 pt-0.5 text-[9px] text-gray-800">
                       <div className="col-span-8">
                         <span className="font-bold">Dirección: </span>
                         <span>{custAddress}</span>
@@ -537,40 +637,40 @@ export default function FacturaA4Modal({
                   </div>
 
                   {/* ── 3. TABLA OFICIAL DE ÍTEMS Y MERCADERÍAS (SET 7 COLS) ── */}
-                  <div className="mt-3 border border-black rounded-lg overflow-hidden">
-                    <table className="w-full text-[10px] border-collapse">
+                  <div className="mt-2 border border-black rounded overflow-hidden">
+                    <table className="w-full text-[9px] border-collapse">
                       <thead>
                         <tr className="bg-gray-100 text-black border-b border-black font-bold text-center">
-                          <th className="py-1.5 px-2 border-r border-black w-[7%]">CANT.</th>
-                          <th className="py-1.5 px-2 border-r border-black w-[13%]">CÓDIGO</th>
-                          <th className="py-1.5 px-2 border-r border-black text-left w-[44%]">
+                          <th className="py-1 px-1.5 border-r border-black w-[6%]">CANT.</th>
+                          <th className="py-1 px-1.5 border-r border-black w-[13%]">CÓDIGO</th>
+                          <th className="py-1 px-1.5 border-r border-black text-left w-[45%]">
                             DESCRIPCIÓN DE MERCADERÍAS Y/O SERVICIOS
                           </th>
-                          <th className="py-1.5 px-2 border-r border-black text-right w-[12%]">
+                          <th className="py-1 px-1.5 border-r border-black text-right w-[12%]">
                             PRECIO UNIT.
                           </th>
-                          <th className="py-1.5 px-1 border-r border-black text-right w-[8%]">
+                          <th className="py-1 px-1 border-r border-black text-right w-[8%]">
                             EXENTAS
                           </th>
-                          <th className="py-1.5 px-1 border-r border-black text-right w-[8%]">
+                          <th className="py-1 px-1 border-r border-black text-right w-[8%]">
                             5%
                           </th>
-                          <th className="py-1.5 px-1 text-right w-[8%]">10%</th>
+                          <th className="py-1 px-1 text-right w-[8%]">10%</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
                         {/* ── FILA DE APERTURA POR TRANSPORTE (VIENEN DEL FOLIO ANTERIOR) ── */}
                         {!page.isFirstPage && (
                           <tr className="bg-amber-50/70 font-bold border-b border-black text-amber-950">
-                            <td className="py-1 px-2 border-r border-black text-center font-mono text-[9px]">—</td>
-                            <td className="py-1 px-2 border-r border-black font-mono text-[9px] text-center">TRANSP.</td>
-                            <td className="py-1 px-2 border-r border-black uppercase text-[10px]">
+                            <td className="py-0.5 px-1.5 border-r border-black text-center font-mono text-[8.5px]">—</td>
+                            <td className="py-0.5 px-1.5 border-r border-black font-mono text-[8.5px] text-center">TRANSP.</td>
+                            <td className="py-0.5 px-1.5 border-r border-black uppercase text-[9px]">
                               *** VIENEN DEL FOLIO ANTERIOR (HOJA {page.pageNumber - 1}) ***
                             </td>
-                            <td className="py-1 px-2 border-r border-black text-right font-mono text-[9px]">—</td>
-                            <td className="py-1 px-1 border-r border-black text-right font-mono text-[9px]">—</td>
-                            <td className="py-1 px-1 border-r border-black text-right font-mono text-[9px]">—</td>
-                            <td className="py-1 px-1 text-right font-mono font-bold">
+                            <td className="py-0.5 px-1.5 border-r border-black text-right font-mono text-[8.5px]">—</td>
+                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8.5px]">—</td>
+                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8.5px]">—</td>
+                            <td className="py-0.5 px-1 text-right font-mono font-bold">
                               {formatPYG(page.carryOverIn)}
                             </td>
                           </tr>
@@ -612,25 +712,25 @@ export default function FacturaA4Modal({
 
                             return (
                               <tr key={`item-${page.pageNumber}-${idx}`} className="hover:bg-gray-50/50">
-                                <td className="py-1 px-2 border-r border-black text-center font-mono font-semibold">
+                                <td className="py-0.5 px-1.5 border-r border-black text-center font-mono font-semibold">
                                   {cant}
                                 </td>
-                                <td className="py-1 px-2 border-r border-black font-mono text-[9px] text-gray-700">
+                                <td className="py-0.5 px-1.5 border-r border-black font-mono text-[8.5px] text-gray-700">
                                   {itemCode}
                                 </td>
-                                <td className="py-1 px-2 border-r border-black uppercase font-medium truncate max-w-[250px]" title={itemDesc}>
+                                <td className="py-0.5 px-1.5 border-r border-black uppercase font-medium truncate max-w-[280px]" title={itemDesc}>
                                   {itemDesc}
                                 </td>
-                                <td className="py-1 px-2 border-r border-black text-right font-mono">
+                                <td className="py-0.5 px-1.5 border-r border-black text-right font-mono">
                                   {formatPYG(pu)}
                                 </td>
-                                <td className="py-1 px-1 border-r border-black text-right font-mono">
+                                <td className="py-0.5 px-1 border-r border-black text-right font-mono">
                                   {exenta > 0 ? formatPYG(exenta) : "0"}
                                 </td>
-                                <td className="py-1 px-1 border-r border-black text-right font-mono">
+                                <td className="py-0.5 px-1 border-r border-black text-right font-mono">
                                   {v5 > 0 ? formatPYG(v5) : "0"}
                                 </td>
-                                <td className="py-1 px-1 text-right font-mono font-semibold">
+                                <td className="py-0.5 px-1 text-right font-mono font-semibold">
                                   {v10 > 0 ? formatPYG(v10) : "0"}
                                 </td>
                               </tr>
@@ -641,66 +741,51 @@ export default function FacturaA4Modal({
                         {/* ── FILA DE ARRASTRE TRIBUTARIO (VAN AL FOLIO SIGUIENTE) EN HOJAS INTERMEDIAS ── */}
                         {!page.isLastPage && (
                           <tr className="bg-amber-50/70 font-bold border-t border-black text-amber-950">
-                            <td className="py-1 px-2 border-r border-black text-center font-mono text-[9px]">—</td>
-                            <td className="py-1 px-2 border-r border-black font-mono text-[9px] text-center">TRANSP.</td>
-                            <td className="py-1 px-2 border-r border-black uppercase text-[10px]">
+                            <td className="py-0.5 px-1.5 border-r border-black text-center font-mono text-[8.5px]">—</td>
+                            <td className="py-0.5 px-1.5 border-r border-black font-mono text-[8.5px] text-center">TRANSP.</td>
+                            <td className="py-0.5 px-1.5 border-r border-black uppercase text-[9px]">
                               *** VAN AL FOLIO SIGUIENTE (HOJA {page.pageNumber + 1}) ***
                             </td>
-                            <td className="py-1 px-2 border-r border-black text-right font-mono text-[9px]">—</td>
-                            <td className="py-1 px-1 border-r border-black text-right font-mono text-[9px]">—</td>
-                            <td className="py-1 px-1 border-r border-black text-right font-mono text-[9px]">—</td>
-                            <td className="py-1 px-1 text-right font-mono font-bold">
+                            <td className="py-0.5 px-1.5 border-r border-black text-right font-mono text-[8.5px]">—</td>
+                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8.5px]">—</td>
+                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8.5px]">—</td>
+                            <td className="py-0.5 px-1 text-right font-mono font-bold">
                               {formatPYG(page.carryOverOut)}
                             </td>
                           </tr>
                         )}
-
-                        {/* Filas vacías estéticas para mantener cuerpo de hoja A4 SET en la última hoja si hay pocos ítems */}
-                        {page.isLastPage && page.items.length > 0 && page.items.length < 6 &&
-                          Array.from({ length: 6 - page.items.length }).map((_, i) => (
-                            <tr key={`fill-${i}`} className="h-5">
-                              <td className="border-r border-black">&nbsp;</td>
-                              <td className="border-r border-black">&nbsp;</td>
-                              <td className="border-r border-black">&nbsp;</td>
-                              <td className="border-r border-black">&nbsp;</td>
-                              <td className="border-r border-black">&nbsp;</td>
-                              <td className="border-r border-black">&nbsp;</td>
-                              <td>&nbsp;</td>
-                            </tr>
-                          ))
-                        }
                       </tbody>
                     </table>
                   </div>
 
                   {/* ── 4. SUBTOTALES POR TASA (O RESUMEN DE PÁGINA INTERMEDIA) ── */}
-                  <div className="border-x border-b border-black rounded-b-lg grid grid-cols-12 text-[10px] bg-gray-50 font-bold">
-                    <div className="col-span-8 py-1.5 px-3 border-r border-black text-right">
+                  <div className="border-x border-b border-black rounded-b grid grid-cols-12 text-[9.5px] bg-gray-50 font-bold">
+                    <div className="col-span-8 py-1 px-2 border-r border-black text-right">
                       {page.isLastPage ? "SUBTOTALES GENERALES:" : `SUBTOTAL ACUMULADO HOJA ${page.pageNumber}:`}
                     </div>
-                    <div className="col-span-1 py-1.5 px-1 border-r border-black text-right font-mono">
+                    <div className="col-span-1 py-1 px-1 border-r border-black text-right font-mono">
                       {page.isLastPage ? formatPYG(desglose.subtotalExenta) : "—"}
                     </div>
-                    <div className="col-span-1 py-1.5 px-1 border-r border-black text-right font-mono">
+                    <div className="col-span-1 py-1 px-1 border-r border-black text-right font-mono">
                       {page.isLastPage ? formatPYG(desglose.subtotal5) : "—"}
                     </div>
-                    <div className="col-span-2 py-1.5 px-1 text-right font-mono">
+                    <div className="col-span-2 py-1 px-1 text-right font-mono">
                       {page.isLastPage ? formatPYG(desglose.subtotal10) : formatPYG(page.carryOverOut)}
                     </div>
                   </div>
 
                   {/* ── 5. TOTAL A PAGAR EN NÚMEROS Y EN LETRAS ── */}
                   {page.isLastPage ? (
-                    <div className="mt-2 border-2 border-black rounded-lg p-2 bg-white space-y-1">
+                    <div className="mt-1.5 border-2 border-black rounded p-1.5 bg-white space-y-0.5">
                       <div className="flex items-center justify-between">
-                        <div className="text-[10px] text-gray-700">
+                        <div className="text-[9.5px] text-gray-700">
                           <span className="font-bold">TOTAL A PAGAR EN GUARANÍES:</span>
                         </div>
-                        <div className="font-mono font-black text-base text-black">
+                        <div className="font-mono font-black text-sm text-black">
                           Gs. {formatPYG(desglose.totalFactura)}
                         </div>
                       </div>
-                      <div className="text-[10px] border-t border-gray-300 pt-1">
+                      <div className="text-[9px] border-t border-gray-300 pt-0.5">
                         <span className="font-bold">SON: </span>
                         <span className="font-mono uppercase font-bold text-gray-900">
                           {numeroALetras(desglose.totalFactura)} GUARANÍES
@@ -708,14 +793,14 @@ export default function FacturaA4Modal({
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-2 border border-dashed border-gray-400 rounded-lg p-2 bg-gray-50 text-center text-[10px] text-gray-600 font-bold">
+                    <div className="mt-1.5 border border-dashed border-gray-400 rounded p-1 bg-gray-50 text-center text-[9px] text-gray-600 font-bold">
                       PASA A LA HOJA {page.pageNumber + 1} DE {page.totalPages} · TOTALIZACIÓN Y LIQUIDACIÓN EN LA ÚLTIMA HOJA
                     </div>
                   )}
 
                   {/* ── 6. LIQUIDACIÓN DEL IVA (DNIT / SET) ── */}
                   {page.isLastPage ? (
-                    <div className="mt-2 border border-black rounded-lg p-2 text-[10px] grid grid-cols-12 gap-2 bg-gray-50/50">
+                    <div className="mt-1.5 border border-black rounded p-1.5 text-[9px] grid grid-cols-12 gap-2 bg-gray-50/50">
                       <div className="col-span-3 font-bold">
                         LIQUIDACIÓN DEL I.V.A.:
                       </div>
@@ -733,14 +818,14 @@ export default function FacturaA4Modal({
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-2 border border-gray-300 rounded-lg p-1.5 text-[9px] text-center text-gray-400 italic">
+                    <div className="mt-1 border border-gray-300 rounded p-1 text-[8.5px] text-center text-gray-400 italic">
                       Liquidación del I.V.A. consolidada al cierre en la Hoja {page.totalPages}
                     </div>
                   )}
                 </div>
 
-                {/* ── 7. PIE DE PÁGINA LEGAL & CONTROL TRIBUTARIO ── */}
-                <div className="mt-3 pt-2 border-t border-dashed border-gray-400 text-[9px] text-gray-700">
+                {/* ── 7. PIE DE PÁGINA LEGAL & CONTROL TRIBUTARIO (SEGURO CONTRA CORTES) ── */}
+                <div className="mt-2 pt-1.5 pb-1 border-t border-dashed border-gray-400 text-[8.5px] text-gray-700">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-bold uppercase tracking-wider text-black">
@@ -760,7 +845,7 @@ export default function FacturaA4Modal({
 
                   {/* Control SIFEN si existe CDC */}
                   {sale.cdc && page.isLastPage && (
-                    <div className="mt-1.5 p-1 bg-blue-50 border border-blue-200 rounded flex items-center justify-between text-[8px]">
+                    <div className="mt-1 p-1 bg-blue-50 border border-blue-200 rounded flex items-center justify-between text-[8px]">
                       <div>
                         <span className="font-bold text-blue-900">CDC SIFEN: </span>
                         <span className="font-mono text-blue-950 font-bold">{sale.cdc}</span>
