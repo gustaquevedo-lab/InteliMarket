@@ -461,7 +461,7 @@ export default function PurchasesPage() {
         factor_evento: factorEvento,
         solo_quiebre_o_bajo: soloQuiebreIA,
         search: searchProductIA || undefined,
-        limit: 150,
+        limit: 2000,
       })
       setReplenishmentData(res)
 

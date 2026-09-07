@@ -1,11 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    {
-      "name": "ui-web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "ui-web"],
-      "port": 5173
-    }
+    { "name": "prueba-etiqueta", "runtimeExecutable": "python3", "runtimeArgs": ["-m","http.server","8777","--directory","/private/tmp/claude-501/-Users-gustaquevedo-Library-CloudStorage-OneDrive-Personal-Dev-Intelimarket/bf71d8b5-831a-4da5-b0c8-2195ca8b8444/scratchpad"], "port": 8777 }
   ]
 }

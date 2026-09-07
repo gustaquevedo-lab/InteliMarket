@@ -284,6 +284,11 @@ async def approve_credit_request(db: AsyncSession, request_id: str, user_id: str
         await finalize_approved_credit_sale(db, request)
 
         await db.flush()
+    else:
+        # Aprobación parcial (solo un slot llenado) — el router no llama
+        # fire_sale_side_effects en este caso, así que necesitamos commitear aquí
+        # para que la firma del supervisor/gerente persista en la BD.
+        await db.commit()
 
     await db.refresh(request)
     return {"success": True, "request": request, "completo": request.estado == "aprobado"}
@@ -314,6 +319,7 @@ async def reject_credit_request(db: AsyncSession, request_id: str, user_id: str,
         sale.estado = "cancelado"
 
     await db.flush()
+    await db.commit()
     await db.refresh(request)
     return {"success": True, "request": request}
 

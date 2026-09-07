@@ -21,6 +21,7 @@ export default function UsuariosPage() {
   const [submitting, setSubmitting] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [tempPasswordFor, setTempPasswordFor] = useState<{ email: string; password: string } | null>(null)
+  const [resetPasswordFor, setResetPasswordFor] = useState<TenantUser | null>(null)
   const toast = useToast()
 
   const fetchData = useCallback(async () => {
@@ -131,9 +132,22 @@ export default function UsuariosPage() {
     }
   }
 
-  const handleResetPassword = async (u: TenantUser) => {
+  const handleResetPassword = (u: TenantUser) => {
+    // Abre el modal de confirmación donde el admin puede elegir
+    // una contraseña propia o dejar vacío para generar una automática
+    setResetPasswordFor(u)
+  }
+
+  const executeResetPassword = async (u: TenantUser, customPassword?: string) => {
+    setResetPasswordFor(null)
     try {
-      const result = await api.auth.users.resetPassword(u.id)
+      const result = await api.auth.users.resetPassword(u.id, customPassword || undefined)
+      if (customPassword) {
+        // Contraseña definida por el admin — no hay nada que mostrar en modal,
+        // simplemente confirmamos que quedó seteada.
+        toast.success("Contraseña Actualizada", `La contraseña de ${u.email} fue cambiada exitosamente.`)
+        return
+      }
       if (!result?.temporary_password) {
         // Si el backend respondio sin la clave temporal (formato inesperado)
         // no hay forma de saber cual quedo puesta de verdad -- mostrar una
@@ -522,6 +536,13 @@ export default function UsuariosPage() {
       )}
 
       {/* ── MODAL DE CONTRASEÑA TEMPORAL ── */}
+      {resetPasswordFor && (
+        <ResetPasswordModal
+          user={resetPasswordFor}
+          onClose={() => setResetPasswordFor(null)}
+          onConfirm={(customPwd) => executeResetPassword(resetPasswordFor, customPwd)}
+        />
+      )}
       {tempPasswordFor && (
         <TempPasswordModal info={tempPasswordFor} onClose={() => setTempPasswordFor(null)} />
       )}
@@ -702,14 +723,17 @@ function UserModal({ user, roles, onClose, onSubmit, submitting }: UserModalProp
 
 function TempPasswordModal({ info, onClose }: { info: { email: string; password: string }; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
+  const [clipboardFailed, setClipboardFailed] = useState(false)
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(info.password)
       setCopied(true)
+      setClipboardFailed(false)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      // Manual copy fallback
+      // clipboard API no disponible (HTTP sin TLS) — mostrar campo seleccionable
+      setClipboardFailed(true)
     }
   }
 
@@ -725,22 +749,134 @@ function TempPasswordModal({ info, onClose }: { info: { email: string; password:
           </p>
         </div>
         <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-2 rounded-2xl border border-slate-200 dark:border-slate-800">
-          <code className="flex-1 font-mono text-sm font-black text-emerald-600 dark:text-emerald-400">
+          <code className="flex-1 font-mono text-sm font-black text-emerald-600 dark:text-emerald-400 select-all">
             {info.password}
           </code>
           <button
             onClick={handleCopy}
             className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            title="Copiar al portapapeles"
           >
             {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-slate-400" />}
           </button>
         </div>
+        {clipboardFailed && (
+          <div className="space-y-1 text-left">
+            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">⚠ El portapapeles no está disponible (conexión HTTP). Seleccioná y copiá manualmente:</p>
+            <input
+              readOnly
+              value={info.password}
+              onFocus={(e) => e.target.select()}
+              className="w-full font-mono text-sm font-black text-emerald-600 dark:text-emerald-400 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 select-all cursor-text"
+            />
+          </div>
+        )}
         <button
           onClick={onClose}
           className="w-full py-2.5 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black text-xs transition cursor-pointer"
         >
           Listo, Entendido
         </button>
+      </div>
+    </Modal>
+  )
+}
+
+function ResetPasswordModal({
+  user, onClose, onConfirm
+}: {
+  user: TenantUser
+  onClose: () => void
+  onConfirm: (customPassword?: string) => void
+}) {
+  const [mode, setMode] = useState<'auto' | 'custom'>('auto')
+  const [customPwd, setCustomPwd] = useState('')
+  const [showPwd, setShowPwd] = useState(false)
+
+  const handleConfirm = () => {
+    if (mode === 'custom') {
+      if (customPwd.length < 6) return
+      onConfirm(customPwd)
+    } else {
+      onConfirm(undefined)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Resetear Contraseña" size="sm">
+      <div className="space-y-4">
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          ¿Cómo querés cambiar la contraseña de <strong className="text-slate-900 dark:text-white">{user.email}</strong>?
+        </p>
+
+        <div className="space-y-2">
+          <label className={`flex items-start gap-3 p-3 rounded-2xl border-2 cursor-pointer transition ${
+            mode === 'auto'
+              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+              : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
+          }`}>
+            <input
+              type="radio" name="reset-mode" value="auto" checked={mode === 'auto'}
+              onChange={() => setMode('auto')}
+              className="mt-0.5 accent-emerald-600"
+            />
+            <div>
+              <p className="text-sm font-bold text-slate-800 dark:text-white">Generar automáticamente</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Se crea una clave aleatoria segura y te la mostramos para copiar.</p>
+            </div>
+          </label>
+
+          <label className={`flex items-start gap-3 p-3 rounded-2xl border-2 cursor-pointer transition ${
+            mode === 'custom'
+              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+              : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
+          }`}>
+            <input
+              type="radio" name="reset-mode" value="custom" checked={mode === 'custom'}
+              onChange={() => setMode('custom')}
+              className="mt-0.5 accent-emerald-600"
+            />
+            <div className="flex-1">
+              <p className="text-sm font-bold text-slate-800 dark:text-white">Definir contraseña</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Establecés vos la nueva contraseña directamente.</p>
+              {mode === 'custom' && (
+                <div className="relative">
+                  <input
+                    type={showPwd ? 'text' : 'password'}
+                    value={customPwd}
+                    onChange={(e) => setCustomPwd(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    autoFocus
+                    className="w-full text-sm px-3 py-2 pr-10 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPwd(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showPwd ? <Lock className="w-4 h-4" /> : <Key className="w-4 h-4" />}
+                  </button>
+                </div>
+              )}
+            </div>
+          </label>
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={mode === 'custom' && customPwd.length < 6}
+            className="flex-1 py-2.5 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-black text-xs disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+          >
+            Confirmar
+          </button>
+        </div>
       </div>
     </Modal>
   )
