@@ -10,6 +10,7 @@ import { api, type Sale, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
+import FacturaA4Modal from "./FacturaA4Modal"
 
 type SalesTab = "comprobantes" | "cierres_caja" | "notas_credito" | "extra_club_credito"
 type StatusFilter = "todas" | "contado" | "credito" | "canceladas"
@@ -625,7 +626,7 @@ export default function SalesPage() {
                           <button
                             onClick={() => setViewingSale(s)}
                             className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-xl transition"
-                            title="Ver detalle / Imprimir ticket"
+                            title="Ver e Imprimir Factura Legal A4 (SET)"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
@@ -652,122 +653,15 @@ export default function SalesPage() {
         </div>
       </div>
 
-      {/* ── MODAL DE DETALLE / VISOR TÉRMICO AUTOIMPRESOR DNIT ───────────────── */}
+      {/* ── MODAL OFICIAL DE FACTURA A4 (SET / DNIT) ───────────────────────── */}
       {viewingSale && !anularModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-2xl">
-            <div className="text-center pb-3 border-b border-dashed border-slate-300 dark:border-slate-700">
-              <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center mx-auto font-black text-xs mb-2 shadow-md shadow-blue-500/20">
-                EXTRA
-              </div>
-              <h3 className="font-black text-sm text-slate-900 dark:text-white uppercase tracking-tight">
-                GRUPO SANTA TERESA E.A.S.
-              </h3>
-              <p className="text-xs text-slate-500 font-bold">
-                Extra Supermercado Mayorista
-              </p>
-              <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                RUC: 80150377-9 · Casa Central
-              </p>
-              <div className="mt-2 p-2 bg-blue-50 dark:bg-slate-800 rounded-xl text-[10px] text-blue-700 dark:text-blue-300 font-mono">
-                DNIT Timbrado Autoimpresor Nº {timbradoFacturas} · Vence: {timbradoVencimiento}
-              </div>
-            </div>
-
-            <div className="space-y-1.5 text-xs border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Comprobante:</span>
-                <strong className="font-mono text-slate-900 dark:text-white">
-                  {viewingSale.numero || `001-001-00${viewingSale.id.slice(-5)}`}
-                </strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Fecha / Hora:</span>
-                <span className="font-mono text-slate-700 dark:text-slate-300">
-                  {viewingSale.fecha ? new Date(viewingSale.fecha).toLocaleString("es-PY") : formatDate(viewingSale.created_at)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Cliente:</span>
-                <strong className="text-slate-900 dark:text-white">
-                  {(viewingSale.customer_id ? customersMap.get(viewingSale.customer_id)?.razon_social : null) || (viewingSale as any).customer_name || "Consumidor Final"}
-                </strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">RUC / C.I.:</span>
-                <span className="font-mono text-slate-700 dark:text-slate-300">
-                  {(viewingSale.customer_id ? customersMap.get(viewingSale.customer_id)?.ruc : null) || (viewingSale as any).customer_ruc || "44444401-7"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Condición de Venta:</span>
-                <span className="font-bold uppercase text-blue-600 dark:text-blue-400">
-                  {viewingSale.condicion === "credito_extra_club" ? "Crédito Extra Club" : viewingSale.condicion || "Contado"}
-                </span>
-              </div>
-            </div>
-
-            <div className="max-h-48 overflow-y-auto space-y-2 divide-y divide-slate-100 dark:divide-slate-800 pr-1">
-              {(viewingSale.items || []).map((item: any, idx: number) => (
-                <div key={idx} className="pt-2 flex items-center justify-between text-xs">
-                  <div>
-                    <div className="font-bold text-slate-800 dark:text-slate-200">
-                      {item.descripcion || item.product_name || "Producto"}
-                    </div>
-                    <div className="text-[10px] text-slate-400 font-mono">
-                      {item.cantidad} un. x {formatPYG(Number(item.precio_unitario || item.precio || 0))} · IVA {item.iva_tasa || 10}%
-                    </div>
-                  </div>
-                  <div className="font-mono font-black text-slate-900 dark:text-white">
-                    {formatPYG(Number(item.total || (item.cantidad * item.precio_unitario) || 0))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1.5 text-xs">
-              <div className="flex justify-between text-slate-500 text-[11px]">
-                <span>Total Exenta:</span>
-                <span className="font-mono">{formatPYG(Number((viewingSale as any).base_exenta || 0))}</span>
-              </div>
-              <div className="flex justify-between text-slate-500 text-[11px]">
-                <span>Total Gravada 5%:</span>
-                <span className="font-mono">{formatPYG(Number((viewingSale as any).base_gravada_5 || 0))}</span>
-              </div>
-              <div className="flex justify-between text-slate-500 text-[11px]">
-                <span>Total Gravada 10%:</span>
-                <span className="font-mono">{formatPYG(Number((viewingSale as any).base_gravada_10 || 0))}</span>
-              </div>
-              <div className="flex justify-between text-blue-600 dark:text-blue-400 font-bold text-[11px] pt-1 border-t border-slate-200 dark:border-slate-700">
-                <span>Total Liquidación IVA (DNIT):</span>
-                <span className="font-mono">{formatPYG(Number(viewingSale.iva_10 || 0) + Number(viewingSale.iva_5 || 0))}</span>
-              </div>
-              <div className="flex justify-between font-black text-base text-slate-900 dark:text-white pt-1.5 border-t border-slate-200 dark:border-slate-700">
-                <span>TOTAL COMPROBANTE:</span>
-                <span className="font-mono text-blue-600 dark:text-blue-400">{formatPYG(Number(viewingSale.total || 0))}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                onClick={() => setViewingSale(null)}
-                className="w-1/3 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300"
-              >
-                Cerrar
-              </button>
-              <button
-                onClick={() => {
-                  window.print()
-                  toast.success("Impresión", "Enviando comprobante a la ticketera 80mm...")
-                }}
-                className="w-2/3 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-2xl font-extrabold text-xs flex items-center justify-center gap-2 transition shadow-md shadow-blue-500/25"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Imprimir Ticket Térmico (80mm)</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <FacturaA4Modal
+          sale={viewingSale}
+          customer={viewingSale.customer_id ? customersMap.get(viewingSale.customer_id) : null}
+          onClose={() => setViewingSale(null)}
+          timbrado={timbradoFacturas}
+          timbradoVencimiento={timbradoVencimiento}
+        />
       )}
 
       {/* ── MODAL DE CIERRE DE CAJA X / Z ──────────────────────────────────── */}
