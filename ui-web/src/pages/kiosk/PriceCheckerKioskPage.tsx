@@ -5,6 +5,7 @@ import {
 } from "lucide-react"
 import { api, type KioskProductLookup, type KioskBanner, type Company } from "../../api"
 import { useTheme } from "../../context/ThemeContext"
+import { useRegisterSW } from "virtual:pwa-register/react"
 
 // Banderas SVG en alta definición
 function FlagBR() {
@@ -182,11 +183,32 @@ export default function PriceCheckerKioskPage() {
     return () => clearInterval(clock)
   }, [])
 
-  // Auto-recarga de madrugada -- estas terminales quedan encendidas dias
-  // enteros sin que nadie las toque. Recargar solo una vez, a una hora sin
-  // clientes y solo si no hay nadie mirando un precio en pantalla, asegura
-  // que cualquier cambio que se publique llegue solo, sin depender de que
-  // un repositor reinicie el equipo a mano.
+  // Auto-actualizacion real del Service Worker -- el registro global (usado
+  // tambien por el POS) es registerType:'prompt' a proposito, para no
+  // interrumpir una venta en curso: solo avisa con un toast y espera a que
+  // alguien cierre sesion. Esta pantalla nunca tiene una venta en curso, asi
+  // que un simple window.location.reload() (como se hacia antes) NO
+  // alcanzaba -- el Service Worker activo seguia siendo el viejo, sirviendo
+  // los mismos assets cacheados de siempre pase lo que pase. Se necesita
+  // updateServiceWorker(true) (skipWaiting real) para que la version nueva
+  // tome control. Se revisa periodicamente y se aplica en cuanto la pantalla
+  // esta idle (nadie mirando un precio), sin esperar a la madrugada.
+  const { needRefresh, updateServiceWorker } = useRegisterSW({
+    immediate: true,
+    onRegisteredSW(_swUrl, registration) {
+      if (!registration) return
+      setInterval(() => registration.update().catch(() => {}), 5 * 60 * 1000)
+    },
+  })
+  useEffect(() => {
+    const idle = !scannedProduct && !notFoundCode && !connError
+    if (needRefresh[0] && idle) {
+      updateServiceWorker(true)
+    }
+  }, [needRefresh, scannedProduct, notFoundCode, connError, updateServiceWorker])
+
+  // Recarga de respaldo a la madrugada -- por si algo dejo la pestaña en un
+  // estado raro que el chequeo de arriba no pudo destrabar solo.
   const reloadedRef = useRef(false)
   useEffect(() => {
     const hour = currentTime.getHours()
