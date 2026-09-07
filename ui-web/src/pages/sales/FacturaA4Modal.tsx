@@ -153,21 +153,51 @@ export default function FacturaA4Modal({
     }
   }, [sale])
 
-  // Datos fiscales de emisor oficiales (Extra Supermercado)
+  // Cargar datos de la empresa desde Configuración (localStorage o API)
+  const [companyData, setCompanyData] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem("pos_company_data")
+      if (saved) return JSON.parse(saved)
+      const tplSaved = localStorage.getItem("pos_receipt_template_config")
+      if (tplSaved) return JSON.parse(tplSaved)
+    } catch {}
+    return null
+  })
+
+  useEffect(() => {
+    let cancelled = false
+    api.companies.list()
+      .then((comps) => {
+        if (!cancelled && Array.isArray(comps) && comps.length > 0) {
+          const comp = comps[0]
+          setCompanyData(comp)
+          localStorage.setItem("pos_company_data", JSON.stringify(comp))
+        }
+      })
+      .catch((e) => console.warn("No se pudo cargar la empresa desde API:", e))
+    return () => { cancelled = true }
+  }, [])
+
+  // Datos fiscales de emisor oficiales (Extra Supermercado) tomados de Configuración
   const emisor = {
-    razonSocial: "GRUPO SANTA TERESA E.A.S.",
-    nombreFantasia: "Extra Supermercado Mayorista",
-    ruc: "80150377-9",
-    actividad: "Venta al por mayor y menor de mercaderías generales en supermercado",
-    direccion: "Supercarretera Itaipú c/ Av. Los Yerbales",
-    ciudad: "Hernandarias, Alto Paraná - Paraguay",
-    telefono: "(0983) 123-456 / (0631) 22-000",
+    razonSocial: companyData?.razon_social || "GRUPO SANTA TERESA E.A.S.",
+    nombreFantasia: companyData?.nombre_fantasia || companyData?.nombre || "Extra Supermercado Mayorista",
+    ruc: companyData?.ruc || "80150377-9",
+    actividad: companyData?.actividad_principal || "Venta al por mayor y menor de mercaderías generales en supermercado",
+    direccion: companyData?.direccion || "Alejo Garcia esquina Carlos Antonio López",
+    ciudad: companyData?.ciudad
+      ? `${companyData.ciudad}${companyData.departamento ? `, ${companyData.departamento}` : ""} - Paraguay`
+      : "Pedro Juan Caballero, Amambay - Paraguay",
+    telefono: companyData?.telefono || "+595992052200",
   }
+
+  // Timbrado oficial obtenido de Configuración
+  const numTimbrado = companyData?.timbrado_numero || (companyData?.config as any)?.timbrado_dnit || timbrado || "18545636"
 
   // Datos de cliente / receptor
   const custName = customer?.razon_social || (sale as any).customer_nombre || (sale as any).customer_name || "CONSUMIDOR FINAL"
   const custRuc = customer?.ruc || (sale as any).customer_doc || (sale as any).customer_ruc || "44444401-7"
-  const custAddress = customer?.direccion || "Hernandarias / Ciudad del Este"
+  const custAddress = customer?.direccion || "Pedro Juan Caballero, Amambay"
   const custPhone = customer?.telefono || "—"
 
   // Condición de Venta
@@ -502,7 +532,7 @@ export default function FacturaA4Modal({
                   Factura Legal A4 (SET / DNIT)
                 </h3>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 font-mono">
-                  Timbrado #{timbrado}
+                  Timbrado #{numTimbrado}
                 </span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-mono flex items-center gap-1">
                   <Layers className="w-3 h-3" /> {pagesData.length} Hoja{pagesData.length > 1 ? "s" : ""}
@@ -619,7 +649,7 @@ export default function FacturaA4Modal({
                           HOJA {page.pageNumber} DE {page.totalPages}
                         </div>
                       )}
-                      <div className="text-[9px] font-bold">TIMBRADO Nº {timbrado}</div>
+                      <div className="text-[9px] font-bold">TIMBRADO Nº {numTimbrado}</div>
                       <div className="text-[8px] text-gray-600">
                         Válido hasta: {timbradoVencimiento}
                       </div>
@@ -950,7 +980,7 @@ export default function FacturaA4Modal({
                         </span>
                       </p>
                       <p className="text-gray-500">
-                        Autorizado como Autoimpresor por Resolución SET / DNIT Nº {timbrado}
+                        Autorizado como Autoimpresor por Resolución SET / DNIT Nº {numTimbrado}
                       </p>
                     </div>
                     <div className="text-right font-mono text-[8px] text-gray-400">

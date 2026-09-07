@@ -563,7 +563,7 @@ export default function PurchasesPage() {
     try {
       const headerRows: any[][] = [
         ["EXTRA SUPERMERCADO MAYORISTA - GRUPO SANTA TERESA E.A.S."],
-        ["RUC: 80150377-9 | Timbrado: 18545636 | Casa Matriz: Av. Santa Teresa - Fernando de la Mora"],
+        ["RUC: 80150377-9 | Timbrado: 18545636 | Casa Matriz: Alejo Garcia esquina Carlos Antonio López - Pedro Juan Caballero, Amambay"],
         ["ORDEN DE COMPRA OFICIAL DE ADQUISICIÓN DE MERCADERÍAS"],
         [],
         ["N° Orden:", po.numero || "S/N", "", "Fecha Emisión:", po.fecha ? formatDate(po.fecha) : formatDate(po.created_at || "")],
@@ -4355,8 +4355,8 @@ export default function PurchasesPage() {
                       </div>
                       <div className="text-[11px] text-gray-500 dark:text-gray-400 space-y-0.5 pt-1">
                         <div><strong>RUC:</strong> 80150377-9 | <strong>Timbrado:</strong> 18545636</div>
-                        <div>Av. Santa Teresa c/ Av. Mcal. López — Fernando de la Mora, Paraguay</div>
-                        <div>Tel: (021) 680-000 | Email: compras@superextra.com.py</div>
+                        <div>Alejo Garcia esquina Carlos Antonio López — Pedro Juan Caballero, Amambay, Paraguay</div>
+                        <div>Tel: +595992052200 | Email: contacto@superextra.com.py</div>
                       </div>
                     </div>
 

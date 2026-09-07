@@ -182,8 +182,8 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
         "nombre_fantasia": "EXTRA SUPERMERCADO MAYORISTA",
         "ruc": company.get("ruc") or "80150377-9",
         "timbrado": "18545636",
-        "direccion": "Av. Santa Teresa c/ Av. Mcal. López - Fernando de la Mora",
-        "telefono": "(021) 680-000",
+        "direccion": company.get("direccion") or "Alejo Garcia esquina Carlos Antonio López, Pedro Juan Caballero, Amambay",
+        "telefono": company.get("telefono") or "+595992052200",
         "logo_url": company.get("logo_url"),
     }
 

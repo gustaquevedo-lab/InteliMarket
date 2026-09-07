@@ -62,8 +62,8 @@ async def get_sale_receipt_pdf(
             "razon_social": row.razon_social or "GRUPO SANTA TERESA E.A.S.",
             "nombre_fantasia": "Extra Supermercado Mayorista",
             "ruc": row.ruc or "80150377-9",
-            "direccion": row.direccion or "Supercarretera Itaipú c/ Av. Los Yerbales, Hernandarias, Alto Paraná",
-            "telefono": row.telefono or "(0983) 123-456 / (0631) 22-000",
+            "direccion": row.direccion or "Alejo Garcia esquina Carlos Antonio López, Pedro Juan Caballero, Amambay",
+            "telefono": row.telefono or "+595992052200",
         }
 
         sale = {

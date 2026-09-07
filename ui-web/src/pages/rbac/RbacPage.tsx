@@ -26,7 +26,7 @@ export default function RbacPage() {
 
   // Lista de usuarios reales del sistema
   const [users, setUsers] = useState<TenantUser[]>([
-    { id: "u-01", email: "admin@extrasuper.com.py", nombre: "Gustavo Quevedo (Admin)", rol: "admin", telefono: "(0983) 123-456", activo: true, is_superadmin: true, tenant_rol: "admin", role_names: ["Administrador"], created_at: "2026-01-01" },
+    { id: "u-01", email: "admin@extrasuper.com.py", nombre: "Gustavo Quevedo (Admin)", rol: "admin", telefono: "+595992052200", activo: true, is_superadmin: true, tenant_rol: "admin", role_names: ["Administrador"], created_at: "2026-01-01" },
     { id: "u-02", email: "nilda.aquino@extrasuper.com.py", nombre: "NILDA AQUINO", rol: "cajera", telefono: "(0983) 555-011", activo: true, is_superadmin: false, tenant_rol: "cajera", role_names: ["Cajera"], created_at: "2026-01-10" },
     { id: "u-03", email: "evelin.herrero@extrasuper.com.py", nombre: "EVELIN HERRERO", rol: "cajera", telefono: "(0983) 555-012", activo: true, is_superadmin: false, tenant_rol: "cajera", role_names: ["Cajera"], created_at: "2026-01-10" },
     { id: "u-04", email: "eduarda@extrasuper.com.py", nombre: "EDUARDA", rol: "cajera", telefono: "(0983) 555-013", activo: true, is_superadmin: false, tenant_rol: "cajera", role_names: ["Cajera"], created_at: "2026-01-15" },

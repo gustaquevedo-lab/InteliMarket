@@ -134,8 +134,8 @@ export default function CustomersPage() {
       telefono: "",
       email: "",
       direccion: "",
-      ciudad: "Santa Teresa",
-      departamento: "Alto Paraná",
+      ciudad: "Pedro Juan Caballero",
+      departamento: "Amambay",
       credito_limite: 0,
       condicion_iva: "contribuyente",
       activo: true,
@@ -626,7 +626,7 @@ export default function CustomersPage() {
                     type="text"
                     value={form.ciudad}
                     onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))}
-                    placeholder="Santa Teresa"
+                    placeholder="Pedro Juan Caballero"
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
@@ -677,7 +677,7 @@ export default function CustomersPage() {
                 <div className="flex justify-between"><span className="text-slate-400">Teléfono:</span><span className="font-mono font-bold text-slate-900 dark:text-white">{viewingCustomer.telefono || "—"}</span></div>
                 <div className="flex justify-between"><span className="text-slate-400">Email:</span><span className="text-slate-700 dark:text-slate-300">{viewingCustomer.email || "—"}</span></div>
                 <div className="flex justify-between"><span className="text-slate-400">Dirección:</span><span className="text-slate-700 dark:text-slate-300">{viewingCustomer.direccion || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400">Ciudad:</span><span className="text-slate-700 dark:text-slate-300">{viewingCustomer.ciudad || "Santa Teresa"}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Ciudad:</span><span className="text-slate-700 dark:text-slate-300">{viewingCustomer.ciudad || "Pedro Juan Caballero"}</span></div>
               </div>
 
               <div className="p-4 bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl flex justify-between items-center">
