@@ -30,9 +30,15 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
     product = result.scalar_one_or_none()
 
     escaneado_como_pack: str | None = None
+    pack_escaneado_match: ProductPackBarcode | None = None
     if not product:
         # Fallback: el codigo escaneado puede ser el de una caja/pack (no el
         # del producto suelto) -- mismo criterio que ya usa el escaneo en POS.
+        # Un producto puede tener VARIOS packs registrados (ej. Fardo x12 y
+        # Pack x15) -- hay que quedarse con el codigo de barra exacto que se
+        # escaneo, nunca asumir "el primero" o "el mas chico", porque ahi el
+        # cliente ve el total de una presentacion distinta a la que tiene en
+        # la mano.
         pack_result = await db.execute(
             select(ProductPackBarcode)
             .where(ProductPackBarcode.company_id == cid, ProductPackBarcode.codigo_barra == code, ProductPackBarcode.activo == True)
@@ -49,6 +55,7 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
             product = prod_result.scalar_one_or_none()
             if product:
                 escaneado_como_pack = pack_match.etiqueta
+                pack_escaneado_match = pack_match
 
     if not product:
         return None
@@ -87,14 +94,27 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
         .where(ProductPackBarcode.company_id == cid, ProductPackBarcode.product_id == product.id, ProductPackBarcode.activo == True)
         .order_by(ProductPackBarcode.unidades_por_paquete.asc())
     )
+    all_packs = packs_result.scalars().all()
     packs = [
         PackPriceInfo(
             etiqueta=p.etiqueta,
             unidades_por_paquete=float(p.unidades_por_paquete),
             precio_pack=round(_precio_para_cantidad(float(p.unidades_por_paquete)) * float(p.unidades_por_paquete), 0),
         )
-        for p in packs_result.scalars().all()
+        for p in all_packs
     ]
+
+    # El pack que realmente se escaneo (si el codigo era de una caja/pack) --
+    # se manda aparte de `packs` para que el frontend muestre EXACTAMENTE
+    # ese, no "el primero de la lista", y liste el resto como presentaciones
+    # adicionales por separado.
+    pack_escaneado = None
+    if pack_escaneado_match:
+        pack_escaneado = PackPriceInfo(
+            etiqueta=pack_escaneado_match.etiqueta,
+            unidades_por_paquete=float(pack_escaneado_match.unidades_por_paquete),
+            precio_pack=round(_precio_para_cantidad(float(pack_escaneado_match.unidades_por_paquete)) * float(pack_escaneado_match.unidades_por_paquete), 0),
+        )
 
     return {
         "id": product.id,
@@ -107,6 +127,7 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
         "tipo_venta": product.tipo_venta,
         "escalas": escalas,
         "packs": packs,
+        "pack_escaneado": pack_escaneado,
         "escaneado_como_pack": escaneado_como_pack,
         "en_promocion": promo_info.en_promocion,
         "precio_regular": promo_info.precio_regular,

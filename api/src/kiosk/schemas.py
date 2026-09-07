@@ -72,6 +72,7 @@ class ProductLookupResponse(BaseModel):
     tipo_venta: Optional[str] = None
     escalas: list[PriceScaleTier] = []
     packs: list[PackPriceInfo] = []
+    pack_escaneado: Optional[PackPriceInfo] = None
     escaneado_como_pack: Optional[str] = None
     
     # Dual Pricing Promocional

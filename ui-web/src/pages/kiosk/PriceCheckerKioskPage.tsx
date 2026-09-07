@@ -521,7 +521,7 @@ export default function PriceCheckerKioskPage() {
                   )}
                 </div>
 
-                <div className={`grid gap-2 ${scannedProduct.packs.length > 0 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
+                <div className={`grid gap-2 ${scannedProduct.pack_escaneado ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
                 {scannedProduct.en_promocion ? (
                   <div className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-br from-emerald-500/15 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-500 dark:border-emerald-400 shadow-xl space-y-2">
                     
@@ -592,19 +592,23 @@ export default function PriceCheckerKioskPage() {
                   </div>
                 )}
 
-                {/* 📦 Card extra al lado del precio de contado: solo si tiene pack/caja.
-                    El total de la escala mayorista se muestra mas abajo, pegado a su
-                    propio precio unitario en la grilla de "Precios Mayoristas". */}
-                {scannedProduct.packs.length > 0 && (
+                {/* 📦 Card extra al lado del precio de contado: SOLO el pack que se
+                    escaneo realmente (nunca "el primero" de la lista -- un producto
+                    puede tener varias presentaciones, ej. Fardo x12 y Pack x15, y
+                    mostrar la que no corresponde confunde al cliente sobre cuanto
+                    paga por lo que tiene en la mano). Si se busco por SKU/codigo
+                    suelto (no se escaneo un pack puntual), no se asume ninguno acá --
+                    todas las presentaciones quedan listadas mas abajo. */}
+                {scannedProduct.pack_escaneado && (
                   <div className="rounded-xl bg-gradient-to-br from-sky-50 via-blue-50 to-sky-100 dark:from-slate-800/90 dark:via-slate-800/60 dark:to-blue-950/40 border-2 border-sky-400 dark:border-sky-500/50 shadow-md overflow-hidden">
                     <div className="px-2 py-1 bg-gradient-to-r from-sky-500 to-blue-500 text-white text-[11px] sm:text-xs font-black uppercase tracking-wider text-center flex items-center justify-center gap-1">
-                      <Package className="w-3.5 h-3.5" /> {scannedProduct.packs[0].etiqueta} ({scannedProduct.packs[0].unidades_por_paquete % 1 === 0 ? scannedProduct.packs[0].unidades_por_paquete.toFixed(0) : scannedProduct.packs[0].unidades_por_paquete} un.)
+                      <Package className="w-3.5 h-3.5" /> {scannedProduct.pack_escaneado.etiqueta} ({scannedProduct.pack_escaneado.unidades_por_paquete % 1 === 0 ? scannedProduct.pack_escaneado.unidades_por_paquete.toFixed(0) : scannedProduct.pack_escaneado.unidades_por_paquete} un.)
                     </div>
                     <div className="p-2 sm:p-2.5 text-center">
                       <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black tracking-tight" style={monoFont}>
-                        Gs. {Math.round(scannedProduct.packs[0].precio_pack).toLocaleString("es-PY")}
+                        Gs. {Math.round(scannedProduct.pack_escaneado.precio_pack).toLocaleString("es-PY")}
                       </div>
-                      <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">Precio del {scannedProduct.packs[0].etiqueta}</div>
+                      <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">Precio del {scannedProduct.pack_escaneado.etiqueta}</div>
                     </div>
                   </div>
                 )}
@@ -695,6 +699,34 @@ export default function PriceCheckerKioskPage() {
                       </Fragment>
                     )
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* 📦 OTRAS PRESENTACIONES -- el resto de los packs/cajas registrados
+                para este producto (todos menos el que se escaneo, si se escaneo
+                alguno), para que el cliente sepa que mas opciones tiene sin que
+                se confundan entre si. */}
+            {scannedProduct.packs.filter((p) => !scannedProduct.pack_escaneado || p.etiqueta !== scannedProduct.pack_escaneado.etiqueta).length > 0 && (
+              <div className="pt-2 border-t border-slate-200 dark:border-white/15">
+                <div className="text-xs sm:text-sm font-black text-sky-500 dark:text-sky-400 uppercase tracking-wider mb-1.5">
+                  Otras presentaciones disponibles
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {scannedProduct.packs
+                    .filter((p) => !scannedProduct.pack_escaneado || p.etiqueta !== scannedProduct.pack_escaneado.etiqueta)
+                    .map((p, i) => (
+                      <div key={i} className="rounded-xl bg-sky-50 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/40 overflow-hidden">
+                        <div className="px-2 py-1 bg-sky-500/20 text-sky-700 dark:text-sky-300 text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-center">
+                          {p.etiqueta} ({p.unidades_por_paquete % 1 === 0 ? p.unidades_por_paquete.toFixed(0) : p.unidades_por_paquete} un.)
+                        </div>
+                        <div className="p-2 text-center">
+                          <div className="font-mono text-slate-800 dark:text-slate-100 text-lg sm:text-xl font-black" style={monoFont}>
+                            Gs. {Math.round(p.precio_pack).toLocaleString("es-PY")}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                 </div>
               </div>
             )}

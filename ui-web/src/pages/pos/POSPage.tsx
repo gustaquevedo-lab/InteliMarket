@@ -862,7 +862,7 @@ export default function POSPage() {
   const [priceCheckPromo, setPriceCheckPromo] = useState<{ nombre: string; tipo: string; descuento: number; precio_final: number } | null>(null)
   const [priceCheckLoadingPromo, setPriceCheckLoadingPromo] = useState(false)
   const [priceCheckPacks, setPriceCheckPacks] = useState<{ id: string; etiqueta: string; unidades_por_paquete: number }[]>([])
-  const [priceCheckScannedAsPack, setPriceCheckScannedAsPack] = useState<string | null>(null)
+  const [priceCheckScannedAsPack, setPriceCheckScannedAsPack] = useState<{ etiqueta: string; unidadesPorPaquete: number } | null>(null)
 
   // ── MULTIMONEDA & COTIZACIONES ────────────────────────────────────────────
   const [rates, setRates] = useState<CurrencyRates>(() => {
@@ -1911,7 +1911,7 @@ export default function POSPage() {
         if (packMatch && baseProduct) {
           setPriceCheckResults([baseProduct])
           setPriceCheckHighlight(0)
-          handlePriceCheckSelect(baseProduct, packMatch.etiqueta)
+          handlePriceCheckSelect(baseProduct, { etiqueta: packMatch.etiqueta, unidadesPorPaquete: packMatch.unidadesPorPaquete })
           return
         }
       }
@@ -5067,13 +5067,14 @@ export default function POSPage() {
     return aplicables.reduce((best, t) => (t.min_qty > best.min_qty ? t : best), aplicables[0]).precio_unitario
   }
 
-  const handlePriceCheckSelect = async (p: Product, scannedAsPack?: string) => {
+  const handlePriceCheckSelect = async (p: Product, scannedAsPack?: { etiqueta: string; unidadesPorPaquete: number }) => {
     setPriceCheckSelected(p)
     setPriceCheckTiers([])
     setPriceCheckStock(null)
     setPriceCheckPromo(null)
     setPriceCheckPacks([])
     setPriceCheckScannedAsPack(scannedAsPack || null)
+
     setPriceCheckLoadingTiers(true)
     setPriceCheckLoadingStock(true)
     setPriceCheckLoadingPromo(true)
@@ -10587,20 +10588,25 @@ export default function POSPage() {
                     </div>
                     {priceCheckScannedAsPack && (
                       <div className="text-[10px] font-bold text-sky-600 dark:text-sky-400 mt-0.5">
-                        Escaneado como: {priceCheckScannedAsPack}
+                        Escaneado como: {priceCheckScannedAsPack.etiqueta}
                       </div>
                     )}
 
-                    {/* Card extra al lado del precio unitario: solo si tiene pack/caja.
-                        El total de la escala mayorista se muestra mas abajo, pegado a
+                    {/* Card extra al lado del precio unitario: SOLO el pack que se
+                        escaneo realmente (nunca "el primero" de la lista -- un
+                        producto puede tener varias presentaciones, ej. Fardo x12 y
+                        Pack x15, y mostrar la que no corresponde confunde al cliente).
+                        Si se busco por nombre/SKU (no se escaneo un pack puntual), no
+                        se asume ninguno acá -- todas quedan en "Otras presentaciones"
+                        mas abajo. El total de la escala mayorista se muestra pegado a
                         su propio precio unitario en "Escala de Precios por Cantidad". */}
-                    {priceCheckPacks.length > 0 && (
+                    {priceCheckScannedAsPack && (
                       <div className="inline-flex items-center gap-2 mt-2 bg-sky-50 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/40 rounded-lg px-2.5 py-1.5">
                         <Package className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
                         <div>
-                          <div className="text-[9px] font-black text-sky-600 dark:text-sky-400 uppercase tracking-wider">{priceCheckPacks[0].etiqueta} ({priceCheckPacks[0].unidades_por_paquete % 1 === 0 ? priceCheckPacks[0].unidades_por_paquete.toFixed(0) : priceCheckPacks[0].unidades_por_paquete} un.)</div>
+                          <div className="text-[9px] font-black text-sky-600 dark:text-sky-400 uppercase tracking-wider">{priceCheckScannedAsPack.etiqueta} ({priceCheckScannedAsPack.unidadesPorPaquete % 1 === 0 ? priceCheckScannedAsPack.unidadesPorPaquete.toFixed(0) : priceCheckScannedAsPack.unidadesPorPaquete} un.)</div>
                           <div className="font-black text-sm text-sky-700 dark:text-sky-300 font-posMono tabular-nums">
-                            {formatPYG(precioParaCantidad(priceCheckPacks[0].unidades_por_paquete, priceCheckTiers, priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) * priceCheckPacks[0].unidades_por_paquete)}
+                            {formatPYG(precioParaCantidad(priceCheckScannedAsPack.unidadesPorPaquete, priceCheckTiers, priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) * priceCheckScannedAsPack.unidadesPorPaquete)}
                           </div>
                         </div>
                       </div>
@@ -10673,6 +10679,31 @@ export default function POSPage() {
                         )}
                       </React.Fragment>
                     ))}
+                  </div>
+                )}
+
+                {/* Otras presentaciones -- el resto de los packs/cajas registrados
+                    para este producto (todos menos el que se escaneo, si se
+                    escaneo alguno). */}
+                {priceCheckPacks.filter((p) => !priceCheckScannedAsPack || p.etiqueta !== priceCheckScannedAsPack.etiqueta).length > 0 && (
+                  <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
+                    <div className="text-xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider mb-2">
+                      Otras presentaciones disponibles
+                    </div>
+                    <div className="space-y-1.5">
+                      {priceCheckPacks
+                        .filter((p) => !priceCheckScannedAsPack || p.etiqueta !== priceCheckScannedAsPack.etiqueta)
+                        .map((p, i) => (
+                          <div key={i} className="flex items-center justify-between bg-sky-50 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/40 rounded-lg px-3 py-2">
+                            <div className="text-sm font-bold text-sky-700 dark:text-sky-300">
+                              {p.etiqueta} ({p.unidades_por_paquete % 1 === 0 ? p.unidades_por_paquete.toFixed(0) : p.unidades_por_paquete} un.)
+                            </div>
+                            <div className="font-black text-sky-700 dark:text-sky-300 font-posMono tabular-nums">
+                              {formatPYG(precioParaCantidad(p.unidades_por_paquete, priceCheckTiers, priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) * p.unidades_por_paquete)}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
                   </div>
                 )}
               </div>
