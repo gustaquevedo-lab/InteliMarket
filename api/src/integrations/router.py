@@ -5,6 +5,7 @@ from typing import Optional
 from sqlalchemy import select
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.integrations import service
 from api.src.integrations import pos_service
 from api.src.integrations.schemas import IntegrationConfigCreate, IntegrationConfigUpdate, WebhookEvent, PosMatchRequest, PosClaimRequest
@@ -71,18 +72,22 @@ async def claim_pos_match(body: PosClaimRequest, db=Depends(get_db), user=Depend
 
 
 # ── WEBHOOKS & ECOSYSTEM ──
+# Solo lectura queda abierta a cualquier logueado (require_auth); crear/editar/
+# borrar una config de integracion (ej. IPs de terminales Bancard/Dinelco,
+# webhooks) es una accion de back-office real -- antes cualquier token valido,
+# incluido el de un cajero, podia reconfigurar esto en caliente.
 @router.get("/configs")
 def list_configs(db=Depends(get_db), _=Depends(require_auth)):
     return service.get_configs(db)
 
 
 @router.post("/configs", status_code=201)
-def create_config(data: IntegrationConfigCreate, db=Depends(get_db), _=Depends(require_auth)):
+def create_config(data: IntegrationConfigCreate, db=Depends(get_db), _=Depends(require_permission("integrations:configure"))):
     return service.create_config(db, data.model_dump())
 
 
 @router.put("/configs/{config_id}")
-def update_config(config_id: str, data: IntegrationConfigUpdate, db=Depends(get_db), _=Depends(require_auth)):
+def update_config(config_id: str, data: IntegrationConfigUpdate, db=Depends(get_db), _=Depends(require_permission("integrations:configure"))):
     cfg = service.update_config(db, config_id, data.model_dump(exclude_unset=True))
     if not cfg:
         raise HTTPException(404, "Config no encontrada")
@@ -90,7 +95,7 @@ def update_config(config_id: str, data: IntegrationConfigUpdate, db=Depends(get_
 
 
 @router.delete("/configs/{config_id}", status_code=204)
-def delete_config(config_id: str, db=Depends(get_db), _=Depends(require_auth)):
+def delete_config(config_id: str, db=Depends(get_db), _=Depends(require_permission("integrations:configure"))):
     if not service.delete_config(db, config_id):
         raise HTTPException(404, "Config no encontrada")
 
