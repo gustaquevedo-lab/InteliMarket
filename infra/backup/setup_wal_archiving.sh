@@ -50,12 +50,16 @@ cat > "$CONF_FILE" <<'EOF'
 # Postgres deja de aceptar escrituras, o sea que las cajas dejan de vender.
 # El envio a minisforum lo hace un proceso aparte que reintenta solo.
 #
+# El "chmod 640" NO es cosmetico: sin el, Postgres crea los .gz con modo 600 y
+# el usuario que los envia a minisforum no puede leerlos. El WAL se archiva
+# igual, pero nunca sale de la VM -- falla silenciosa, respaldo remoto vacio.
+#
 # El "test ! -f" es obligatorio: Postgres exige que archivar NO pise un archivo
 # ya existente. El .tmp + mv hace que el archivo aparezca completo o no aparezca,
 # nunca a medias.
 
 archive_mode = on
-archive_command = 'test ! -f /var/backups/intelimarket-wal/%f.gz && gzip -1 -c %p > /var/backups/intelimarket-wal/%f.gz.tmp && mv /var/backups/intelimarket-wal/%f.gz.tmp /var/backups/intelimarket-wal/%f.gz'
+archive_command = 'test ! -f /var/backups/intelimarket-wal/%f.gz && gzip -1 -c %p > /var/backups/intelimarket-wal/%f.gz.tmp && chmod 640 /var/backups/intelimarket-wal/%f.gz.tmp && mv /var/backups/intelimarket-wal/%f.gz.tmp /var/backups/intelimarket-wal/%f.gz'
 
 # Fuerza cerrar el segmento cada 5 minutos aunque no se haya llenado: es lo que
 # acota la perdida maxima a 5 minutos en horarios de poco movimiento.
@@ -70,14 +74,14 @@ if ! su - postgres -c "/usr/lib/postgresql/18/bin/postgres --config-file=/etc/po
     echo "    aviso: no se pudo pre-verificar; se continua igual (el reinicio dira si algo esta mal)."
 fi
 
-echo "==> 4/5 Instalando la copia fisica semanal (domingos 01:00)..."
+echo "==> 4/5 Instalando la copia fisica semanal (domingos 01:00 hora local = 04:00 UTC)..."
 cat > /etc/cron.d/intelimarket-basebackup <<'EOF'
 # Copia fisica semanal de la base. Sin esto el WAL archivado no sirve para
 # restaurar: el WAL se reproduce sobre una copia FISICA, y el pg_dump nocturno
 # es logico (no sirve como base).
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-0 1 * * 0 root /home/intellihouse/basebackup.sh
+0 4 * * 0 root /home/intellihouse/basebackup.sh
 EOF
 chmod 644 /etc/cron.d/intelimarket-basebackup
 echo "    cron instalado."

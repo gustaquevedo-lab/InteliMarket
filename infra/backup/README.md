@@ -43,3 +43,21 @@ Postgres ni se entera.
 Ver `RESTAURAR.md`. Incluye también el chequeo de salud periódico: si
 `pg_stat_archiver.failed_count` sube, el archivado está fallando en silencio y
 hay que mirarlo antes de que sea un problema de disco.
+
+## La VM corre en UTC
+
+`timedatectl` dice `Etc/UTC`. Los cron y los logs de estos scripts están **3 horas
+adelantados** respecto de la hora de Paraguay. Al programar cualquier tarea acá,
+restar 3: `04:00 UTC` = `01:00` local.
+
+Ya mordió una vez: el cron de la copia física quedó a las 01:00 UTC, que son las
+22:00 del sábado local — con el local abierto, no el domingo de madrugada.
+
+## La trampa de permisos (ya arreglada, no repetirla)
+
+Postgres crea los `.gz` archivados con modo `600`. Si el `archive_command` no
+hace un `chmod 640`, el usuario que los envía a minisforum **no puede leerlos**:
+el archivado parece sano (`failed_count = 0`, los archivos existen) pero el WAL
+nunca sale de la VM. Es una falla silenciosa que deja el respaldo remoto vacío
+sin que nada avise. Por eso el chequeo de salud tiene que mirar que el
+directorio local **se vacíe**, no solo que se llene.
