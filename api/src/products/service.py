@@ -17,6 +17,7 @@ from api.src.purchases.models import PurchaseOrder, PurchaseOrderItem, Supplier
 from api.src.promotions.models import Promotion
 from api.src.sales.models import Sale, SaleItem
 from api.src.customers.models import Customer
+from api.src.pack_barcodes.models import ProductPackBarcode
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -99,10 +100,59 @@ async def get_product_by_barcode(db: AsyncSession, company_id: str, barcode: str
         c_uuid = UUID(company_id)
     except ValueError:
         return None
+
+    clean_bc = barcode.strip() if barcode else ""
+    if not clean_bc:
+        return None
+
+    # 1. Búsqueda directa por código de barras principal
     result = await db.execute(
-        select(Product).where(Product.company_id == c_uuid, Product.codigo_barra == barcode).order_by(Product.activo.desc())
+        select(Product)
+        .options(selectinload(Product.categoria))
+        .where(Product.company_id == c_uuid, Product.codigo_barra == clean_bc)
+        .order_by(Product.activo.desc())
     )
-    return result.scalars().first()
+    prod = result.scalars().first()
+    if prod:
+        return prod
+
+    # 2. Búsqueda por código alternativo EAN / Pack registrado
+    pack_res = await db.execute(
+        select(ProductPackBarcode).where(
+            ProductPackBarcode.company_id == c_uuid,
+            ProductPackBarcode.codigo_barra == clean_bc,
+            ProductPackBarcode.activo == True
+        )
+    )
+    pack = pack_res.scalars().first()
+    if pack:
+        prod_res = await db.execute(
+            select(Product).options(selectinload(Product.categoria)).where(Product.id == pack.product_id)
+        )
+        matched = prod_res.scalar_one_or_none()
+        if matched:
+            return matched
+
+    # 3. Tolerancia EAN-13 <-> UPC-A (variantes con y sin cero inicial)
+    norm_bc = clean_bc.lstrip("0")
+    if norm_bc:
+        var_res = await db.execute(
+            select(Product)
+            .options(selectinload(Product.categoria))
+            .where(
+                Product.company_id == c_uuid,
+                or_(
+                    Product.codigo_barra == norm_bc,
+                    Product.codigo_barra == "0" + norm_bc,
+                )
+            )
+            .order_by(Product.activo.desc())
+        )
+        alt_prod = var_res.scalars().first()
+        if alt_prod:
+            return alt_prod
+
+    return None
 
 
 async def list_products(
@@ -160,7 +210,14 @@ async def list_products(
                     or_(
                         Product.nombre.ilike(f"%{t}%"),
                         Product.sku.ilike(f"%{t}%"),
-                        Product.codigo_barra.ilike(f"%{t}%")
+                        Product.codigo_barra.ilike(f"%{t}%"),
+                        Product.id.in_(
+                            select(ProductPackBarcode.product_id).where(
+                                ProductPackBarcode.company_id == c_uuid,
+                                ProductPackBarcode.activo == True,
+                                ProductPackBarcode.codigo_barra.ilike(f"%{t}%"),
+                            )
+                        ),
                     )
                 )
             query = query.where(and_(*token_conds))
@@ -170,7 +227,14 @@ async def list_products(
                 or_(
                     Product.nombre.ilike(f"%{t}%"),
                     Product.sku.ilike(f"%{t}%"),
-                    Product.codigo_barra.ilike(f"%{t}%")
+                    Product.codigo_barra.ilike(f"%{t}%"),
+                    Product.id.in_(
+                        select(ProductPackBarcode.product_id).where(
+                            ProductPackBarcode.company_id == c_uuid,
+                            ProductPackBarcode.activo == True,
+                            ProductPackBarcode.codigo_barra.ilike(f"%{t}%"),
+                        )
+                    ),
                 )
             )
 
