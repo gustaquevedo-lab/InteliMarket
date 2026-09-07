@@ -104,8 +104,8 @@ function numeroALetras(monto: number): string {
   return resultado.trim()
 }
 
-// 30 ítems por hoja A4 aprovechan con exactitud el formato estándar SET y rellenan la hoja sin gaps
-const ITEMS_PER_PAGE = 30
+// 40 ítems por hoja A4 aprovechan con exactitud el formato estándar SET y permiten hasta 40 renglones por página
+const ITEMS_PER_PAGE = 40
 
 export default function FacturaA4Modal({
   sale,
@@ -471,7 +471,8 @@ export default function FacturaA4Modal({
 
   return (
     <div
-      className="fixed inset-0 z-[80] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+      style={{ paddingTop: "4.75rem", paddingBottom: "2rem" }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -518,7 +519,7 @@ export default function FacturaA4Modal({
       {/* Tarjeta Envolvente del Modal */}
       <div
         className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl md:rounded-3xl shadow-2xl w-full max-w-5xl my-auto flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
-        style={{ maxHeight: "min(94vh, 960px)" }}
+        style={{ maxHeight: "calc(100vh - 6.5rem)" }}
       >
         {/* Barra Superior de Herramientas (no-print) */}
         <div className="no-print bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 px-4 py-3 sm:px-6 flex items-center justify-between gap-3 flex-shrink-0">
@@ -539,7 +540,7 @@ export default function FacturaA4Modal({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                {items.length} ítems · 30 líneas estándar por hoja · Foliado oficial
+                {items.length} ítems · 40 líneas estándar por hoja · Foliado oficial
               </p>
             </div>
           </div>
@@ -634,8 +635,8 @@ export default function FacturaA4Modal({
                       </div>
                     </div>
 
-                    {/* Lado Derecho: Recuadro Oficial Timbrado SET con Foliado */}
-                    <div className="col-span-4 border-2 border-black rounded p-1 text-center flex flex-col justify-center bg-gray-50 relative">
+                    {/* Lado Derecho: Recuadro Oficial Timbrado SET con Foliado (sin solapamiento) */}
+                    <div className="col-span-4 border-2 border-black rounded p-1 text-center flex flex-col justify-center bg-gray-50">
                       {page.totalPages > 1 && (
                         <div
                           style={{
@@ -644,16 +645,16 @@ export default function FacturaA4Modal({
                             WebkitPrintColorAdjust: "exact",
                             printColorAdjust: "exact",
                           }}
-                          className="absolute -top-3 right-2 border-2 border-black font-black text-[9px] px-2 py-0.5 rounded uppercase tracking-wider shadow-xs"
+                          className="font-black text-[8px] py-0.5 px-2 mb-1 rounded uppercase tracking-wider text-center"
                         >
                           HOJA {page.pageNumber} DE {page.totalPages}
                         </div>
                       )}
-                      <div className="text-[9px] font-bold">TIMBRADO Nº {numTimbrado}</div>
-                      <div className="text-[8px] text-gray-600">
+                      <div className="text-[8.5px] font-bold leading-tight">TIMBRADO Nº {numTimbrado}</div>
+                      <div className="text-[7.5px] text-gray-600 leading-tight">
                         Válido hasta: {timbradoVencimiento}
                       </div>
-                      <div className="text-[9.5px] font-mono font-black mt-0.5">
+                      <div className="text-[9px] font-mono font-black mt-0.5 leading-tight">
                         RUC: {emisor.ruc}
                       </div>
                       <div
@@ -663,11 +664,11 @@ export default function FacturaA4Modal({
                           WebkitPrintColorAdjust: "exact",
                           printColorAdjust: "exact",
                         }}
-                        className="border border-black font-black text-[11px] py-0.5 my-0.5 uppercase tracking-widest text-center"
+                        className="border border-black font-black text-[10px] py-0.5 my-0.5 uppercase tracking-widest text-center"
                       >
                         FACTURA
                       </div>
-                      <div className="font-mono font-black text-xs tracking-tight">
+                      <div className="font-mono font-black text-[11px] tracking-tight">
                         Nº {sale.numero || `001-011-00${sale.id.slice(-5)}`}
                       </div>
                     </div>
@@ -762,17 +763,17 @@ export default function FacturaA4Modal({
                               WebkitPrintColorAdjust: "exact",
                               printColorAdjust: "exact",
                             }}
-                            className="h-[20px] font-bold border-b border-black"
+                            className="h-[15.5px] font-bold border-b border-black text-[7.5px]"
                           >
-                            <td className="py-0.5 px-1 border-r border-black text-center font-mono text-[8px]">—</td>
-                            <td className="py-0.5 px-1 border-r border-black font-mono text-[8px] text-center">TRANSP.</td>
-                            <td className="py-0.5 px-1.5 border-r border-black uppercase text-[8.5px]">
+                            <td className="py-0 px-1 border-r border-black text-center font-mono text-[7.5px]">—</td>
+                            <td className="py-0 px-1 border-r border-black font-mono text-[7.5px] text-center">TRANSP.</td>
+                            <td className="py-0 px-1.5 border-r border-black uppercase text-[7.5px]">
                               *** VIENEN DEL FOLIO ANTERIOR (HOJA {page.pageNumber - 1}) ***
                             </td>
-                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8px]">—</td>
-                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8px]">—</td>
-                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8px]">—</td>
-                            <td className="py-0.5 px-1 text-right font-mono font-bold">
+                            <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">—</td>
+                            <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">—</td>
+                            <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">—</td>
+                            <td className="py-0 px-1 text-right font-mono font-bold text-[7.5px]">
                               {formatPYG(page.carryOverIn)}
                             </td>
                           </tr>
@@ -811,26 +812,26 @@ export default function FacturaA4Modal({
                             const itemDesc = item.descripcion || item.product_name || "Producto"
 
                             return (
-                              <tr key={`item-${page.pageNumber}-${idx}`} className="h-[20px] hover:bg-gray-50/50">
-                                <td className="py-0.5 px-1 border-r border-black text-center font-mono font-semibold text-[8px]">
+                              <tr key={`item-${page.pageNumber}-${idx}`} className="h-[15.5px] hover:bg-gray-50/50 text-[7.5px]">
+                                <td className="py-0 px-1 border-r border-black text-center font-mono font-semibold text-[7.5px]">
                                   {cant}
                                 </td>
-                                <td className="py-0.5 px-1 border-r border-black font-mono text-[8px] text-gray-700">
+                                <td className="py-0 px-1 border-r border-black font-mono text-[7.5px] text-gray-700">
                                   {itemCode}
                                 </td>
-                                <td className="py-0.5 px-1.5 border-r border-black uppercase font-medium truncate max-w-[280px]" title={itemDesc}>
+                                <td className="py-0 px-1.5 border-r border-black uppercase font-medium truncate max-w-[280px]" title={itemDesc}>
                                   {itemDesc}
                                 </td>
-                                <td className="py-0.5 px-1 border-r border-black text-right font-mono">
+                                <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">
                                   {formatPYG(pu)}
                                 </td>
-                                <td className="py-0.5 px-1 border-r border-black text-right font-mono">
+                                <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">
                                   {exenta > 0 ? formatPYG(exenta) : "0"}
                                 </td>
-                                <td className="py-0.5 px-1 border-r border-black text-right font-mono">
+                                <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">
                                   {v5 > 0 ? formatPYG(v5) : "0"}
                                 </td>
-                                <td className="py-0.5 px-1 text-right font-mono font-semibold">
+                                <td className="py-0 px-1 text-right font-mono font-semibold text-[7.5px]">
                                   {v10 > 0 ? formatPYG(v10) : "0"}
                                 </td>
                               </tr>
@@ -838,7 +839,7 @@ export default function FacturaA4Modal({
                           })
                         )}
 
-                        {/* Renglones en blanco para completar exactamente los 30 renglones por página */}
+                        {/* Renglones en blanco para completar exactamente los 40 renglones por página */}
                         {Array.from({
                           length: Math.max(
                             0,
@@ -848,14 +849,14 @@ export default function FacturaA4Modal({
                               (!page.isLastPage ? 1 : 0)
                           ),
                         }).map((_, blankIdx) => (
-                          <tr key={`blank-${page.pageNumber}-${blankIdx}`} className="h-[20px]">
-                            <td className="py-0.5 px-1 border-r border-black text-center text-transparent select-none">&nbsp;</td>
-                            <td className="py-0.5 px-1 border-r border-black text-transparent select-none">&nbsp;</td>
-                            <td className="py-0.5 px-1.5 border-r border-black text-transparent select-none">&nbsp;</td>
-                            <td className="py-0.5 px-1 border-r border-black text-transparent select-none">&nbsp;</td>
-                            <td className="py-0.5 px-1 border-r border-black text-transparent select-none">&nbsp;</td>
-                            <td className="py-0.5 px-1 border-r border-black text-transparent select-none">&nbsp;</td>
-                            <td className="py-0.5 px-1 text-transparent select-none">&nbsp;</td>
+                          <tr key={`blank-${page.pageNumber}-${blankIdx}`} className="h-[15.5px]">
+                            <td className="py-0 px-1 border-r border-black text-center text-transparent select-none">&nbsp;</td>
+                            <td className="py-0 px-1 border-r border-black text-transparent select-none">&nbsp;</td>
+                            <td className="py-0 px-1.5 border-r border-black text-transparent select-none">&nbsp;</td>
+                            <td className="py-0 px-1 border-r border-black text-transparent select-none">&nbsp;</td>
+                            <td className="py-0 px-1 border-r border-black text-transparent select-none">&nbsp;</td>
+                            <td className="py-0 px-1 border-r border-black text-transparent select-none">&nbsp;</td>
+                            <td className="py-0 px-1 text-transparent select-none">&nbsp;</td>
                           </tr>
                         ))}
 
@@ -868,17 +869,17 @@ export default function FacturaA4Modal({
                               WebkitPrintColorAdjust: "exact",
                               printColorAdjust: "exact",
                             }}
-                            className="h-[20px] font-bold border-t border-black"
+                            className="h-[15.5px] font-bold border-t border-black text-[7.5px]"
                           >
-                            <td className="py-0.5 px-1 border-r border-black text-center font-mono text-[8px]">—</td>
-                            <td className="py-0.5 px-1 border-r border-black font-mono text-[8px] text-center">TRANSP.</td>
-                            <td className="py-0.5 px-1.5 border-r border-black uppercase text-[8.5px]">
+                            <td className="py-0 px-1 border-r border-black text-center font-mono text-[7.5px]">—</td>
+                            <td className="py-0 px-1 border-r border-black font-mono text-[7.5px] text-center">TRANSP.</td>
+                            <td className="py-0 px-1.5 border-r border-black uppercase text-[7.5px]">
                               *** VAN AL FOLIO SIGUIENTE (HOJA {page.pageNumber + 1}) ***
                             </td>
-                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8px]">—</td>
-                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8px]">—</td>
-                            <td className="py-0.5 px-1 border-r border-black text-right font-mono text-[8px]">—</td>
-                            <td className="py-0.5 px-1 text-right font-mono font-bold">
+                            <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">—</td>
+                            <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">—</td>
+                            <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">—</td>
+                            <td className="py-0 px-1 text-right font-mono font-bold text-[7.5px]">
                               {formatPYG(page.carryOverOut)}
                             </td>
                           </tr>

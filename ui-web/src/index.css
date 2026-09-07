@@ -152,13 +152,19 @@
            border border-gray-200 dark:border-gray-600;
   }
 
-  /* Modal overlay */
-  .modal-overlay {
-    @apply fixed inset-0 z-50 bg-black/40 dark:bg-black/60 backdrop-blur-sm
-           flex items-center justify-center p-4;
+  /* ── Modales Globales (blindaje para que ningún modal se solape con el header) ── */
+  .modal-overlay,
+  div[class*="fixed"][class*="inset-0"][class*="bg-"]:not(:empty):not(aside) {
+    z-index: 100 !important;
+    padding-top: max(4.75rem, env(safe-area-inset-top)) !important;
+    padding-bottom: 2rem !important;
+    overflow-y: auto !important;
   }
-  .modal-content {
-    @apply card w-full shadow-2xl animate-fade-in-up;
+
+  .modal-content,
+  .modal-overlay > div,
+  div[class*="fixed"][class*="inset-0"][class*="bg-"]:not(:empty):not(aside) > div {
+    max-height: calc(100vh - 6.5rem) !important;
   }
 
   /* Side panel */

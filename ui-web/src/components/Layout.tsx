@@ -253,10 +253,10 @@ export default function Layout() {
 
   return (
     <div className="h-screen bg-body-light dark:bg-body-dark flex overflow-hidden font-sans">
-      {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      {sidebarOpen && <div className="fixed inset-0 z-[110] bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* ── Sidebar Estilo Vertical Distribuidora con Estilo Pill y Línea Vertical ── */}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 sidebar-gradient transform transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} flex flex-col`}>
+      <aside className={`fixed lg:static inset-y-0 left-0 z-[120] lg:z-30 w-64 sidebar-gradient transform transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} flex flex-col`}>
         
         {/* Logo & Header */}
         <div className="p-5 border-b border-white/10">
@@ -366,7 +366,7 @@ export default function Layout() {
 
       {/* ── Main Content ───────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <header className="relative z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 px-4 lg:px-6 py-3 flex items-center gap-4 lg:gap-8 justify-between">
+        <header className="relative z-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 px-4 lg:px-6 py-3 flex items-center gap-4 lg:gap-8 justify-between">
           <div className="flex items-center gap-4 lg:hidden">
             <button onClick={() => setSidebarOpen(true)} className="text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 p-2 rounded-lg transition-colors">
               <Menu className="w-6 h-6" />
@@ -399,7 +399,7 @@ export default function Layout() {
 
             {/* Dropdown de resultados */}
             {searchOpen && searchResults.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-50 text-left">
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-30 text-left">
                 {searchResults.map((item) => (
                   <button
                     key={item.path}
@@ -438,7 +438,7 @@ export default function Layout() {
               </div>
 
               {branchDropdownOpen && branches.length > 0 && (
-                <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50 text-left font-sans">
+                <div className="absolute top-full right-0 mt-2 w-64 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl overflow-hidden z-30 text-left font-sans">
                   {branches.map((b) => (
                     <button
                       key={b.id}
