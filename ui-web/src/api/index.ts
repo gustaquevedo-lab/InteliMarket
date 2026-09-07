@@ -376,12 +376,39 @@ export interface Product360Response {
     precio_venta: number
     precio_regular?: number
     costo_unitario: number
+    costo_promedio?: number
+    ultimo_costo?: number
     costo_landed?: number
     margen_bruto_monto: number
     margen_bruto_pct: number
     markup_pct: number
     valor_inventario?: number
   }
+  costos_estructura?: {
+    costo_promedio: number
+    ultimo_costo: number
+    costo_landed: number
+    metodo_costeo: string
+    variacion_costo_pct: number
+    margen_sobre_promedio_pct: number
+    margen_sobre_ultimo_pct: number
+    markup_sobre_promedio_pct: number
+    markup_sobre_ultimo_pct: number
+    ganancia_unitaria_promedio: number
+    ganancia_unitaria_ultimo: number
+  }
+  escalas_precio?: Array<{
+    id: string
+    min_qty: number
+    max_qty?: number | null
+    precio_unitario: number
+    moneda: string
+    ahorro_por_unidad: number
+    descuento_pct: number
+    total_minimo: number
+    margen_pct: number
+    markup_pct: number
+  }>
   historial_ventas_mensual?: Array<{
     mes: string
     mes_label: string
@@ -464,23 +491,45 @@ export interface Product360Response {
   kardex_reciente: Array<{
     id: string
     tipo: string
+    tipo_label?: string
+    color_theme?: string
+    es_entrada?: boolean
     cantidad: number
+    cantidad_abs?: number
     costo_unitario: number
+    costo_total?: number
     motivo?: string
     referencia_type?: string
+    referencia_id?: string
+    comprobante_numero?: string
     created_at: string
     warehouse_nombre?: string
   }>
   kardex?: Array<{
     id: string
     tipo: string
+    tipo_label?: string
+    color_theme?: string
+    es_entrada?: boolean
     cantidad: number
+    cantidad_abs?: number
     costo_unitario: number
+    costo_total?: number
     motivo?: string
     referencia_type?: string
+    referencia_id?: string
+    comprobante_numero?: string
     created_at: string
     warehouse_nombre?: string
   }>
+  kardex_resumen?: {
+    total_entradas: number
+    total_salidas: number
+    saldo_neto_periodo: number
+    movimientos_count: number
+    total_valorizado_salidas: number
+    total_valorizado_entradas: number
+  }
 }
 
 export interface InventoryStatsResponse {

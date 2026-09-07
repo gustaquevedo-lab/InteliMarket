@@ -605,20 +605,103 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
     demanda_diaria = round(ventas_30d_qty / 30.0, 2)
     autonomia_dias = round(total_stock / demanda_diaria, 1) if demanda_diaria > 0 else (999 if total_stock > 0 else 0)
 
-    # 7. Kardex / Movimientos (50 últimos)
+    # 7. Kardex / Movimientos (últimos 50 movimientos con comprobante y desglose)
     mov_rows = await db.execute(
         text("""
             SELECT im.id, im.tipo, im.cantidad, im.costo_unitario, im.motivo, im.referencia_type,
-                   im.referencia_id, im.created_at, w.nombre as warehouse_nombre
+                   im.referencia_id, im.created_at, w.nombre as warehouse_nombre,
+                   s.numero as sale_numero, po.numero as po_numero
             FROM inventory_movements im
             LEFT JOIN warehouses w ON w.id = im.warehouse_id
+            LEFT JOIN sales s ON s.id = im.referencia_id AND im.referencia_type = 'sale'
+            LEFT JOIN purchase_orders po ON po.id = im.referencia_id AND (im.referencia_type = 'purchase_order' OR im.referencia_type = 'purchase')
             WHERE im.product_id = :p_id
             ORDER BY im.created_at DESC
             LIMIT 50
         """),
         {"p_id": p_uuid}
     )
-    movements = [dict(r._mapping) for r in mov_rows]
+    movements_raw = [dict(r._mapping) for r in mov_rows]
+
+    def _tipo_mov_info(tipo_str: str, cant: float) -> tuple[str, str, bool]:
+        t = (tipo_str or "").lower()
+        if "venta" in t:
+            return "Venta POS", "rose", False
+        elif "compra" in t or "recepcion" in t:
+            return "Recepción Compra", "emerald", True
+        elif "devolucion" in t or "cancelacion_venta" in t:
+            return "Devolución Cliente", "sky", True
+        elif "cancelacion_recepcion" in t:
+            return "Devolución a Proveedor", "amber", False
+        elif "ajuste_positivo" in t:
+            return "Ajuste Inventario (+)", "emerald", True
+        elif "ajuste_negativo" in t or "merma" in t:
+            return "Ajuste / Merma (-)", "rose", False
+        elif "transferencia" in t:
+            return "Transferencia Depósito", "violet", cant > 0
+        return t.replace("_", " ").title() or "Movimiento", "slate", cant > 0
+
+    costo_ref = float(product.costo_promedio or product.ultimo_costo or 0)
+    movements = []
+    total_entradas_kardex = 0.0
+    total_salidas_kardex = 0.0
+
+    for m in movements_raw:
+        c = float(m.get("cantidad") or 0)
+        c_u = float(m.get("costo_unitario") or 0)
+        if c_u <= 0:
+            c_u = costo_ref
+
+        tipo_label, color_theme, es_entrada = _tipo_mov_info(m.get("tipo"), c)
+        if es_entrada:
+            total_entradas_kardex += abs(c)
+        else:
+            total_salidas_kardex += abs(c)
+
+        comprobante = m.get("sale_numero") or m.get("po_numero") or None
+        if not comprobante and m.get("referencia_id"):
+            comprobante = f"REF #{str(m.get('referencia_id'))[:8].upper()}"
+
+        movements.append({
+            "id": str(m["id"]),
+            "tipo": m.get("tipo") or "desconocido",
+            "tipo_label": tipo_label,
+            "color_theme": color_theme,
+            "es_entrada": es_entrada,
+            "cantidad": c,
+            "cantidad_abs": abs(c),
+            "costo_unitario": c_u,
+            "costo_total": round(abs(c) * c_u, 0),
+            "motivo": m.get("motivo"),
+            "referencia_type": m.get("referencia_type"),
+            "referencia_id": str(m.get("referencia_id")) if m.get("referencia_id") else None,
+            "comprobante_numero": comprobante,
+            "warehouse_nombre": m.get("warehouse_nombre") or "Depósito Central",
+            "created_at": m["created_at"].isoformat() if m.get("created_at") else None,
+        })
+
+    # Si no había inventory_movements pero sí hay ventas, crear kardex sintético desde ventas
+    if not movements and sales:
+        for sa in sales:
+            q = float(sa.get("cantidad") or 1)
+            total_salidas_kardex += q
+            movements.append({
+                "id": str(sa.get("id")),
+                "tipo": "salida_venta",
+                "tipo_label": "Venta POS",
+                "color_theme": "rose",
+                "es_entrada": False,
+                "cantidad": -q,
+                "cantidad_abs": q,
+                "costo_unitario": costo_ref,
+                "costo_total": round(q * costo_ref, 0),
+                "motivo": "Venta mostrador",
+                "referencia_type": "sale",
+                "referencia_id": str(sa.get("id")),
+                "comprobante_numero": sa.get("numero") or "Ticket Venta",
+                "warehouse_nombre": "Salón de Ventas",
+                "created_at": sa.get("fecha").isoformat() if hasattr(sa.get("fecha"), "isoformat") else str(sa.get("fecha")),
+            })
 
     # 8. Promociones aplicadas (vigentes e históricas)
     try:
@@ -689,15 +772,96 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         if sup:
             supplier_info = dict(sup._mapping)
 
-    # 11. Métricas Financieras
-    costo = float(product.costo_promedio or product.ultimo_costo or 0)
+    # 11. Escalas de Precio Mayoristas (sp_tiered_prices)
+    scale_rows = await db.execute(
+        text("""
+            SELECT id, min_qty, max_qty, precio_unitario, moneda, activo, created_at
+            FROM sp_tiered_prices
+            WHERE product_id = :p_id AND activo = true
+            ORDER BY min_qty ASC
+        """),
+        {"p_id": p_uuid}
+    )
+    precio_base_un = float(product.precio_venta or 0)
+    costo_prom_eval = float(product.costo_promedio or product.ultimo_costo or 0)
+    escalas_precio = []
+    for sr in scale_rows.all():
+        s_dict = dict(sr._mapping)
+        p_esc = float(s_dict.get("precio_unitario") or 0)
+        min_q = int(s_dict.get("min_qty") or 1)
+        max_q = s_dict.get("max_qty")
+        ahorro_un = max(0.0, precio_base_un - p_esc) if precio_base_un > 0 else 0.0
+        desc_pct = round((ahorro_un / precio_base_un * 100), 1) if precio_base_un > 0 else 0.0
+        tot_min = round(min_q * p_esc, 0)
+        mrg_esc = round(((p_esc - costo_prom_eval) / p_esc * 100), 1) if p_esc > 0 else 0.0
+        mrk_esc = round(((p_esc - costo_prom_eval) / costo_prom_eval * 100), 1) if costo_prom_eval > 0 else 0.0
+
+        escalas_precio.append({
+            "id": str(s_dict["id"]),
+            "min_qty": min_q,
+            "max_qty": int(max_q) if max_q is not None else None,
+            "precio_unitario": p_esc,
+            "moneda": s_dict.get("moneda") or "PYG",
+            "ahorro_por_unidad": ahorro_un,
+            "descuento_pct": desc_pct,
+            "total_minimo": tot_min,
+            "margen_pct": mrg_esc,
+            "markup_pct": mrk_esc,
+        })
+
+    # 12. Métricas Financieras y Estructura de Costos Detallada
+    costo_prom = float(product.costo_promedio or 0)
+    costo_ult = float(product.ultimo_costo or 0)
     costo_landed = float(getattr(product, "costo_landed", None) or 0)
+
+    # Si uno es 0, sincronizar con el otro para no romper indicadores
+    if costo_prom <= 0 and costo_ult > 0:
+        costo_prom = costo_ult
+    if costo_ult <= 0 and costo_prom > 0:
+        costo_ult = costo_prom
+    costo_principal = costo_prom if costo_prom > 0 else costo_ult
+
     precio = float(product.precio_venta or 0)
     precio_regular = float(getattr(product, "precio_regular", None) or precio)
-    margen_monto = precio - costo
-    margen_pct = round((margen_monto / precio * 100), 1) if precio > 0 else 0.0
-    markup_pct = round((margen_monto / costo * 100), 1) if costo > 0 else 0.0
-    valor_inventario = total_stock * (costo if costo > 0 else precio * 0.7)
+
+    # Variación porcentual de Último Costo vs Costo Promedio (PPP)
+    variacion_costo_pct = round(((costo_ult - costo_prom) / costo_prom * 100), 1) if costo_prom > 0 else 0.0
+
+    # Margen sobre Costo Promedio
+    margen_prom_monto = precio - costo_prom
+    margen_prom_pct = round((margen_prom_monto / precio * 100), 1) if precio > 0 else 0.0
+    markup_prom_pct = round((margen_prom_monto / costo_prom * 100), 1) if costo_prom > 0 else 0.0
+
+    # Margen sobre Último Costo
+    margen_ult_monto = precio - costo_ult
+    margen_ult_pct = round((margen_ult_monto / precio * 100), 1) if precio > 0 else 0.0
+    markup_ult_pct = round((margen_ult_monto / costo_ult * 100), 1) if costo_ult > 0 else 0.0
+
+    valor_inventario_costo = total_stock * (costo_principal if costo_principal > 0 else precio * 0.7)
+    valor_inventario_venta = total_stock * precio
+
+    costos_estructura = {
+        "costo_promedio": costo_prom,
+        "ultimo_costo": costo_ult,
+        "costo_landed": costo_landed,
+        "metodo_costeo": getattr(product, "metodo_costeo", "PPP") or "PPP",
+        "variacion_costo_pct": variacion_costo_pct,
+        "margen_sobre_promedio_pct": margen_prom_pct,
+        "margen_sobre_ultimo_pct": margen_ult_pct,
+        "markup_sobre_promedio_pct": markup_prom_pct,
+        "markup_sobre_ultimo_pct": markup_ult_pct,
+        "ganancia_unitaria_promedio": margen_prom_monto,
+        "ganancia_unitaria_ultimo": margen_ult_monto,
+    }
+
+    kardex_resumen = {
+        "total_entradas": total_entradas_kardex,
+        "total_salidas": total_salidas_kardex,
+        "saldo_neto_periodo": total_entradas_kardex - total_salidas_kardex,
+        "movimientos_count": len(movements),
+        "total_valorizado_salidas": round(total_salidas_kardex * costo_principal, 0),
+        "total_valorizado_entradas": round(total_entradas_kardex * costo_principal, 0),
+    }
 
     return {
         "product": {
@@ -714,9 +878,10 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
             "categoria_nombre": cat_nombre,
             "precio_venta": precio,
             "precio_regular": precio_regular,
-            "costo_promedio": costo,
-            "ultimo_costo": float(product.ultimo_costo or 0),
+            "costo_promedio": costo_prom,
+            "ultimo_costo": costo_ult,
             "costo_landed": costo_landed,
+            "metodo_costeo": getattr(product, "metodo_costeo", "PPP") or "PPP",
             "stock_minimo": float(product.stock_minimo or 0),
             "stock_maximo": float(getattr(product, "stock_maximo", 0) or 0),
             "iva_tasa": float(product.iva_tasa or 10),
@@ -731,7 +896,8 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
             "total_fisico": total_stock,
             "total_reservado": total_reservado,
             "total_disponible": max(0.0, total_stock - total_reservado),
-            "valor_inventario_costo": valor_inventario,
+            "valor_inventario_costo": valor_inventario_costo,
+            "valor_inventario_venta": valor_inventario_venta,
             "por_deposito": stocks,
         },
         "rotacion": {
@@ -744,13 +910,17 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         "metricas_financieras": {
             "precio_venta": precio,
             "precio_regular": precio_regular,
-            "costo_unitario": costo,
+            "costo_unitario": costo_principal,
+            "costo_promedio": costo_prom,
+            "ultimo_costo": costo_ult,
             "costo_landed": costo_landed,
-            "margen_bruto_monto": margen_monto,
-            "margen_bruto_pct": margen_pct,
-            "markup_pct": markup_pct,
-            "valor_inventario": valor_inventario,
+            "margen_bruto_monto": margen_prom_monto,
+            "margen_bruto_pct": margen_prom_pct,
+            "markup_pct": markup_prom_pct,
+            "valor_inventario": valor_inventario_costo,
         },
+        "costos_estructura": costos_estructura,
+        "escalas_precio": escalas_precio,
         "historial_ventas_mensual": historial_ventas,
         "historial_costos_mensual": historial_costos,
         "promociones": promociones,
@@ -759,6 +929,8 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         "ultimas_compras": purchases,
         "ultimas_ventas": sales,
         "kardex": movements,
+        "kardex_reciente": movements,
+        "kardex_resumen": kardex_resumen,
     }
 
 
