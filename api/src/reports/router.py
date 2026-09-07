@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.reports import service, export_service, pdf_reports
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -101,12 +102,12 @@ async def inventory_rotation(db: AsyncSession = Depends(get_db), user=Depends(re
 
 
 @router.get("/fiscal/book")
-async def fiscal_book(tipo_libro: str = Query("ventas", pattern="^(ventas|compras)$"), fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def fiscal_book(tipo_libro: str = Query("ventas", pattern="^(ventas|compras)$"), fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("reports:fiscal"))):
     return await service.get_fiscal_book(db, user["company_id"], tipo_libro, fecha_desde, fecha_hasta)
 
 
 @router.get("/fiscal/summary")
-async def fiscal_summary(tipo_libro: str = Query("ventas", pattern="^(ventas|compras)$"), fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+async def fiscal_summary(tipo_libro: str = Query("ventas", pattern="^(ventas|compras)$"), fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth), _=Depends(require_permission("reports:fiscal"))):
     return await service.get_fiscal_summary(db, user["company_id"], tipo_libro, fecha_desde, fecha_hasta)
 
 

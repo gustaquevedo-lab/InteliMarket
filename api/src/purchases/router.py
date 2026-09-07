@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
+from api.src.rbac.deps import require_permission
 from api.src.purchases import pdf_reports as purchases_pdf_reports
 from api.src.purchases.schemas import (
     SupplierCreate, SupplierUpdate, SupplierResponse,
@@ -264,6 +265,7 @@ async def approve_requisition(
     req_id: str,
     aprobado_por: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("purchases:approve")),
 ):
     result = await service.approve_requisition(db, req_id, aprobado_por)
     if not result:
@@ -276,6 +278,7 @@ async def reject_requisition(
     req_id: str,
     motivo: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("purchases:approve")),
 ):
     result = await service.reject_requisition(db, req_id, motivo)
     if not result:
