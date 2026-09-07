@@ -6,6 +6,19 @@ from sqlalchemy import select, text, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+async def search_empresas_vinculadas(db: AsyncSession, company_id: str, search: str) -> list[str]:
+    result = await db.execute(
+        text("""
+            SELECT DISTINCT trim(empresa_vinculada_nombre) as nombre
+            FROM customers
+            WHERE company_id = :company_id AND empresa_vinculada_nombre ILIKE :search
+            ORDER BY nombre LIMIT 20
+        """),
+        {"company_id": company_id, "search": f"%{search}%"},
+    )
+    return [row.nombre for row in result.all() if row.nombre]
+
+
 async def get_aging_report(db: AsyncSession, company_id: str) -> dict:
     today = date.today()
     query = text("""

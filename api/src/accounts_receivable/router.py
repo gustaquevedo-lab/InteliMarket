@@ -49,6 +49,14 @@ async def aging_report(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.get_aging_report(db, company_id)
 
 
+@router.get("/companies/{company_id}/accounts-receivable/empresas-vinculadas")
+async def search_empresas_vinculadas(company_id: str, search: str = Query(..., min_length=1), db: AsyncSession = Depends(get_db)):
+    """Typeahead de empresas vinculadas (customers.empresa_vinculada_nombre) para
+    el filtro del reporte de aging -- sin esto el usuario tiene que adivinar el
+    nombre exacto en un campo de texto libre."""
+    return await service.search_empresas_vinculadas(db, company_id, search)
+
+
 # ── Reportes exportables (Aging y Cobranzas), Excel + PDF, con rango de fechas ──
 
 @router.get("/companies/{company_id}/accounts-receivable/export/aging.xlsx")

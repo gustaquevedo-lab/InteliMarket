@@ -119,6 +119,10 @@ export default function AccountsReceivablePage() {
   const [customerSearchResults, setCustomerSearchResults] = useState<{ id: string; razon_social: string; ruc?: string }[]>([])
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false)
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false)
+  const [empresaSearchInput, setEmpresaSearchInput] = useState("")
+  const [empresaSearchResults, setEmpresaSearchResults] = useState<string[]>([])
+  const [empresaSearchOpen, setEmpresaSearchOpen] = useState(false)
+  const [empresaSearchLoading, setEmpresaSearchLoading] = useState(false)
 
   // Registrar pago
   const [showPaymentModal, setShowPaymentModal] = useState<string | null>(null)
@@ -161,6 +165,19 @@ export default function AccountsReceivablePage() {
     }, 300)
     return () => clearTimeout(t)
   }, [customerSearchInput])
+
+  // Buscador de empresa vinculada (typeahead) del modal de reporte
+  useEffect(() => {
+    if (!empresaSearchInput.trim()) { setEmpresaSearchResults([]); return }
+    setEmpresaSearchLoading(true)
+    const t = setTimeout(() => {
+      api.accountsReceivable.searchEmpresasVinculadas(empresaSearchInput.trim())
+        .then(rows => setEmpresaSearchResults(rows))
+        .catch(() => setEmpresaSearchResults([]))
+        .finally(() => setEmpresaSearchLoading(false))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [empresaSearchInput])
 
   const fetchData = async () => {
     setLoading(true)
@@ -341,6 +358,8 @@ export default function AccountsReceivablePage() {
     setReportEmpresaVinculada("")
     setCustomerSearchInput("")
     setCustomerSearchResults([])
+    setEmpresaSearchInput("")
+    setEmpresaSearchResults([])
   }
   const handleDownloadCobranzasExcel = () => api.accountsReceivable.downloadCobranzasExcel(reportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadCobranzasPdf = () => api.accountsReceivable.downloadCobranzasPdf(reportParams).catch((e: any) => toast.error("Error", e.message))
@@ -1100,14 +1119,52 @@ export default function AccountsReceivablePage() {
                 )}
               </div>
 
-              <div>
+              <div className="relative">
                 <label className="label-field">Empresa Vinculada (opcional)</label>
-                <input
-                  className="input-field text-xs"
-                  placeholder="Ej: convenio con empresa X..."
-                  value={reportEmpresaVinculada}
-                  onChange={e => setReportEmpresaVinculada(e.target.value)}
-                />
+                {reportEmpresaVinculada ? (
+                  <div className="input-field text-xs flex items-center justify-between">
+                    <span className="font-semibold text-gray-800 dark:text-gray-200">{reportEmpresaVinculada}</span>
+                    <button
+                      onClick={() => { setReportEmpresaVinculada(""); setEmpresaSearchInput("") }}
+                      className="text-gray-400 hover:text-red-500"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      className="input-field text-xs pl-8"
+                      placeholder="Buscar empresa vinculada..."
+                      value={empresaSearchInput}
+                      onChange={e => { setEmpresaSearchInput(e.target.value); setEmpresaSearchOpen(true) }}
+                      onFocus={() => setEmpresaSearchOpen(true)}
+                    />
+                    {empresaSearchOpen && empresaSearchInput.trim() && (
+                      <div className="absolute z-10 mt-1 w-full max-h-52 overflow-y-auto bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg">
+                        {empresaSearchLoading ? (
+                          <div className="p-3 text-center"><Loader2 className="w-4 h-4 animate-spin mx-auto text-gray-400" /></div>
+                        ) : empresaSearchResults.length === 0 ? (
+                          <div className="p-3 text-xs text-gray-400 text-center">Sin resultados</div>
+                        ) : (
+                          empresaSearchResults.map(nombre => (
+                            <button
+                              key={nombre}
+                              onClick={() => {
+                                setReportEmpresaVinculada(nombre)
+                                setEmpresaSearchOpen(false); setEmpresaSearchInput("")
+                              }}
+                              className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-slate-700 font-semibold text-gray-800 dark:text-gray-200"
+                            >
+                              {nombre}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

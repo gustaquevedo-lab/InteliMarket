@@ -1437,6 +1437,7 @@ export const api = {
     aging: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/aging`),
     summary: () => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/summary`),
     downloadStatementPdf: (customerId: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/statement.pdf`, undefined, `estado_cuenta_cliente_${customerId.slice(0, 8)}.pdf`),
+    searchEmpresasVinculadas: (search: string) => client.get<string[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/empresas-vinculadas`, { search }),
     downloadAgingExcel: (params?: { fecha_desde?: string; fecha_hasta?: string; customer_id?: string; empresa_vinculada?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/aging.xlsx`, params, "aging_cuentas_por_cobrar.xlsx"),
     downloadAgingPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; customer_id?: string; empresa_vinculada?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/aging.pdf`, params, "aging_cuentas_por_cobrar.pdf"),
     downloadCobranzasExcel: (params?: { fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/cobranzas.xlsx`, params, "cobranzas.xlsx"),
