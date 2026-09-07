@@ -79,8 +79,14 @@ export default {
       },
       keyframes: {
         fadeInUp: {
-          '0%': { opacity: '0', transform: 'translateY(10px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
+          // Usa margin-top en vez de transform: translateY -- un transform activo
+          // (incluso "translateY(0)" al terminar la animacion, con forwards) crea un
+          // containing block nuevo para cualquier descendiente position:fixed, y eso
+          // rompe el centrado de TODOS los modales (.modal-overlay) que queden anidados
+          // dentro de un wrapper de pagina con esta animacion -- el modal termina
+          // fijo contra el wrapper (alto como toda la lista) en vez de la pantalla.
+          '0%': { opacity: '0', marginTop: '10px' },
+          '100%': { opacity: '1', marginTop: '0' },
         },
         fadeIn: {
           '0%': { opacity: '0' },
