@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react"
+import React, { useState, useCallback, useMemo, useEffect } from "react"
 import {
   X, Sparkles, Package, Tag, Barcode, DollarSign, TrendingUp, TrendingDown,
   Building2, ShoppingCart, Layers, Lock, Unlock, Save, AlertTriangle,
@@ -254,9 +254,25 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
     tipo: mv.tipo_label || mv.tipo,
   }))
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [onClose])
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 md:p-4 overflow-hidden">
-      <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-6xl flex flex-col overflow-hidden" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+    <div
+      className="fixed inset-0 z-[80] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 md:py-10 md:px-8 overflow-y-auto"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div
+        className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl md:rounded-3xl shadow-2xl w-full max-w-6xl my-auto flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        style={{ maxHeight: "min(85vh, 840px)" }}
+      >
 
         {/* ── HEADER ── */}
         <div className="relative flex-shrink-0">
