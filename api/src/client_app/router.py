@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.features import require_feature
 from api.src.client_app.auth import require_client
+from api.src.common.rate_limit import login_rate_limit
 from api.src.client_app import service
 from api.src.client_app import loyalty
 
@@ -31,7 +32,7 @@ async def register(data: dict, db: AsyncSession = Depends(get_db)):
         raise HTTPException(400, str(e))
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", dependencies=[Depends(login_rate_limit)])
 async def login(data: dict, db: AsyncSession = Depends(get_db)):
     try:
         _, token = await service.login_client(db, data["email"], data["password"])

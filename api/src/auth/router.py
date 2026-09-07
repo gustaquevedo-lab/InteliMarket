@@ -18,6 +18,7 @@ from api.src.auth.schemas import (
     PosStaffItem, PosStaffListResponse, ActiveSupervisorResponse,
 )
 from api.src.auth.middleware import get_current_user
+from api.src.common.rate_limit import login_rate_limit
 from api.src.tenants.service import create_tenant_with_schema, get_user_tenants, get_tenant_by_id
 from api.src.tenants.models import UserTenant
 
@@ -59,7 +60,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse, dependencies=[Depends(login_rate_limit)])
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     clean_input = (body.email or "").strip().lower()
     auto_email = f"{clean_input}@intelimarket.com.py" if "@" not in clean_input else clean_input

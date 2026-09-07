@@ -7,6 +7,7 @@ from typing import Optional
 from api.src.db import get_db
 from api.src.ecommerce import service
 from api.src.ecommerce.auth import require_ecommerce_customer
+from api.src.common.rate_limit import login_rate_limit
 
 router = APIRouter(
     prefix="/api/v1/ecommerce",
@@ -32,7 +33,7 @@ async def register(
         raise HTTPException(400, str(e))
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", dependencies=[Depends(login_rate_limit)])
 async def login(
     data: dict = Body(...),
     db: AsyncSession = Depends(get_db),
