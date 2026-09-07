@@ -100,8 +100,12 @@ export default function IntegrationsPage() {
   const [dinelcoEnabled, setDinelcoEnabled] = useState(true)
   const [savingDinelco, setSavingDinelco] = useState(false)
 
-  const [pantumConfig, setPantumConfig] = useState({ nombre: "Pantum PT-D160", qz_printer_name: "", ancho_mm: 33, alto_mm: 22, columnas: 3, gap_horizontal_mm: 0, gap_vertical_mm: 0, margen_izquierdo_mm: 0, activa: true })
-  const [zebraConfig, setZebraConfig] = useState({ nombre: "Zebra ZD-220", conexion: "qz_tray", qz_printer_name: "", host: "", puerto_tcp: 9100, ancho_mm: 50, alto_mm: 30, columnas: 1, activa: true })
+  // OJO: el guardado manda el objeto entero y el backend pisa TODOS los campos
+  // con los valores por defecto del schema. Todo lo que no este aca se resetea
+  // al guardar, aunque la pantalla no lo muestre: por eso la calibracion medida
+  // (dpmm, offsets) viaja en el estado aunque no tenga control propio.
+  const [pantumConfig, setPantumConfig] = useState({ nombre: "Pantum PT-D160", qz_printer_name: "", ancho_mm: 33, alto_mm: 22, columnas: 3, gap_horizontal_mm: 0, gap_vertical_mm: 0, margen_izquierdo_mm: 0, dpmm_x: 8, dpmm_y: 8, offsets_columnas_mm: "", offset_vertical_mm: 0, activa: true })
+  const [zebraConfig, setZebraConfig] = useState({ nombre: "Zebra ZD-220", conexion: "qz_tray", qz_printer_name: "", host: "", puerto_tcp: 9100, ancho_mm: 50, alto_mm: 30, columnas: 1, gap_vertical_mm: 0, margen_izquierdo_mm: 0, offset_vertical_mm: 0, dpmm_x: 8, dpmm_y: 8, activa: true })
   const [loadingPrinters, setLoadingPrinters] = useState(false)
   const [savingPantum, setSavingPantum] = useState(false)
   const [savingZebra, setSavingZebra] = useState(false)
@@ -116,12 +120,18 @@ export default function IntegrationsPage() {
       if (pantum) setPantumConfig({
         nombre: pantum.nombre, qz_printer_name: pantum.qz_printer_name || "", ancho_mm: Number(pantum.ancho_mm), alto_mm: Number(pantum.alto_mm), columnas: pantum.columnas,
         gap_horizontal_mm: Number(pantum.gap_horizontal_mm || 0), gap_vertical_mm: Number(pantum.gap_vertical_mm || 0), margen_izquierdo_mm: Number(pantum.margen_izquierdo_mm || 0),
+        dpmm_x: Number(pantum.dpmm_x || 8), dpmm_y: Number(pantum.dpmm_y || 8), offsets_columnas_mm: pantum.offsets_columnas_mm || "",
+        offset_vertical_mm: Number(pantum.offset_vertical_mm || 0),
         activa: pantum.activa,
       })
       if (zebra) setZebraConfig({
         nombre: zebra.nombre, conexion: zebra.conexion || "qz_tray", qz_printer_name: zebra.qz_printer_name || "",
         host: zebra.host || "", puerto_tcp: zebra.puerto_tcp || 9100, ancho_mm: Number(zebra.ancho_mm), alto_mm: Number(zebra.alto_mm),
-        columnas: zebra.columnas, activa: zebra.activa,
+        columnas: zebra.columnas,
+        gap_vertical_mm: Number(zebra.gap_vertical_mm || 0), margen_izquierdo_mm: Number(zebra.margen_izquierdo_mm || 0),
+        offset_vertical_mm: Number(zebra.offset_vertical_mm || 0),
+        dpmm_x: Number(zebra.dpmm_x || 8), dpmm_y: Number(zebra.dpmm_y || 8),
+        activa: zebra.activa,
       })
     } finally {
       setLoadingPrinters(false)
@@ -753,7 +763,16 @@ export default function IntegrationsPage() {
                     <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Alto etiqueta (mm)</label>
                     <input type="number" value={zebraConfig.alto_mm} onChange={(e) => setZebraConfig((z) => ({ ...z, alto_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
                   </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Correr a la derecha (mm)</label>
+                    <input type="number" step="0.5" value={zebraConfig.margen_izquierdo_mm} onChange={(e) => setZebraConfig((z) => ({ ...z, margen_izquierdo_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Correr hacia abajo (mm)</label>
+                    <input type="number" step="0.5" min="0" value={zebraConfig.offset_vertical_mm} onChange={(e) => setZebraConfig((z) => ({ ...z, offset_vertical_mm: Number(e.target.value) }))} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-750 text-xs font-mono outline-none" />
+                  </div>
                 </div>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">Los dos últimos mueven todo el contenido dentro de la etiqueta. Bajarlos sube el contenido; no admiten valores negativos.</p>
                 {zebraConfig.conexion === "qz_tray" && (
                   <p className="text-[11px] text-gray-500 dark:text-gray-400">Requiere tener <a href="https://qz.io/download/" target="_blank" rel="noreferrer" className="underline font-bold">QZ Tray</a> instalado y corriendo en la PC donde está conectada la Zebra por USB.</p>
                 )}
