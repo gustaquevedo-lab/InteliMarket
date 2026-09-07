@@ -879,7 +879,7 @@ class SmartReplenishmentRequest(BaseModel):
     factor_evento: str = "normal"  # normal, feriado, semana_santa, fin_de_ano
     solo_quiebre_o_bajo: bool = False
     search: Optional[str] = None
-    limit: int = 2000
+    limit: int = 500
 
 
 

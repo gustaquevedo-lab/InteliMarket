@@ -2342,7 +2342,7 @@ async def calculate_smart_replenishment_preview(
     factor_evento: str = "normal",
     solo_quiebre_o_bajo: bool = False,
     search: str | None = None,
-    limit: int = 5000,
+    limit: int = 500,
 ) -> dict:
     cid = company_id
     dias_hist = max(dias_historial_ventas, 7)
