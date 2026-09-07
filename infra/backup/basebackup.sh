@@ -42,6 +42,11 @@ if ! sudo -u postgres pg_basebackup -D "$DESTINO" -Ft -z -Xs -cfast -P >>"$LOG" 
     exit 1
 fi
 
+# pg_basebackup crea el directorio en modo 700 (solo postgres). El envio lo
+# hace intellihouse, igual que con el WAL, asi que hay que darle lectura al
+# grupo. Sin esto la copia queda encerrada en la VM.
+chmod -R g+rX "$DESTINO"
+
 tam=$(du -sh "$DESTINO" | cut -f1)
 log "==> Copia fisica lista: $DESTINO ($tam)"
 
@@ -50,7 +55,10 @@ ls -1dt "$DEST_DIR"/base_* 2>/dev/null | tail -n +$((RETENCION + 1)) | while rea
     rm -rf "$viejo" && log "podada copia vieja: $viejo"
 done
 
-if rsync -a --delete --timeout=300 \
+# El envio corre como intellihouse, NO como root: la llave y el known_hosts que
+# autentican a minisforum son suyos. Corriendo como root fallaba con
+# "Host key verification failed" y la copia nunca salia de la VM.
+if sudo -u intellihouse rsync -a --delete --timeout=300 \
     -e "ssh -i ${REMOTE_KEY} -o BatchMode=yes -o ConnectTimeout=15" \
     "$DEST_DIR/" "${REMOTE_HOST}:basebackup/" >>"$LOG" 2>&1; then
     log "==> Enviada a minisforum-ia."
