@@ -1114,6 +1114,17 @@ async def register_cash_drop(
     session_obj.ultimo_cash_drop_at = datetime.now(timezone.utc)
     await db.flush()
     await db.refresh(request)
+    if request.company_id:
+        try:
+            from api.src.events.manager import manager
+            await manager.broadcast(str(request.company_id), {
+                "type": "cash_drop_requested",
+                "request_id": str(request.id),
+                "cajero_nombre": request.solicitado_por_nombre,
+                "monto_pyg": float(request.monto_pyg or 0),
+            })
+        except Exception:
+            pass
     return request
 
 

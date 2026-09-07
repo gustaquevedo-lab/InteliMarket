@@ -23,10 +23,10 @@ async def event_stream(
                 if await request.is_disconnected():
                     break
                 try:
-                    message = await asyncio.wait_for(queue.get(), timeout=30)
+                    message = await asyncio.wait_for(queue.get(), timeout=15)
                     yield f"data: {json.dumps(message)}\n\n"
                 except asyncio.TimeoutError:
-                    yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+                    yield ": keep-alive\n\n"
         finally:
             manager.disconnect(company_id, queue)
 

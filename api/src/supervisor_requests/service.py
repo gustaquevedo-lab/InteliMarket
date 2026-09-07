@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.supervisor_requests.models import SupervisorAuthRequest
 from api.src.supervisor_requests.schemas import SupervisorAuthRequestCreate, SupervisorAuthRequestResolve
+from api.src.events.manager import manager
 
 
 async def create_request(db: AsyncSession, data: SupervisorAuthRequestCreate) -> SupervisorAuthRequest:
@@ -13,6 +14,18 @@ async def create_request(db: AsyncSession, data: SupervisorAuthRequestCreate) ->
     db.add(req)
     await db.commit()
     await db.refresh(req)
+    try:
+        await manager.broadcast(str(req.company_id), {
+            "type": "supervisor_request_new",
+            "request_id": str(req.id),
+            "tipo": req.tipo,
+            "descripcion": req.descripcion,
+            "cajero_nombre": req.cajero_nombre,
+            "caja_nombre": req.caja_nombre,
+            "created_at": req.created_at.isoformat() if req.created_at else None,
+        })
+    except Exception:
+        pass
     return req
 
 
@@ -40,4 +53,13 @@ async def resolve_request(db: AsyncSession, request_id: str, data: SupervisorAut
     req.resuelto_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(req)
+    try:
+        await manager.broadcast(str(req.company_id), {
+            "type": "supervisor_request_resolved",
+            "request_id": str(req.id),
+            "estado": req.estado,
+            "resuelto_por_nombre": req.resuelto_por_nombre,
+        })
+    except Exception:
+        pass
     return req

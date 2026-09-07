@@ -1631,7 +1631,11 @@ export const api = {
     test: (data: { to: string; subject: string; body: string }) => client.post<any>("/v1/email/test", data),
   },
   events: {
-    stream: () => new EventSource(`${API_BASE}/v1/events/stream`),
+    stream: (companyId?: string, token?: string) => {
+      const cid = companyId || COMPANY_ID
+      const tok = token || localStorage.getItem("access_token") || localStorage.getItem("token") || ""
+      return new EventSource(`${API_BASE}/v1/events/stream?company_id=${cid}&token=${encodeURIComponent(tok)}`)
+    },
   },
   bancard: {
     payments: (companyId: string) => client.get<BancardTransaction[]>("/v1/bancard/payments", { company_id: companyId }),

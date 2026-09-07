@@ -335,6 +335,9 @@ export default function SupervisorPage() {
     }
   }, [])
 
+  // ── ESTADO DE ENLACE EN TIEMPO REAL (SSE) ────────────────────────────────
+  const [isSseConnected, setIsSseConnected] = useState(false)
+
   // ── SONIDO Y AVISOS SONOROS ──────────────────────────────────────────────
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem("supervisor_sound_enabled")
@@ -672,29 +675,129 @@ export default function SupervisorPage() {
     }
   }, [emitSound])
 
-  // Polling combinado y reactivación instantánea al desbloquear pantalla
+  // ── SCREEN WAKE LOCK (IMPEDIR SUSPENSIÓN DE PANTALLA Y CONGELAMIENTO EN CELULAR) ──
   useEffect(() => {
-    if (!isAuthorized) return
-    fetchPending()
-    fetchData()
+    if (!isAuthorized || !onDuty) return
+    let wakeLockObj: any = null
+    let isCancelled = false
 
-    const intervalPending = setInterval(fetchPending, 1500)
-    const intervalData = setInterval(fetchData, 6000)
-
-    const onWake = () => {
-      fetchPending()
-      fetchData()
+    const acquireLock = async () => {
+      if (typeof navigator !== "undefined" && "wakeLock" in navigator && document.visibilityState === "visible") {
+        try {
+          wakeLockObj = await (navigator as any).wakeLock.request("screen")
+          wakeLockObj.addEventListener("release", () => {
+            if (!isCancelled && document.visibilityState === "visible" && onDuty) {
+              acquireLock()
+            }
+          })
+        } catch {
+          // WakeLock bloqueado por ahorro de batería del SO
+        }
+      }
     }
-    document.addEventListener("visibilitychange", onWake)
-    window.addEventListener("focus", onWake)
+
+    acquireLock()
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        acquireLock()
+        fetchPending()
+        fetchData()
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("focus", handleVisibility)
+    window.addEventListener("online", handleVisibility)
 
     return () => {
+      isCancelled = true
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("focus", handleVisibility)
+      window.removeEventListener("online", handleVisibility)
+      if (wakeLockObj) wakeLockObj.release().catch(() => {})
+    }
+  }, [isAuthorized, onDuty, fetchPending, fetchData])
+
+  // ── CANAL DE EVENTOS EN TIEMPO REAL (SSE) PARA RESPUESTA INMEDIATA (<10ms) ──
+  useEffect(() => {
+    if (!isAuthorized || !onDuty) return
+
+    let eventSource: EventSource | null = null
+    let reconnectTimeout: any = null
+    let isCancelled = false
+
+    const connectSse = () => {
+      try {
+        const companyId = user?.company_id || "00000000-0000-0000-0000-000000000010"
+        eventSource = api.events.stream(companyId)
+
+        eventSource.onopen = () => {
+          if (!isCancelled) {
+            setIsSseConnected(true)
+            setSyncError(null)
+          }
+        }
+
+        eventSource.onmessage = (event) => {
+          if (isCancelled || !event.data) return
+          try {
+            const payload = JSON.parse(event.data)
+            if (
+              payload.type === "supervisor_request_new" ||
+              payload.type === "supervisor_request_resolved" ||
+              payload.type === "cash_drop_requested" ||
+              payload.type === "cash_session"
+            ) {
+              // Actualización inmediata sin esperar polling
+              fetchPending()
+              fetchData()
+              if (payload.type === "supervisor_request_new") {
+                emitSound("nuevo_pedido")
+                systemNotify("Nueva solicitud de cajera", `${payload.cajero_nombre || "Cajera"} en ${payload.caja_nombre || "Caja"}: ${payload.descripcion || "Intervención requerida"}`)
+              } else if (payload.type === "cash_drop_requested") {
+                emitSound("nuevo_retiro")
+                systemNotify("Retiro Drop Cash", `${payload.cajero_nombre || "Cajera"} solicitó retiro.`)
+              }
+            }
+          } catch {
+            // Ignorar ping / keepalive
+          }
+        }
+
+        eventSource.onerror = () => {
+          if (isCancelled) return
+          setIsSseConnected(false)
+          if (eventSource) {
+            eventSource.close()
+            eventSource = null
+          }
+          // Auto-reconexión inmediata
+          clearTimeout(reconnectTimeout)
+          reconnectTimeout = setTimeout(connectSse, 2500)
+        }
+      } catch {
+        setIsSseConnected(false)
+      }
+    }
+
+    // Carga inicial
+    fetchPending()
+    fetchData()
+    connectSse()
+
+    // Polling de respaldo (cada 5s con SSE activo, cada 2s si SSE está reconectando)
+    const intervalPending = setInterval(fetchPending, isSseConnected ? 5000 : 2000)
+    const intervalData = setInterval(fetchData, 8000)
+
+    return () => {
+      isCancelled = true
       clearInterval(intervalPending)
       clearInterval(intervalData)
-      document.removeEventListener("visibilitychange", onWake)
-      window.removeEventListener("focus", onWake)
+      clearTimeout(reconnectTimeout)
+      if (eventSource) eventSource.close()
     }
-  }, [isAuthorized, fetchPending, fetchData])
+  }, [isAuthorized, onDuty, user?.company_id, fetchPending, fetchData, emitSound, isSseConnected])
 
   // ── DATOS SECUNDARIOS (EQUIPO) ──────────────────────────────────
   const fetchVaultAndTeam = useCallback(async () => {
@@ -1222,8 +1325,8 @@ try {
                 </span>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${syncError ? "bg-rose-500" : "bg-emerald-500"} animate-pulse`} />
-                <span className="truncate">{syncError ? "Sin Conexión" : "Turno Activo"}</span>
+                <span className={`w-2 h-2 rounded-full shrink-0 ${syncError ? "bg-rose-500" : isSseConnected ? "bg-emerald-500 shadow-xs shadow-emerald-500" : "bg-amber-400"} animate-pulse`} />
+                <span className="truncate font-semibold">{syncError ? "Sin Conexión" : isSseConnected ? "En Vivo (Reactivo)" : "Reconectando..."}</span>
                 <span className="text-slate-400 dark:text-slate-500 font-mono hidden sm:inline shrink-0">
                   · {now.toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}
                 </span>
