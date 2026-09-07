@@ -111,6 +111,7 @@ export default function AccountsReceivablePage() {
     return d.toISOString().split("T")[0]
   })
   const [reportFechaHasta, setReportFechaHasta] = useState(() => new Date().toISOString().split("T")[0])
+  const [reportCustomerId, setReportCustomerId] = useState("")
 
   // Registrar pago
   const [showPaymentModal, setShowPaymentModal] = useState<string | null>(null)
@@ -307,8 +308,9 @@ export default function AccountsReceivablePage() {
   }
 
   const reportParams = { fecha_desde: reportFechaDesde, fecha_hasta: reportFechaHasta }
-  const handleDownloadAgingExcel = () => api.accountsReceivable.downloadAgingExcel(reportParams).catch((e: any) => toast.error("Error", e.message))
-  const handleDownloadAgingPdf = () => api.accountsReceivable.downloadAgingPdf(reportParams).catch((e: any) => toast.error("Error", e.message))
+  const agingReportParams = { ...reportParams, ...(reportCustomerId ? { customer_id: reportCustomerId } : {}) }
+  const handleDownloadAgingExcel = () => api.accountsReceivable.downloadAgingExcel(agingReportParams).catch((e: any) => toast.error("Error", e.message))
+  const handleDownloadAgingPdf = () => api.accountsReceivable.downloadAgingPdf(agingReportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadCobranzasExcel = () => api.accountsReceivable.downloadCobranzasExcel(reportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadCobranzasPdf = () => api.accountsReceivable.downloadCobranzasPdf(reportParams).catch((e: any) => toast.error("Error", e.message))
 
@@ -393,6 +395,37 @@ export default function AccountsReceivablePage() {
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-400" : ""}`} />
             </button>
+            <div className="flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/80 rounded-xl px-2.5 py-1.5">
+              <input
+                type="date"
+                value={reportFechaDesde}
+                onChange={e => setReportFechaDesde(e.target.value)}
+                max={reportFechaHasta}
+                className="bg-transparent text-[11px] font-mono text-slate-200 outline-none [color-scheme:dark]"
+                title="Desde"
+              />
+              <span className="text-slate-500 text-xs">→</span>
+              <input
+                type="date"
+                value={reportFechaHasta}
+                onChange={e => setReportFechaHasta(e.target.value)}
+                min={reportFechaDesde}
+                max={new Date().toISOString().split("T")[0]}
+                className="bg-transparent text-[11px] font-mono text-slate-200 outline-none [color-scheme:dark]"
+                title="Hasta"
+              />
+            </div>
+            <select
+              value={reportCustomerId}
+              onChange={e => setReportCustomerId(e.target.value)}
+              className="bg-slate-800/80 border border-slate-700/80 rounded-xl px-2.5 py-2.5 text-[11px] font-bold text-slate-200 outline-none max-w-[160px]"
+              title="Filtrar reporte por cliente"
+            >
+              <option value="">Todos los clientes</option>
+              {(aging?.por_clientes || []).map(c => (
+                <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>
+              ))}
+            </select>
             <button
               onClick={handleDownloadAgingPdf}
               className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-bold transition flex items-center gap-2 shadow-sm"
