@@ -2342,7 +2342,7 @@ async def calculate_smart_replenishment_preview(
     factor_evento: str = "normal",
     solo_quiebre_o_bajo: bool = False,
     search: str | None = None,
-    limit: int = 100,
+    limit: int = 5000,
 ) -> dict:
     cid = company_id
     dias_hist = max(dias_historial_ventas, 7)
@@ -2368,10 +2368,22 @@ async def calculate_smart_replenishment_preview(
     if supplier_id:
         params["supplier_id"] = supplier_id
         where_clauses.append("""
-            EXISTS (
-                SELECT 1 FROM purchase_order_items poi2
-                JOIN purchase_orders po2 ON po2.id = poi2.purchase_order_id
-                WHERE po2.supplier_id = :supplier_id AND poi2.product_id = p.id
+            (
+                EXISTS (
+                    SELECT 1 FROM purchase_order_items poi2
+                    JOIN purchase_orders po2 ON po2.id = poi2.purchase_order_id
+                    WHERE po2.supplier_id = :supplier_id AND poi2.product_id = p.id
+                )
+                OR EXISTS (
+                    SELECT 1 FROM purchase_receipt_items pri2
+                    JOIN purchase_receipts pr2 ON pr2.id = pri2.receipt_id
+                    WHERE pr2.supplier_id = :supplier_id AND pri2.product_id = p.id
+                )
+                OR EXISTS (
+                    SELECT 1 FROM supplier_invoice_items sii2
+                    JOIN supplier_invoices si2 ON si2.id = sii2.invoice_id
+                    WHERE si2.supplier_id = :supplier_id AND sii2.product_id = p.id
+                )
             )
         """)
         
