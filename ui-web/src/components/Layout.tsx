@@ -171,6 +171,12 @@ const navGroups: NavGroup[] = [
       { icon: ShieldCheck, label: "Permisos & Roles (RBAC)", path: "/rbac" },
     ]
   },
+  {
+    title: "Ayuda",
+    items: [
+      { icon: BookOpen, label: "Manual Interactivo", path: "/manual" },
+    ]
+  },
 ]
 
 export default function Layout() {

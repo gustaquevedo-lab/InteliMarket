@@ -136,6 +136,7 @@ const PortalPage = lazy(() => import("./pages/portal/PortalPage"))
 const ClientAppPage = lazy(() => import("./pages/client-app/ClientAppPage"))
 const SifenAvanzadoPage = lazy(() => import("./pages/sifen-avanzado/SifenAvanzadoPage"))
 const SupplierPortalHubPage = lazy(() => import("./pages/supplier-portal/SupplierPortalHubPage"))
+const ManualPage = lazy(() => import("./pages/manual/ManualPage"))
 
 function PageLoader() {
   return (
@@ -342,6 +343,7 @@ function AppRoutes() {
         <Route path="loyalty" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="loyalty"><LoyaltyPage /></FeatureRoute></Suspense>} />
         <Route path="portal" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="portal"><PortalPage /></FeatureRoute></Suspense>} />
         <Route path="client-app" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="client_app"><ClientAppPage /></FeatureRoute></Suspense>} />
+        <Route path="manual" element={<Suspense fallback={<PageLoader />}><ManualPage /></Suspense>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
