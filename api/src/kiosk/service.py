@@ -6,9 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.src.kiosk.models import KioskBanner
-from api.src.kiosk.schemas import KioskBannerCreate, KioskBannerUpdate, PriceScaleTier
+from api.src.kiosk.schemas import KioskBannerCreate, KioskBannerUpdate, PriceScaleTier, PackPriceInfo
 from api.src.products.models import Product
 from api.src.smart_pricing.models import TieredPrice
+from api.src.pack_barcodes.models import ProductPackBarcode
 
 
 async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict | None:
@@ -27,6 +28,28 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
         .limit(1)
     )
     product = result.scalar_one_or_none()
+
+    escaneado_como_pack: str | None = None
+    if not product:
+        # Fallback: el codigo escaneado puede ser el de una caja/pack (no el
+        # del producto suelto) -- mismo criterio que ya usa el escaneo en POS.
+        pack_result = await db.execute(
+            select(ProductPackBarcode)
+            .where(ProductPackBarcode.company_id == cid, ProductPackBarcode.codigo_barra == code, ProductPackBarcode.activo == True)
+            .limit(1)
+        )
+        pack_match = pack_result.scalar_one_or_none()
+        if pack_match:
+            prod_result = await db.execute(
+                select(Product)
+                .options(selectinload(Product.categoria))
+                .where(Product.id == pack_match.product_id, Product.activo == True)
+                .limit(1)
+            )
+            product = prod_result.scalar_one_or_none()
+            if product:
+                escaneado_como_pack = pack_match.etiqueta
+
     if not product:
         return None
 
@@ -47,6 +70,20 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
 
     effective_price = promo_info.precio_promocional if promo_info.en_promocion else base_price
 
+    packs_result = await db.execute(
+        select(ProductPackBarcode)
+        .where(ProductPackBarcode.company_id == cid, ProductPackBarcode.product_id == product.id, ProductPackBarcode.activo == True)
+        .order_by(ProductPackBarcode.unidades_por_paquete.asc())
+    )
+    packs = [
+        PackPriceInfo(
+            etiqueta=p.etiqueta,
+            unidades_por_paquete=float(p.unidades_por_paquete),
+            precio_pack=round(effective_price * float(p.unidades_por_paquete), 0),
+        )
+        for p in packs_result.scalars().all()
+    ]
+
     return {
         "id": product.id,
         "nombre": product.nombre,
@@ -57,6 +94,8 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
         "categoria_nombre": product.categoria.nombre if product.categoria else None,
         "tipo_venta": product.tipo_venta,
         "escalas": escalas,
+        "packs": packs,
+        "escaneado_como_pack": escaneado_como_pack,
         "en_promocion": promo_info.en_promocion,
         "precio_regular": promo_info.precio_regular,
         "precio_promocional": promo_info.precio_promocional,

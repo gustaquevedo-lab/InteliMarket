@@ -55,6 +55,12 @@ class PriceScaleTier(BaseModel):
     moneda: str = "PYG"
 
 
+class PackPriceInfo(BaseModel):
+    etiqueta: str
+    unidades_por_paquete: float
+    precio_pack: float
+
+
 class ProductLookupResponse(BaseModel):
     id: UUID
     nombre: str
@@ -65,6 +71,8 @@ class ProductLookupResponse(BaseModel):
     categoria_nombre: Optional[str] = None
     tipo_venta: Optional[str] = None
     escalas: list[PriceScaleTier] = []
+    packs: list[PackPriceInfo] = []
+    escaneado_como_pack: Optional[str] = None
     
     # Dual Pricing Promocional
     en_promocion: bool = False

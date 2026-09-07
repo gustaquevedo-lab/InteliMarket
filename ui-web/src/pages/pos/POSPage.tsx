@@ -861,6 +861,8 @@ export default function POSPage() {
   const [priceCheckLoadingStock, setPriceCheckLoadingStock] = useState(false)
   const [priceCheckPromo, setPriceCheckPromo] = useState<{ nombre: string; tipo: string; descuento: number; precio_final: number } | null>(null)
   const [priceCheckLoadingPromo, setPriceCheckLoadingPromo] = useState(false)
+  const [priceCheckPacks, setPriceCheckPacks] = useState<{ id: string; etiqueta: string; unidades_por_paquete: number }[]>([])
+  const [priceCheckScannedAsPack, setPriceCheckScannedAsPack] = useState<string | null>(null)
 
   // ── MULTIMONEDA & COTIZACIONES ────────────────────────────────────────────
   const [rates, setRates] = useState<CurrencyRates>(() => {
@@ -1881,6 +1883,20 @@ export default function POSPage() {
           p.sku?.toLowerCase().includes(q) ||
           (p.codigo_barra && p.codigo_barra.toLowerCase().includes(q))
       ).slice(0, 30)
+
+      // Sin match directo: puede ser el codigo de barra de una caja/pack
+      // (no del producto suelto) -- mismo fallback que ya usa el escaneo de venta.
+      if (matched.length === 0) {
+        const packMatch = packBarcodeMap.get(query)
+        const baseProduct = packMatch ? products.find((p) => p.id === packMatch.productId) : null
+        if (packMatch && baseProduct) {
+          setPriceCheckResults([baseProduct])
+          setPriceCheckHighlight(0)
+          handlePriceCheckSelect(baseProduct, packMatch.etiqueta)
+          return
+        }
+      }
+
       setPriceCheckResults(matched)
       setPriceCheckHighlight(0)
       // Codigo de barras escaneado: 1 sola coincidencia → abre detalle directo
@@ -1907,7 +1923,7 @@ export default function POSPage() {
     }, 200)
 
     return () => clearTimeout(timer)
-  }, [priceCheckSearch, showPriceCheckModal, products])
+  }, [priceCheckSearch, showPriceCheckModal, products, packBarcodeMap])
 
   // Búsqueda remota y en vivo de Clientes (F9) con debounce y consulta RUC
   useEffect(() => {
@@ -5019,14 +5035,20 @@ export default function POSPage() {
     }
   }
 
-  const handlePriceCheckSelect = async (p: Product) => {
+  const handlePriceCheckSelect = async (p: Product, scannedAsPack?: string) => {
     setPriceCheckSelected(p)
     setPriceCheckTiers([])
     setPriceCheckStock(null)
     setPriceCheckPromo(null)
+    setPriceCheckPacks([])
+    setPriceCheckScannedAsPack(scannedAsPack || null)
     setPriceCheckLoadingTiers(true)
     setPriceCheckLoadingStock(true)
     setPriceCheckLoadingPromo(true)
+
+    api.products.packBarcodes.list(p.id)
+      .then((packs) => setPriceCheckPacks((packs || []).map((pk: any) => ({ id: pk.id, etiqueta: pk.etiqueta, unidades_por_paquete: Number(pk.unidades_por_paquete) }))))
+      .catch(() => {})
 
     api.smartPricing.listTieredPrices(COMPANY_ID, p.id)
       .then((tiers) => setPriceCheckTiers((tiers || []).slice().sort((a: any, b: any) => (a.min_qty || 0) - (b.min_qty || 0))))
@@ -5064,6 +5086,8 @@ export default function POSPage() {
     setPriceCheckTiers([])
     setPriceCheckStock(null)
     setPriceCheckPromo(null)
+    setPriceCheckPacks([])
+    setPriceCheckScannedAsPack(null)
   }
 
   // Temporizador de auto-cierre -- igual criterio que el kiosco de precios
@@ -10529,6 +10553,35 @@ export default function POSPage() {
                     <div className="text-[10px] text-slate-500 mt-1">
                       {priceCheckLoadingPromo ? "Verificando promociones…" : priceCheckPromo ? "Precio unitario con promoción aplicada" : "Precio unitario"}
                     </div>
+                    {priceCheckScannedAsPack && (
+                      <div className="text-[10px] font-bold text-sky-600 dark:text-sky-400 mt-0.5">
+                        Escaneado como: {priceCheckScannedAsPack}
+                      </div>
+                    )}
+
+                    {/* Una sola card extra al lado del precio unitario: pack/caja si
+                        tiene, si no, la primera escala mayorista */}
+                    {priceCheckPacks.length > 0 ? (
+                      <div className="inline-flex items-center gap-2 mt-2 bg-sky-50 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/40 rounded-lg px-2.5 py-1.5">
+                        <Package className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                        <div>
+                          <div className="text-[9px] font-black text-sky-600 dark:text-sky-400 uppercase tracking-wider">{priceCheckPacks[0].etiqueta} ({priceCheckPacks[0].unidades_por_paquete % 1 === 0 ? priceCheckPacks[0].unidades_por_paquete.toFixed(0) : priceCheckPacks[0].unidades_por_paquete} un.)</div>
+                          <div className="font-black text-sm text-sky-700 dark:text-sky-300 font-posMono tabular-nums">
+                            {formatPYG((priceCheckPromo ? priceCheckPromo.precio_final : Number(priceCheckSelected.precio_venta) || 0) * priceCheckPacks[0].unidades_por_paquete)}
+                          </div>
+                        </div>
+                      </div>
+                    ) : priceCheckTiers.length > 0 ? (
+                      <div className="inline-flex items-center gap-2 mt-2 bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 rounded-lg px-2.5 py-1.5">
+                        <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <div>
+                          <div className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">Mayorista desde {priceCheckTiers[0].min_qty}+ un.</div>
+                          <div className="font-black text-sm text-amber-700 dark:text-amber-300 font-posMono tabular-nums">
+                            {formatPYG(Number(priceCheckTiers[0].precio_unitario) || 0)}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 

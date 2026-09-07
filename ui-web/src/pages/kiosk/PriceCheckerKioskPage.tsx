@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import {
   Barcode, Sparkles, ShoppingBag, ArrowDown, Clock, CheckCircle2, DollarSign,
-  Star, Layers, Maximize2, Sun, Moon, WifiOff, XCircle,
+  Star, Layers, Maximize2, Sun, Moon, WifiOff, XCircle, Package,
 } from "lucide-react"
 import { api, type KioskProductLookup, type KioskBanner, type Company } from "../../api"
 import { useTheme } from "../../context/ThemeContext"
@@ -514,8 +514,14 @@ export default function PriceCheckerKioskPage() {
                   <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
                     CÓDIGO: <strong className="text-slate-700 dark:text-slate-200 font-bold">{scannedProduct.codigo_barra || scannedProduct.sku}</strong>
                   </p>
+                  {scannedProduct.escaneado_como_pack && (
+                    <p className="text-[11px] font-bold text-sky-600 dark:text-sky-400 mt-0.5">
+                      Escaneado como: {scannedProduct.escaneado_como_pack}
+                    </p>
+                  )}
                 </div>
 
+                <div className={`grid gap-2 ${scannedProduct.packs.length > 0 || scannedProduct.escalas.length > 0 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
                 {scannedProduct.en_promocion ? (
                   <div className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-br from-emerald-500/15 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-500 dark:border-emerald-400 shadow-xl space-y-2">
                     
@@ -585,6 +591,34 @@ export default function PriceCheckerKioskPage() {
                     </div>
                   </div>
                 )}
+
+                {/* 📦 UNA sola card extra: pack/caja si tiene, si no la primera escala mayorista */}
+                {scannedProduct.packs.length > 0 ? (
+                  <div className="rounded-xl bg-gradient-to-br from-sky-50 via-blue-50 to-sky-100 dark:from-slate-800/90 dark:via-slate-800/60 dark:to-blue-950/40 border-2 border-sky-400 dark:border-sky-500/50 shadow-md overflow-hidden">
+                    <div className="px-2 py-1 bg-gradient-to-r from-sky-500 to-blue-500 text-white text-[11px] sm:text-xs font-black uppercase tracking-wider text-center flex items-center justify-center gap-1">
+                      <Package className="w-3.5 h-3.5" /> {scannedProduct.packs[0].etiqueta} ({scannedProduct.packs[0].unidades_por_paquete % 1 === 0 ? scannedProduct.packs[0].unidades_por_paquete.toFixed(0) : scannedProduct.packs[0].unidades_por_paquete} un.)
+                    </div>
+                    <div className="p-2 sm:p-2.5 text-center">
+                      <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black tracking-tight" style={monoFont}>
+                        Gs. {Math.round(scannedProduct.packs[0].precio_pack).toLocaleString("es-PY")}
+                      </div>
+                      <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">Precio del {scannedProduct.packs[0].etiqueta}</div>
+                    </div>
+                  </div>
+                ) : scannedProduct.escalas.length > 0 ? (
+                  <div className="rounded-xl bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100 dark:from-slate-800/90 dark:via-slate-800/60 dark:to-orange-950/40 border-2 border-amber-400 dark:border-amber-500/50 shadow-md overflow-hidden">
+                    <div className="px-2 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-[11px] sm:text-xs font-black uppercase tracking-wider text-center flex items-center justify-center gap-1">
+                      <Layers className="w-3.5 h-3.5" /> Mayorista desde {scannedProduct.escalas[0].min_qty}+ un.
+                    </div>
+                    <div className="p-2 sm:p-2.5 text-center">
+                      <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black tracking-tight" style={monoFont}>
+                        Gs. {Math.round(scannedProduct.escalas[0].precio_unitario).toLocaleString("es-PY")}
+                      </div>
+                      <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">Precio Mayorista / un.</div>
+                    </div>
+                  </div>
+                ) : null}
+                </div>
 
                 {/* Multimoneda */}
                 {activeCurrencies.length > 0 && (
