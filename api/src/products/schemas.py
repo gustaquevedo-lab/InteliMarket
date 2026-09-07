@@ -120,6 +120,9 @@ class ProductResponse(BaseModel):
     promocion_id: Optional[str] = None
     promocion_nombre: Optional[str] = None
     promo_dias_semana: Optional[list[int]] = None
+    # Escala mayorista preferencial / primer escalón (sp_tiered_prices)
+    precio_mayorista: Optional[Decimal] = None
+    precio_mayorista_min_qty: Optional[int] = None
 
     class Config:
         from_attributes = True

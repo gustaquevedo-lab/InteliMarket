@@ -892,6 +892,7 @@ class SmartReplenishmentItem(BaseModel):
     stock_actual: float
     stock_en_transito: float = 0.0
     ventas_periodo: float
+    ventas_mes_actual: float = 0.0
     ventas_mes_1: float = 0.0
     ventas_mes_2: float = 0.0
     ventas_mes_3: float = 0.0
@@ -927,6 +928,7 @@ class SmartReplenishmentResponse(BaseModel):
     total_sugeridos: int
     monto_total_estimado: float
     meses_labels: list[str] = []
+    mes_actual_label: Optional[str] = None
     items: list[SmartReplenishmentItem]
 
 

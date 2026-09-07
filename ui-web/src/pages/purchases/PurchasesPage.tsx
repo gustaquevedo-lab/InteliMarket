@@ -214,6 +214,7 @@ export default function PurchasesPage() {
     | "m3"
     | "m2"
     | "m1"
+    | "mes_actual"
     | "pulso"
     | "costo_ppp"
     | "ultimo_costo"
@@ -1449,6 +1450,10 @@ export default function PurchasesPage() {
           valA = Number(a.ventas_mes_1) || 0
           valB = Number(b.ventas_mes_1) || 0
           break
+        case "mes_actual":
+          valA = Number(a.ventas_mes_actual) || 0
+          valB = Number(b.ventas_mes_actual) || 0
+          break
         case "pulso": {
           const rank = (p: string) => (p === "acelerando" ? 3 : p === "estable" ? 2 : 1)
           valA = rank(a.pulso_tendencia)
@@ -2231,6 +2236,7 @@ export default function PurchasesPage() {
                       sortColumnIA === "m3" ? (replenishmentData?.meses_labels?.[1] || "M-3") :
                       sortColumnIA === "m2" ? (replenishmentData?.meses_labels?.[2] || "M-2") :
                       sortColumnIA === "m1" ? (replenishmentData?.meses_labels?.[3] || "M-1") :
+                      sortColumnIA === "mes_actual" ? `${replenishmentData?.mes_actual_label || "Mes"} (En Curso)` :
                       sortColumnIA === "pulso" ? "Pulso Venta" :
                       sortColumnIA === "costo_ppp" ? "Costo PPP" :
                       sortColumnIA === "ultimo_costo" ? "Última Compra" :
@@ -2263,11 +2269,12 @@ export default function PurchasesPage() {
                 No se encontraron productos con los filtros seleccionados.
               </div>
             ) : (
-              <div className="overflow-x-auto w-full">
+              <div className="overflow-auto w-full max-h-[calc(100vh-230px)] min-h-[420px] rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-inner relative">
                 {(() => {
                   const labels4m = (replenishmentData?.meses_labels && replenishmentData.meses_labels.length === 4)
                     ? replenishmentData.meses_labels
                     : ["M-4", "M-3", "M-2", "M-1"]
+                  const mesActualLabel = replenishmentData?.mes_actual_label || "Mes"
 
                   const renderSortHeader = (
                     col: IASortColumn,
@@ -2281,8 +2288,8 @@ export default function PurchasesPage() {
                       <th
                         onClick={() => handleSortIA(col)}
                         title={title || `Ordenar por ${label} (clic para alternar)`}
-                        className={`p-2.5 select-none cursor-pointer group transition-colors hover:bg-slate-200/80 dark:hover:bg-slate-800/80 ${
-                          isSorted ? "bg-indigo-100/70 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300" : ""
+                        className={`p-2.5 select-none cursor-pointer group transition-colors sticky top-0 z-30 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200/90 dark:hover:bg-slate-800/90 ${
+                          isSorted ? "bg-indigo-100/90 dark:bg-indigo-950/90 text-indigo-700 dark:text-indigo-300" : ""
                         } ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"} ${extraClass}`}
                       >
                         <div className={`inline-flex items-center gap-1.5 ${
@@ -2308,10 +2315,10 @@ export default function PurchasesPage() {
                   }
 
                   return (
-                    <table className="w-full text-left text-xs min-w-[1350px]">
-                      <thead className="bg-slate-100/90 dark:bg-slate-900/70 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60 sticky top-0 z-10 shadow-xs">
+                    <table className="w-full text-left text-xs min-w-[1450px]">
+                      <thead className="bg-slate-100 dark:bg-slate-900 text-gray-600 dark:text-gray-300 font-bold uppercase text-[10px] tracking-wider border-b-2 border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-xs">
                         <tr>
-                          <th className="p-3 w-10 text-center">
+                          <th className="p-3 w-10 text-center sticky top-0 z-30 bg-slate-100 dark:bg-slate-900">
                             <input
                               type="checkbox"
                               checked={displayedReplenishmentItems.length > 0 && displayedReplenishmentItems.every((it: any) => selectedItemsIA[it.product_id])}
@@ -2330,7 +2337,8 @@ export default function PurchasesPage() {
                           {renderSortHeader("m4", labels4m[0], "right", `Ventas mensuales registradas en ${labels4m[0]}`, "font-mono")}
                           {renderSortHeader("m3", labels4m[1], "right", `Ventas mensuales registradas en ${labels4m[1]}`, "font-mono")}
                           {renderSortHeader("m2", labels4m[2], "right", `Ventas mensuales registradas en ${labels4m[2]}`, "font-mono")}
-                          {renderSortHeader("m1", labels4m[3], "right", `Ventas mensuales registradas en ${labels4m[3]}`, "font-mono text-indigo-600 dark:text-indigo-400 font-extrabold")}
+                          {renderSortHeader("m1", labels4m[3], "right", `Ventas mensuales registradas en ${labels4m[3]}`, "font-mono font-bold text-indigo-700 dark:text-indigo-300")}
+                          {renderSortHeader("mes_actual", `${mesActualLabel} (En Curso)`, "right", `Ventas acumuladas en ${mesActualLabel} (mes en curso)`, "font-mono !bg-amber-100 dark:!bg-amber-950/80 text-amber-900 dark:text-amber-200 border-x-2 border-amber-300 dark:border-amber-700/80 font-black shadow-xs")}
                           {renderSortHeader("pulso", "Pulso Venta", "center", "Tendencia / Pulso de Venta reciente", "min-w-[95px]")}
                           {renderSortHeader("costo_ppp", "Costo PPP", "right", "Costo Promedio Ponderado de Inventario (PPP)", "min-w-[100px]")}
                           {renderSortHeader("ultimo_costo", "Última Compra", "right", "Último Costo de Compra facturado por el proveedor", "min-w-[110px]")}
@@ -2339,7 +2347,7 @@ export default function PurchasesPage() {
                           {renderSortHeader("pedido", "Tu Pedido (Un.)", "center", "Modificá esta cantidad libremente.", "min-w-[140px]")}
                           {renderSortHeader("costo_unit", "Costo Unit. (Gs.)", "right", "Modificá el precio de compra acordado con el proveedor", "min-w-[125px]")}
                           {renderSortHeader("subtotal", "Subtotal (Gs.)", "right", undefined, "min-w-[115px]")}
-                          <th className="p-3 min-w-[210px]">Justificación & Alertas</th>
+                          <th className="p-3 min-w-[210px] sticky top-0 z-30 bg-slate-100 dark:bg-slate-900">Justificación & Alertas</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
@@ -2413,7 +2421,7 @@ export default function PurchasesPage() {
                                 {stockActual.toLocaleString()}
                               </td>
 
-                              {/* 4 Columnas de Ventas Históricas */}
+                              {/* Columnas de Ventas Históricas */}
                               <td className="p-2.5 text-right font-mono text-gray-500 dark:text-gray-400">
                                 {Number(it.ventas_mes_4 || 0).toLocaleString()}
                               </td>
@@ -2423,8 +2431,15 @@ export default function PurchasesPage() {
                               <td className="p-2.5 text-right font-mono text-gray-600 dark:text-gray-300 font-semibold">
                                 {Number(it.ventas_mes_2 || 0).toLocaleString()}
                               </td>
-                              <td className="p-2.5 text-right font-mono text-indigo-600 dark:text-indigo-400 font-bold">
+                              <td className="p-2.5 text-right font-mono text-slate-700 dark:text-slate-200 font-bold">
                                 {Number(it.ventas_mes_1 || 0).toLocaleString()}
+                              </td>
+                              {/* Columna destacada: Ventas del Mes en Curso */}
+                              <td
+                                className="p-2.5 text-right font-mono font-black text-amber-800 dark:text-amber-200 bg-amber-50/90 dark:bg-amber-950/40 border-x-2 border-amber-300/80 dark:border-amber-700/60 shadow-xs"
+                                title={`Ventas acumuladas en ${mesActualLabel} (mes en curso)`}
+                              >
+                                {Number(it.ventas_mes_actual || 0).toLocaleString()}
                               </td>
 
                               {/* Pulso de Venta */}

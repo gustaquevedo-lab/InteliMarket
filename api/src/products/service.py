@@ -298,6 +298,26 @@ async def list_products(
                 p.__dict__["supplier_id"] = po_supp_map[p.id][0]
                 p.__dict__["supplier_nombre"] = po_supp_map[p.id][1]
 
+        # 3. Asociar Escala Mayorista preferencial (sp_tiered_prices)
+        tier_res = await db.execute(
+            text("""
+                SELECT DISTINCT ON (product_id)
+                    product_id, min_qty, precio_unitario
+                FROM sp_tiered_prices
+                WHERE product_id = ANY(:p_ids) AND activo = true
+                ORDER BY product_id, min_qty ASC
+            """),
+            {"p_ids": p_ids}
+        )
+        tier_map = {r.product_id: (int(r.min_qty), float(r.precio_unitario)) for r in tier_res}
+        for p in products:
+            if p.id in tier_map:
+                p.__dict__["precio_mayorista"] = tier_map[p.id][1]
+                p.__dict__["precio_mayorista_min_qty"] = tier_map[p.id][0]
+            else:
+                p.__dict__["precio_mayorista"] = None
+                p.__dict__["precio_mayorista_min_qty"] = None
+
     return products
 
 

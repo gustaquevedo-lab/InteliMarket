@@ -1221,7 +1221,8 @@ export default function ProductsPage() {
                       <th className="p-3.5 text-center">Stock Físico</th>
                       <th className="p-3.5 text-center">Unidad</th>
                       <th className="p-3.5 text-right">Costo Promedio</th>
-                      <th className="p-3.5 text-right">Precio de Venta</th>
+                      <th className="p-3.5 text-right text-slate-800 dark:text-slate-200">PVP (Minorista)</th>
+                      <th className="p-3.5 text-right text-indigo-600 dark:text-indigo-400">Precio Mayorista</th>
                       <th className="p-3.5 text-center">Margen Bruto %</th>
                       <th className="p-3.5 text-right pr-4">Acciones</th>
                     </tr>
@@ -1331,9 +1332,25 @@ export default function ProductsPage() {
                             {costo > 0 ? formatPYG(costo) : "—"}
                           </td>
 
-                          {/* Precio de Venta */}
+                          {/* PVP (Precio de Venta al Público) */}
                           <td className="p-3.5 text-right font-mono font-bold text-slate-900 dark:text-white">
                             {precio > 0 ? formatPYG(precio) : <span className="text-amber-500 font-normal">Sin Precio</span>}
+                          </td>
+
+                          {/* Precio Mayorista */}
+                          <td className="p-3.5 text-right font-mono">
+                            {p.precio_mayorista != null && Number(p.precio_mayorista) > 0 ? (
+                              <div className="flex flex-col items-end">
+                                <span className="font-extrabold text-indigo-600 dark:text-indigo-400">
+                                  {formatPYG(Number(p.precio_mayorista))}
+                                </span>
+                                <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500">
+                                  (a partir de {p.precio_mayorista_min_qty || 1} un.)
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600 font-normal">—</span>
+                            )}
                           </td>
 
                           {/* Margen Bruto % */}

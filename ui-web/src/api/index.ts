@@ -146,13 +146,63 @@ async function downloadAuthenticated(path: string, params: Record<string, string
 }
 
 // ========== TYPE STUBS ==========
-export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
+export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; precio_regular?: number; precio_promo?: number; en_promocion?: boolean; precio_mayorista?: number | null; precio_mayorista_min_qty?: number | null; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
 export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
 export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; extra_club_numero?: string | null; empresa_vinculada_nombre?: string | null; empresa_vinculada_ruc?: string | null; razon_social?: string; ci?: string; direccion?: string; ciudad?: string; tipo?: string; tipo_persona?: string; activo?: boolean; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
 export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_doc?: string; customer_extra_club?: string; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; forma_pago?: string; tipo_comprobante?: string; fecha?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; numero_interno?: string; recibo_html?: string; recibo_escpos_b64?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
 export interface SaleItem { id?: string; sale_id?: string; product_id?: string; producto?: Product; product?: Product; descripcion?: string; cantidad?: number; cantidad_devuelta?: number; cantidad_disponible?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; iva_monto?: number; total?: number; descuento?: number }
 export interface PaymentMethod { id: string; nombre: string; codigo?: string; tipo?: string; moneda?: string; activo?: boolean; permite_parcial?: boolean; requiere_autorizacion?: boolean; created_at?: string }
 export interface Payment { id: string; sale_id?: string; metodo_pago_id?: string; payment_method_id?: string; metodo_pago?: PaymentMethod; tipo?: string; monto?: number; moneda?: string; referencia?: string; estado?: string; fecha?: string; created_at?: string }
+
+export interface SmartReplenishmentItem {
+  product_id: string
+  nombre: string
+  sku?: string | null
+  codigo_barra?: string | null
+  unidad_medida: string
+  stock_actual: number
+  stock_en_transito: number
+  ventas_periodo: number
+  ventas_mes_actual?: number
+  ventas_mes_1?: number
+  ventas_mes_2?: number
+  ventas_mes_3?: number
+  ventas_mes_4?: number
+  costo_promedio?: number
+  ultimo_costo?: number
+  variacion_costo_pct?: number
+  pulso_tendencia?: "acelerando" | "estable" | "desacelerando"
+  tiene_promocion_detectada?: boolean
+  promocion_info?: string | null
+  ultimo_proveedor_id?: string | null
+  ultimo_proveedor_nombre?: string | null
+  demanda_diaria_base: number
+  multiplicador_estacional: number
+  demanda_diaria_ajustada: number
+  dias_stock_restantes: number
+  autonomia_estado: "critico" | "bajo" | "optimo" | "sobrestock"
+  stock_seguridad?: number
+  punto_reorden?: number
+  target_stock?: number
+  cantidad_sugerida: number
+  costo_unitario_estimado: number
+  subtotal_estimado: number
+  iva_tasa: number
+  explicacion_ia: string
+  generada_automaticamente?: boolean
+}
+
+export interface SmartReplenishmentResponse {
+  total_evaluados: number
+  total_quiebres: number
+  total_bajos: number
+  total_sugeridos: number
+  monto_total_estimado: number
+  meses_labels?: string[]
+  mes_actual_label?: string
+  items: SmartReplenishmentItem[]
+}
+
 export interface Warehouse { id: string; codigo?: string; nombre: string; direccion?: string; ciudad?: string; tipo?: string; activo?: boolean; company_id?: string; created_at?: string }
 export interface StockItem { id?: string; product_id?: string; producto?: Product; product?: Product; nombre?: string; sku?: string; warehouse_id?: string; warehouse?: Warehouse; cantidad?: number; cantidad_reservada?: number; cantidad_disponible?: number; stock_minimo?: number; stock_maximo?: number; costo_promedio?: number; ultimo_costo?: number; costo_unitario?: number; lote?: string; fecha_vencimiento?: string; created_at?: string }
 export interface Company { id: string; nombre?: string; nombre_fantasia?: string; ruc?: string; razon_social?: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; logo_url?: string; activo?: boolean; config?: Record<string, unknown>; iva_condition?: string; regimen_tributario?: string; created_at?: string; updated_at?: string }
@@ -205,52 +255,7 @@ export interface PurchaseBudget { id: string; company_id: string; nombre: string
 export interface PurchaseBudgetConsumption { budget_id: string; nombre: string; anio: number; mes?: number | null; monto_presupuestado: number; monto_ejecutado: number; monto_disponible: number; porcentaje_ejecutado: number }
 export interface PurchaseReceipt { id: string; company_id?: string; purchase_order_id?: string | null; orden?: PurchaseOrder; supplier_id?: string; supplier?: Supplier; warehouse_id?: string; numero?: string; fecha?: string; estado?: string; proveedor_ref?: string | null; total?: number; user_id?: string | null; observaciones?: string | null; requiere_revision?: boolean; motivo_revision?: string | null; items?: PurchaseReceiptItem[]; created_at?: string; updated_at?: string }
 export interface PurchaseReceiptItem { id?: string; receipt_id?: string; product_id?: string; producto?: Product; variant_id?: string | null; cantidad_ordenada?: number | null; cantidad_recibida?: number; precio_unitario?: number; costo_unitario?: number; total?: number; batch_id?: string | null; cantidad_rechazada?: number | null; motivo_rechazo?: string | null; created_at?: string }
-export interface SmartReplenishmentItem {
-  product_id: string
-  nombre: string
-  sku?: string | null
-  codigo_barra?: string | null
-  unidad_medida: string
-  stock_actual: number
-  stock_en_transito: number
-  ventas_periodo: number
-  ventas_mes_1?: number
-  ventas_mes_2?: number
-  ventas_mes_3?: number
-  ventas_mes_4?: number
-  costo_promedio?: number
-  ultimo_costo?: number
-  variacion_costo_pct?: number
-  pulso_tendencia?: "acelerando" | "estable" | "desacelerando"
-  tiene_promocion_detectada?: boolean
-  promocion_info?: string | null
-  ultimo_proveedor_id?: string | null
-  ultimo_proveedor_nombre?: string | null
-  demanda_diaria_base: number
-  multiplicador_estacional: number
-  demanda_diaria_ajustada: number
-  dias_stock_restantes: number
-  autonomia_estado: "critico" | "bajo" | "optimo" | "sobrestock"
-  stock_seguridad?: number
-  punto_reorden?: number
-  target_stock?: number
-  cantidad_sugerida: number
-  costo_unitario_estimado: number
-  subtotal_estimado: number
-  iva_tasa: number
-  explicacion_ia: string
-  generada_automaticamente?: boolean
-}
 
-export interface SmartReplenishmentResponse {
-  total_evaluados: number
-  total_quiebres: number
-  total_bajos: number
-  total_sugeridos: number
-  monto_total_estimado: number
-  meses_labels?: string[]
-  items: SmartReplenishmentItem[]
-}
 
 export interface SmartReplenishmentRequest {
   company_id?: string

@@ -2353,6 +2353,7 @@ async def calculate_smart_replenishment_preview(
     cur_year = today.year
     cur_month = today.month
     
+    mes_actual_label = month_names_es[cur_month - 1]
     meses_labels = []
     for i in [4, 3, 2, 1]:
         m = cur_month - i
@@ -2391,8 +2392,8 @@ async def calculate_smart_replenishment_preview(
         params["cat_id"] = categoria_id
         where_clauses.append("p.categoria_id = :cat_id")
         
-    if search:
-        params["search"] = f"%{search}%"
+    if search and search.strip():
+        params["search"] = f"%{search.strip()}%"
         where_clauses.append("(p.nombre ILIKE :search OR p.sku ILIKE :search OR p.codigo_barra ILIKE :search)")
 
     sql = f"""
@@ -2410,6 +2411,7 @@ async def calculate_smart_replenishment_preview(
             COALESCE(stk.total_stock, 0) as stock_actual,
             COALESCE(sales.total_vendido, 0) as total_vendido_periodo,
             COALESCE(po_transit.total_en_transito, 0) as stock_en_transito,
+            COALESCE(sales_4m.v_mes_actual, 0) as v_mes_actual,
             COALESCE(sales_4m.v_m1, 0) as v_m1,
             COALESCE(sales_4m.v_m2, 0) as v_m2,
             COALESCE(sales_4m.v_m3, 0) as v_m3,
@@ -2436,6 +2438,7 @@ async def calculate_smart_replenishment_preview(
         LEFT JOIN (
             SELECT 
                 si.product_id,
+                SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW()) THEN si.cantidad ELSE 0 END) as v_mes_actual,
                 SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '1 month') AND s.fecha < DATE_TRUNC('month', NOW()) THEN si.cantidad ELSE 0 END) as v_m1,
                 SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '2 month') AND s.fecha < DATE_TRUNC('month', NOW() - INTERVAL '1 month') THEN si.cantidad ELSE 0 END) as v_m2,
                 SUM(CASE WHEN s.fecha >= DATE_TRUNC('month', NOW() - INTERVAL '3 month') AND s.fecha < DATE_TRUNC('month', NOW() - INTERVAL '2 month') THEN si.cantidad ELSE 0 END) as v_m3,
@@ -2506,14 +2509,15 @@ async def calculate_smart_replenishment_preview(
         ventas_periodo = Decimal(str(r[11]))
         stock_en_transito = Decimal(str(r[12]))
         
-        vm1 = float(r[13])
-        vm2 = float(r[14])
-        vm3 = float(r[15])
-        vm4 = float(r[16])
-        v_promo_qty = float(r[17])
-        en_promo_flag = bool(r[18])
-        ultimo_proveedor_id = str(r[19]) if r[19] else None
-        ultimo_proveedor_nombre = str(r[20]) if r[20] else None
+        vm_actual = float(r[13])
+        vm1 = float(r[14])
+        vm2 = float(r[15])
+        vm3 = float(r[16])
+        vm4 = float(r[17])
+        v_promo_qty = float(r[18])
+        en_promo_flag = bool(r[19])
+        ultimo_proveedor_id = str(r[20]) if r[20] else None
+        ultimo_proveedor_nombre = str(r[21]) if r[21] else None
         
         # Variación porcentual de costo (Último costo vs Costo promedio)
         if costo_prom > Decimal("0") and costo_ult > Decimal("0"):
@@ -2660,6 +2664,7 @@ async def calculate_smart_replenishment_preview(
             "stock_actual": float(stock_actual),
             "stock_en_transito": float(stock_en_transito),
             "ventas_periodo": float(ventas_periodo),
+            "ventas_mes_actual": vm_actual,
             "ventas_mes_1": vm1,
             "ventas_mes_2": vm2,
             "ventas_mes_3": vm3,
@@ -2695,6 +2700,7 @@ async def calculate_smart_replenishment_preview(
         "total_sugeridos": total_sugeridos,
         "monto_total_estimado": float(monto_total_estimado),
         "meses_labels": meses_labels,
+        "mes_actual_label": mes_actual_label,
         "items": items,
     }
 
