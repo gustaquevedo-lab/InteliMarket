@@ -2466,14 +2466,19 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
     """
     rows = await _fetch(sql)
 
-    # 2. Mapear productos por SKU y Código de Barra
+    # 2. Mapear productos por SKU y Código de Barra (incluyendo normalización de códigos con/sin cero inicial)
     res_p = await db.execute(select(Product.id, Product.sku, Product.codigo_barra, Product.nombre).where(Product.company_id == cid))
-    sku_to_prod = {}
-    for p in res_p.fetchall():
-        if p[1]:
-            sku_to_prod[str(p[1]).strip()] = (p[0], p[3])
-        if p[2]:
-            sku_to_prod[str(p[2]).strip()] = (p[0], p[3])
+    all_prods = res_p.fetchall()
+    sku_to_prods = {}
+    norm_cb_to_prods = {}
+    for p in all_prods:
+        pid, sku, cb, nom = p[0], str(p[1]).strip() if p[1] else "", str(p[2]).strip() if p[2] else "", p[3]
+        if sku:
+            sku_to_prods.setdefault(sku, []).append((pid, nom, cb))
+        if cb:
+            norm_cb = cb.lstrip("0")
+            if norm_cb:
+                norm_cb_to_prods.setdefault(norm_cb, []).append((pid, nom, cb))
 
     # 3. Mapear promociones existentes por legacy_id
     res_exist = await db.execute(select(Promotion).where(Promotion.company_id == cid, Promotion.legacy_id != None))
@@ -2491,9 +2496,21 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
     for r in rows:
         legacy_id = r["ID_PROMOCAO"]
         prod_sku = str(r["ID_PRODUTO"]).strip()
-        matched = sku_to_prod.get(prod_sku)
-        prod_id = matched[0] if matched else None
-        prod_nombre = matched[1] if matched else f"Ítem #{prod_sku}"
+        matched_items = sku_to_prods.get(prod_sku, [])
+        all_matched_ids = set()
+        prod_nombre = None
+        for pid, nom, cb in matched_items:
+            all_matched_ids.add(pid)
+            if not prod_nombre:
+                prod_nombre = nom
+            if cb:
+                norm_cb = cb.lstrip("0")
+                for sib_id, sib_nom, _ in norm_cb_to_prods.get(norm_cb, []):
+                    all_matched_ids.add(sib_id)
+
+        if not prod_nombre:
+            prod_nombre = f"Ítem #{prod_sku}"
+        prod_ids = list(all_matched_ids) if all_matched_ids else None
 
         dias_semana = []
         if r.get("BO_DOMINGO"): dias_semana.append(0)
@@ -2532,8 +2549,8 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
                 promo.activo = is_active
                 promo.estado = "activa" if is_active else "finalizada_por_fecha"
                 changed = True
-            if prod_id and (not promo.producto_ids or promo.producto_ids != [prod_id]):
-                promo.producto_ids = [prod_id]
+            if prod_ids and (not promo.producto_ids or set(promo.producto_ids) != set(prod_ids)):
+                promo.producto_ids = prod_ids
                 changed = True
             if changed:
                 promo.updated_at = func.now()
@@ -2545,8 +2562,8 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
                 descripcion=r.get("OBSERVACAO") or f"Sincronizado de Ñemuha legacy ID {legacy_id}",
                 tipo="precio_fijo_oferta",
                 precio_fijo_promocional=precio_promo,
-                aplica_a="producto" if prod_id else "carrito",
-                producto_ids=[prod_id] if prod_id else None,
+                aplica_a="producto" if prod_ids else "carrito",
+                producto_ids=prod_ids,
                 origen="accion_proveedor" if r.get("TIPO_PROMOCAO") == "ESTOQUE_LIMITADO" else "iniciativa_propia",
                 financiamiento="propio_supermercado",
                 valido_desde=dt_inicio,

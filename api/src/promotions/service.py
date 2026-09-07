@@ -712,12 +712,33 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
         precio_orig = r.get("VL_PRECO_VAREJO_PRODUTO") or Decimal("0")
         
         # Buscar producto local por SKU / código Nemuha
-        prod_sku = str(r["ID_PRODUTO"])
+        prod_sku = str(r["ID_PRODUTO"]).strip()
         p_res = await db.execute(
             select(Product).where(Product.company_id == cid, or_(Product.sku == prod_sku, Product.codigo_barra == prod_sku))
         )
-        matched_prod = p_res.scalar_one_or_none()
-        prod_ids = [matched_prod.id] if matched_prod else None
+        matched_prods = list(p_res.scalars().all())
+        prod_ids = []
+        matched_prod = matched_prods[0] if matched_prods else None
+        for mp in matched_prods:
+            if mp.id not in prod_ids:
+                prod_ids.append(mp.id)
+            cb = mp.codigo_barra
+            if cb:
+                norm_cb = cb.lstrip("0")
+                if norm_cb:
+                    sib_res = await db.execute(
+                        select(Product).where(
+                            Product.company_id == cid,
+                            or_(
+                                Product.codigo_barra == norm_cb,
+                                Product.codigo_barra == "0" + norm_cb,
+                                Product.codigo_barra == cb,
+                            )
+                        )
+                    )
+                    for sib in sib_res.scalars().all():
+                        if sib.id not in prod_ids:
+                            prod_ids.append(sib.id)
 
         is_active = valido_hasta >= today
 
