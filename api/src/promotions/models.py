@@ -93,9 +93,10 @@ class Promotion(Base):
     nc_timbrado_proveedor = Column(String(20), nullable=True)
     nc_monto_total = Column(Numeric(15, 2), default=0)
 
-    # Trazabilidad Legacy Nemuha
+    # Trazabilidad Legacy Nemuha & Auditoría
     origen_fuente = Column(String(30), default="intelimarket")  # nemuha | intelimarket
     legacy_id = Column(Integer, nullable=True, index=True)  # ID_PROMOCAO en MySQL Nemuha
+    usuario_registro = Column(String(100), nullable=True)  # Usuario que cargó/registró la promo
 
     # Control
     usos_maximos = Column(Integer)

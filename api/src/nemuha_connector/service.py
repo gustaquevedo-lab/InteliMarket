@@ -2459,7 +2459,7 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
         SELECT p.ID_PROMOCAO, p.ID_PRODUTO, p.DT_INICIO_PROMOCAO, p.DT_FIM_PROMOCAO,
                p.VL_PRECO_VAREJO, p.VL_PRECO_VAREJO_PRODUTO, p.TIPO_PROMOCAO,
                p.BO_DOMINGO, p.BO_SEGUNDA, p.BO_TERCA, p.BO_QUARTA, p.BO_QUINTA, p.BO_SEXTA, p.BO_SABADO,
-               p.OBSERVACAO, p.DT_PROMOCAO
+               p.OBSERVACAO, p.DT_PROMOCAO, p.USUARIO
         FROM ven_promocao p
         WHERE p.DT_FIM_PROMOCAO >= CURDATE() - INTERVAL 60 DAY
         ORDER BY p.ID_PROMOCAO DESC;
@@ -2533,6 +2533,8 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
         precio_promo = Decimal(str(r.get("VL_PRECO_VAREJO") or 0))
         is_active = (valido_hasta >= today)
 
+        usuario_nemuha = (r.get("USUARIO") or "").strip() or None
+
         if legacy_id in existing_map:
             promo = existing_map[legacy_id]
             changed = False
@@ -2548,6 +2550,9 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
             if promo.activo != is_active:
                 promo.activo = is_active
                 promo.estado = "activa" if is_active else "finalizada_por_fecha"
+                changed = True
+            if usuario_nemuha and promo.usuario_registro != usuario_nemuha:
+                promo.usuario_registro = usuario_nemuha
                 changed = True
             if prod_ids and (not promo.producto_ids or set(promo.producto_ids) != set(prod_ids)):
                 promo.producto_ids = prod_ids
@@ -2573,6 +2578,7 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
                 estado="activa" if is_active else "finalizada_por_fecha",
                 origen_fuente="nemuha_sync",
                 legacy_id=legacy_id,
+                usuario_registro=usuario_nemuha or "Nemuha",
             )
             db.add(new_promo)
             existing_map[legacy_id] = new_promo

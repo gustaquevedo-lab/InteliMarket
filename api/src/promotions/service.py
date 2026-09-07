@@ -87,7 +87,7 @@ def calcular_precio_promocional(
     return precio_promo
 
 
-async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCreate) -> Promotion:
+async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCreate, usuario_registro: Optional[str] = None) -> Promotion:
     cid = uuid.UUID(company_id)
     
     # Evaluar si vende bajo costo
@@ -146,6 +146,7 @@ async def create_promotion(db: AsyncSession, company_id: str, data: PromotionCre
         nc_estado=nc_estado_inicial,
         vende_bajo_costo=es_bajo_costo,
         estado=estado_inicial,
+        usuario_registro=usuario_registro or getattr(data, "usuario_registro", None) or "Sistema",
         
         limite_por_compra=data.limite_por_compra,
         limitar_unidades=data.limitar_unidades or (data.origen == "corto_vencimiento"),
@@ -742,6 +743,8 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
 
         is_active = valido_hasta >= today
 
+        usuario_nemuha = (r.get("USUARIO") or "").strip() or None
+
         if not existing:
             promo = Promotion(
                 company_id=cid,
@@ -760,6 +763,7 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
                 estado="activa" if is_active else "finalizada_por_fecha",
                 origen_fuente="nemuha",
                 legacy_id=legacy_id,
+                usuario_registro=usuario_nemuha or "Nemuha",
             )
             db.add(promo)
             imported_count += 1
@@ -770,6 +774,8 @@ async def sync_nemuha_promotions(db: AsyncSession, company_id: str) -> dict:
             existing.dias_semana = dias_semana if len(dias_semana) > 0 else None
             existing.activo = is_active
             existing.estado = "activa" if is_active else "finalizada_por_fecha"
+            if usuario_nemuha and existing.usuario_registro != usuario_nemuha:
+                existing.usuario_registro = usuario_nemuha
             if prod_ids:
                 existing.producto_ids = prod_ids
             updated_count += 1

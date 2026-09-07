@@ -101,7 +101,8 @@ async def create_promotion(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.create_promotion(db, user["company_id"], data)
+    nombre_usuario = user.get("nombre") or user.get("username") or user.get("email") or "Usuario"
+    return await service.create_promotion(db, user["company_id"], data, usuario_registro=nombre_usuario)
 
 
 @router.put("/{promo_id}", response_model=PromotionResponse)

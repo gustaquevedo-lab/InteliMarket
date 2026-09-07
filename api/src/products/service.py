@@ -738,8 +738,11 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
                 p.valido_desde, p.valido_hasta, p.dias_semana,
                 p.origen, p.financiamiento, p.activo,
                 p.costo_unitario_referencia,
-                p.limite_por_compra, p.stock_limite_unidades, p.unidades_vendidas_promo
+                p.limite_por_compra, p.stock_limite_unidades, p.unidades_vendidas_promo,
+                p.usuario_registro, p.origen_fuente, p.legacy_id, p.created_at,
+                u.nombre as usuario_aprobador_nombre
             FROM promotions p
+            LEFT JOIN users u ON u.id = p.aprobado_por
             WHERE p.company_id = :company_id
               AND :p_id = ANY(p.producto_ids)
             ORDER BY p.valido_hasta DESC
@@ -762,6 +765,24 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         else:
             row["ahorro_por_unidad"] = 0
             row["ahorro_pct"] = 0
+
+        # Usuario que registró la promoción
+        usuario = (row.get("usuario_registro") or "").strip()
+        if not usuario:
+            if row.get("usuario_aprobador_nombre"):
+                usuario = row.get("usuario_aprobador_nombre")
+            elif row.get("origen_fuente") in ("nemuha", "nemuha_sync") or row.get("legacy_id"):
+                usuario = "Operador Ñemuha"
+            else:
+                usuario = "Sistema"
+        row["usuario_registro"] = usuario
+
+        # Asegurar strings de fecha en ISO
+        if hasattr(desde, "isoformat"):
+            row["valido_desde"] = desde.isoformat()
+        if hasattr(hasta, "isoformat"):
+            row["valido_hasta"] = hasta.isoformat()
+
         promociones.append(row)
 
     # 9. Códigos Alternativos (product_pack_barcodes)

@@ -65,6 +65,7 @@ class PromotionCreate(BaseModel):
     usos_maximos: Optional[int] = None
     activo: bool = True
     estado: Optional[str] = "activa"
+    usuario_registro: Optional[str] = None
 
     @model_validator(mode="after")
     def validar_consistencia(self):
@@ -138,6 +139,7 @@ class PromotionUpdate(BaseModel):
     requiere_cupon: Optional[bool] = None
     usos_maximos: Optional[int] = None
     activo: Optional[bool] = None
+    usuario_registro: Optional[str] = None
 
 
 class PromotionResponse(BaseModel):
@@ -171,6 +173,7 @@ class PromotionResponse(BaseModel):
     estado: str = "activa"
     aprobado_por: Optional[str] = None
     fecha_aprobacion: Optional[datetime] = None
+    usuario_registro: Optional[str] = None
 
     limite_por_compra: Optional[int] = None
     limitar_unidades: bool = False

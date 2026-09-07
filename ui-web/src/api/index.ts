@@ -472,6 +472,8 @@ export interface Product360Response {
     limite_por_compra?: number
     stock_limite_unidades?: number
     unidades_vendidas_promo?: number
+    usuario_registro?: string
+    created_at?: string
   }>
   codigos_alternativos?: Array<{
     id: string
