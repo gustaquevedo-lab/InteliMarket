@@ -327,20 +327,28 @@ export interface Product360Response {
     id: string
     sku: string
     nombre: string
+    descripcion?: string | null
     codigo_barra?: string | null
-    plu_codigo?: string | null
+    plu_balanza?: number | null
     unidad_medida: string
     tipo: string
+    tipo_venta?: string
     categoria_id?: string | null
     categoria_nombre?: string | null
     precio_venta: number
+    precio_regular?: number
     costo_promedio: number
     ultimo_costo: number
+    costo_landed?: number
     stock_minimo: number
+    stock_maximo?: number
     iva_tasa: number
-    es_perecedero: boolean
-    vida_util_dias?: number
+    tiene_lotes?: boolean
+    tiene_vencimiento?: boolean
+    peso_kg?: number
+    imagen_url?: string | null
     activo: boolean
+    created_at?: string | null
   }
   stock: {
     total_fisico: number
@@ -366,11 +374,72 @@ export interface Product360Response {
   }
   metricas_financieras: {
     precio_venta: number
+    precio_regular?: number
     costo_unitario: number
+    costo_landed?: number
     margen_bruto_monto: number
     margen_bruto_pct: number
     markup_pct: number
+    valor_inventario?: number
   }
+  historial_ventas_mensual?: Array<{
+    mes: string
+    mes_label: string
+    unidades: number
+    monto: number
+    num_ventas: number
+  }>
+  historial_costos_mensual?: Array<{
+    mes: string
+    mes_label: string
+    costo_promedio_mes: number
+    unidades_compradas: number
+  }>
+  promociones?: Array<{
+    id: string
+    nombre: string
+    descripcion?: string
+    tipo: string
+    valor?: number
+    precio_fijo_promocional?: number
+    estado: string
+    valido_desde: string
+    valido_hasta: string
+    dias_semana?: number[]
+    origen?: string
+    financiamiento?: string
+    activo: boolean
+    es_vigente_hoy: boolean
+    ahorro_por_unidad: number
+    ahorro_pct: number
+    limite_por_compra?: number
+    stock_limite_unidades?: number
+    unidades_vendidas_promo?: number
+  }>
+  codigos_alternativos?: Array<{
+    id: string
+    codigo_barra: string
+    etiqueta: string
+    unidades_por_paquete: number
+    activo: boolean
+    created_at: string
+  }>
+  supplier_info?: {
+    id: string
+    razon_social: string
+    ruc?: string
+    telefono?: string
+    email?: string
+    contacto_nombre?: string
+    contacto_telefono?: string
+    plazo_pago_dias?: number
+    tipo_proveedor?: string
+    rating?: number
+    moneda_default?: string
+    ciudad?: string
+    plazo_entrega_promedio?: number
+    grupo?: string
+  } | null
   ultimas_compras: Array<{
     id: string
     numero: string
@@ -393,6 +462,16 @@ export interface Product360Response {
     customer_nombre?: string
   }>
   kardex_reciente: Array<{
+    id: string
+    tipo: string
+    cantidad: number
+    costo_unitario: number
+    motivo?: string
+    referencia_type?: string
+    created_at: string
+    warehouse_nombre?: string
+  }>
+  kardex?: Array<{
     id: string
     tipo: string
     cantidad: number

@@ -468,32 +468,12 @@ async def get_products_stats(db: AsyncSession, company_id: str) -> dict:
     }
 
 
-async def update_product(db: AsyncSession, product_id: str, data: ProductUpdate) -> Product | None:
-    product = await get_product(db, product_id)
-    if not product:
-        return None
-    update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(product, key, value)
-    await db.flush()
-    await db.refresh(product)
-    return product
-
-
-async def delete_product(db: AsyncSession, product_id: str) -> bool:
-    product = await get_product(db, product_id)
-    if not product:
-        return False
-    await db.delete(product)
-    await db.flush()
-    return True
-
-
 # ═══════════════════════════════════════════════════════════════
 #  FICHA 360° COMPLETA Y CONECTADA
 # ═══════════════════════════════════════════════════════════════
 
 async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
+
     product = await get_product(db, product_id)
     if not product:
         return None
@@ -516,7 +496,6 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
     )
     stocks = [dict(r._mapping) for r in stock_rows]
 
-    # Si no tiene filas en stock, traer depósitos activos
     if not stocks:
         w_rows = await db.execute(text("SELECT id as warehouse_id, nombre as warehouse_nombre, codigo as warehouse_codigo FROM warehouses WHERE activo = true LIMIT 5"))
         costo_u = float(product.costo_promedio or product.ultimo_costo or 0)
@@ -546,7 +525,7 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
             LEFT JOIN suppliers s ON s.id = po.supplier_id
             WHERE poi.product_id = :p_id
             ORDER BY po.fecha DESC
-            LIMIT 10
+            LIMIT 15
         """),
         {"p_id": p_uuid}
     )
@@ -563,13 +542,53 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
             LEFT JOIN customers c ON c.id = sa.customer_id
             WHERE si.product_id = :p_id
             ORDER BY sa.fecha DESC
-            LIMIT 10
+            LIMIT 15
         """),
         {"p_id": p_uuid}
     )
     sales = [dict(r._mapping) for r in sale_rows]
 
-    # 4. Rotación (30 días)
+    # 4. Historial mensual de ventas para gráfico (6 meses)
+    hist_v_rows = await db.execute(
+        text("""
+            SELECT
+                TO_CHAR(sa.fecha AT TIME ZONE 'America/Asuncion', 'YYYY-MM') as mes,
+                TO_CHAR(sa.fecha AT TIME ZONE 'America/Asuncion', 'Mon YY') as mes_label,
+                COALESCE(SUM(si.cantidad), 0) as unidades,
+                COALESCE(SUM(si.total), 0) as monto,
+                COUNT(DISTINCT sa.id) as num_ventas
+            FROM sale_items si
+            JOIN sales sa ON sa.id = si.sale_id
+            WHERE si.product_id = :p_id
+              AND sa.fecha >= NOW() - INTERVAL '6 months'
+            GROUP BY 1, 2
+            ORDER BY 1 ASC
+        """),
+        {"p_id": p_uuid}
+    )
+    historial_ventas = [dict(r._mapping) for r in hist_v_rows]
+
+    # 5. Historial mensual de costos para gráfico (6 meses)
+    hist_c_rows = await db.execute(
+        text("""
+            SELECT
+                TO_CHAR(po.fecha AT TIME ZONE 'America/Asuncion', 'YYYY-MM') as mes,
+                TO_CHAR(po.fecha AT TIME ZONE 'America/Asuncion', 'Mon YY') as mes_label,
+                ROUND(AVG(poi.precio_unitario), 0) as costo_promedio_mes,
+                SUM(poi.cantidad) as unidades_compradas
+            FROM purchase_order_items poi
+            JOIN purchase_orders po ON po.id = poi.purchase_order_id
+            WHERE poi.product_id = :p_id
+              AND po.fecha >= NOW() - INTERVAL '6 months'
+              AND po.estado != 'cancelada'
+            GROUP BY 1, 2
+            ORDER BY 1 ASC
+        """),
+        {"p_id": p_uuid}
+    )
+    historial_costos = [dict(r._mapping) for r in hist_c_rows]
+
+    # 6. Rotación (30 días)
     v30_res = await db.execute(
         text("""
             SELECT COALESCE(SUM(si.cantidad), 0) as total_qty,
@@ -586,7 +605,7 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
     demanda_diaria = round(ventas_30d_qty / 30.0, 2)
     autonomia_dias = round(total_stock / demanda_diaria, 1) if demanda_diaria > 0 else (999 if total_stock > 0 else 0)
 
-    # 5. Kardex / Movimientos
+    # 7. Kardex / Movimientos (50 últimos)
     mov_rows = await db.execute(
         text("""
             SELECT im.id, im.tipo, im.cantidad, im.costo_unitario, im.motivo, im.referencia_type,
@@ -595,15 +614,86 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
             LEFT JOIN warehouses w ON w.id = im.warehouse_id
             WHERE im.product_id = :p_id
             ORDER BY im.created_at DESC
-            LIMIT 15
+            LIMIT 50
         """),
         {"p_id": p_uuid}
     )
     movements = [dict(r._mapping) for r in mov_rows]
 
-    # 6. Métricas Financieras
+    # 8. Promociones aplicadas (vigentes e históricas)
+    try:
+        from zoneinfo import ZoneInfo
+        hoy = datetime.now(ZoneInfo("America/Asuncion")).date()
+    except Exception:
+        hoy = date.today()
+
+    promo_rows = await db.execute(
+        text("""
+            SELECT
+                p.id, p.nombre, p.descripcion, p.tipo, p.valor,
+                p.precio_fijo_promocional, p.aplica_a, p.estado,
+                p.valido_desde, p.valido_hasta, p.dias_semana,
+                p.origen, p.financiamiento, p.activo,
+                p.costo_unitario_referencia,
+                p.limite_por_compra, p.stock_limite_unidades, p.unidades_vendidas_promo
+            FROM promotions p
+            WHERE p.company_id = :company_id
+              AND :p_id = ANY(p.producto_ids)
+            ORDER BY p.valido_hasta DESC
+            LIMIT 20
+        """),
+        {"company_id": product.company_id, "p_id": p_uuid}
+    )
+    promociones = []
+    for pr in promo_rows.all():
+        row = dict(pr._mapping)
+        desde = row.get("valido_desde")
+        hasta = row.get("valido_hasta")
+        es_vigente = bool(row.get("activo") and row.get("estado") == "activa" and desde and hasta and desde <= hoy <= hasta)
+        row["es_vigente_hoy"] = es_vigente
+        precio_base = float(product.precio_venta or 0)
+        precio_promo = float(row.get("precio_fijo_promocional") or 0)
+        if precio_promo > 0 and precio_base > 0:
+            row["ahorro_por_unidad"] = round(precio_base - precio_promo, 0)
+            row["ahorro_pct"] = round((precio_base - precio_promo) / precio_base * 100, 1)
+        else:
+            row["ahorro_por_unidad"] = 0
+            row["ahorro_pct"] = 0
+        promociones.append(row)
+
+    # 9. Códigos Alternativos (product_pack_barcodes)
+    pack_rows = await db.execute(
+        text("""
+            SELECT id, codigo_barra, etiqueta, unidades_por_paquete, activo, created_at
+            FROM product_pack_barcodes
+            WHERE product_id = :p_id
+            ORDER BY unidades_por_paquete ASC
+        """),
+        {"p_id": p_uuid}
+    )
+    codigos_alternativos = [dict(r._mapping) for r in pack_rows]
+
+    # 10. Info del Proveedor vinculado al producto
+    supplier_info = None
+    if product.supplier_id:
+        sup_row = await db.execute(
+            text("""
+                SELECT id, razon_social, ruc, telefono, email, contacto_nombre,
+                       contacto_telefono, plazo_pago_dias, tipo_proveedor, rating,
+                       moneda_default, ciudad, plazo_entrega_promedio, grupo
+                FROM suppliers WHERE id = :sid
+            """),
+            {"sid": product.supplier_id}
+        )
+        sup = sup_row.first()
+        if sup:
+            supplier_info = dict(sup._mapping)
+
+    # 11. Métricas Financieras
     costo = float(product.costo_promedio or product.ultimo_costo or 0)
+    costo_landed = float(getattr(product, "costo_landed", None) or 0)
     precio = float(product.precio_venta or 0)
+    precio_regular = float(getattr(product, "precio_regular", None) or precio)
     margen_monto = precio - costo
     margen_pct = round((margen_monto / precio * 100), 1) if precio > 0 else 0.0
     markup_pct = round((margen_monto / costo * 100), 1) if costo > 0 else 0.0
@@ -614,20 +704,28 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
             "id": str(product.id),
             "sku": product.sku,
             "nombre": product.nombre,
+            "descripcion": getattr(product, "descripcion", None),
             "codigo_barra": product.codigo_barra,
-            "plu_codigo": getattr(product, "plu_codigo", None),
+            "plu_balanza": getattr(product, "plu_balanza", None),
             "unidad_medida": product.unidad_medida or "UN",
             "tipo": product.tipo or "producto",
+            "tipo_venta": getattr(product, "tipo_venta", "unidad"),
             "categoria_id": str(product.categoria_id) if product.categoria_id else None,
             "categoria_nombre": cat_nombre,
             "precio_venta": precio,
+            "precio_regular": precio_regular,
             "costo_promedio": costo,
             "ultimo_costo": float(product.ultimo_costo or 0),
+            "costo_landed": costo_landed,
             "stock_minimo": float(product.stock_minimo or 0),
+            "stock_maximo": float(getattr(product, "stock_maximo", 0) or 0),
             "iva_tasa": float(product.iva_tasa or 10),
-            "es_perecedero": bool(getattr(product, "es_perecedero", False)),
-            "vida_util_dias": getattr(product, "vida_util_dias", 0),
+            "tiene_lotes": bool(getattr(product, "tiene_lotes", False)),
+            "tiene_vencimiento": bool(getattr(product, "tiene_vencimiento", False)),
+            "peso_kg": float(getattr(product, "peso_kg", None) or 0),
+            "imagen_url": getattr(product, "imagen_url", None),
             "activo": bool(product.activo),
+            "created_at": product.created_at.isoformat() if product.created_at else None,
         },
         "stock": {
             "total_fisico": total_stock,
@@ -645,12 +743,19 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         },
         "metricas_financieras": {
             "precio_venta": precio,
+            "precio_regular": precio_regular,
             "costo_unitario": costo,
+            "costo_landed": costo_landed,
             "margen_bruto_monto": margen_monto,
             "margen_bruto_pct": margen_pct,
             "markup_pct": markup_pct,
             "valor_inventario": valor_inventario,
         },
+        "historial_ventas_mensual": historial_ventas,
+        "historial_costos_mensual": historial_costos,
+        "promociones": promociones,
+        "codigos_alternativos": codigos_alternativos,
+        "supplier_info": supplier_info,
         "ultimas_compras": purchases,
         "ultimas_ventas": sales,
         "kardex": movements,
