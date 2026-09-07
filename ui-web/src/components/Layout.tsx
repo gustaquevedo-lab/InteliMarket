@@ -14,6 +14,7 @@ import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { useFeatures } from "../context/FeatureContext"
 import { api } from "../api"
+import { applyPwaUpdateIfPending } from "../utils/pwaUpdate"
 import Logo from "./Logo"
 import NotificationBell from "./NotificationBell"
 
@@ -356,7 +357,7 @@ export default function Layout() {
             )}
           </div>
           <button
-            onClick={() => { logout(); navigate("/login") }}
+            onClick={() => { logout(); if (!applyPwaUpdateIfPending()) navigate("/login") }}
             className="w-full flex items-center justify-start gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-red-300 hover:text-red-200 hover:bg-red-500/20 transition-all text-left"
           >
             <LogOut className="w-4 h-4 flex-shrink-0" /> <span className="text-left">Cerrar sesión</span>

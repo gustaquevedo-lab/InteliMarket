@@ -2,6 +2,7 @@
 import { useEffect, useRef } from "react"
 import { useRegisterSW } from "virtual:pwa-register/react"
 import { useToast } from "../context/ToastContext"
+import { setPwaUpdateState } from "../utils/pwaUpdate"
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
 
@@ -9,7 +10,7 @@ export function PWAUpdatePrompt() {
   const toast = useToast()
   const notified = useRef(false)
 
-  const { needRefresh } = useRegisterSW({
+  const { needRefresh, updateServiceWorker } = useRegisterSW({
     immediate: true,
     onRegisteredSW(_swUrl, registration) {
       if (!registration) return
@@ -20,6 +21,7 @@ export function PWAUpdatePrompt() {
   })
 
   useEffect(() => {
+    setPwaUpdateState(needRefresh[0], () => updateServiceWorker(true))
     if (needRefresh[0] && !notified.current) {
       notified.current = true
       toast.info(
@@ -27,7 +29,7 @@ export function PWAUpdatePrompt() {
         "Se aplicará sola la próxima vez que se cierre sesión o se reinicie la aplicación, sin interrumpir la venta actual."
       )
     }
-  }, [needRefresh, toast])
+  }, [needRefresh, toast, updateServiceWorker])
 
   return null
 }
