@@ -156,21 +156,30 @@ async def handle_callback(db: AsyncSession, payload: dict) -> dict:
         return {"status": "error", "messages": [{"level": "error", "key": "ConfirmedError", "description": "El comercio ya habia solicitado la reversa de este QR"}]}
 
     status = payment.get("status")
-    txn.status = "confirmed" if status == "confirmed" else "failed"
-    txn.response_code = payment.get("response_code")
-    txn.response_description = payment.get("response_description")
-    txn.ticket_number = str(payment.get("ticket_number") or "") or None
-    txn.authorization_code = payment.get("authorization_code")
-    txn.account_type = payment.get("account_type")
-    txn.card_last_numbers = str(payment.get("card_last_numbers") or "") or None
-    txn.bin = payment.get("bin")
-    payer = payment.get("payer") or {}
-    txn.payer_name = payer.get("name")
-    txn.payer_lastname = payer.get("lastname")
-    txn.raw_callback = str(payload)
-    if txn.status == "confirmed":
-        txn.confirmed_at = datetime.now(timezone.utc)
-    await db.commit()
+    try:
+        txn.status = "confirmed" if status == "confirmed" else "failed"
+        txn.response_code = payment.get("response_code")
+        txn.response_description = payment.get("response_description")
+        txn.ticket_number = str(payment.get("ticket_number") or "") or None
+        txn.authorization_code = payment.get("authorization_code")
+        txn.account_type = payment.get("account_type")
+        txn.card_last_numbers = str(payment.get("card_last_numbers") or "") or None
+        txn.bin = payment.get("bin")
+        payer = payment.get("payer") or {}
+        txn.payer_name = payer.get("name")
+        txn.payer_lastname = payer.get("lastname")
+        txn.raw_callback = str(payload)
+        if txn.status == "confirmed":
+            txn.confirmed_at = datetime.now(timezone.utc)
+        await db.commit()
+    except Exception:
+        # Si Bancard notifico un pago EXITOSO pero no pudimos persistirlo de
+        # nuestro lado (caida de DB, etc.), hay que responder error explicito
+        # -- con eso Bancard revierte el pago automaticamente (escenario 2 de
+        # su spec de "recepcion fallida"). Un 500 generico de FastAPI no
+        # cumple el contrato esperado (status/messages).
+        await db.rollback()
+        return {"status": "error", "messages": [{"level": "error", "key": "ConfirmedError", "description": "No se pudo procesar la notificacion del lado del comercio"}]}
 
     return {"status": "success", "messages": [{"level": "success", "key": "Confirmed", "description": "Pago recibido con exito"}]}
 

@@ -1291,6 +1291,13 @@ export default function POSPage() {
     setDinelcoTxnState("idle"); setDinelcoTxnResult(null); setDinelcoTxnError(""); setDinelcoTxnLogId(null); setDinelcoSessionId(null); setDinelcoCuotas(1); setShowDinelcoManualFallback(false)
     setDinelcoQrState("idle"); setDinelcoQrError(""); setDinelcoQrMode("qr"); setDinelcoPixCpf("")
     if (bancardCloudPollRef.current) { clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null }
+    // Mismo caso que Dinelco: si se abandona el flujo con un QR de Bancard
+    // todavia sin confirmar (por el cierre generico del panel, no el boton
+    // "Cancelar QR" dedicado que ya llama a revert), hay que revertirlo
+    // igual -- si no, el QR queda activo indefinidamente del lado de Bancard.
+    if (bancardCloudQrData?.hookAlias && bancardCloudQrState === "esperando") {
+      api.bancardQr.revert(bancardCloudQrData.hookAlias).catch(() => {})
+    }
     setBancardCloudQrState("idle"); setBancardCloudQrError(""); setBancardCloudQrData(null)
   }
 
@@ -1308,7 +1315,19 @@ export default function POSPage() {
       setBancardCloudQrData({ hookAlias: res.hook_alias, qrUrl: res.qr_url || "", qrData: res.qr_data || "", amount: res.amount })
       setBancardCloudQrState("esperando")
       if (bancardCloudPollRef.current) clearInterval(bancardCloudPollRef.current)
+      // Bancard recomienda mostrar el QR un maximo de 5 min y llamar a
+      // revert si el cliente nunca llega a pagar -- sin esto el QR queda
+      // activo indefinidamente del lado de ellos.
+      const generatedAt = Date.now()
+      const QR_TIMEOUT_MS = 5 * 60 * 1000
       bancardCloudPollRef.current = setInterval(async () => {
+        if (Date.now() - generatedAt >= QR_TIMEOUT_MS) {
+          clearInterval(bancardCloudPollRef.current); bancardCloudPollRef.current = null
+          api.bancardQr.revert(res.hook_alias).catch(() => {})
+          setBancardCloudQrState("error")
+          setBancardCloudQrError("El QR expiró sin pago (5 minutos) y fue cancelado automáticamente.")
+          return
+        }
         try {
           const st = await api.bancardQr.status(res.hook_alias)
           if (st.status === "confirmed") {
@@ -10573,9 +10592,10 @@ export default function POSPage() {
                       </div>
                     )}
 
-                    {/* Una sola card extra al lado del precio unitario: pack/caja si
-                        tiene, si no, la primera escala mayorista */}
-                    {priceCheckPacks.length > 0 ? (
+                    {/* Card extra al lado del precio unitario: solo si tiene pack/caja.
+                        El total de la escala mayorista se muestra mas abajo, pegado a
+                        su propio precio unitario en "Escala de Precios por Cantidad". */}
+                    {priceCheckPacks.length > 0 && (
                       <div className="inline-flex items-center gap-2 mt-2 bg-sky-50 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/40 rounded-lg px-2.5 py-1.5">
                         <Package className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
                         <div>
@@ -10585,17 +10605,7 @@ export default function POSPage() {
                           </div>
                         </div>
                       </div>
-                    ) : priceCheckTiers.length > 0 ? (
-                      <div className="inline-flex items-center gap-2 mt-2 bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 rounded-lg px-2.5 py-1.5">
-                        <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                        <div>
-                          <div className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">Mayorista: {priceCheckTiers[0].min_qty} un.</div>
-                          <div className="font-black text-sm text-amber-700 dark:text-amber-300 font-posMono tabular-nums">
-                            {formatPYG((Number(priceCheckTiers[0].precio_unitario) || 0) * priceCheckTiers[0].min_qty)}
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
+                    )}
                   </div>
                 </div>
 
@@ -10634,7 +10644,7 @@ export default function POSPage() {
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    {priceCheckTiers.map((t) => (
+                    {priceCheckTiers.map((t, i) => (
                       <div
                         key={t.id}
                         className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2"
@@ -10644,6 +10654,11 @@ export default function POSPage() {
                         </div>
                         <div className="text-right">
                           <div className="font-black text-emerald-600 dark:text-emerald-400 font-posMono tabular-nums">{formatPYG(Number(t.precio_unitario) || 0)}</div>
+                          {i === 0 && (
+                            <div className="text-[10px] font-black text-amber-600 dark:text-amber-400 mt-0.5">
+                              Total por {t.min_qty} un.: {formatPYG((Number(t.precio_unitario) || 0) * t.min_qty)}
+                            </div>
+                          )}
                           {(rates.BRL > 0 || rates.USD > 0) && (
                             <div className="flex items-center gap-2 justify-end mt-1">
                               {rates.BRL > 0 && <span className="text-sm font-black text-amber-600 dark:text-amber-400 font-posMono tabular-nums">R$ {(Number(t.precio_unitario) / rates.BRL).toFixed(2)}</span>}
