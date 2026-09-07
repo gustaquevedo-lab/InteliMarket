@@ -17,8 +17,17 @@ export const ventasCategory: ManualCategory = {
       tagline: "Factorar ventas rápido, sin perder un cliente",
       category: "Ventas",
       color: "emerald",
+      role: "Cajeras/os de línea de cajas, Encargados de Salón y Supervisores de Caja",
+      prerequisites: [
+        "Sesión de caja abierta con fondo inicial registrado en Bóveda.",
+        "Punto de emisión fiscal activo con timbrado legal vigente (Timbrado 18545636).",
+        "Impresora térmica de tickets conectada y con papel continuo de 80mm.",
+        "Lector de código de barras USB/inalámbrico calibrado y operativo.",
+      ],
+      workflowOverview:
+        "El cajero escanea los artículos del cliente. El sistema calcula descuentos automáticos de promociones activas o precios escalonados mayoristas. Se identifica al cliente (Consumidor Final o con RUC para factura crédito/ExtraClub), se cobra con uno o varios medios de pago (₲, R$, Tarjeta, QR, Crédito) y se imprime el comprobante fiscal timbrado.",
       description:
-        "El Punto de Venta es el corazón operativo: factura en segundos, con catálogo virtual, teclado o lector de código de barras. Soporta efectivo, tarjeta/QR, transferencia, cuenta a crédito y cupón de descuento. Es la pantalla que usan las cajeras en cada caja.",
+        "El Punto de Venta es el corazón operativo: factura en segundos, con catálogo virtual, teclado o lector de código de barras. Soporta efectivo multimoneda (₲ y R$), tarjeta/QR, transferencia, cuenta a crédito y cupones de descuento. Es la pantalla que usan las cajeras en cada caja.",
       tabs: [
         { id: "carrito", label: "Carrito" },
         { id: "pago", label: "Formas de pago" },
@@ -26,31 +35,36 @@ export const ventasCategory: ManualCategory = {
       ],
       steps: [
         {
-          title: "Arranque una venta",
+          title: "1. Escaneo y Carga de Artículos",
           detail:
-            "Al abrir el POS, busque el producto por nombre, código o escánelo con el lector. El producto se agrega al carrito con su precio. Puede modificar cantidades con los botones + / − o directamente.",
+            "Escanee el código de barras con la lectora o presione F1 para buscar por nombre o SKU. El producto entra al carrito con su precio unitario. Para productos pesables (carnicería, panadería, fiambrería), escanee el código de barras emitido por la balanza: el sistema decodifica automáticamente el peso y precio exacto.",
           mockKey: "carrito",
         },
         {
-          title: "Identifique al cliente (opcional)",
+          title: "2. Modificación de Cantidad y Escalas Mayoristas",
           detail:
-            "Si el cliente pertenece a ExtraClub o compra a crédito, selecciónelo para acumular puntos y registrar la cuenta. Si no, la venta es «mostrador» (consumidor final).",
+            "Para cambiar la cantidad, presione '*' y digite el número de unidades (ej: '12 * [Enter]'). Si el artículo posee precios escalonados mayoristas (ej. a partir de 6 o 12 unidades), el sistema aplica el descuento mayorista automáticamente en tiempo real.",
         },
         {
-          title: "Seleccione la forma de pago",
+          title: "3. Identificación del Cliente (RUC / ExtraClub)",
           detail:
-            "Efectivo, Tarjeta o QR, Transferencia, Cuenta a Crédito, o Cupón. En efectivo el sistema calcula el vuelto automáticamente. Puede dividirse en varias formas de pago (ej: mitad efectivo, mitad tarjeta).",
+            "Presione F2 para buscar al cliente por RUC, Cédula de Identidad o Nombre. Si el cliente está adherido a ExtraClub, acumulará puntos de fidelidad y accederá a precios promocionales exclusivos del club.",
+        },
+        {
+          title: "4. Cobro Multimoneda y Medios de Pago Mixtos",
+          detail:
+            "Presione F10 o pulse 'Cobrar'. Seleccione el medio: Efectivo ₲, Efectivo R$ (con tipo de cambio fijado del día), Tarjeta Dinelco/Bancard, QR o Crédito de Cliente. Es posible cobrar en múltiples medios: ej. cobrar ₲ 100.000 en efectivo y el saldo restante con tarjeta o transferencia.",
           mockKey: "pago",
         },
         {
-          title: "Cierre la venta",
+          title: "5. Emisión del Comprobante Fiscal y Vuelto",
           detail:
-            "Confirme y el comprobante se factura. Según la configuración, se imprime el ticket (impresora térmica), se muestra en pantalla o se reenvía por WhatsApp. La venta aparece al instante en el Dashboard y en Facturación.",
+            "Al completar el pago, la gaveta de dinero se abre automáticamente, la impresora térmica emite el ticket timbrado y la pantalla muestra el importe del vuelto en guaraníes para entregarlo al cliente con rapidez.",
         },
         {
-          title: "Operaciones de cajero",
+          title: "6. Operaciones Auxiliares del Cajero",
           detail:
-            "Desde el POS también se puede: ver vuelto pendiente, abrir la gaveta, cierre parcial de caja, y consultar el último comprobante si el cliente lo pide de nuevo.",
+            "Desde el menú de operaciones puede: reimprimir el último ticket emitido (si se trabó el papel), verificar precios en pantalla sin agregarlo al carrito, o solicitar autorización remota del supervisor para anulación de un ítem.",
           mockKey: "extra",
         },
       ],
@@ -64,11 +78,11 @@ export const ventasCategory: ManualCategory = {
           type: "list",
           title: "Formas de pago disponibles",
           items: [
-            { title: "Efectivo", sub: "Calcula el vuelto automáticamente. Suma Gs 10.000 / 20.000 / 50.000…", badge: "Rápido", badgeColor: "green" },
+            { title: "Efectivo Guaraníes (₲)", sub: "Calcula el vuelto automáticamente. Denominaciones rápidas 10k, 20k, 50k, 100k.", badge: "Rápido", badgeColor: "green" },
+            { title: "Efectivo Reales (R$)", sub: "Conversión automática a tasa oficial del día. El vuelto se entrega en Guaraníes.", badge: "Multimoneda", badgeColor: "purple" },
             { title: "Tarjeta o QR", sub: "POS Dinelco / Bancard / QR. Muestra el voucher al cliente.", badge: "Integrado", badgeColor: "blue" },
-            { title: "Transferencia", sub: "Registra el comprobante de la transferencia bancaria.", badge: "Web", badgeColor: "purple" },
-            { title: "Cuenta a Crédito", sub: "Carga a la cuenta del cliente. Solo si tiene habilitado el crédito.", badge: "Crédito", badgeColor: "amber" },
-            { title: "Cupón de descuento", sub: "Aplica cupones del módulo de sorteos y promociones.", badge: "Promo", badgeColor: "red" },
+            { title: "Cuenta a Crédito", sub: "Carga a la cuenta corriente del cliente mayorista con scoring aprobado.", badge: "Crédito", badgeColor: "amber" },
+            { title: "Cupón de Descuento", sub: "Aplica cupones del módulo de sorteos y promociones.", badge: "Promo", badgeColor: "red" },
           ],
         },
         extra: {
@@ -82,6 +96,56 @@ export const ventasCategory: ManualCategory = {
           ],
         },
       },
+      useCases: [
+        {
+          title: "Caso 1: Cobro mixto (Cliente abona parte en Reales y saldo con Tarjeta de Débito)",
+          scenario:
+            "Un cliente realiza una compra por un total de ₲ 290.000. Desea pagar R$ 100 en billetes de reales y el saldo restante con su tarjeta de débito.",
+          stepByStep: [
+            "1. En la pantalla de cobro del POS, seleccione 'Efectivo Reales (R$)'.",
+            "2. Ingrese '100'. El sistema multiplica 100 * 1.450 (tasa del día) = ₲ 145.000 y lo imputa como pagado.",
+            "3. El saldo pendiente en pantalla se actualiza inmediatamente a ₲ 145.000.",
+            "4. Seleccione ahora 'Tarjeta Débito' y procese los ₲ 145.000 en el terminal Dinelco/Bancard.",
+            "5. Confirme la operación: el POS emite el ticket con el desglose exacto de ambos medios y guarda los R$ 100 en la sesión de caja.",
+          ],
+          keyLesson:
+            "El sistema de Extra Supermercado maneja la contabilidad bimoneda de forma transparente: las ventas quedan asentadas en guaraníes fiscales y los billetes extranjeros quedan registrados para el arqueo de cierre.",
+        },
+        {
+          title: "Caso 2: Venta de productos pesables fraccionados (Carnicería / Quesos)",
+          scenario:
+            "El cliente llega a caja con un paquete de Costilla de Primera con etiqueta pesada en la carnicería por valor de ₲ 68.450.",
+          stepByStep: [
+            "1. Pase el código de barras impreso en la bandeja bajo el lector láser.",
+            "2. El lector lee el código de barras que inicia con prefijo '20' (código estándar de balanza pesable).",
+            "3. El POS decodifica instantáneamente los primeros dígitos como el código del producto (Costilla) y los últimos dígitos como el peso o importe exacto.",
+            "4. El ítem se agrega al carrito sin necesidad de digitar el peso manualmente.",
+          ],
+          keyLesson:
+            "Si la etiqueta de balanza está arrugada o manchada, el cajero puede buscar el producto por F1 y digitar manualmente los kilos que indica la etiqueta física.",
+        },
+      ],
+      commonErrors: [
+        {
+          error: "Mensaje: 'Código de barras no encontrado en catálogo'",
+          cause: "El producto ingresó recientemente al salón sin haber sido dado de alta en el sistema o el código fue leído incorrectamente.",
+          solution:
+            "Presione F1 para buscar el artículo por descripción (ej: 'Arroz 1kg'). Si no existe, comuníquese con el encargado de compras para el alta inmediata con su código EAN.",
+        },
+        {
+          error: "La gaveta de dinero no se abre al finalizar el ticket",
+          cause: "El cable RJ11 que conecta la gaveta con la impresora térmica está desconectado o flojo.",
+          solution:
+            "Verifique la conexión del cable telefónico ubicado en la parte trasera de la impresora térmica EPSON/Bixolon. También puede usar la llave manual de seguridad de la gaveta.",
+        },
+      ],
+      shortcutsOrHotkeys: [
+        { key: "F1", action: "Búsqueda rápida de productos por nombre o código" },
+        { key: "F2", action: "Buscar / Asignar Cliente (RUC / ExtraClub)" },
+        { key: "F9", action: "Cobro rápido con Efectivo exacto" },
+        { key: "F10", action: "Abrir pantalla de formas de pago y cobro mixto" },
+        { key: "Esc", action: "Cancelar o volver al carrito" },
+      ],
       tips: [
         "Asigne teclas «rápidas» a los productos más vendidos para cobrar aún más rápido.",
         "El POS funciona también en tablets y el operador puede trabajar con botonera táctil.",
@@ -101,8 +165,15 @@ export const ventasCategory: ManualCategory = {
       tagline: "Comprobantes, cierres de caja y notas de crédito",
       category: "Ventas",
       color: "blue",
+      role: "Supervisores de Salón, Encargados de Facturación, Auditoría y Contabilidad",
+      prerequisites: [
+        "Permisos de supervisor o administrador para anulación de comprobantes o notas de crédito.",
+        "Timbrado tributario activo y con rango de numeración disponible (Timbrado 18545636).",
+      ],
+      workflowOverview:
+        "Centraliza todas las facturas y tickets emitidos en la empresa. Permite auditar ventas por fecha y cajero, reimprimir facturas perdidas por clientes, emitir Notas de Crédito fiscales para devoluciones y controlar las conciliaciones de cierres de caja.",
       description:
-        "Centraliza todos los comprobantes emitidos: facturas, boletas y notas de crédito. Permite buscar, reimprimir, anular, ver el detalle de formas de pago y conciliar los cierres de caja por punto de emisión.",
+        "Centraliza todos los comprobantes emitidos: facturas timbradas, tickets de caja y notas de crédito. Permite buscar, reimprimir, anular con trazabilidad de supervisor, ver el detalle de formas de pago y conciliar los cierres de caja por punto de emisión.",
       tabs: [
         { id: "comprobantes", label: "Comprobantes" },
         { id: "cierres", label: "Cierres de caja" },
@@ -110,26 +181,26 @@ export const ventasCategory: ManualCategory = {
       ],
       steps: [
         {
-          title: "Busque un comprobante",
+          title: "1. Búsqueda y Filtro de Comprobantes",
           detail:
-            "Filtre por fecha, punto de emisión, número de comprobante o nombre del cliente. El listado muestra el detalle: tipo (factura, boleta, NC), monto, forma de pago y estado (validado, pendiente, anulado).",
+            "Filtre por fecha, punto de emisión, número de comprobante o nombre/RUC del cliente. El listado muestra el detalle: tipo (Factura Crédito, Factura Contado, Nota de Crédito), monto total, desglose de IVA (10%, 5%, Exentas), medio de pago y estado fiscal.",
           mockKey: "comprobantes",
         },
         {
-          title: "Vea el detalle y reimprima",
+          title: "2. Detalle, Auditoría y Reimpresión",
           detail:
-            "Abra el comprobante para ver todos sus ítems, descuentos y la forma de pago. Desde aquí puede reimprimir el ticket o descargarlo en PDF.",
+            "Haga clic en cualquier fila para inspeccionar los ítems vendidos, precios unitarios, cajero que emitió la venta y hora exacta. Puede reimprimir el ticket en la impresora térmica o generar un PDF legal para remitir por correo al cliente.",
         },
         {
-          title: "Gestione los cierres de caja",
+          title: "3. Conciliación y Auditoría de Cierres de Caja",
           detail:
-            "Cada caja cierra con su arqueo: se comparan los comprobantes emitidos y las formas de pago contra el efectivo declarado. Aquí se concilian los cortes de las cajeras.",
+            "En la pestaña 'Cierres de caja', compare los totales facturados en el sistema contra las declaraciones físicas de cada cajero. Permite detectar desvíos y autorizar cierres observados.",
           mockKey: "cierres",
         },
         {
-          title: "Emita notas de crédito",
+          title: "4. Emisión de Notas de Crédito y Devoluciones",
           detail:
-            "Ante devoluciones o errores de facturación, genere una nota de crédito que anula total o parcialmente un comprobante. Esto también se refleja en las cuentas del cliente.",
+            "Para devoluciones de productos por parte de clientes o errores en facturación, genere una Nota de Crédito vinculada a la factura original. El sistema reingresa la mercadería al stock disponible y acredita el saldo a la cuenta del cliente o autoriza la devolución en caja.",
         },
       ],
       mocks: {

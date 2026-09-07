@@ -3,495 +3,301 @@ import type { ManualCategory } from "../types"
 
 export const abastecimientoCategory: ManualCategory = {
   id: "abastecimiento",
-  label: "Abastecimiento",
+  label: "Abastecimiento & Compras",
   icon: ShoppingBag,
   gradient: "from-sky-600 to-blue-700",
-  description: "Del pedido de compra a la góndola: gestión de compras multicanal, etiquetas, forecast de reposición, recepción DSD y la relación con proveedores.",
-  subtitle: "La mercadería correcta, en el momento correcto",
+  description:
+    "El ciclo integral de compras y abastecimiento de Extra Supermercado: Asistente IA con reposición predictiva, demandas de clientes capturadas en caja, órdenes de compra (PO), recepción física con control de gancho y mermas, buzón de facturas electrónicas SIFEN/IMAP, matching a 3 vías y evaluación de proveedores OTIF.",
+  subtitle: "Cadena de suministro, compras inteligentes y control Procure-to-Pay (P2P)",
   modules: [
     {
       id: "purchases",
-      label: "Gestión de Compras",
+      label: "Gestión Integral de Compras (P2P)",
       path: "/purchases",
       icon: ShoppingBag,
-      tagline: "El ciclo completo de compra a proveedores",
-      category: "Abastecimiento",
+      tagline: "El circuito completo de compras: desde la sugerencia IA hasta el pago conciliado",
+      category: "Abastecimiento & Compras",
       color: "sky",
+      role: "Jefes de Compras, Compradores por Categoría, Recepcionistas de Depósito, Auditoría y Gerencia Comercial",
+      prerequisites: [
+        "Proveedores registrados con RUC, Razón Social y condición comercial (contado o crédito a 15/30/60 días).",
+        "Artículos del catálogo con unidades de medida bien definidas (kilos, unidades, bultos/packs de 6, 12 o 24).",
+        "Balanza de recepción en plataforma y báscula aérea de riel (gancho de carnicería) calibradas.",
+        "Buzón de correo IMAP cPanel (facturaelectronica@superextra.com.py) configurado para recepción de XML/KUDE.",
+      ],
+      workflowOverview:
+        "Este módulo controla las 12 etapas del circuito de compras en Extra Supermercado:\n" +
+        "1. El Asistente IA analiza la velocidad de venta diaria y genera la propuesta de reposición según días de cobertura y clima.\n" +
+        "2. Se incorporan las Demandas de Clientes no encontradas en góndola registradas por las cajeras en el POS.\n" +
+        "3. Se emite la Orden de Compra (PO) y se remite por WhatsApp o correo al proveedor.\n" +
+        "4. Al arribar el camión, Depósito ejecuta la Recepción Física pesando la mercadería en gancho o plataforma y registrando mermas o roturas.\n" +
+        "5. La Factura del Proveedor ingresa automáticamente desde el buzón de correo o se carga manualmente con su Timbrado legal.\n" +
+        "6. El motor de Matching a 3 Vías compara PO vs Recepción vs Factura: si todo coincide 100%, habilita la factura para pago en Tesorería.",
       description:
-        "La central de abastecimiento: desde la demanda de clientes y el asistente IA hasta la orden de compra, la recepción (con mermas), la factura del proveedor, el matching a 3 vías y las devoluciones.",
+        "La central operativa de compras más robusta del sistema. Cuenta con 12 pestañas especializadas: Asistente IA, Demandas de Clientes, Órdenes de Compra (PO), Recepción de Mercadería, Facturas de Proveedores (P2P), Matching a 3 Vías, Devoluciones y Notas de Crédito, Maestro de Proveedores y Ficha 360° con Scorecard OTIF, Requisiciones Internas, Cotizaciones Comparativas (RFQ), Control Presupuestario y Reportes Ejecutivos de Compras.",
       tabs: [
-        { id: "ia", label: "Asistente IA" },
-        { id: "po", label: "Órdenes de compra" },
-        { id: "recepcion", label: "Recepción" },
-        { id: "facturas", label: "Facturas P2P" },
-        { id: "matching", label: "Matching 3 vías" },
+        { id: "asistente_ia", label: "1. Asistente IA" },
+        { id: "demandas_clientes", label: "2. Demandas Clientes" },
+        { id: "ordenes", label: "3. Órdenes (PO)" },
+        { id: "recepciones", label: "4. Recepción Muelle" },
+        { id: "facturas_p2p", label: "5. Facturas Proveedor" },
+        { id: "matching", label: "6. Matching 3 Vías" },
+        { id: "devoluciones", label: "7. Devoluciones & NC" },
+        { id: "proveedores", label: "8. Proveedores 360°" },
+        { id: "requisiciones", label: "9. Requisiciones" },
+        { id: "cotizaciones", label: "10. Cotizaciones (RFQ)" },
+        { id: "presupuestos", label: "11. Presupuestos" },
+        { id: "reportes", label: "12. Reportes & KPIs" },
       ],
       steps: [
         {
-          title: "Use el asistente IA de compras",
+          title: "Pestaña 1: Asistente IA de Reposición Predictiva",
           detail:
-            "El asistente propone qué comprar según forecast de demanda, stock actual y días de cobertura: por producto, por proveedor o por categoría. Revise las sugerencias y genere las órdenes con un clic.",
-          mockKey: "ia",
+            "El asistente analiza en tiempo real el stock actual (descontando ventas del POS), la velocidad de venta diaria (unidades/día), los días de cobertura deseados (ej. 5 días para carnes frescas, 20 días para secos) y variables climáticas (días calurosos elevan cerveza y bebidas; días fríos elevan panadería y chocolate). Muestra la lista de compras sugeridas agrupadas por proveedor y permite generar la Orden de Compra formal con un solo clic.",
+          mockKey: "asistente_ia",
         },
         {
-          title: "Cree la orden de compra",
+          title: "Pestaña 2: Demandas de Clientes (Productos no encontrados)",
           detail:
-            "La PO nace del asistente, de una demanda de cliente o manualmente. Incluye proveedor, precio acordado, condiciones y fecha de entrega. El estado recorre: borrador → enviada → recibida → facturada.",
-          mockKey: "po",
+            "Cuando un cliente pregunta por un producto que no está en góndola o no existe en el catálogo, la cajera lo registra en el POS con la tecla de atajo. Esta pestaña lista todas esas solicitudes con fecha, hora, caja y cantidad de veces pedido. El comprador evalúa cada artículo y lo clasifica como: 'PENDIENTE', 'EN EVALUACIÓN' (contactando distribuidores), 'COMPRADO' (incorporado al surtido) o 'DESCARTADO'.",
+          mockKey: "demandas",
         },
         {
-          title: "Reciba la mercadería",
+          title: "Pestaña 3: Gestión de Órdenes de Compra (PO)",
           detail:
-            "Al llegar la mercadería, la recepción verifica unidades y controla averías/mermas. Las diferencias se registran: el proveedor recibe nota de crédito o se ajusta la PO.",
-          mockKey: "recepcion",
+            "Permite crear, editar y hacer seguimiento a las POs. Al pulsar '+ Nueva Orden de Compra' seleccione el proveedor (ej. Casa Gonzalito S.R.L.), fecha de entrega prometida, condición comercial (ej. Crédito 30 Días) y agregue los artículos indicando bultos o unidades con el costo pactado. La PO pasa por los estados: Borrador -> Confirmada -> Enviada a Proveedor (exportable en PDF o Excel para remitir por WhatsApp) -> Entrega Parcial -> Completada.",
+          mockKey: "ordenes",
         },
         {
-          title: "Matchee la factura (3 vías)",
+          title: "Pestaña 4: Recepción Física de Mercadería en Muelle",
           detail:
-            "El matching compara la factura del proveedor contra la PO y la recepción: cantidades iguales, precios iguales. Las diferencias se resuelven antes de habilitar el pago, evitando pagar de más.",
+            "Cuando el camión del distribuidor estaciona en la playa de descarga, el recepcionista abre la PO correspondiente. Verifica producto por producto: cuenta bultos, verifica fecha de vencimiento de lotes, mide temperatura en lácteos/congelados y pesa en gancho las medias reses de carnicería. Si hay diferencias o cajas rotas, se asientan como 'Avería / Merma de Recepción' y se emite la constancia física firmada por el chofer.",
+          mockKey: "recepciones",
+        },
+        {
+          title: "Pestaña 5: Facturas de Proveedores (Procure-to-Pay) & Buzón IMAP",
+          detail:
+            "Centraliza todas las facturas de compra. Se sincroniza automáticamente con el buzón de correo cPanel de la empresa (facturaelectronica@superextra.com.py) vía IMAP para descargar facturas electrónicas oficiales SIFEN en XML y PDF KUDE. También permite la carga manual registrando el Timbrado legal, RUC emisor, número de factura (ej. 001-002-0008891), condición (Contado/Crédito) y vencimiento fiscal.",
+          mockKey: "facturas",
+        },
+        {
+          title: "Pestaña 6: Matching a 3 Vías (El Candado Anti-Fraude)",
+          detail:
+            "Cruza de forma automática los 3 documentos clave de la operación:\n" +
+            "1. La Orden de Compra (lo que se pactó pagar y comprar).\n" +
+            "2. La Recepción Física (lo que efectivamente entró por el portón de descarga).\n" +
+            "3. La Factura Legal del Proveedor (lo que el proveedor está cobrando).\n" +
+            "Si las cantidades y los precios coinciden al 100%, el semáforo se enciende en VERDE ('Conciliada OK') y la factura viaja a Tesorería para programación de pago. Si hay sobreprecio o faltante, se bloquea en ROJO ('Discrepancia').",
           mockKey: "matching",
         },
         {
-          title: "Gestione devoluciones al proveedor",
+          title: "Pestaña 7: Devoluciones y Notas de Crédito de Proveedores",
           detail:
-            "Productos defectuosos o fuera de condición se devuelven generando la nota de crédito al proveedor y la reentrada del stock.",
+            "Registra mercadería rechazada en la recepción o mercadería vencida devuelta al proveedor según acuerdo de canje. Realiza el seguimiento de la Nota de Crédito fiscal que el proveedor debe emitir para descontarla del próximo pago de Tesorería.",
+        },
+        {
+          title: "Pestaña 8: Maestro de Proveedores & Ficha 360° con Scorecard OTIF",
+          detail:
+            "Audita el desempeño de cada proveedor mediante el índice OTIF (On-Time In-Full: % de pedidos entregados a tiempo y completos). Incluye el historial cronológico de aumentos de precios del proveedor para negociar mejores condiciones de compra.",
+          mockKey: "proveedor360",
+        },
+        {
+          title: "Pestañas 9 a 12: Requisiciones, Cotizaciones (RFQ), Presupuestos y Reportes",
+          detail:
+            "• Requisiciones: Pedidos internos entre áreas (panadería solicita harina a depósito).\n" +
+            "• Cotizaciones (RFQ): Comparativa de precios entre 3 proveedores antes de compras grandes.\n" +
+            "• Presupuestos: Asignación de tope de gasto mensual por departamento.\n" +
+            "• Reportes & KPIs: Indicadores de volumen de compra, concentración de gasto por proveedor y variaciones de costos.",
         },
       ],
       mocks: {
-        ia: {
+        asistente_ia: {
           type: "table",
-          title: "Sugerencias del asistente IA",
+          title: "Asistente IA — Sugerencias de Reposición por Cobertura Crítica",
           columns: [
             { label: "Producto", value: "producto" },
-            { label: "Stock", value: "stock" },
-            { label: "Cobertura", value: "cobertura" },
-            { label: "Sugerido", value: "sugerido" },
             { label: "Proveedor", value: "proveedor" },
+            { label: "Stock Salón", value: "stock" },
+            { label: "Venta Diaria", value: "velocidad" },
+            { label: "Días Cobertura", value: "cobertura", badge: true },
+            { label: "Cantidad Sugerida", value: "sugerido", badge: true },
           ],
           rows: [
-            { producto: "Leche larga vida 1L", stock: 258, cobertura: "8 días", sugerido: "600 un", proveedor: "La Lactea" },
-            { producto: "Fideo tallarín 500g", stock: 22, cobertura: "3 días", sugerido: "480 un", proveedor: "Fideos Pasta Real" },
-            { producto: "Queso Paraguay x kg", stock: 21, cobertura: "4 días", sugerido: "80 kg", proveedor: "Chortitzer" },
+            { producto: "LECHE ENTERA LARGA VIDA 1L", proveedor: "LA LACTEA", stock: "48 un", velocidad: "34 un/día", cobertura: "1.4 días", sugerido: "600 un (50 fardos)", badges: { cobertura: "red", sugerido: "green" } },
+            { producto: "HARINA COMUN TIPO 000 1KG", proveedor: "CASA GONZALITO S.R.L.", stock: "0 un", velocidad: "28 un/día", cobertura: "0 días (QUIEBRE)", sugerido: "400 un (40 fardos)", badges: { cobertura: "red", sugerido: "green" } },
+            { producto: "CERVEZA BRAHMITA 269ML", proveedor: "CERVEPAR S.A.", stock: "2.570 un", velocidad: "480 un/día", cobertura: "5.3 días", sugerido: "2.400 un (200 packs)", badges: { cobertura: "amber", sugerido: "blue" } },
           ],
         },
-        po: {
+        demandas: {
           type: "table",
-          title: "Órdenes de compra activas",
+          title: "Demandas de Clientes no Encontradas en Góndola (Registradas en POS)",
           columns: [
-            { label: "Nº", value: "numero" },
-            { label: "Proveedor", value: "proveedor" },
-            { label: "Total", value: "total", currency: true },
-            { label: "Entrega", value: "entrega" },
-            { label: "Estado", value: "estado", badge: true },
+            { label: "Producto Solicitado por el Cliente", value: "producto" },
+            { label: "Veces Pedido en Cajas", value: "veces" },
+            { label: "Sector Sugerido", value: "sector" },
+            { label: "Último Registro", value: "fecha" },
+            { label: "Estado Comercial", value: "estado", badge: true },
           ],
           rows: [
-            { numero: "PO-1001", proveedor: "Coca Cola Paresa", total: 15840000, entrega: "08/09", estado: "Enviada", badge: "blue" },
-            { numero: "PO-1002", proveedor: "Frigorífico Concepción", total: 22350000, entrega: "07/09", estado: "Recibida", badge: "green" },
-            { numero: "PO-1003", proveedor: "Abasto Central", total: 9870000, entrega: "10/09", estado: "Borrador", badge: "gray" },
+            { producto: "YERBA MATE KURUPÍ ANÍS 500G", veces: "14 solicitudes", sector: "Almacén", fecha: "Hoy 11:20 hs", estado: "EN EVALUACIÓN", badge: "amber" },
+            { producto: "QUESO BRIE IMPORTADO FRANCÉS", veces: "6 solicitudes", sector: "Fiambrería Gourmet", fecha: "Ayer 18:40 hs", estado: "PENDIENTE", badge: "gray" },
+            { producto: "LECHE SIN LACTOSA CHOCOLATADA 1L", veces: "22 solicitudes", sector: "Lácteos", fecha: "Hoy 09:15 hs", estado: "COMPRADO", badge: "green" },
           ],
         },
-        recepcion: {
+        ordenes: {
           type: "table",
-          title: "Recepción — PO-1002",
+          title: "Órdenes de Compra (PO) en Curso",
           columns: [
-            { label: "Producto", value: "producto" },
-            { label: "Pedido", value: "pedido" },
-            { label: "Recibido", value: "recibido" },
-            { label: "Avería", value: "averia", badge: true },
+            { label: "Nº Orden", value: "numero" },
+            { label: "Proveedor", value: "proveedor" },
+            { label: "Condición", value: "condicion" },
+            { label: "Total Orden (₲)", value: "total", currency: true },
+            { label: "Fecha Entrega", value: "entrega" },
+            { label: "Estado PO", value: "estado", badge: true },
           ],
           rows: [
-            { producto: "Vacio x kg", pedido: 120, recibido: 118, averia: "2 kg", badge: "red" },
-            { producto: "Costilla x kg", pedido: 90, recibido: 90, averia: "0", badge: "green" },
-            { producto: "Pollo entero", pedido: 60, recibido: 58, averia: "2 un", badge: "red" },
+            { numero: "PO-2026-0891", proveedor: "CASA GONZALITO S.R.L.", condicion: "Crédito 30 Días", total: 48900000, entrega: "08/09/2026", estado: "ENVIADA A PROVEEDOR", badge: "blue" },
+            { numero: "PO-2026-0892", proveedor: "FRIGORÍFICO CONCEPCIÓN", condicion: "Contado Contraentrega", total: 62450000, entrega: "Hoy 14:00 hs", estado: "CONFIRMADA", badge: "green" },
+            { numero: "PO-2026-0893", proveedor: "CERVEPAR S.A.", condicion: "Crédito 15 Días", total: 34800000, entrega: "09/09/2026", estado: "BORRADOR", badge: "gray" },
+          ],
+        },
+        recepciones: {
+          type: "table",
+          title: "Acta de Recepción en Muelle — PO-2026-0892 (Frigorífico)",
+          columns: [
+            { label: "Artículo / Corte", value: "producto" },
+            { label: "Cantidad Pedida en PO", value: "pedido" },
+            { label: "Peso Real en Báscula", value: "pesado" },
+            { label: "Diferencia / Merma", value: "merma", badge: true },
+            { label: "Temperatura Cámara", value: "temp" },
+          ],
+          rows: [
+            { producto: "MEDIA RES VACUNA DE PRIMERA", pedido: "1.200 kg", pesado: "1.182 kg", merma: "−18 kg (Desbaste flete)", temp: "3.8 °C (OK)", badge: "red" },
+            { producto: "COSTILLA VACUNA EN PLANCHA", pedido: "450 kg", pesado: "450 kg", merma: "0 kg (Exacto)", temp: "3.5 °C (OK)", badge: "green" },
           ],
         },
         matching: {
           type: "list",
-          title: "Matching de factura",
+          title: "Resultados del Matching a 3 Vías (Verificación Automática)",
           items: [
-            { title: "Factura 001-004-0001122 — Frigorífico", sub: "PO-1002 · 3 ítems conciliados · sin diferencias", badge: "OK", badgeColor: "green" },
-            { title: "Factura 001-002-0008891 — La Lactea", sub: "PO-1004 · Diferencia de ₲ 1.250: revisar precio", badge: "Revisar", badgeColor: "amber" },
-            { title: "Factura 003-001-0003321 — Abasto", sub: "PO-1003 · Diferencia de 4 unidades", badge: "Revisar", badgeColor: "red" },
+            { title: "Factura 001-002-0008891 — CASA GONZALITO S.R.L.", sub: "PO-2026-0891 · 18 ítems cruzados · Coincidencia 100% en precio y cantidad. Habilitada para pago.", badge: "CONCILIADA OK", badgeColor: "green" },
+            { title: "Factura 002-001-0014521 — LACTEOS DEL SUR", sub: "PO-2026-0888 · Diferencia: Facturaron ₲ 4.500 por leche cuando la PO pactaba ₲ 4.200. Bloqueada.", badge: "PRECIO SOBREVALUADO", badgeColor: "red" },
+            { title: "Factura 001-005-0003310 — ABASTO CENTRAL", sub: "PO-2026-0889 · Faltante: Facturaron 50 bolsas pero el muelle solo recibió 46 bolsas.", badge: "CANTIDAD FALTANTE", badgeColor: "amber" },
           ],
         },
       },
+      useCases: [
+        {
+          title: "Caso 1: Recepción de carne vacuna con báscula aérea y emisión de constancia de merma",
+          scenario:
+            "Llega el camión del frigorífico con remisión declarada de 1.200 kg de carne en gancho. Al colgar en la báscula de riel de Extra Supermercado, el pesaje da 1.182 kg (diferencia de 18 kg por evaporación y flete).",
+          stepByStep: [
+            "1. En Gestión de Compras -> solapa 'Recepciones', abra la orden del frigorífico.",
+            "2. En el renglón de media res, ingrese el peso real pesado: 1.182 kg.",
+            "3. El sistema calcula la merma: '−18 kg (−1.5%)'.",
+            "4. Marque 'Generar Constancia de Merma de Pesaje' e imprímala en la impresora de depósito.",
+            "5. Haga firmar al chofer del camión. La recepción se asienta por 1.182 kg reales para el Kardex, y contabilidad descuenta los 18 kg de la factura fiscal del frigorífico.",
+          ],
+          keyLesson:
+            "Pagar sobre los kilos declarados en el remito del proveedor sin pesar en gancho propio representa una fuga de dinero directa para el supermercado.",
+        },
+        {
+          title: "Caso 2: Detección y bloqueo de factura de proveedor con sobreprecio (Matching 3 Vías)",
+          scenario:
+            "Un distribuidor envía factura por ₲ 45.000.000, pero al cruzar con la PO se detecta que facturó el aceite a ₲ 8.900 en vez de los ₲ 8.200 acordados en la orden.",
+          stepByStep: [
+            "1. Ingrese a la solapa 'Matching 3 Vías'.",
+            "2. Observe la factura en estado rojo 'PRECIO SOBREVALUADO'.",
+            "3. El sistema resalta el ítem específico con la diferencia monetaria (₲ 700 por botella en 1.000 botellas = ₲ 700.000 de sobreprecio).",
+            "4. El sistema bloquea automáticamente la autorización de pago en Tesorería.",
+            "5. El comprador llama al distribuidor y exige la emisión de la Nota de Crédito por ₲ 700.000 antes de liberar el cheque o transferencia.",
+          ],
+          keyLesson:
+            "El Matching a 3 Vías impide que los errores o avivadas de facturación de los proveedores se paguen inadvertidamente por el departamento de finanzas.",
+        },
+        {
+          title: "Caso 3: Incorporación de producto demandado por clientes en cajas",
+          scenario:
+            "Durante la semana, 14 clientes preguntaron a las cajeras por 'Yerba Mate Kurupí Anís 500g' y no había en góndola.",
+          stepByStep: [
+            "1. El comprador abre la solapa 'Demandas Clientes'.",
+            "2. Observa la alerta destacada: 14 solicitudes en 5 días.",
+            "3. Contacta al representante de Yerba Kurupí y solicita 10 fardos.",
+            "4. Cambia el estado de la demanda a 'COMPRADO' y carga la PO.",
+            "5. Cuando el producto llega a salón, las ventas se disparan inmediatamente porque responde a una demanda insatisfecha real y validada.",
+          ],
+          keyLesson:
+            "Escuchar y tabular lo que los clientes piden en la línea de cajas es la mejor guía para no perder ventas frente a la competencia.",
+        },
+      ],
+      commonErrors: [
+        {
+          error: "Error: 'La factura no puede asociarse a la PO: RUC del emisor no coincide'",
+          cause: "El proveedor tiene múltiples razones sociales o emitió la factura desde otra empresa del mismo grupo no registrada en el sistema.",
+          solution:
+            "Verifique el RUC en el maestro de proveedores. Si el proveedor cambió de timbrado o razón social, actualice la ficha en la solapa 'Proveedores' antes de vincular la factura.",
+        },
+        {
+          error: "Bloqueo: 'No se puede recepcionar camión sin número de lote y vencimiento'",
+          cause: "En productos perecederos (lácteos, embutidos, carnes), el sistema exige obligatoriamente cargar la fecha de expiración.",
+          solution:
+            "Examine la fecha impresa en el envase físico del producto e ingrésela en el formulario de recepción para habilitar el principio FEFO en depósito.",
+        },
+      ],
+      shortcutsOrHotkeys: [
+        { key: "F2", action: "Nueva Orden de Compra manual" },
+        { key: "F6", action: "Ir directo a pantalla de Recepción de Muelle" },
+        { key: "Ctrl + M", action: "Ejecutar Matching 3 Vías de facturas pendientes" },
+      ],
       tips: [
-        "El asistente IA prioriza productos con cobertura < 10 días y puntos de rotación.",
-        "Exporte las POs a Excel para enviarlas por mail o WhatsApp al proveedor.",
-        "El matching impide pagar facturas con diferencias sin autorización.",
+        "Configure el Asistente IA los lunes a primera hora para programar las órdenes de compra de toda la semana.",
+        "Revise diariamente la solapa de 'Demandas Clientes' para detectar faltantes de surtido antes de que los clientes se vayan a otro supermercado.",
       ],
       faq: [
-        { q: "¿Qué es el matching a 3 vías?", a: "Compara orden de compra, recepción y factura del proveedor. Solo cuando las tres coinciden, la factura queda «conciliada» y lista para pagar." },
+        {
+          q: "¿Cómo ingresan las facturas electrónicas de los proveedores al sistema?",
+          a: "A través del conector IMAP configurado en la solapa de Facturas. El sistema lee el correo facturaelectronica@superextra.com.py, descarga el XML legal de SIFEN y pre-carga la factura sin necesidad de tipear a mano.",
+        },
+        {
+          q: "¿Qué es el Scorecard OTIF en la ficha del proveedor?",
+          a: "Mide la confiabilidad de cada proveedor: qué porcentaje de órdenes fueron entregadas a tiempo (On-Time) y con la cantidad completa de mercadería (In-Full). Ayuda a decidir a qué distribuidor comprar.",
+        },
       ],
     },
     {
       id: "labels",
-      label: "Etiquetas",
+      label: "Impresión de Etiquetas de Góndola",
       path: "/etiquetas",
       icon: Tags,
-      tagline: "Imprima etiquetas y códigos de barras",
-      category: "Abastecimiento",
+      tagline: "Etiquetas térmicas de precio, ofertas destacadas y códigos CODE128",
+      category: "Abastecimiento & Compras",
       color: "orange",
+      role: "Repositores, Auxiliares de Salón y Encargados de Precios",
       description:
-        "Genere e imprima etiquetas de producto: códigos de barras CODE128, precios, fechas de vencimiento y datos de la mercadería. Diseñado para impresoras térmicas (Zebra, Pantum) usadas en el depósito y el salón.",
+        "Generador de cartelería y etiquetas de góndola para impresoras térmicas (Zebra, Pantum). Permite imprimir etiquetas con código de barras legible por los escáneres del POS, precios regulares, precios mayoristas por fardo y cartelería amarilla de oferta.",
       steps: [
         {
-          title: "Seleccione producto(s)",
-          detail:
-            "Elija un producto o una categoría completa. El sistema lista las etiquetas que se imprimirán con nombre, código, precio y vencimiento.",
-          mockKey: "seleccion",
+          title: "1. Selección de Artículos a Etiquetar",
+          detail: "Busque los artículos modificados o elija una góndola completa para reimpresión tras un cambio de precios.",
         },
         {
-          title: "Configure la impresora",
-          detail:
-            "Seleccione el modelo (Zebra ZD-220, Pantum PT-D160) y el tamaño de etiqueta. La utilidad de impresión se comunica con la impresora de red o USB.",
+          title: "2. Elección del Formato de Etiqueta",
+          detail: "Seleccione: Etiqueta Estándar de Góndola (40x30mm), Etiqueta Amarilla de Oferta / Promoción, o Etiqueta de Balanza Pesable.",
         },
         {
-          title: "Imprima",
-          detail:
-            "Pulse imprimir: las etiquetas salen con el código de barras escaneable en caja. Útil para góndola, prepack de carnicería y mercadería suelta.",
-          mockKey: "etiqueta",
+          title: "3. Impresión Térmica Directa",
+          detail: "Envíe la orden a la impresora térmica Zebra conectada por USB o red local.",
         },
       ],
       mocks: {
-        seleccion: {
-          type: "table",
-          title: "Etiquetas a imprimir",
-          columns: [
-            { label: "Producto", value: "producto" },
-            { label: "Precio", value: "precio", currency: true },
-            { label: "Cant.", value: "cant" },
-            { label: "Código", value: "codigo" },
-          ],
-          rows: [
-            { producto: "Milanesa (prepack)", precio: 72000, cant: 20, codigo: "7793000456789" },
-            { producto: "Vacio x kg", precio: 69000, cant: 30, codigo: "7793000456783" },
-            { producto: "Queso Paraguay x kg", precio: 16900, cant: 15, codigo: "7793000456780" },
-          ],
-        },
         etiqueta: {
           type: "recibo",
-          title: "Vista previa de etiqueta",
-          caption: "Impresión térmica 40x30 con código CODE128 escaneable en caja.",
+          title: "Muestra de Etiqueta Térmica de Góndola (40x30mm)",
+          caption: "ARROZ TIPO 1 5KG · Código EAN-13 · Precio: ₲ 28.500 · Fardo x6: ₲ 26.000 c/u.",
         },
       },
       tips: [
-        "Las etiquetas de banda (prepack) con precio impreso agilizan la caja: el cajero escanea y cobra directo.",
-      ],
-    },
-    {
-      id: "forecast",
-      label: "Forecast & Reposición",
-      path: "/demand-forecast",
-      icon: TrendingUp,
-      tagline: "Prediga la demanda y evite el quiebre de stock",
-      category: "Abastecimiento",
-      color: "purple",
-      description:
-        "El motor de forecast estadístico (suavizado exponencial, media móvil, descomposición estacional) predice la demanda de cada producto, calcula el stock de seguridad y genera sugerencias de compra con lead time.",
-      tabs: [
-        { id: "forecast", label: "Forecast" },
-        { id: "picos", label: "Picos semanales" },
-        { id: "sugerencias", label: "Sugerencias" },
-        { id: "quiebres", label: "Quiebres" },
-        { id: "formulas", label: "Fórmulas" },
-      ],
-      steps: [
-        {
-          title: "Vea el forecast por producto",
-          detail:
-            "Cada producto muestra: venta promedio diaria, forecast a 7 días, stock de seguridad y estado (crítico, alerta, normal). Los críticos necesitan compra urgente.",
-          mockKey: "forecast",
-        },
-        {
-          title: "Analice los picos semanales",
-          detail:
-            "La demanda varia por día: el sistema aprende los picos (ej: carnicería +75% los viernes, verdulería +45% miércoles, sábado pico máximo 2.1x). Use este conocimiento para ordenar las reposiciones.",
-          mockKey: "picos",
-        },
-        {
-          title: "Aplique las sugerencias de compra",
-          detail:
-            "Las sugerencias proponen cantidad a comprar considerando lead time del proveedor, stock actual y stock de seguridad. Se exportan directo a la orden de compra.",
-          mockKey: "sugerencias",
-        },
-        {
-          title: "Evalúe las fórmulas",
-          detail:
-            "La pestaña de fórmulas explica cómo se calculan: suavizado exponencial con nivel + tendencia, stock de seguridad = venta diaria × lead time + margen, y los umbrales de alerta.",
-        },
-      ],
-      mocks: {
-        forecast: {
-          type: "table",
-          title: "Forecast a 7 días",
-          columns: [
-            { label: "Producto", value: "producto" },
-            { label: "Venta prom. día", value: "vpd" },
-            { label: "Forecast 7d", value: "f7" },
-            { label: "Stock seg.", value: "ss" },
-            { label: "Estado", value: "estado", badge: true },
-          ],
-          rows: [
-            { producto: "Carne vacío", vpd: "41 kg", f7: "287 kg", ss: "90 kg", estado: "CRÍTICO", badge: "red" },
-            { producto: "Leche larga vida 1L", vpd: 34, f7: 248, ss: 100, estado: "Alerta", badge: "amber" },
-            { producto: "Fideo tallarín 500g", vpd: 12, f7: 89, ss: 40, estado: "Alerta", badge: "amber" },
-            { producto: "Coca-Cola 2.25L", vpd: 95, f7: 712, ss: 260, estado: "Normal", badge: "green" },
-            { producto: "Arroz Tipo 1 5kg", vpd: 51, f7: 383, ss: 150, estado: "Normal", badge: "green" },
-          ],
-        },
-        picos: {
-          type: "chart",
-          title: "Factor de demanda por día de la semana",
-          chart: {
-            kind: "bar",
-            unit: "x",
-            points: [
-              { label: "Lun", value: 0.75 },
-              { label: "Mar", value: 0.8 },
-              { label: "Mié", value: 1.0 },
-              { label: "Jue", value: 1.1 },
-              { label: "Vie", value: 1.75 },
-              { label: "Sáb", value: 2.1 },
-              { label: "Dom", value: 1.35 },
-            ],
-          },
-        },
-        sugerencias: {
-          type: "list",
-          title: "Sugerencias de compra",
-          items: [
-            { title: "Carne vacío — 120 kg", sub: "Lead time 1d · stock 21kg · cobertura 1 día", badge: "Urgente", badgeColor: "red" },
-            { title: "Leche larga vida — 480 un", sub: "Lead time 2d · stock 258 · cobertura 8 días", badge: "Programar", badgeColor: "amber" },
-            { title: "Coca-Cola 2.25L — 360 un", sub: "Lead time 3d · stock 890 · cobertura 12 días", badge: "Normal", badgeColor: "green" },
-          ],
-        },
-      },
-      tips: [
-        "El forecast aprende de los picos: programe recepciones antes del jueves para tener stock el fin de semana.",
-        "Use los «quiebres» del histórico para ajustar el stock de seguridad de los productos sensibles.",
-      ],
-      faq: [
-        { q: "¿En qué se basa el pronóstico?", a: "En el histórico de ventas del producto con modelos estadísticos puros (suavizado exponencial, media móvil y descomposición estacional). Se pueden ajustar con datos manuales si hace falta." },
-      ],
-    },
-    {
-      id: "dsd",
-      label: "Recepción Directa DSD",
-      path: "/dsd",
-      icon: Truck,
-      tagline: "Mercadería del proveedor directo al salón",
-      category: "Abastecimiento",
-      color: "blue",
-      description:
-        "DSD (Direct Store Delivery) gestiona la mercadería que el proveedor trae directo al salón sin pasar por el depósito: programación de llegadas, recepción por muelle, control de items y rechazos.",
-      tabs: [
-        { id: "dashboard", label: "Dashboard" },
-        { id: "programacion", label: "Programación" },
-        { id: "recepciones", label: "Recepciones" },
-        { id: "items", label: "Items" },
-        { id: "rechazos", label: "Rechazos" },
-      ],
-      steps: [
-        {
-          title: "Programe las llegadas",
-          detail:
-            "El proveedor avisa su visita: fecha, hora, muelle y tipo de carga. La programación ordena la recepción y evita colas.",
-          mockKey: "prog",
-        },
-        {
-          title: "Reciba en el muelle",
-          detail:
-            "Al llegar, registre la recepción por muelle: las unidades por producto y el estado. Los items con averías se marcan para rechazo.",
-          mockKey: "recepcion",
-        },
-        {
-          title: "Gestione los rechazos",
-          detail:
-            "Los productos rechazados (dañados, vencidos) se registran con su motivo. El proveedor recibe la devolución automáticamente y el stock no entra.",
-          mockKey: "rechazos",
-        },
-      ],
-      mocks: {
-        prog: {
-          type: "table",
-          title: "Programación de recepciones",
-          columns: [
-            { label: "Proveedor", value: "proveedor" },
-            { label: "Hora", value: "hora" },
-            { label: "Muelle", value: "muelle" },
-            { label: "Tipo", value: "tipo" },
-            { label: "Estado", value: "estado", badge: true },
-          ],
-          rows: [
-            { proveedor: "Coca Cola Paresa", hora: "07:00", muelle: "1", tipo: "Gaseosas", estado: "Recibido", badge: "green" },
-            { proveedor: "Cervepar", hora: "08:30", muelle: "2", tipo: "Cervezas", estado: "En recepción", badge: "amber" },
-            { proveedor: "Pepsi Snacks", hora: "10:00", muelle: "1", tipo: "Snacks", estado: "Programado", badge: "gray" },
-          ],
-        },
-        recepcion: {
-          type: "table",
-          title: "Recepción — Cervepar",
-          columns: [
-            { label: "Producto", value: "producto" },
-            { label: "Unidades", value: "unidades" },
-            { label: "Verificado", value: "verificado" },
-            { label: "Estado", value: "estado", badge: true },
-          ],
-          rows: [
-            { producto: "Pilsen 24x355ml", unidades: 400, verificado: 400, estado: "OK", badge: "green" },
-            { producto: "Bavaria 6x1L", unidades: 120, verificado: 118, estado: "2 rechazadas", badge: "amber" },
-            { producto: "Keller 12x350ml", unidades: 250, verificado: 250, estado: "OK", badge: "green" },
-          ],
-        },
-        rechazos: {
-          type: "list",
-          title: "Rechazos de hoy",
-          items: [
-            { title: "Bavaria 6x1L — 2 un", sub: "Botella dañada · Devuelto al proveedor", badge: "Rechazado", badgeColor: "red" },
-            { title: "Snacks Pepsi — 1 caja", sub: "Lata abollada · Devuelto", badge: "Rechazado", badgeColor: "red" },
-          ],
-        },
-      },
-      faq: [
-        { q: "¿Difiere DSD de la compra normal?", a: "Sí: en DSD la mercadería llega directo del proveedor al salón, sin orden de compra formal siempre. Es típico en gaseosas, cervezas y snacks." },
-      ],
-    },
-    {
-      id: "contratos",
-      label: "Contratos & Rebates",
-      path: "/contratos-proveedores",
-      icon: Briefcase,
-      tagline: "Acuerdos y bonificaciones con proveedores",
-      category: "Abastecimiento",
-      color: "amber",
-      description:
-        "Gestione los contratos comerciales con proveedores: plazos, precios acordados y rebates (bonificaciones por volumen). Siga el cumplimiento y las negociaciones en curso.",
-      tabs: [
-        { id: "dashboard", label: "Dashboard" },
-        { id: "contratos", label: "Contratos" },
-        { id: "rebates", label: "Rebates" },
-        { id: "negociaciones", label: "Negociaciones" },
-        { id: "cumplimiento", label: "Cumplimiento" },
-      ],
-      steps: [
-        {
-          title: "Registre el contrato",
-          detail:
-            "Cada contrato define vigencia (desde/hasta), condiciones de pago, descuentos y precios acordados por producto.",
-          mockKey: "contratos",
-        },
-        {
-          title: "Configure los rebates",
-          detail:
-            "Los rebates bonifican por volumen: por ejemplo, 2% sobre compras si superan ₲ 50.000.000 por trimestre. El sistema calcula el rebate devengado automáticamente.",
-          mockKey: "rebates",
-        },
-        {
-          title: "Mida el cumplimiento",
-          detail:
-            "Compare lo comprado vs lo comprometido en el contrato: si no llega al volumen de rebate, el sistema lo avisa para decidir si compensa comprar más para alcanzar el tramo.",
-        },
-      ],
-      mocks: {
-        contratos: {
-          type: "table",
-          title: "Contratos vigentes",
-          columns: [
-            { label: "Proveedor", value: "proveedor" },
-            { label: "Vigencia", value: "vigencia" },
-            { label: "Descuento", value: "desc" },
-            { label: "Estado", value: "estado", badge: true },
-          ],
-          rows: [
-            { proveedor: "Coca Cola Paresa", vigencia: "01/01/26 – 31/12/26", desc: "3%", estado: "Vigente", badge: "green" },
-            { proveedor: "Cervepar", vigencia: "01/06/26 – 31/05/27", desc: "2.5%", estado: "Vigente", badge: "green" },
-            { proveedor: "Chortitzer", vigencia: "01/03/26 – 31/02/27", desc: "1.8%", estado: "Por vencer", badge: "amber" },
-          ],
-        },
-        rebates: {
-          type: "table",
-          title: "Rebates devengados Q3",
-          columns: [
-            { label: "Proveedor", value: "proveedor" },
-            { label: "Compras Q3", value: "compras", currency: true },
-            { label: "Meta", value: "meta", currency: true },
-            { label: "Rebate", value: "rebate", currency: true },
-            { label: "Estado", value: "estado", badge: true },
-          ],
-          rows: [
-            { proveedor: "Coca Cola Paresa", compras: 128400000, meta: 100000000, rebate: 2568000, estado: "Alcanzado", badge: "green" },
-            { proveedor: "Cervepar", compras: 84200000, meta: 100000000, rebate: 2105000, estado: "A 84%", badge: "amber" },
-            { proveedor: "Chortitzer", compras: 39600000, meta: 60000000, rebate: 712800, estado: "A 66%", badge: "red" },
-          ],
-        },
-      },
-      faq: [
-        { q: "¿Cómo se cobra el rebate?", a: "Se devenga por volumen comprado y se descuenta como nota de crédito del proveedor o crédito a cuenta, según lo pactado." },
-      ],
-    },
-    {
-      id: "portal-proveedores",
-      label: "Portal Proveedores",
-      path: "/portal/proveedores",
-      icon: Globe,
-      tagline: "El proveedor ve y gestiona su relación",
-      category: "Abastecimiento",
-      color: "indigo",
-      description:
-        "El portal de autoservicio para proveedores: ven sus órdenes de compra, facturas, pagos y documentos. Pueden invitar nuevos proveedores y consultar el estado de cada operación sin llamar por teléfono.",
-      tabs: [
-        { id: "usuarios", label: "Usuarios" },
-        { id: "documentos", label: "Documentos" },
-        { id: "invitar", label: "Invitar proveedor" },
-      ],
-      steps: [
-        {
-          title: "Gestione los usuarios del portal",
-          detail:
-            "Administre los proveedores con acceso: cada uno con usuario y permisos. Desde acá se invita y se da de baja.",
-          mockKey: "usuarios",
-        },
-        {
-          title: "Deje que el proveedor consulte",
-          detail:
-            "En el portal, el proveedor ve: POs, recepciones, facturas pagadas y pendientes, y el estado de sus contratos. Menos llamadas, más transparencia.",
-          mockKey: "documentos",
-        },
-        {
-          title: "Invite proveedores nuevos",
-          detail:
-            "Complete el formulario de invitación: el proveedor recibe un mail, crea su clave y entra al portal.",
-        },
-      ],
-      mocks: {
-        usuarios: {
-          type: "table",
-          title: "Proveedores con acceso al portal",
-          columns: [
-            { label: "Proveedor", value: "proveedor" },
-            { label: "Usuario", value: "usuario" },
-            { label: "Último acceso", value: "acceso" },
-            { label: "Estado", value: "estado", badge: true },
-          ],
-          rows: [
-            { proveedor: "Coca Cola Paresa", usuario: "copa_paresa", acceso: "06/09 10:20", estado: "Activo", badge: "green" },
-            { proveedor: "Cervepar", usuario: "cervepar_spa", acceso: "05/09 16:40", estado: "Activo", badge: "green" },
-            { proveedor: "Chortitzer", usuario: "chortitzer", acceso: "—", estado: "Invitado", badge: "amber" },
-          ],
-        },
-        documentos: {
-          type: "list",
-          title: "Documentos visibles para el proveedor",
-          items: [
-            { title: "Órdenes de compra", sub: "PO, estado, fechas de entrega, recepciones", badge: "12 docs", badgeColor: "blue" },
-            { title: "Facturas y pagos", sub: "Facturas conciliadas, pagos realizados y fecha", badge: "45 docs", badgeColor: "green" },
-            { title: "Contratos y rebates", sub: "Vigencias, descuentos y cumplimiento", badge: "3 docs", badgeColor: "purple" },
-          ],
-        },
-      },
-      faq: [
-        { q: "¿El proveedor puede cargar su propia factura?", a: "En la versión actual el proveedor consulta; la carga de facturas se habilita por rol. Es el siguiente paso del portal." },
+        "Verifique que la etiqueta impresa coincida exactamente con el precio del POS para evitar reclamos en caja.",
       ],
     },
   ],

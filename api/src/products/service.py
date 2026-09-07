@@ -197,8 +197,8 @@ async def list_products(
         stock_map = {r.product_id: (int(r.stock_total), int(r.stock_disponible)) for r in stock_map_res}
         for p in products:
             st, sd = stock_map.get(p.id, (0, 0))
-            setattr(p, "stock_actual", st)
-            setattr(p, "stock_disponible", sd)
+            p.__dict__["stock_actual"] = st
+            p.__dict__["stock_disponible"] = sd
 
         # 2. Asociar Proveedor (directo del producto o por órdenes de compra)
         direct_supp_ids = [p.supplier_id for p in products if getattr(p, "supplier_id", None)]
@@ -229,10 +229,10 @@ async def list_products(
 
         for p in products:
             if getattr(p, "supplier_id", None) and p.supplier_id in suppliers_by_id:
-                setattr(p, "supplier_nombre", suppliers_by_id[p.supplier_id])
+                p.__dict__["supplier_nombre"] = suppliers_by_id[p.supplier_id]
             elif p.id in po_supp_map:
-                setattr(p, "supplier_id", po_supp_map[p.id][0])
-                setattr(p, "supplier_nombre", po_supp_map[p.id][1])
+                p.__dict__["supplier_id"] = po_supp_map[p.id][0]
+                p.__dict__["supplier_nombre"] = po_supp_map[p.id][1]
 
     return products
 
@@ -302,21 +302,21 @@ async def annotate_products_with_promos(db: AsyncSession, company_id: str, produ
         info = promo_map.get(p.id)
         if info and info["precio"]:
             promo_p = info["precio"]
-            p.precio_promo = promo_p
-            p.en_promocion = True
-            p.promocion_id = info["id"]
-            p.promocion_nombre = info["nombre"]
-            p.promo_dias_semana = info["dias"]
+            p.__dict__["precio_promo"] = promo_p
+            p.__dict__["en_promocion"] = True
+            p.__dict__["promocion_id"] = info["id"]
+            p.__dict__["promocion_nombre"] = info["nombre"]
+            p.__dict__["promo_dias_semana"] = info["dias"]
             # Preservar precio regular si precio_venta ya está en promo o si falta
             if getattr(p, "precio_regular", None) is None or getattr(p, "precio_regular", None) <= promo_p:
                 if p.precio_venta and p.precio_venta > promo_p:
-                    p.precio_regular = p.precio_venta
+                    p.__dict__["precio_regular"] = p.precio_venta
         else:
-            p.precio_promo = None
-            p.en_promocion = False
-            p.promocion_id = None
-            p.promocion_nombre = None
-            p.promo_dias_semana = None
+            p.__dict__["precio_promo"] = None
+            p.__dict__["en_promocion"] = False
+            p.__dict__["promocion_id"] = None
+            p.__dict__["promocion_nombre"] = None
+            p.__dict__["promo_dias_semana"] = None
 
 
 async def get_products_stats(db: AsyncSession, company_id: str) -> dict:

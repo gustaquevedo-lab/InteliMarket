@@ -73,6 +73,25 @@ export interface ModuleTab {
   label: string
 }
 
+export interface ModuleUseCase {
+  title: string
+  scenario: string
+  stepByStep: string[]
+  keyLesson?: string
+}
+
+export interface ModuleCommonError {
+  error: string
+  cause: string
+  solution: string
+}
+
+export interface ModuleShortcut {
+  key: string
+  action: string
+  context?: string
+}
+
 export interface ManualModule {
   id: string
   label: string
@@ -82,9 +101,15 @@ export interface ManualModule {
   category: string
   description: string
   color: string
+  role?: string
+  prerequisites?: string[]
+  workflowOverview?: string
   tabs?: ModuleTab[]
   steps: ModuleStep[]
   mocks: Record<string, MockBlock>
+  useCases?: ModuleUseCase[]
+  commonErrors?: ModuleCommonError[]
+  shortcutsOrHotkeys?: ModuleShortcut[]
   tips?: string[]
   faq?: Array<{ q: string; a: string }>
 }

@@ -180,8 +180,16 @@ export const operacionesCategory: ManualCategory = {
       tagline: "Del animal a la góndola, medido",
       category: "Operaciones de Salón",
       color: "red",
+      role: "Maestro Carnicero, Jefe de Sección Carnes y Fiambrería, Encargado de Salón",
+      prerequisites: [
+        "Media res o cuarto vacuno ingresado formalmente en el stock de la cámara de frío.",
+        "Báscula de riel y balanza de mesa de corte calibradas y taradas a cero.",
+        "Plantilla de desposte paraguaya seleccionada según el tipo de cuarto (delantero o trasero).",
+      ],
+      workflowOverview:
+        "El carnicero retira la media res de la cámara, registra el pesaje inicial en gancho y procede al despiece siguiendo la plantilla técnica. A medida que corta (Costilla, Vacío, Lomo, Tapa Cuadril, Carnaza), pesa cada fracción y la asigna a: vitrina de atención, bandejas prepack o picada/cocina. El sistema da de baja el animal entero e ingresa los cortes con su costo ponderado exacto.",
       description:
-        "La herramienta del carnicero: registra los cortes (asados, vacío, milanesas), su rendimiento sobre el costado, y el stock de cada corte en la vitrina. Incluye templates de desposte para la faena frecuente.",
+        "La herramienta clave del carnicero profesional: descompone medias reses y cuartos en cortes comerciales (asado, vacío, tapa cuadril, puchero, bola de lomo), calculando el rendimiento porcentual, controlando las mermas de grasa/hueso y asignando el costo unitario a cada corte según su valor comercial.",
       tabs: [
         { id: "wizard", label: "Desposte" },
         { id: "templates", label: "Plantillas" },
@@ -190,26 +198,31 @@ export const operacionesCategory: ManualCategory = {
       ],
       steps: [
         {
-          title: "Inicie un desposte",
+          title: "1. Selección de Materia Prima y Plantilla Técnica",
           detail:
-            "Seleccione la especie (vacuno, cerdo, pollo, caprino) y el costado a despostar. El sistema usa la plantilla para descomponer en cortes.",
+            "Seleccione la especie (Vacuno, Cerdo o Pollo) y la pieza a despostar (ej. Cuarto Trasero de 128 kg). Elija la plantilla técnica: 'Parrillero 7 cortes' o 'Tradicional mostrador'. La plantilla predefine la lista estándar de cortes esperados.",
           mockKey: "wizard",
         },
         {
-          title: "Cargue los cortes y pesos",
+          title: "2. Pesaje de Cortes Obtenidos en Mesa",
           detail:
-            "Por cada corte, indique el peso obtenido y su uso (venta en vitrina, prepack, cocina). El rendimiento se compara contra el costado original para medir pérdidas.",
+            "A medida que realiza el despiece, coloque cada corte sobre la balanza digital y asigne los kilos obtenidos. Especifique el destino operativo: 'Vitrina mostrador', 'Prepack con film termoencogible' o 'Materia prima para molida/embutidos'.",
           mockKey: "cortes",
         },
         {
-          title: "Guarde la operación",
+          title: "3. Registro de Descarte, Grasa y Hueso",
           detail:
-            "El desposte se registra en inventario: el costado sale de stock y entran los cortes con sus kilos y costos. La vitrina queda actualizada.",
+            "Pese el hueso pelado y el sebo/grasa residual. El sistema contrasta el peso total de cortes nobles + puchero/hueso + sebo contra el peso bruto inicial del animal para calcular el 'Desbaste de Faena'.",
         },
         {
-          title: "Analice rendimientos",
+          title: "4. Asentamiento en Stock y Costeo Automático",
           detail:
-            "Compare el rendimiento real contra el esperado por especie y por carnicero. Un rendimiento bajo indica pérdida de materia prima que atender.",
+            "Al confirmar la orden, el cuarto original sale del inventario y entran automáticamente al catálogo los kilos exactos de cada corte con su costo ponderado, listos para facturar en las cajas y mostrar en la TV de carnicería.",
+        },
+        {
+          title: "5. Auditoría de Rendimiento por Carnicero",
+          detail:
+            "Analice la gráfica de rendimientos históricos. Si un carnicero rinde 81% de carne vendible y otro 86% en el mismo tipo de novillo, el módulo permite detectar exceso de desecho o mala técnica de corte para capacitar al personal.",
           mockKey: "rend",
         },
       ],
@@ -255,6 +268,37 @@ export const operacionesCategory: ManualCategory = {
           },
         },
       },
+      useCases: [
+        {
+          title: "Caso 1: Desposte de Cuarto Trasero para preparación del fin de semana",
+          scenario:
+            "El viernes a las 06:00 AM el carnicero desposta un cuarto trasero de 120 kg para abastecer la vitrina de cortes parrilleros antes de la afluencia de clientes.",
+          stepByStep: [
+            "1. En Carnicería & Desposte, seleccione 'Nueva Orden de Desposte' y elija 'Cuarto Trasero Vacuno #4412'.",
+            "2. Seleccione la plantilla 'Parrillero Tradicional'.",
+            "3. Despiece y pese en la balanza: Costilla (32 kg), Vacío (16 kg), Tapa Cuadril (8 kg), Colita de Cuadril (5 kg), Carnaza Negra (24 kg), Puchero de Primera (14 kg), Grasa y Hueso Blanco (19 kg).",
+            "4. Verifique la suma: 118 kg netos + 2 kg de desbaste por frío = 120 kg (100% de cuadre).",
+            "5. Confirme la operación: el stock de cuarto trasero baja a 0 y se dan de alta los kilos de cada corte listo para la venta.",
+          ],
+          keyLesson:
+            "Registrar el desposte el mismo momento en que se corta evita que el POS facture cortes 'sin stock' y mantiene la rentabilidad real de la carnicería en el PyG diario.",
+        },
+      ],
+      commonErrors: [
+        {
+          error: "Diferencia de peso superior al 3% entre el animal entero y los cortes",
+          cause: "Se omitió pesar el hueso blanco de descarte o la balanza de corte tenía tara residual.",
+          solution:
+            "Reverifique el peso del hueso y la grasa residual. La balanza debe volver a 0.000 kg antes de asentar cada corte.",
+        },
+      ],
+      shortcutsOrHotkeys: [
+        { key: "F4", action: "Iniciar nuevo desposte" },
+        { key: "F7", action: "Tarar balanza de carnicería" },
+      ],
+      tips: [
+        "Las mermas de recorte magro deben enviarse de inmediato a la picadora para elaborar carne molida especial y evitar degradación por contacto con el aire.",
+      ],
       faq: [
         { q: "¿Puedo vender cortes directos del desposte?", a: "Sí, cada corte queda habilitado en la vitrina y se vende por kilo en el POS con su precio cargado." },
       ],

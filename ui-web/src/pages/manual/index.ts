@@ -4,8 +4,7 @@ import { ventasCategory } from "./data/ventas"
 import { inventarioCategory } from "./data/inventario"
 import { operacionesCategory } from "./data/operaciones"
 import { abastecimientoCategory } from "./data/abastecimiento"
-import { tesoreriaCategory } from "./data/tesoreria"
-import { cuentasCategory } from "./data/cuentas"
+import { finanzasCategory } from "./data/finanzas"
 import { crmCategory } from "./data/crm"
 import { integracionesCategory } from "./data/integraciones"
 import { sistemaCategory } from "./data/sistema"
@@ -16,8 +15,7 @@ export const MANUAL_CATEGORIES: ManualCategory[] = [
   inventarioCategory,
   operacionesCategory,
   abastecimientoCategory,
-  tesoreriaCategory,
-  cuentasCategory,
+  finanzasCategory,
   crmCategory,
   integracionesCategory,
   sistemaCategory,
