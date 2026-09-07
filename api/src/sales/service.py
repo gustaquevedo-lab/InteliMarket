@@ -1455,6 +1455,26 @@ async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
     )
     devueltos = {str(sid): float(qty) for sid, qty in devueltos_result.all() if sid is not None}
 
+    # Búsqueda complementaria de código de barras para productos que no lo tengan directo
+    product_ids_without_bc = [p.id for _, p in rows if p and not p.codigo_barra]
+    pack_bc_map = {}
+    if product_ids_without_bc:
+        from api.src.pack_barcodes.models import ProductPackBarcode
+        try:
+            pb_res = await db.execute(
+                select(ProductPackBarcode.product_id, ProductPackBarcode.codigo_barra)
+                .where(
+                    ProductPackBarcode.product_id.in_(product_ids_without_bc),
+                    ProductPackBarcode.activo == True,
+                )
+                .order_by(ProductPackBarcode.created_at.asc())
+            )
+            for pid, bc in pb_res.all():
+                if pid not in pack_bc_map and bc:
+                    pack_bc_map[pid] = bc
+        except Exception:
+            pass
+
     return [
         {
             "id": str(i.id),
@@ -1463,7 +1483,7 @@ async def get_sale_items(db: AsyncSession, sale_id: str) -> list[dict]:
             "descripcion": i.descripcion or (p.nombre if p else None) or "Producto",
             "product_name": p.nombre if p else (i.descripcion or "Producto"),
             "product_sku": p.sku if p else None,
-            "codigo_barra": p.codigo_barra if p else None,
+            "codigo_barra": (p.codigo_barra or pack_bc_map.get(p.id)) if p else None,
             "cantidad": float(i.cantidad),
             "cantidad_devuelta": devueltos.get(str(i.id), 0.0),
             "cantidad_disponible": max(0.0, float(i.cantidad) - devueltos.get(str(i.id), 0.0)),

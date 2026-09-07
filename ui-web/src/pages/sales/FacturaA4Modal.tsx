@@ -353,7 +353,12 @@ export default function FacturaA4Modal({
               padding: 0 !important;
               background: #fff !important;
               color: #000 !important;
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+              font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+              -webkit-font-smoothing: antialiased !important;
+            }
+            .font-mono {
+              font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace !important;
+              font-variant-numeric: tabular-nums !important;
             }
             #facturas-print-container {
               display: block !important;
@@ -513,6 +518,19 @@ export default function FacturaA4Modal({
             page-break-after: auto !important;
             break-after: auto !important;
           }
+        }
+
+        /* ── Tipografía Nítida y de Alta Fidelidad para Factura A4 (sin alterar espacio) ── */
+        .factura-a4-page {
+          font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+          font-feature-settings: 'tnum' on, 'lnum' on;
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          text-rendering: optimizeLegibility;
+        }
+        .factura-a4-page .font-mono {
+          font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace !important;
+          font-variant-numeric: tabular-nums !important;
         }
       `}</style>
 
@@ -805,33 +823,37 @@ export default function FacturaA4Modal({
                             const v10 = tasa === 10 || tasa > 5 ? lineTotal : 0
 
                             const itemCode =
-                              item.product_sku ||
                               item.codigo_barra ||
+                              item.barcode ||
+                              item.product_barcode ||
+                              item.product_codigo_barra ||
+                              item.product_sku ||
+                              item.sku ||
                               (item.product_id ? String(item.product_id).slice(0, 8) : "—")
 
                             const itemDesc = item.descripcion || item.product_name || "Producto"
 
                             return (
                               <tr key={`item-${page.pageNumber}-${idx}`} className="h-[15.5px] hover:bg-gray-50/50 text-[7.5px]">
-                                <td className="py-0 px-1 border-r border-black text-center font-mono font-semibold text-[7.5px]">
+                                <td className="py-0 px-1 border-r border-black text-center font-mono font-bold text-black text-[7.5px] leading-[15.5px]">
                                   {cant}
                                 </td>
-                                <td className="py-0 px-1 border-r border-black font-mono text-[7.5px] text-gray-700">
+                                <td className="py-0 px-1 border-r border-black font-mono text-[7.5px] text-black font-bold tracking-tighter leading-[15.5px] text-center truncate max-w-[95px]" title={itemCode}>
                                   {itemCode}
                                 </td>
-                                <td className="py-0 px-1.5 border-r border-black uppercase font-medium truncate max-w-[280px]" title={itemDesc}>
+                                <td className="py-0 px-1.5 border-r border-black uppercase font-bold text-black truncate max-w-[280px] leading-[15.5px] tracking-tight" title={itemDesc}>
                                   {itemDesc}
                                 </td>
-                                <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">
+                                <td className="py-0 px-1 border-r border-black text-right font-mono font-semibold text-black text-[7.5px] tabular-nums leading-[15.5px]">
                                   {formatPYG(pu)}
                                 </td>
-                                <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">
+                                <td className="py-0 px-1 border-r border-black text-right font-mono font-semibold text-black text-[7.5px] tabular-nums leading-[15.5px]">
                                   {exenta > 0 ? formatPYG(exenta) : "0"}
                                 </td>
-                                <td className="py-0 px-1 border-r border-black text-right font-mono text-[7.5px]">
+                                <td className="py-0 px-1 border-r border-black text-right font-mono font-semibold text-black text-[7.5px] tabular-nums leading-[15.5px]">
                                   {v5 > 0 ? formatPYG(v5) : "0"}
                                 </td>
-                                <td className="py-0 px-1 text-right font-mono font-semibold text-[7.5px]">
+                                <td className="py-0 px-1 text-right font-mono font-bold text-black text-[7.5px] tabular-nums leading-[15.5px]">
                                   {v10 > 0 ? formatPYG(v10) : "0"}
                                 </td>
                               </tr>
