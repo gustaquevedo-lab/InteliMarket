@@ -149,11 +149,38 @@ async def list_sales(
     estado: str | None = Query(None),
     user_id: str | None = Query(None),
     session_id: str | None = Query(None),
-    limit: int = Query(50, le=500),
+    search: str | None = Query(None, description="Búsqueda por número comprobante, RUC/CI o nombre del cliente"),
+    punto_emision: str | None = Query(None),
+    condicion: str | None = Query(None),
+    tipo_comprobante: str | None = Query(None),
+    fecha_desde: str | None = Query(None),
+    fecha_hasta: str | None = Query(None),
+    desde: str | None = Query(None),
+    hasta: str | None = Query(None),
+    all_dates: bool = Query(False, description="Ignorar rango de fechas al buscar"),
+    limit: int = Query(50, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_sales(db, company_id, customer_id, estado, user_id=user_id, session_id=session_id, limit=limit, offset=offset)
+    f_desde = fecha_desde or desde
+    f_hasta = fecha_hasta or hasta
+    return await service.list_sales(
+        db,
+        company_id,
+        customer_id=customer_id,
+        estado=estado,
+        fecha_desde=f_desde,
+        fecha_hasta=f_hasta,
+        user_id=user_id,
+        session_id=session_id,
+        search=search,
+        punto_emision=punto_emision,
+        condicion=condicion,
+        tipo_comprobante=tipo_comprobante,
+        all_dates=all_dates,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/sales/{sale_id}", response_model=SaleResponse)

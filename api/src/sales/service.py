@@ -1177,52 +1177,115 @@ async def list_sales(
     company_id: str,
     customer_id: str | None = None,
     estado: str | None = None,
-    fecha_desde: datetime | None = None,
-    fecha_hasta: datetime | None = None,
+    fecha_desde: datetime | str | None = None,
+    fecha_hasta: datetime | str | None = None,
     user_id: str | None = None,
     session_id: str | None = None,
+    search: str | None = None,
+    punto_emision: str | None = None,
+    condicion: str | None = None,
+    tipo_comprobante: str | None = None,
+    all_dates: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Sale]:
     from api.src.customers.models import Customer
+    from zoneinfo import ZoneInfo
+    asuncion_tz = ZoneInfo("America/Asuncion")
+
     query = (
-        select(Sale, Customer, SalePayment)
+        select(Sale, Customer)
         .outerjoin(Customer, Customer.id == Sale.customer_id)
-        .outerjoin(SalePayment, SalePayment.sale_id == Sale.id)
         .where(Sale.company_id == company_id)
     )
     if customer_id:
         query = query.where(Sale.customer_id == customer_id)
     if estado:
         query = query.where(Sale.estado == estado)
-    if fecha_desde:
-        query = query.where(Sale.fecha >= fecha_desde)
-    if fecha_hasta:
-        query = query.where(Sale.fecha <= fecha_hasta)
     if user_id:
         query = query.where(Sale.user_id == user_id)
     if session_id:
         query = query.where(Sale.session_id == session_id)
-    query = query.order_by(Sale.fecha.desc()).limit(limit * 2).offset(offset)
+    if punto_emision and punto_emision != "todos":
+        query = query.where(Sale.numero.like(f"{punto_emision}%"))
+    if condicion and condicion != "todas":
+        if condicion == "credito":
+            query = query.where(Sale.condicion.in_(["credito", "credito_extra_club"]))
+        else:
+            query = query.where(Sale.condicion == condicion)
+    if tipo_comprobante and tipo_comprobante != "todos":
+        query = query.where(Sale.tipo_comprobante == tipo_comprobante)
+
+    # Búsqueda directa en Base de Datos (Número comprobante, RUC/CI, CDC o Cliente)
+    if search and search.strip():
+        s_term = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Sale.numero.ilike(s_term),
+                Sale.numero_interno.ilike(s_term),
+                Sale.cdc.ilike(s_term),
+                Customer.razon_social.ilike(s_term),
+                Customer.nombre_fantasia.ilike(s_term),
+                Customer.ruc.ilike(s_term),
+                Customer.ci.ilike(s_term),
+                Customer.telefono.ilike(s_term),
+            )
+        )
+
+    # Filtro de fechas respetando la zona horaria del negocio America/Asuncion
+    if not all_dates:
+        if fecha_desde:
+            try:
+                if isinstance(fecha_desde, str):
+                    fd_dt = datetime.strptime(fecha_desde[:10], "%Y-%m-%d").replace(tzinfo=asuncion_tz)
+                else:
+                    fd_dt = fecha_desde
+                query = query.where(Sale.fecha >= fd_dt)
+            except Exception:
+                pass
+        if fecha_hasta:
+            try:
+                if isinstance(fecha_hasta, str):
+                    fh_dt = datetime.strptime(fecha_hasta[:10], "%Y-%m-%d").replace(
+                        hour=23, minute=59, second=59, microsecond=999999, tzinfo=asuncion_tz
+                    )
+                else:
+                    fh_dt = fecha_hasta
+                query = query.where(Sale.fecha <= fh_dt)
+            except Exception:
+                pass
+
+    query = query.order_by(Sale.fecha.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     rows = result.all()
-    sales_dict = {}
-    for sale, cust, payment in rows:
-        if sale.id not in sales_dict:
-            fp = payment.forma_pago if payment else (
-                "EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"
-            )
-            c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
-            c_doc = cust.ruc or cust.ci or cust.telefono if cust else None
-            c_ec = cust.extra_club_numero if cust else None
-            setattr(sale, "forma_pago", fp)
-            setattr(sale, "customer_nombre", c_name)
-            setattr(sale, "customer_doc", c_doc)
-            setattr(sale, "customer_extra_club", c_ec)
-            sales_dict[sale.id] = sale
-            if len(sales_dict) >= limit:
-                break
-    return list(sales_dict.values())
+    if not rows:
+        return []
+
+    sale_ids = [s.id for s, _ in rows]
+    payments_res = await db.execute(
+        select(SalePayment).where(SalePayment.sale_id.in_(sale_ids))
+    )
+    payments_by_sale: dict[uuid.UUID, str] = {}
+    for p in payments_res.scalars().all():
+        if p.sale_id not in payments_by_sale:
+            payments_by_sale[p.sale_id] = p.forma_pago
+
+    sales_list = []
+    for sale, cust in rows:
+        fp = payments_by_sale.get(
+            sale.id,
+            "EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO"
+        )
+        c_name = cust.razon_social or cust.nombre_fantasia if cust else "Consumidor Final"
+        c_doc = cust.ruc or cust.ci or cust.telefono if cust else None
+        c_ec = cust.extra_club_numero if cust else None
+        setattr(sale, "forma_pago", fp)
+        setattr(sale, "customer_nombre", c_name)
+        setattr(sale, "customer_doc", c_doc)
+        setattr(sale, "customer_extra_club", c_ec)
+        sales_list.append(sale)
+
+    return sales_list
 
 
 async def get_sales_today(db: AsyncSession, company_id: str) -> dict:

@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect, useMemo, useCallback } from "react"
 import {
   Search, ShoppingCart, TrendingUp, Eye, Loader2, FileDown, Download, Filter,
   X, DollarSign, CreditCard, Plus, RotateCcw, Printer, FileText,
   Receipt, ShieldCheck, FileSpreadsheet, Layers, CheckCircle2, AlertTriangle,
   Calendar, ArrowUpRight, Banknote, Award, RefreshCw, Clock, Building,
-  Check, ChevronRight
+  Check, ChevronRight, Database
 } from "lucide-react"
 import { api, type Sale, type Customer } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -53,6 +53,8 @@ export default function SalesPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("todas")
   const [selectedPunto, setSelectedPunto] = useState<string>("todos")
   const [search, setSearch] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  const [allDates, setAllDates] = useState(false)
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date()
     d.setDate(d.getDate() - 30)
@@ -80,15 +82,30 @@ export default function SalesPage() {
   const timbradoNC = "18545636"
   const timbradoVencimiento = "31/12/2026"
 
-  const fetchData = async () => {
+  // Debounce para búsqueda en vivo directamente contra PostgreSQL
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  const fetchData = useCallback(async () => {
     setLoading(true)
     try {
+      const isSearchActive = Boolean(debouncedSearch.trim())
       const [salesData, customersData] = await Promise.allSettled([
         api.sales.list({
-          desde: dateFrom || undefined,
-          hasta: dateTo || undefined,
+          desde: allDates ? undefined : (dateFrom || undefined),
+          hasta: allDates ? undefined : (dateTo || undefined),
+          search: isSearchActive ? debouncedSearch.trim() : undefined,
+          punto_emision: selectedPunto !== "todos" ? selectedPunto : undefined,
+          condicion: statusFilter !== "todas" ? statusFilter : undefined,
+          tipo_comprobante: activeTab === "notas_credito" ? "nota_credito" : undefined,
+          all_dates: allDates,
+          limit: isSearchActive ? 200 : 100,
         }),
-        api.customers.list(),
+        customers.length === 0 ? api.customers.list() : Promise.resolve(customers),
       ])
 
       if (salesData.status === "fulfilled") {
@@ -97,19 +114,19 @@ export default function SalesPage() {
         setSales([])
       }
 
-      if (customersData.status === "fulfilled") {
-        setCustomers(customersData.value || [])
+      if (customersData.status === "fulfilled" && customers.length === 0) {
+        setCustomers((customersData as any).value || [])
       }
     } catch (err: any) {
-      toast.error("Error al cargar ventas", err.message)
+      toast.error("Error al consultar comprobantes en base de datos", err.message)
     } finally {
       setLoading(false)
     }
-  }
+  }, [dateFrom, dateTo, debouncedSearch, selectedPunto, statusFilter, activeTab, allDates, customers.length])
 
   useEffect(() => {
     fetchData()
-  }, [dateFrom, dateTo])
+  }, [fetchData])
 
   useEffect(() => {
     api.companies.list().then((comps) => {
@@ -158,17 +175,9 @@ export default function SalesPage() {
       if (statusFilter === "credito" && s.condicion !== "credito" && s.condicion !== "credito_extra_club") return false
       if (statusFilter === "canceladas" && s.estado !== "cancelado") return false
 
-      if (search.trim()) {
-        const q = search.toLowerCase()
-        const num = (s.numero || "").toLowerCase()
-        const custName = (customersMap.get(s.customer_id)?.razon_social || s.customer_name || "").toLowerCase()
-        const custRuc = (customersMap.get(s.customer_id)?.ruc || s.customer_ruc || "").toLowerCase()
-        return num.includes(q) || custName.includes(q) || custRuc.includes(q)
-      }
-
       return true
     })
-  }, [sales, selectedPunto, activeTab, statusFilter, search, customersMap])
+  }, [sales, selectedPunto, activeTab, statusFilter])
 
   const kpis = useMemo(() => {
     let totalMonto = 0
@@ -398,67 +407,124 @@ export default function SalesPage() {
       </div>
 
       {/* 🔍 BARRA DE HERRAMIENTAS & FILTROS GLASSMORPHISM */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por Nº comprobante, RUC/CI o nombre del cliente..."
-            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={selectedPunto}
-            onChange={(e) => setSelectedPunto(e.target.value)}
-            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
-          >
-            {PUNTOS_EMISION.map((pe) => (
-              <option key={pe.id} value={pe.id}>
-                {pe.nombre}
-              </option>
-            ))}
-          </select>
-
-          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs">
-            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 w-4 h-4 text-slate-400 top-3" />
             <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="bg-transparent font-mono text-[11px] outline-none text-slate-700 dark:text-slate-300"
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Consultar DB por Nº comprobante (ej: 001-015-0000146 o 146), RUC, CI o Cliente..."
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl pl-10 pr-24 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-            <span className="text-slate-400">→</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="bg-transparent font-mono text-[11px] outline-none text-slate-700 dark:text-slate-300"
-            />
+            <div className="absolute right-3 top-2.5 flex items-center gap-1.5">
+              {loading && debouncedSearch && (
+                <div className="flex items-center gap-1 text-[10px] text-blue-500 font-medium">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span className="hidden sm:inline">DB</span>
+                </div>
+              )}
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800"
+                  title="Limpiar búsqueda"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
-          >
-            <option value="todas">Todas las Condiciones</option>
-            <option value="contado">Solo Contado</option>
-            <option value="credito">Solo Crédito / Extra Club</option>
-            <option value="canceladas">Solo Anuladas</option>
-          </select>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setAllDates(!allDates)}
+              className={`px-3 py-2 rounded-2xl border text-xs font-bold transition flex items-center gap-1.5 shadow-xs ${
+                allDates
+                  ? "bg-blue-50 dark:bg-blue-950/60 border-blue-400 text-blue-700 dark:text-blue-300 ring-1 ring-blue-400"
+                  : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+              title="Consultar en toda la base de datos sin límite de fechas (130k+ ventas)"
+            >
+              <Database className="w-3.5 h-3.5 text-blue-500" />
+              <span>{allDates ? "Todo el Historial (DB)" : "Filtrar Fechas"}</span>
+            </button>
 
-          <button
-            onClick={fetchData}
-            className="p-2.5 text-slate-400 hover:text-blue-500 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-sm"
-            title="Recargar datos"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
+            <select
+              value={selectedPunto}
+              onChange={(e) => setSelectedPunto(e.target.value)}
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+            >
+              {PUNTOS_EMISION.map((pe) => (
+                <option key={pe.id} value={pe.id}>
+                  {pe.nombre}
+                </option>
+              ))}
+            </select>
+
+            {!allDates && (
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="bg-transparent font-mono text-[11px] outline-none text-slate-700 dark:text-slate-300"
+                />
+                <span className="text-slate-400">→</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="bg-transparent font-mono text-[11px] outline-none text-slate-700 dark:text-slate-300"
+                />
+              </div>
+            )}
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+            >
+              <option value="todas">Todas las Condiciones</option>
+              <option value="contado">Solo Contado</option>
+              <option value="credito">Solo Crédito / Extra Club</option>
+              <option value="canceladas">Solo Anuladas</option>
+            </select>
+
+            <button
+              onClick={fetchData}
+              className="p-2.5 text-slate-400 hover:text-blue-500 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-sm"
+              title="Recargar datos de base de datos"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
         </div>
+
+        {debouncedSearch.trim() && (
+          <div className="flex items-center justify-between text-xs bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 px-3.5 py-2 rounded-xl text-blue-800 dark:text-blue-300">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Database className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+              <span>
+                Consulta directa en Base de Datos para: <strong className="font-mono">"{debouncedSearch}"</strong>
+                {allDates ? " (en todo el historial de ventas)" : ` (período ${dateFrom} al ${dateTo})`}
+                {" · "}
+                <span className="font-bold">{filteredSales.length} comprobantes encontrados</span>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="text-[11px] underline font-semibold hover:text-blue-900 dark:hover:text-blue-100 shrink-0 ml-2"
+            >
+              Limpiar búsqueda
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 📊 TABLA DE VENTAS Y COMPROBANTES */}

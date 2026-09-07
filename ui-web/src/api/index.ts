@@ -845,7 +845,20 @@ export const api = {
     delete: (id: string) => client.delete<void>(`/v1/customers/${id}`),
   },
   sales: {
-    list: (params?: { fecha_desde?: string; fecha_hasta?: string; desde?: string; hasta?: string; estado?: string }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
+    list: (params?: {
+      fecha_desde?: string
+      fecha_hasta?: string
+      desde?: string
+      hasta?: string
+      estado?: string
+      search?: string
+      punto_emision?: string
+      condicion?: string
+      tipo_comprobante?: string
+      all_dates?: boolean
+      limit?: number
+      offset?: number
+    }) => client.get<Sale[]>(`/v1/companies/${COMPANY_ID}/sales`, params as any),
     get: (id: string) => client.get<Sale>(`/v1/sales/${id}`),
     create: (data: Partial<Sale> & { items: SaleItem[]; payments?: { forma_pago: string; monto: number; moneda?: string }[]; admin_override_credito?: boolean }) => client.post<Sale>("/v1/sales", data),
     cancel: (id: string) => client.post<void>(`/v1/sales/${id}/cancel`),
