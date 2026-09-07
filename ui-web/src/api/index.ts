@@ -375,6 +375,8 @@ export interface Product360Response {
   metricas_financieras: {
     precio_venta: number
     precio_regular?: number
+    precio_venta_promedio_real?: number
+    precio_venta_promedio_30d?: number
     costo_unitario: number
     costo_promedio?: number
     ultimo_costo?: number
@@ -382,7 +384,30 @@ export interface Product360Response {
     margen_bruto_monto: number
     margen_bruto_pct: number
     markup_pct: number
+    margen_lista_pct?: number
+    margen_lista_monto?: number
+    descuento_medio_escala_pct?: number
+    diferencial_margen_pct?: number
     valor_inventario?: number
+  }
+  margen_ponderado_analisis?: {
+    precio_lista: number
+    precio_promedio_real: number
+    precio_promedio_30d: number
+    costo_promedio_ppp: number
+    ultimo_costo: number
+    margen_bruto_real_pct: number
+    margen_bruto_real_monto: number
+    markup_real_pct: number
+    margen_bruto_real_30d_pct: number
+    margen_lista_nominal_pct: number
+    margen_lista_nominal_monto: number
+    markup_lista_pct: number
+    descuento_medio_escala_pct: number
+    diferencial_margen_pct: number
+    unidades_totales_vendidas: number
+    monto_total_vendido: number
+    tickets_totales_count: number
   }
   costos_estructura?: {
     costo_promedio: number

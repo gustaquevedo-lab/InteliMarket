@@ -5,7 +5,7 @@ import {
   CheckCircle2, Info, Clock, Star, Truck, Phone, Mail, MapPin,
   Zap, BarChart3, Activity, ArrowUpRight, ArrowDownRight, Box,
   Percent, Gift, Calendar, Scale, Loader2, ChevronRight, FileText,
-  RefreshCw, Eye, Hash, Filter, ArrowRight, ShieldCheck, Check
+  RefreshCw, Eye, Hash, Filter, ArrowRight, ShieldCheck, Check, Calculator
 } from "lucide-react"
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis,
@@ -129,19 +129,39 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
   const s = data.stock
   const escalas = data.escalas_precio || []
 
-  // Estructura de costos completa
+  // Estructura de Costos y Margen Ponderado Real
+  const margenPond = data.margen_ponderado_analisis || {
+    precio_lista: m.precio_venta,
+    precio_promedio_real: m.precio_venta_promedio_real || m.precio_venta,
+    precio_promedio_30d: m.precio_venta_promedio_30d || m.precio_venta,
+    costo_promedio_ppp: m.costo_promedio || m.costo_unitario || 0,
+    ultimo_costo: m.ultimo_costo || p.ultimo_costo || m.costo_unitario || 0,
+    margen_bruto_real_pct: m.margen_bruto_pct,
+    margen_bruto_real_monto: m.margen_bruto_monto,
+    markup_real_pct: m.markup_pct,
+    margen_bruto_real_30d_pct: m.margen_bruto_pct,
+    margen_lista_nominal_pct: m.margen_lista_pct || m.margen_bruto_pct,
+    margen_lista_nominal_monto: m.margen_lista_monto || m.margen_bruto_monto,
+    markup_lista_pct: m.markup_pct,
+    descuento_medio_escala_pct: m.descuento_medio_escala_pct || 0,
+    diferencial_margen_pct: m.diferencial_margen_pct || 0,
+    unidades_totales_vendidas: r.ventas_ultimos_30d_unidades,
+    monto_total_vendido: r.ventas_ultimos_30d_gs,
+    tickets_totales_count: 0,
+  }
+
   const costos = data.costos_estructura || {
-    costo_promedio: Number(m.costo_promedio || m.costo_unitario || 0),
-    ultimo_costo: Number(m.ultimo_costo || p.ultimo_costo || m.costo_unitario || 0),
+    costo_promedio: margenPond.costo_promedio_ppp,
+    ultimo_costo: margenPond.ultimo_costo,
     costo_landed: Number(m.costo_landed || 0),
     metodo_costeo: "PPP (Promedio Ponderado)",
     variacion_costo_pct: 0,
-    margen_sobre_promedio_pct: m.margen_bruto_pct,
-    margen_sobre_ultimo_pct: m.margen_bruto_pct,
-    markup_sobre_promedio_pct: m.markup_pct,
-    markup_sobre_ultimo_pct: m.markup_pct,
-    ganancia_unitaria_promedio: m.margen_bruto_monto,
-    ganancia_unitaria_ultimo: m.margen_bruto_monto,
+    margen_sobre_promedio_pct: margenPond.margen_bruto_real_pct,
+    margen_sobre_ultimo_pct: margenPond.margen_bruto_real_pct,
+    markup_sobre_promedio_pct: margenPond.markup_real_pct,
+    markup_sobre_ultimo_pct: margenPond.markup_real_pct,
+    ganancia_unitaria_promedio: margenPond.margen_bruto_real_monto,
+    ganancia_unitaria_ultimo: margenPond.margen_bruto_real_monto,
   }
 
   // Kardex unificado (lee kardex_reciente o kardex como fallback)
@@ -173,11 +193,6 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
   const newMargenPct = newPriceNum > 0 ? (newMargenMonto / newPriceNum) * 100 : 0
   const newMarkup = costoBaseSim > 0 ? (newMargenMonto / costoBaseSim) * 100 : 0
 
-  // Margen sobre último costo en la simulación
-  const newMargenUltimo = costos.ultimo_costo > 0 && newPriceNum > 0
-    ? ((newPriceNum - costos.ultimo_costo) / newPriceNum) * 100
-    : newMargenPct
-
   const handleSavePrice = useCallback(async () => {
     if (!newPriceNum || newPriceNum <= 0) { toast.error("Precio inválido", "Ingrese un precio mayor a 0"); return }
     setSavingPrice(true)
@@ -195,30 +210,34 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
     setIaText(null)
     try {
       const context = {
-        producto: p.nombre, sku: p.sku, precio_venta: m.precio_venta,
-        costo_promedio_ppp: costos.costo_promedio, ultimo_costo: costos.ultimo_costo,
-        margen_promedio_pct: costos.margen_sobre_promedio_pct,
-        margen_ultimo_pct: costos.margen_sobre_ultimo_pct,
+        producto: p.nombre, sku: p.sku,
+        precio_lista: margenPond.precio_lista,
+        precio_venta_promedio_real: margenPond.precio_promedio_real,
+        costo_promedio_ppp: margenPond.costo_promedio_ppp,
+        ultimo_costo: margenPond.ultimo_costo,
+        margen_bruto_real_pct: margenPond.margen_bruto_real_pct,
+        margen_lista_nominal_pct: margenPond.margen_lista_nominal_pct,
+        erosion_margen_escalas_pct: margenPond.diferencial_margen_pct,
+        descuento_medio_escala_pct: margenPond.descuento_medio_escala_pct,
+        unidades_vendidas: margenPond.unidades_totales_vendidas,
         stock_total: s.total_fisico, demanda_diaria: r.demanda_diaria_estimada,
-        autonomia_dias: r.autonomia_dias, ventas_30d: r.ventas_ultimos_30d_unidades,
-        escalas_mayoristas: escalas.length,
+        autonomia_dias: r.autonomia_dias, escalas_mayoristas: escalas.length,
         promociones_vigentes: (data.promociones as any[])?.filter((pr: any) => pr.es_vigente_hoy).length || 0,
         proveedor: (data.supplier_info as any)?.razon_social || "No asignado",
-        estado_stock: r.estado_stock,
       }
       const res = await (api as any).generalAgent.chat(
-        `Analizá este producto de supermercado como gerente de categoría. Datos: ${JSON.stringify(context)}.
+        `Analizá este producto de supermercado como gerente comercial y de categoría mayorista. Datos: ${JSON.stringify(context)}.
 Dame en formato estructurado:
-1) Diagnóstico de rentabilidad comparando Costo Promedio (PPP) vs Último Costo de compra.
-2) Evaluación de escalas mayoristas y rotación en góndola.
-3) Alertas o recomendación accionable concreta (subir/mantener precio, reponer stock o armar promo).
+1) Diagnóstico de Margen Real Ponderado (PVP promedio real vs Costo PPP) y el impacto del escalonado mayorista.
+2) Evaluación de si la escala de precios actual defiende la rentabilidad o erosiona demasiado el margen.
+3) Acción sugerida concreta: renegociar con proveedor, ajustar precios o modificar la cantidad mínima de escala.
 Español paraguayo comercial, máx 200 palabras con viñetas •.`,
         []
       )
       setIaText(typeof res === "string" ? res : (res as any)?.reply || (res as any)?.response || "Sin respuesta")
     } catch { setIaText("⚠️ No se pudo obtener el análisis IA en este momento.") }
     finally { setIaLoading(false) }
-  }, [data, m, p, r, s, costos, escalas])
+  }, [data, m, p, r, s, costos, escalas, margenPond])
 
   const promoVigente = (data.promociones as any[])?.find((pr: any) => pr.es_vigente_hoy)
   const hasPromo = !!promoVigente
@@ -272,25 +291,31 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                 <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex-shrink-0"><X className="w-5 h-5" /></button>
               </div>
 
-              {/* Strip de métricas ejecutivas */}
+              {/* Strip de métricas ejecutivas con MARGEN REAL PONDERADO */}
               <div className="flex flex-wrap items-center gap-3 mt-2.5 text-xs">
-                <div className="flex items-center gap-1 font-black text-slate-900 dark:text-white">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase">Venta:</span>
-                  <DollarSign className="w-3.5 h-3.5 text-emerald-500" />{formatPYG(m.precio_venta)}
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">PVP Promedio:</span>
+                  <span className="font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(margenPond.precio_promedio_real)}</span>
+                  {margenPond.precio_promedio_real !== m.precio_venta && (
+                    <span className="text-[10px] text-slate-400 font-mono">(Lista: {formatPYG(m.precio_venta)})</span>
+                  )}
                 </div>
                 <div className="text-slate-300 dark:text-slate-700">|</div>
                 <div className="flex items-center gap-1 font-bold text-amber-600 dark:text-amber-400">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase">PPP:</span>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">Costo PPP:</span>
                   {formatPYG(costos.costo_promedio)}
                 </div>
                 <div className="text-slate-300 dark:text-slate-700">|</div>
-                <div className="flex items-center gap-1 font-bold text-slate-600 dark:text-slate-300">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase">Últ. Costo:</span>
-                  {formatPYG(costos.ultimo_costo)}
-                </div>
-                <div className="text-slate-300 dark:text-slate-700">|</div>
-                <div className="flex items-center gap-1 text-emerald-600 font-black">
-                  <Percent className="w-3 h-3" /> {costos.margen_sobre_promedio_pct}% mg.
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">Margen Real:</span>
+                  <span className={`font-black font-mono text-sm px-2 py-0.5 rounded-md ${margenPond.margen_bruto_real_pct >= 20 ? "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600" : margenPond.margen_bruto_real_pct >= 10 ? "bg-amber-50 dark:bg-amber-950/60 text-amber-600" : "bg-rose-50 dark:bg-rose-950/60 text-rose-600"}`}>
+                    {margenPond.margen_bruto_real_pct}%
+                  </span>
+                  {margenPond.diferencial_margen_pct !== 0 && (
+                    <span className="text-[10px] text-slate-400" title={`Margen Teórico de Lista: ${margenPond.margen_lista_nominal_pct}%`}>
+                      ({margenPond.diferencial_margen_pct > 0 ? `+${margenPond.diferencial_margen_pct}%` : `${margenPond.diferencial_margen_pct}%`})
+                    </span>
+                  )}
                 </div>
                 <div className="text-slate-300 dark:text-slate-700">|</div>
                 <div className={`font-bold ${s.total_fisico <= 0 ? "text-rose-500" : r.autonomia_dias < 7 ? "text-amber-500" : "text-emerald-500"}`}>
@@ -329,60 +354,68 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
              ════════════════════════════════════════════════════════════════════════ */}
           {tab === "overview" && (
             <div className="space-y-5">
+              {/* KPIs Principales con Margen Real Ponderado */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <KpiCard label="Precio de Venta" color="indigo" icon={DollarSign} value={formatPYG(m.precio_venta)} sub={`IVA ${p.iva_tasa}% incl.`} />
-                <KpiCard label="Margen Bruto (PPP)" color="emerald" icon={Percent} value={`${costos.margen_sobre_promedio_pct}%`} sub={`Ganancia: ${formatPYG(costos.ganancia_unitaria_promedio)}/un`} />
+                <KpiCard label="Venta Promedio (PVP Real)" color="indigo" icon={DollarSign} value={formatPYG(margenPond.precio_promedio_real)} sub={`Lista: ${formatPYG(m.precio_venta)}`} />
+                <KpiCard label="Margen Real Ponderado" color={margenPond.margen_bruto_real_pct >= 20 ? "emerald" : margenPond.margen_bruto_real_pct >= 10 ? "amber" : "rose"} icon={Percent} value={`${margenPond.margen_bruto_real_pct}%`} sub={`Ganancia: ${formatPYG(margenPond.margen_bruto_real_monto)} / un.`} />
+                <KpiCard label="Costo Promedio (PPP)" color="amber" icon={TrendingDown} value={formatPYG(costos.costo_promedio)} sub={`Último: ${formatPYG(costos.ultimo_costo)}`} />
                 <KpiCard label="Stock Total" color={s.total_fisico <= 0 ? "rose" : r.autonomia_dias < 7 ? "amber" : "sky"} icon={Box} value={`${s.total_fisico} ${p.unidad_medida}`} sub={`Autonomía: ${r.autonomia_dias} días`} />
-                <KpiCard label="Ventas (30 días)" color="violet" icon={TrendingUp} value={`${r.ventas_ultimos_30d_unidades} un.`} sub={formatPYG(r.ventas_ultimos_30d_gs)} />
               </div>
 
-              {/* Módulo Ejecutivo: Costos & Valuación */}
-              <div className="bg-gradient-to-br from-slate-50 to-indigo-50/30 dark:from-slate-900 dark:to-indigo-950/20 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
-                <div className="flex items-center justify-between mb-3">
+              {/* Módulo Especial: Análisis de Margen Real Ponderado vs Margen de Lista */}
+              <div className="bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-3xl p-5 shadow-xl border border-indigo-900/60 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+                <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-indigo-500" />
-                    <h4 className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">Estructura de Costos & Valuación Oficial</h4>
+                    <Calculator className="w-5 h-5 text-emerald-400" />
+                    <div>
+                      <h3 className="text-sm font-black uppercase tracking-wider text-white">Margen Bruto Ponderado por Escalas de Precio</h3>
+                      <p className="text-[11px] text-slate-400">Calculado rigurosamente: <strong>(PVP Promedio Real - Costo PPP) ÷ PVP Promedio Real</strong></p>
+                    </div>
                   </div>
-                  <button onClick={() => setTab("costos")} className="text-[11px] text-indigo-600 hover:text-indigo-700 font-bold flex items-center gap-1">
-                    Ver análisis detallado <ArrowRight className="w-3 h-3" />
-                  </button>
+                  <span className="text-[10px] font-bold uppercase px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Retail & Mayorista
+                  </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                  <div className="bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl p-3">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Costo Promedio (PPP)</span>
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">Oficial</span>
-                    </div>
-                    <p className="text-xl font-black font-mono text-slate-800 dark:text-white">{formatPYG(costos.costo_promedio)}</p>
-                    <p className="text-[10px] text-emerald-600 font-bold mt-1">Margen negocio: {costos.margen_sobre_promedio_pct}%</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs pt-1">
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-sm">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Precio Venta Promedio (Real)</span>
+                    <p className="text-2xl font-black font-mono text-emerald-400">{formatPYG(margenPond.precio_promedio_real)}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Ponderado en caja sobre {margenPond.unidades_totales_vendidas > 0 ? `${Number(margenPond.unidades_totales_vendidas).toLocaleString("es-PY")} un.` : "catálogo"}</p>
                   </div>
-                  <div className="bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl p-3">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Último Costo Compra</span>
-                      {costos.variacion_costo_pct !== 0 && (
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${costos.variacion_costo_pct > 0 ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
-                          {costos.variacion_costo_pct > 0 ? `+${costos.variacion_costo_pct}%` : `${costos.variacion_costo_pct}%`}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xl font-black font-mono text-slate-800 dark:text-white">{formatPYG(costos.ultimo_costo)}</p>
-                    <p className="text-[10px] text-indigo-600 font-bold mt-1">Margen sobre últ.: {costos.margen_sobre_ultimo_pct}%</p>
+
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-sm">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Costo Promedio (PPP)</span>
+                    <p className="text-2xl font-black font-mono text-amber-400">{formatPYG(costos.costo_promedio)}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Valuación contable de inventario</p>
                   </div>
-                  <div className="bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl p-3">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Escalas Mayoristas</span>
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 font-bold">{escalas.length} niveles</span>
-                    </div>
-                    {escalas.length > 0 ? (
-                      <div>
-                        <p className="text-base font-black font-mono text-slate-800 dark:text-white">Desde {formatPYG(escalas[0].precio_unitario)}</p>
-                        <p className="text-[10px] text-amber-600 font-bold mt-1">Min. {escalas[0].min_qty} un. (-{escalas[0].descuento_pct}%)</p>
-                      </div>
-                    ) : (
-                      <p className="text-slate-400 text-[11px] italic mt-2">Sin precios escalonados</p>
-                    )}
+
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-sm">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Margen Bruto Real Efectivo</span>
+                    <p className={`text-2xl font-black font-mono ${margenPond.margen_bruto_real_pct >= 20 ? "text-emerald-400" : margenPond.margen_bruto_real_pct >= 10 ? "text-amber-400" : "text-rose-400"}`}>
+                      {margenPond.margen_bruto_real_pct}%
+                    </p>
+                    <p className="text-[10px] text-slate-300 font-mono mt-1">Ganancia: {formatPYG(margenPond.margen_bruto_real_monto)} / un.</p>
+                  </div>
+
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-sm">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Impacto Escalas Mayoristas</span>
+                    <p className="text-2xl font-black font-mono text-violet-400">
+                      {margenPond.descuento_medio_escala_pct > 0 ? `-${margenPond.descuento_medio_escala_pct}%` : "0%"}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1">Lista: {margenPond.margen_lista_nominal_pct}% ({margenPond.diferencial_margen_pct}%)</p>
                   </div>
                 </div>
+
+                {margenPond.descuento_medio_escala_pct > 0 && (
+                  <div className="mt-3 text-[11px] text-slate-300 bg-white/5 border border-white/10 rounded-xl p-2.5 flex items-center gap-2">
+                    <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                    <span>
+                      Al venderse por escalas mayoristas, el precio promedio real alcanzado ({formatPYG(margenPond.precio_promedio_real)}) es menor al precio unitario de lista ({formatPYG(margenPond.precio_lista)}). Esto genera un <strong>descuento ponderado del {margenPond.descuento_medio_escala_pct}%</strong> absorbido por el negocio a cambio de mayor rotación y volumen.
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Gráficos de Ventas y Compras */}
@@ -479,12 +512,25 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
              ════════════════════════════════════════════════════════════════════════ */}
           {tab === "precios" && (
             <div className="space-y-6">
-              {/* KPIs de Precios y Márgenes */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <KpiCard label="Precio Unitario" color="indigo" icon={DollarSign} value={formatPYG(m.precio_venta)} sub={`IVA ${p.iva_tasa}% incluido`} />
-                <KpiCard label="Margen sobre PPP" color="emerald" icon={Percent} value={`${costos.margen_sobre_promedio_pct}%`} sub={`Ganancia: ${formatPYG(costos.ganancia_unitaria_promedio)}`} />
-                <KpiCard label="Margen sobre Últ. Costo" color="amber" icon={Percent} value={`${costos.margen_sobre_ultimo_pct}%`} sub={`Ganancia: ${formatPYG(costos.ganancia_unitaria_ultimo)}`} />
-                <KpiCard label="Markup Aplicado" color="violet" icon={ArrowUpRight} value={`${costos.markup_sobre_promedio_pct}%`} sub="Sobre costo PPP" />
+              {/* Comparador de Precios y Márgenes Ponderados */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Precio Unitario de Lista</span>
+                  <p className="text-2xl font-black font-mono text-indigo-700 dark:text-indigo-300">{formatPYG(m.precio_venta)}</p>
+                  <p className="text-[11px] text-slate-500 mt-1">Margen teórico: <strong>{margenPond.margen_lista_nominal_pct}%</strong></p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">PVP Promedio Real (en Caja)</span>
+                  <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(margenPond.precio_promedio_real)}</p>
+                  <p className="text-[11px] text-slate-500 mt-1">Margen Real: <strong className="text-emerald-600">{margenPond.margen_bruto_real_pct}%</strong> (PVP vs PPP)</p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-amber-50/50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Costo Promedio Ponderado (PPP)</span>
+                  <p className="text-2xl font-black font-mono text-amber-600 dark:text-amber-400">{formatPYG(costos.costo_promedio)}</p>
+                  <p className="text-[11px] text-slate-500 mt-1">Últ. Costo de compra: {formatPYG(costos.ultimo_costo)}</p>
+                </div>
               </div>
 
               {/* Candado de Seguridad y Modificación de Precio */}
@@ -494,7 +540,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                     {locked ? <Lock className="w-5 h-5 text-slate-400" /> : <Unlock className="w-5 h-5 text-indigo-500" />}
                     <div>
                       <h4 className="text-sm font-black text-slate-800 dark:text-white">{locked ? "Candado de Precio Activo" : "Modificación de Precio Desbloqueada"}</h4>
-                      <p className="text-[10px] text-slate-400">{locked ? "El precio está protegido contra cambios accidentales. Presioná Desbloquear para editar." : "Modificá el precio y evaluá en tiempo real los márgenes proyectados."}</p>
+                      <p className="text-[10px] text-slate-400">{locked ? "El precio de lista está protegido contra cambios accidentales. Presioná Desbloquear para editar." : "Modificá el precio y evaluá en tiempo real los márgenes proyectados."}</p>
                     </div>
                   </div>
                   <button onClick={() => setLocked(l => !l)} className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors ${locked ? "bg-slate-200 dark:bg-slate-800 text-slate-600 hover:bg-amber-100 hover:text-amber-700" : "bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700"}`}>
@@ -506,7 +552,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                   <div className="space-y-4">
                     <div className="flex items-end gap-3">
                       <div className="flex-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nuevo Precio de Venta Unitario (₲)</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nuevo Precio de Venta Unitario de Lista (₲)</label>
                         <input type="number" min={0} value={newPrice} onChange={e => setNewPrice(e.target.value)}
                           className="w-full px-4 py-3 rounded-xl border-2 border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 font-black text-lg text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono" />
                       </div>
@@ -518,13 +564,15 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                     {newPriceNum > 0 && (
                       <div className="grid grid-cols-3 gap-3">
                         <div className={`p-3 rounded-xl border text-center ${newMargenPct >= 20 ? "bg-emerald-50 border-emerald-200" : newMargenPct >= 10 ? "bg-amber-50 border-amber-200" : "bg-rose-50 border-rose-200"}`}>
-                          <p className="text-[10px] text-slate-500 font-bold uppercase">Margen sobre PPP</p>
+                          <p className="text-[10px] text-slate-500 font-bold uppercase">Margen Proyectado sobre PPP</p>
                           <p className={`text-xl font-black font-mono ${newMargenPct >= 20 ? "text-emerald-600" : newMargenPct >= 10 ? "text-amber-600" : "text-rose-600"}`}>{newMargenPct.toFixed(1)}%</p>
                           <p className="text-[9px] text-slate-400 font-mono">Ganancia: {formatPYG(newMargenMonto)}</p>
                         </div>
                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-center">
                           <p className="text-[10px] text-slate-500 font-bold uppercase">Margen sobre Últ. Costo</p>
-                          <p className="text-xl font-black font-mono text-slate-800 dark:text-white">{newMargenUltimo.toFixed(1)}%</p>
+                          <p className="text-xl font-black font-mono text-slate-800 dark:text-white">
+                            {costos.ultimo_costo > 0 ? (((newPriceNum - costos.ultimo_costo) / newPriceNum) * 100).toFixed(1) : newMargenPct.toFixed(1)}%
+                          </p>
                           <p className="text-[9px] text-slate-400 font-mono">Últ: {formatPYG(costos.ultimo_costo)}</p>
                         </div>
                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-center">
@@ -618,14 +666,14 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                           {/* Fila base 1 unidad */}
                           <tr className="bg-slate-50/50 dark:bg-slate-900/50">
-                            <td className="p-3 font-bold text-slate-600">Base (Unidad)</td>
+                            <td className="p-3 font-bold text-slate-600">Base (Unidad Minorista)</td>
                             <td className="p-3 text-right font-mono">1 un.</td>
                             <td className="p-3 text-right font-mono font-black text-slate-900 dark:text-white">{formatPYG(m.precio_venta)}</td>
                             <td className="p-3 text-right font-mono text-slate-400">—</td>
                             <td className="p-3 text-right font-mono text-slate-400">—</td>
                             <td className="p-3 text-right font-mono text-slate-700">{formatPYG(m.precio_venta)}</td>
-                            <td className="p-3 text-right font-mono font-bold text-emerald-600">{costos.margen_sobre_promedio_pct}%</td>
-                            <td className="p-3 text-right font-mono text-violet-600">{costos.markup_sobre_promedio_pct}%</td>
+                            <td className="p-3 text-right font-mono font-bold text-emerald-600">{margenPond.margen_lista_nominal_pct}%</td>
+                            <td className="p-3 text-right font-mono text-violet-600">{margenPond.markup_lista_pct}%</td>
                           </tr>
                           {escalas.map((esc, i) => (
                             <tr key={esc.id || i} className="hover:bg-indigo-50/40 dark:hover:bg-slate-800/60 transition-colors">
@@ -666,8 +714,8 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                   <p className="text-3xl font-black font-mono text-amber-700 dark:text-amber-400 my-1">{formatPYG(costos.costo_promedio)}</p>
                   <p className="text-xs text-slate-500 mt-2">Valuación contable de inventario según entradas y salidas acumuladas.</p>
                   <div className="mt-4 pt-3 border-t border-amber-200/60 dark:border-amber-900/60 flex justify-between text-xs">
-                    <span className="text-slate-500">Margen sobre PPP:</span>
-                    <span className="font-bold font-mono text-emerald-600">{costos.margen_sobre_promedio_pct}% ({formatPYG(costos.ganancia_unitaria_promedio)})</span>
+                    <span className="text-slate-500">Margen Real sobre PPP:</span>
+                    <span className="font-bold font-mono text-emerald-600">{margenPond.margen_bruto_real_pct}% ({formatPYG(margenPond.margen_bruto_real_monto)})</span>
                   </div>
                 </div>
 

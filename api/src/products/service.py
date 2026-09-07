@@ -809,7 +809,7 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
             "markup_pct": mrk_esc,
         })
 
-    # 12. Métricas Financieras y Estructura de Costos Detallada
+    # 12. Métricas Financieras y Estructura de Costos Detallada (Margen Real Ponderado por Escalas)
     costo_prom = float(product.costo_promedio or 0)
     costo_ult = float(product.ultimo_costo or 0)
     costo_landed = float(getattr(product, "costo_landed", None) or 0)
@@ -820,22 +820,65 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
     if costo_ult <= 0 and costo_prom > 0:
         costo_ult = costo_prom
     costo_principal = costo_prom if costo_prom > 0 else costo_ult
+    costo_ppp = costo_principal
 
     precio = float(product.precio_venta or 0)
     precio_regular = float(getattr(product, "precio_regular", None) or precio)
 
-    # Variación porcentual de Último Costo vs Costo Promedio (PPP)
+    # 12b. Consulta de Ventas Históricas Totales para calcular Precio de Venta Promedio Ponderado Real
+    sales_agg_rows = await db.execute(
+        text("""
+            SELECT 
+                COALESCE(SUM(si.cantidad), 0) as total_qty,
+                COALESCE(SUM(si.total), 0) as total_monto,
+                COUNT(DISTINCT sa.id) as tickets_count
+            FROM sale_items si
+            JOIN sales sa ON sa.id = si.sale_id
+            WHERE si.product_id = :p_id
+        """),
+        {"p_id": p_uuid}
+    )
+    s_agg = sales_agg_rows.first()
+    ventas_totales_qty = float(s_agg.total_qty) if s_agg else 0.0
+    ventas_totales_monto = float(s_agg.total_monto) if s_agg else 0.0
+    tickets_count = int(s_agg.tickets_count) if s_agg else 0
+
+    # Precio Venta Promedio Ponderado Real (PVP Efectivo en Caja)
+    if ventas_totales_qty > 0:
+        pvp_promedio_real = round(ventas_totales_monto / ventas_totales_qty, 2)
+    else:
+        pvp_promedio_real = precio
+
+    if ventas_30d_qty > 0:
+        pvp_promedio_30d = round(ventas_30d_monto / ventas_30d_qty, 2)
+    else:
+        pvp_promedio_30d = pvp_promedio_real
+
+    # MARGEN BRUTO REAL PONDERADO: (PVP Promedio Real - Costo Promedio PPP) / PVP Promedio Real
+    margen_real_monto = pvp_promedio_real - costo_ppp
+    margen_real_pct = round((margen_real_monto / pvp_promedio_real * 100), 1) if pvp_promedio_real > 0 else 0.0
+    markup_real_pct = round((margen_real_monto / costo_ppp * 100), 1) if costo_ppp > 0 else 0.0
+
+    # Margen Real de los últimos 30 días
+    margen_real_30d_monto = pvp_promedio_30d - costo_ppp
+    margen_real_30d_pct = round((margen_real_30d_monto / pvp_promedio_30d * 100), 1) if pvp_promedio_30d > 0 else 0.0
+
+    # MARGEN TEÓRICO DE LISTA (Unitario Minorista sin escala)
+    margen_lista_monto = precio - costo_ppp
+    margen_lista_pct = round((margen_lista_monto / precio * 100), 1) if precio > 0 else 0.0
+    markup_lista_pct = round((margen_lista_monto / costo_ppp * 100), 1) if costo_ppp > 0 else 0.0
+
+    # Variación de Último Costo vs Costo Promedio (PPP)
     variacion_costo_pct = round(((costo_ult - costo_prom) / costo_prom * 100), 1) if costo_prom > 0 else 0.0
 
-    # Margen sobre Costo Promedio
-    margen_prom_monto = precio - costo_prom
-    margen_prom_pct = round((margen_prom_monto / precio * 100), 1) if precio > 0 else 0.0
-    markup_prom_pct = round((margen_prom_monto / costo_prom * 100), 1) if costo_prom > 0 else 0.0
-
-    # Margen sobre Último Costo
-    margen_ult_monto = precio - costo_ult
-    margen_ult_pct = round((margen_ult_monto / precio * 100), 1) if precio > 0 else 0.0
+    # Margen sobre Último Costo con PVP Promedio
+    margen_ult_monto = pvp_promedio_real - costo_ult
+    margen_ult_pct = round((margen_ult_monto / pvp_promedio_real * 100), 1) if pvp_promedio_real > 0 else 0.0
     markup_ult_pct = round((margen_ult_monto / costo_ult * 100), 1) if costo_ult > 0 else 0.0
+
+    # Descuento Promedio Otorgado por Escalas Mayoristas y Promos
+    descuento_medio_escala_pct = round(((precio - pvp_promedio_real) / precio * 100), 1) if precio > 0 else 0.0
+    diferencial_margen_pct = round(margen_real_pct - margen_lista_pct, 1)
 
     valor_inventario_costo = total_stock * (costo_principal if costo_principal > 0 else precio * 0.7)
     valor_inventario_venta = total_stock * precio
@@ -846,12 +889,32 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         "costo_landed": costo_landed,
         "metodo_costeo": getattr(product, "metodo_costeo", "PPP") or "PPP",
         "variacion_costo_pct": variacion_costo_pct,
-        "margen_sobre_promedio_pct": margen_prom_pct,
+        "margen_sobre_promedio_pct": margen_real_pct,
         "margen_sobre_ultimo_pct": margen_ult_pct,
-        "markup_sobre_promedio_pct": markup_prom_pct,
+        "markup_sobre_promedio_pct": markup_real_pct,
         "markup_sobre_ultimo_pct": markup_ult_pct,
-        "ganancia_unitaria_promedio": margen_prom_monto,
+        "ganancia_unitaria_promedio": margen_real_monto,
         "ganancia_unitaria_ultimo": margen_ult_monto,
+    }
+
+    margen_ponderado_analisis = {
+        "precio_lista": precio,
+        "precio_promedio_real": pvp_promedio_real,
+        "precio_promedio_30d": pvp_promedio_30d,
+        "costo_promedio_ppp": costo_ppp,
+        "ultimo_costo": costo_ult,
+        "margen_bruto_real_pct": margen_real_pct,
+        "margen_bruto_real_monto": margen_real_monto,
+        "markup_real_pct": markup_real_pct,
+        "margen_bruto_real_30d_pct": margen_real_30d_pct,
+        "margen_lista_nominal_pct": margen_lista_pct,
+        "margen_lista_nominal_monto": margen_lista_monto,
+        "markup_lista_pct": markup_lista_pct,
+        "descuento_medio_escala_pct": descuento_medio_escala_pct,
+        "diferencial_margen_pct": diferencial_margen_pct,
+        "unidades_totales_vendidas": ventas_totales_qty,
+        "monto_total_vendido": ventas_totales_monto,
+        "tickets_totales_count": tickets_count,
     }
 
     kardex_resumen = {
@@ -910,15 +973,22 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
         "metricas_financieras": {
             "precio_venta": precio,
             "precio_regular": precio_regular,
+            "precio_venta_promedio_real": pvp_promedio_real,
+            "precio_venta_promedio_30d": pvp_promedio_30d,
             "costo_unitario": costo_principal,
             "costo_promedio": costo_prom,
             "ultimo_costo": costo_ult,
             "costo_landed": costo_landed,
-            "margen_bruto_monto": margen_prom_monto,
-            "margen_bruto_pct": margen_prom_pct,
-            "markup_pct": markup_prom_pct,
+            "margen_bruto_monto": margen_real_monto,
+            "margen_bruto_pct": margen_real_pct,
+            "markup_pct": markup_real_pct,
+            "margen_lista_pct": margen_lista_pct,
+            "margen_lista_monto": margen_lista_monto,
+            "descuento_medio_escala_pct": descuento_medio_escala_pct,
+            "diferencial_margen_pct": diferencial_margen_pct,
             "valor_inventario": valor_inventario_costo,
         },
+        "margen_ponderado_analisis": margen_ponderado_analisis,
         "costos_estructura": costos_estructura,
         "escalas_precio": escalas_precio,
         "historial_ventas_mensual": historial_ventas,
