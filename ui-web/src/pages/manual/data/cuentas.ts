@@ -3,7 +3,7 @@ import type { ManualCategory } from "../types"
 
 export const cuentasCategory: ManualCategory = {
   id: "cuentas",
-  label: "Finanzas & Tesorería",
+  label: "Cuentas & Finanzas",
   icon: DollarSign,
   gradient: "from-amber-600 to-orange-700",
   description: "Las cuentas corrientes del negocio: a cobrar, a pagar, gastos operativos, el PyG diario por departamento y la gestión financiera.",
@@ -15,7 +15,7 @@ export const cuentasCategory: ManualCategory = {
       path: "/accounts-receivable",
       icon: DollarSign,
       tagline: "Documentos, aging y scoring de la cartera",
-      category: "Finanzas & Tesorería",
+      category: "Cuentas & Finanzas",
       color: "emerald",
       description:
         "Todas las cuentas a cobrar de los clientes: documentos (facturas con saldo), el análisis de vejeces (aging: corriente, 30, 60, 90+ días), scoring de clientes morosos y la gestión de recibos de cobranza.",
@@ -89,7 +89,7 @@ export const cuentasCategory: ManualCategory = {
       path: "/payments",
       icon: ReceiptText,
       tagline: "Facturas de proveedores y lotes de pago",
-      category: "Finanzas & Tesorería",
+      category: "Cuentas & Finanzas",
       color: "blue",
       description:
         "Las cuentas a pagar: facturas de proveedores conciliadas, el aging de pagos, los lotes de pago (seleccione varias facturas y páguelas juntas) y el historial de pagos realizados con retención.",
@@ -154,7 +154,7 @@ export const cuentasCategory: ManualCategory = {
       path: "/gastos",
       icon: ReceiptText,
       tagline: "Gastos, fondos rotativos y caja chica",
-      category: "Finanzas & Tesorería",
+      category: "Cuentas & Finanzas",
       color: "orange",
       description:
         "Registre todos los gastos operativos del día: pagos de servicios, compras menores, caja chica y fondos rotativos por sector. Con categorías, centros de costo y la recomendación financiera.",
@@ -205,7 +205,7 @@ export const cuentasCategory: ManualCategory = {
       path: "/pyg-diario",
       icon: DollarSign,
       tagline: "Resultado diario por departamento",
-      category: "Finanzas & Tesorería",
+      category: "Cuentas & Finanzas",
       color: "fuchsia",
       description:
         "El estado de resultado día a día y por departamento: ventas, costos, márgenes y gastos directos de cada sector (carnicería, verdulería, panadería, almacén). Sepa qué sector gana y qué sector pierde.",
@@ -270,7 +270,7 @@ export const cuentasCategory: ManualCategory = {
       path: "/financiero",
       icon: Building,
       tagline: "Tesorería, presupuestos y flujo de caja",
-      category: "Finanzas & Tesorería",
+      category: "Cuentas & Finanzas",
       color: "slate",
       description:
         "La vista financiera consolidada: dashboard financiero, cuentas por pagar con lotes, proyección de flujo de caja y presupuestos por rubro (carnes, lácteos, panificados, limpieza…).",

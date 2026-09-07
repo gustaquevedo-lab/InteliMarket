@@ -3,7 +3,7 @@ import type { ManualCategory } from "../types"
 
 export const tesoreriaCategory: ManualCategory = {
   id: "tesoreria",
-  label: "Finanzas & Tesorería",
+  label: "Tesorería & Caja",
   icon: Banknote,
   gradient: "from-amber-600 to-orange-700",
   description: "La plata del negocio de punta a punta: caja, bóveda, bancos y cheques. Control total del efectivo, la custodia y los medios de cobro.",
@@ -15,7 +15,7 @@ export const tesoreriaCategory: ManualCategory = {
       path: "/caja",
       icon: Banknote,
       tagline: "Cierres, cortes y arqueos de las cajeras",
-      category: "Finanzas & Tesorería",
+      category: "Tesorería & Caja",
       color: "amber",
       description:
         "Gestiona la operación de cada caja: apertura, movimientos del turno, arqueo de cierre (efectivo real vs sistema), pagos de clientes y corte final. Incluye el ranking de cajeros solidarios (donaciones).",
@@ -81,7 +81,7 @@ export const tesoreriaCategory: ManualCategory = {
       path: "/boveda",
       icon: Landmark,
       tagline: "La custodia del efectivo del negocio",
-      category: "Finanzas & Tesorería",
+      category: "Tesorería & Caja",
       color: "amber",
       description:
         "La bóveda es el punto central de custodia: recibe las remesas de las cajas, administra remesas a bancos, concilia el calce de efectivo y genera informes de movimientos.",
@@ -142,7 +142,7 @@ export const tesoreriaCategory: ManualCategory = {
       path: "/bancos",
       icon: Landmark,
       tagline: "Posición bancaria y conciliación",
-      category: "Finanzas & Tesorería",
+      category: "Tesorería & Caja",
       color: "blue",
       description:
         "Consolida las cuentas bancarias de la empresa: saldos, movimientos, conciliación bancaria y el flujo entre bancos. Los movimientos se clasifican (depósitos, pagos, cheques) para alimentar la gestión financiera.",
@@ -201,7 +201,7 @@ export const tesoreriaCategory: ManualCategory = {
       path: "/cheques",
       icon: CreditCard,
       tagline: "Cartera de cheques recibidos y emitidos",
-      category: "Finanzas & Tesorería",
+      category: "Tesorería & Caja",
       color: "indigo",
       description:
         "Gestione los cheques del negocio: recibidos de clientes (en cartera, depositados, cobrados, rechazados) y emitidos a proveedores, con el detalle de los bancos paraguayos.",
