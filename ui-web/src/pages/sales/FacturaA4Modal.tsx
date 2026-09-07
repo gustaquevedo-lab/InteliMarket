@@ -104,8 +104,8 @@ function numeroALetras(monto: number): string {
   return resultado.trim()
 }
 
-// 25 ítems por hoja A4 aprovechan con exactitud el formato estándar SET sin gaps
-const ITEMS_PER_PAGE = 25
+// 30 ítems por hoja A4 aprovechan con exactitud el formato estándar SET y rellenan la hoja sin gaps
+const ITEMS_PER_PAGE = 30
 
 export default function FacturaA4Modal({
   sale,
@@ -509,7 +509,7 @@ export default function FacturaA4Modal({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                {items.length} ítems · 25 líneas estándar por hoja · Foliado oficial
+                {items.length} ítems · 30 líneas estándar por hoja · Foliado oficial
               </p>
             </div>
           </div>
@@ -732,7 +732,7 @@ export default function FacturaA4Modal({
                               WebkitPrintColorAdjust: "exact",
                               printColorAdjust: "exact",
                             }}
-                            className="font-bold border-b border-black"
+                            className="h-[20px] font-bold border-b border-black"
                           >
                             <td className="py-0.5 px-1 border-r border-black text-center font-mono text-[8px]">—</td>
                             <td className="py-0.5 px-1 border-r border-black font-mono text-[8px] text-center">TRANSP.</td>
@@ -781,7 +781,7 @@ export default function FacturaA4Modal({
                             const itemDesc = item.descripcion || item.product_name || "Producto"
 
                             return (
-                              <tr key={`item-${page.pageNumber}-${idx}`} className="hover:bg-gray-50/50">
+                              <tr key={`item-${page.pageNumber}-${idx}`} className="h-[20px] hover:bg-gray-50/50">
                                 <td className="py-0.5 px-1 border-r border-black text-center font-mono font-semibold text-[8px]">
                                   {cant}
                                 </td>
@@ -808,7 +808,7 @@ export default function FacturaA4Modal({
                           })
                         )}
 
-                        {/* Renglones en blanco para completar exactamente los 25 renglones por página */}
+                        {/* Renglones en blanco para completar exactamente los 30 renglones por página */}
                         {Array.from({
                           length: Math.max(
                             0,
@@ -818,7 +818,7 @@ export default function FacturaA4Modal({
                               (!page.isLastPage ? 1 : 0)
                           ),
                         }).map((_, blankIdx) => (
-                          <tr key={`blank-${page.pageNumber}-${blankIdx}`} className="h-[18px]">
+                          <tr key={`blank-${page.pageNumber}-${blankIdx}`} className="h-[20px]">
                             <td className="py-0.5 px-1 border-r border-black text-center text-transparent select-none">&nbsp;</td>
                             <td className="py-0.5 px-1 border-r border-black text-transparent select-none">&nbsp;</td>
                             <td className="py-0.5 px-1.5 border-r border-black text-transparent select-none">&nbsp;</td>
@@ -838,7 +838,7 @@ export default function FacturaA4Modal({
                               WebkitPrintColorAdjust: "exact",
                               printColorAdjust: "exact",
                             }}
-                            className="font-bold border-t border-black"
+                            className="h-[20px] font-bold border-t border-black"
                           >
                             <td className="py-0.5 px-1 border-r border-black text-center font-mono text-[8px]">—</td>
                             <td className="py-0.5 px-1 border-r border-black font-mono text-[8px] text-center">TRANSP.</td>
