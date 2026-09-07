@@ -543,7 +543,7 @@ export default function PriceCheckerKioskPage() {
                   )}
                 </div>
 
-                <div className={`grid gap-2 ${scannedProduct.packs.length > 0 || scannedProduct.escalas.length > 0 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
+                <div className={`grid gap-2 ${scannedProduct.packs.length > 0 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
                 {scannedProduct.en_promocion ? (
                   <div className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-br from-emerald-500/15 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-500 dark:border-emerald-400 shadow-xl space-y-2">
                     
@@ -614,8 +614,10 @@ export default function PriceCheckerKioskPage() {
                   </div>
                 )}
 
-                {/* 📦 UNA sola card extra: pack/caja si tiene, si no la primera escala mayorista */}
-                {scannedProduct.packs.length > 0 ? (
+                {/* 📦 Card extra al lado del precio de contado: solo si tiene pack/caja.
+                    El total de la escala mayorista se muestra mas abajo, pegado a su
+                    propio precio unitario en la grilla de "Precios Mayoristas". */}
+                {scannedProduct.packs.length > 0 && (
                   <div className="rounded-xl bg-gradient-to-br from-sky-50 via-blue-50 to-sky-100 dark:from-slate-800/90 dark:via-slate-800/60 dark:to-blue-950/40 border-2 border-sky-400 dark:border-sky-500/50 shadow-md overflow-hidden">
                     <div className="px-2 py-1 bg-gradient-to-r from-sky-500 to-blue-500 text-white text-[11px] sm:text-xs font-black uppercase tracking-wider text-center flex items-center justify-center gap-1">
                       <Package className="w-3.5 h-3.5" /> {scannedProduct.packs[0].etiqueta} ({scannedProduct.packs[0].unidades_por_paquete % 1 === 0 ? scannedProduct.packs[0].unidades_por_paquete.toFixed(0) : scannedProduct.packs[0].unidades_por_paquete} un.)
@@ -627,19 +629,7 @@ export default function PriceCheckerKioskPage() {
                       <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">Precio del {scannedProduct.packs[0].etiqueta}</div>
                     </div>
                   </div>
-                ) : scannedProduct.escalas.length > 0 ? (
-                  <div className="rounded-xl bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100 dark:from-slate-800/90 dark:via-slate-800/60 dark:to-orange-950/40 border-2 border-amber-400 dark:border-amber-500/50 shadow-md overflow-hidden">
-                    <div className="px-2 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-[11px] sm:text-xs font-black uppercase tracking-wider text-center flex items-center justify-center gap-1">
-                      <Layers className="w-3.5 h-3.5" /> Mayorista: {scannedProduct.escalas[0].min_qty} un.
-                    </div>
-                    <div className="p-2 sm:p-2.5 text-center">
-                      <div className="font-mono text-slate-900 dark:text-white text-2xl sm:text-3xl font-black tracking-tight" style={monoFont}>
-                        Gs. {Math.round(scannedProduct.escalas[0].precio_unitario * scannedProduct.escalas[0].min_qty).toLocaleString("es-PY")}
-                      </div>
-                      <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">Precio por {scannedProduct.escalas[0].min_qty} un.</div>
-                    </div>
-                  </div>
-                ) : null}
+                )}
                 </div>
 
                 {/* Multimoneda */}
@@ -691,6 +681,11 @@ export default function PriceCheckerKioskPage() {
                           <div className="text-[10px] text-slate-600 dark:text-slate-300 font-extrabold uppercase">
                             Precio Mayorista / un.
                           </div>
+                          {i === 0 && (
+                            <div className="text-xs sm:text-sm font-black text-amber-700 dark:text-amber-300 bg-amber-500/10 rounded-md py-1 mt-1">
+                              Total por {t.min_qty} un.: Gs. {Math.round(t.precio_unitario * t.min_qty).toLocaleString("es-PY")}
+                            </div>
+                          )}
                           {ahorroMay > 0 && (
                             <div className="inline-block px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-black">
                               Ahorrás Gs. {ahorroMay.toLocaleString("es-PY")}
