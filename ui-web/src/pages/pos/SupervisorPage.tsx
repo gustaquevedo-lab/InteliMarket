@@ -11,7 +11,7 @@ import {
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { useTheme } from "../../context/ThemeContext"
-import { api } from "../../api"
+import { api, COMPANY_ID } from "../../api"
 
 const SUPERVISOR_ROLES = ["supervisor", "admin"]
 
@@ -729,7 +729,7 @@ export default function SupervisorPage() {
 
     const connectSse = () => {
       try {
-        const companyId = user?.company_id || "00000000-0000-0000-0000-000000000010"
+        const companyId = COMPANY_ID
         eventSource = api.events.stream(companyId)
 
         eventSource.onopen = () => {
@@ -797,7 +797,7 @@ export default function SupervisorPage() {
       clearTimeout(reconnectTimeout)
       if (eventSource) eventSource.close()
     }
-  }, [isAuthorized, onDuty, user?.company_id, fetchPending, fetchData, emitSound, isSseConnected])
+  }, [isAuthorized, onDuty, fetchPending, fetchData, emitSound, isSseConnected])
 
   // ── DATOS SECUNDARIOS (EQUIPO) ──────────────────────────────────
   const fetchVaultAndTeam = useCallback(async () => {
