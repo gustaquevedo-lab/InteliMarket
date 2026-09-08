@@ -479,81 +479,176 @@ def generate_cierre_sesion_individual_pdf(
     elements.append(Paragraph("<b>1. ARQUEO Y CONCILIACIÓN DE EFECTIVO</b>", styles["Normal"]))
     elements.append(Spacer(1, 4))
 
-    monto_apertura = s.get("monto_apertura") or 0
-    monto_cierre_esperado = s.get("monto_cierre_esperado") or 0
-    monto_cierre = s.get("monto_cierre") or 0
-    diferencia = s.get("diferencia") or 0
-    diferencia_usd = s.get("diferencia_usd") or 0
-    diferencia_brl = s.get("diferencia_brl") or 0
-    contado_usd = s.get("monto_efectivo_usd") or 0
-    contado_brl = s.get("monto_efectivo_brl") or 0
+    recon = s.get("recon")
+    if recon:
+        f_pyg = recon.get("fondo_pyg", 0)
+        f_brl = recon.get("fondo_brl", 0)
+        f_usd = recon.get("fondo_usd", 0)
+        esp_pyg = recon.get("esp_pyg", f_pyg + recon.get("efectivo_pyg", 0) - recon.get("total_drops_gs", 0))
+        esp_brl = recon.get("esp_brl", f_brl + recon.get("efectivo_brl", 0))
+        esp_usd = recon.get("esp_usd", f_usd + recon.get("efectivo_usd", 0))
+        c_pyg = recon.get("contado_pyg", 0)
+        c_brl = recon.get("contado_brl", 0)
+        c_usd = recon.get("contado_usd", 0)
+        dif_consolidada = recon.get("diferencia_consolidada_gs", 0)
+        tasa_brl = recon.get("tasa_brl", 1130)
 
-    arqueo_header = ["Moneda", "Fondo Apertura", "Cobrado Efectivo", "Total Esperado", "Total Contado", "Diferencia", "Auditoría"]
-    arqueo_rows = [arqueo_header]
+        arqueo_header = ["Moneda / Concepto", "Fondo Apertura", "Cobrado Efectivo", "Total Esperado", "Contado Físico", "Dif. Moneda"]
+        arqueo_rows = [arqueo_header]
 
-    # PYG
-    dif_pyg_str = f"{'+' if diferencia >= 0 else ''}{_fmt_gs(diferencia)}"
-    auditoria_pyg = "REVISIÓN" if s.get("requiere_revision") else "EXACTO" if diferencia == 0 else "DESCUADRE"
-    arqueo_rows.append([
-        "PYG (Gs.)",
-        _fmt_gs(monto_apertura),
-        _fmt_gs(s.get("efectivo_cobrado_pyg") or (monto_cierre_esperado - monto_apertura)),
-        _fmt_gs(monto_cierre_esperado),
-        _fmt_gs(monto_cierre),
-        dif_pyg_str,
-        auditoria_pyg,
-    ])
-
-    # USD (si hubo movimiento o conteo)
-    monto_apertura_usd = s.get("monto_apertura_usd") or 0
-    monto_apertura_brl = s.get("monto_apertura_brl") or 0
-    monto_cierre_esperado_usd = s.get("monto_cierre_esperado_usd") or 0
-    monto_cierre_esperado_brl = s.get("monto_cierre_esperado_brl") or 0
-
-    if contado_usd > 0 or s.get("efectivo_usd_esperado") or monto_apertura_usd > 0 or diferencia_usd != 0:
-        dif_usd_str = f"{'+' if diferencia_usd >= 0 else ''}{diferencia_usd:.2f}"
+        dif_pyg = c_pyg - esp_pyg
+        signo_p = "+" if dif_pyg >= 0 else ""
         arqueo_rows.append([
-            "USD (US$)",
-            f"{monto_apertura_usd:.2f}",
-            f"{s.get('efectivo_usd_esperado', 0):.2f}",
-            f"{monto_cierre_esperado_usd:.2f}",
-            f"{contado_usd:.2f}",
-            dif_usd_str,
-            "EXACTO" if diferencia_usd == 0 else "DESCUADRE",
+            "Guaraníes (PYG)",
+            _fmt_gs(f_pyg),
+            _fmt_gs(recon.get("efectivo_pyg", 0)),
+            _fmt_gs(esp_pyg),
+            _fmt_gs(c_pyg),
+            f"{signo_p}{_fmt_gs(dif_pyg)}",
         ])
 
-    # BRL (si hubo movimiento o conteo)
-    if contado_brl > 0 or s.get("efectivo_brl_esperado") or monto_apertura_brl > 0 or diferencia_brl != 0:
-        dif_brl_str = f"{'+' if diferencia_brl >= 0 else ''}{diferencia_brl:.2f}"
+        dif_brl = c_brl - esp_brl
+        signo_b = "+" if dif_brl >= 0 else ""
+        comp_brl_gs = dif_brl * tasa_brl
+        signo_cb = "+" if comp_brl_gs >= 0 else ""
         arqueo_rows.append([
-            "BRL (R$)",
-            f"{monto_apertura_brl:.2f}",
-            f"{s.get('efectivo_brl_esperado', 0):.2f}",
-            f"{monto_cierre_esperado_brl:.2f}",
-            f"{contado_brl:.2f}",
-            dif_brl_str,
-            "EXACTO" if diferencia_brl == 0 else "DESCUADRE",
+            "Reales (R$)",
+            f"R$ {f_brl:.2f}",
+            f"R$ {recon.get('efectivo_brl', 0):.2f}",
+            f"R$ {esp_brl:.2f}",
+            f"R$ {c_brl:.2f}",
+            f"{signo_b}R$ {dif_brl:.2f} ({signo_cb}{comp_brl_gs:,.0f} Gs.)",
         ])
 
-    t_arq = Table(arqueo_rows, colWidths=[24 * mm, 26 * mm, 26 * mm, 26 * mm, 26 * mm, 26 * mm, 26 * mm])
-    style_arq = [
-        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
-        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
-        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
-        ("ALIGN", (1, 0), (5, -1), "RIGHT"),
-        ("ALIGN", (6, 0), (6, -1), "CENTER"),
-        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
-        ("LINEBELOW", (0, 0), (-1, 0), 1.0, HexColor("#94A3B8")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#F8FAFC")]),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-    ]
-    if s.get("requiere_revision") or diferencia != 0:
-        style_arq.append(("TEXTCOLOR", (5, 1), (6, 1), RED))
-    t_arq.setStyle(TableStyle(style_arq))
-    elements.append(t_arq)
-    elements.append(Spacer(1, 10))
+        if c_usd > 0 or esp_usd > 0 or f_usd > 0:
+            dif_usd = c_usd - esp_usd
+            signo_u = "+" if dif_usd >= 0 else ""
+            arqueo_rows.append([
+                "Dólares (US$)",
+                f"US$ {f_usd:.2f}",
+                f"US$ {recon.get('efectivo_usd', 0):.2f}",
+                f"US$ {esp_usd:.2f}",
+                f"US$ {c_usd:.2f}",
+                f"{signo_u}US$ {dif_usd:.2f}",
+            ])
+
+        t_arq = Table(arqueo_rows, colWidths=[35 * mm, 27 * mm, 27 * mm, 27 * mm, 27 * mm, 37 * mm])
+        style_arq = [
+            ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
+            ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+            ("LINEBELOW", (0, 0), (-1, 0), 1.0, HexColor("#94A3B8")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#F8FAFC")]),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ]
+        t_arq.setStyle(TableStyle(style_arq))
+        elements.append(t_arq)
+        elements.append(Spacer(1, 4))
+
+        # Banner de Conciliación Consolidada
+        estado_cuadre = "CUADRADO" if abs(dif_consolidada) < 5000 else ("SOBRANTE" if dif_consolidada > 0 else "FALTANTE")
+        signo_cons = "+" if dif_consolidada >= 0 else ""
+        bg_color = HexColor("#ECFDF5") if estado_cuadre == "CUADRADO" else (HexColor("#FEF3C7") if estado_cuadre == "SOBRANTE" else HexColor("#FEE2E2"))
+        txt_color = HexColor("#065F46") if estado_cuadre == "CUADRADO" else (HexColor("#92400E") if estado_cuadre == "SOBRANTE" else HexColor("#991B1B"))
+
+        resumen_box = [
+            [
+                f"Total Esperado Gaveta: {_fmt_gs(recon.get('esperado_total_gs', 0))}",
+                f"Total Rendido Físico: {_fmt_gs(recon.get('contado_total_gs', 0))}",
+                f"Diferencia Consolidada: {signo_cons}{_fmt_gs(dif_consolidada)}",
+                f"DICTAMEN: {estado_cuadre}",
+            ]
+        ]
+        t_box = Table(resumen_box, colWidths=[45 * mm, 45 * mm, 45 * mm, 45 * mm])
+        t_box.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), bg_color),
+            ("TEXTCOLOR", (0, 0), (-1, -1), txt_color),
+            ("FONTNAME", (0, 0), (-1, -1), FONT_BOLD),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("BOX", (0, 0), (-1, -1), 1.0, txt_color),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(t_box)
+        elements.append(Spacer(1, 10))
+    else:
+        monto_apertura = s.get("monto_apertura") or 0
+        monto_cierre_esperado = s.get("monto_cierre_esperado") or 0
+        monto_cierre = s.get("monto_cierre") or 0
+        diferencia = s.get("diferencia") or 0
+        diferencia_usd = s.get("diferencia_usd") or 0
+        diferencia_brl = s.get("diferencia_brl") or 0
+        contado_usd = s.get("monto_efectivo_usd") or 0
+        contado_brl = s.get("monto_efectivo_brl") or 0
+
+        arqueo_header = ["Moneda", "Fondo Apertura", "Cobrado Efectivo", "Total Esperado", "Total Contado", "Diferencia", "Auditoría"]
+        arqueo_rows = [arqueo_header]
+
+        dif_pyg_str = f"{'+' if diferencia >= 0 else ''}{_fmt_gs(diferencia)}"
+        auditoria_pyg = "REVISIÓN" if s.get("requiere_revision") else "EXACTO" if diferencia == 0 else "DESCUADRE"
+        arqueo_rows.append([
+            "PYG (Gs.)",
+            _fmt_gs(monto_apertura),
+            _fmt_gs(s.get("efectivo_cobrado_pyg") or (monto_cierre_esperado - monto_apertura)),
+            _fmt_gs(monto_cierre_esperado),
+            _fmt_gs(monto_cierre),
+            dif_pyg_str,
+            auditoria_pyg,
+        ])
+
+        monto_apertura_usd = s.get("monto_apertura_usd") or 0
+        monto_apertura_brl = s.get("monto_apertura_brl") or 0
+        monto_cierre_esperado_usd = s.get("monto_cierre_esperado_usd") or 0
+        monto_cierre_esperado_brl = s.get("monto_cierre_esperado_brl") or 0
+
+        if contado_usd > 0 or s.get("efectivo_usd_esperado") or monto_apertura_usd > 0 or diferencia_usd != 0:
+            dif_usd_str = f"{'+' if diferencia_usd >= 0 else ''}{diferencia_usd:.2f}"
+            arqueo_rows.append([
+                "USD (US$)",
+                f"{monto_apertura_usd:.2f}",
+                f"{s.get('efectivo_usd_esperado', 0):.2f}",
+                f"{monto_cierre_esperado_usd:.2f}",
+                f"{contado_usd:.2f}",
+                dif_usd_str,
+                "EXACTO" if diferencia_usd == 0 else "DESCUADRE",
+            ])
+
+        if contado_brl > 0 or s.get("efectivo_brl_esperado") or monto_apertura_brl > 0 or diferencia_brl != 0:
+            dif_brl_str = f"{'+' if diferencia_brl >= 0 else ''}{diferencia_brl:.2f}"
+            arqueo_rows.append([
+                "BRL (R$)",
+                f"{monto_apertura_brl:.2f}",
+                f"{s.get('efectivo_brl_esperado', 0):.2f}",
+                f"{monto_cierre_esperado_brl:.2f}",
+                f"{contado_brl:.2f}",
+                dif_brl_str,
+                "EXACTO" if diferencia_brl == 0 else "DESCUADRE",
+            ])
+
+        t_arq = Table(arqueo_rows, colWidths=[24 * mm, 26 * mm, 26 * mm, 26 * mm, 26 * mm, 26 * mm, 26 * mm])
+        style_arq = [
+            ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#0F172A")),
+            ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("ALIGN", (1, 0), (5, -1), "RIGHT"),
+            ("ALIGN", (6, 0), (6, -1), "CENTER"),
+            ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+            ("LINEBELOW", (0, 0), (-1, 0), 1.0, HexColor("#94A3B8")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#F8FAFC")]),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ]
+        if s.get("requiere_revision") or diferencia != 0:
+            style_arq.append(("TEXTCOLOR", (5, 1), (6, 1), RED))
+        t_arq.setStyle(TableStyle(style_arq))
+        elements.append(t_arq)
+        elements.append(Spacer(1, 10))
 
     # 3. DESGLOSE DE VENTAS POR MEDIO DE PAGO
     elements.append(Paragraph("<b>2. DESGLOSE DE VENTAS POR MEDIOS DE PAGO DEL TURNO</b>", styles["Normal"]))

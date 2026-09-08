@@ -371,7 +371,7 @@ def _format_two_col(left: str, right: str, width: int = 42) -> str:
 
 
 def generate_cierre_escpos(recon: dict) -> dict:
-    """Genera texto formateado y comandos binarios ESC/POS para impresión térmica de arqueo."""
+    """Genera texto formateado y comandos binarios ESC/POS para impresión térmica de arqueo conforme a la Lógica Inmutable de Arqueo."""
     W = 42
     lines = []
     
@@ -382,7 +382,7 @@ def generate_cierre_escpos(recon: dict) -> dict:
     lines.append("RUC: 80150377-9".center(W))
     lines.append("TIMBRADO: 18545636".center(W))
     lines.append("=" * W)
-    lines.append("REIMPRESION DE ARQUEO / CIERRE".center(W))
+    lines.append("CIERRE DE CAJA / ARQUEO".center(W))
     lines.append("-" * W)
     
     # Metadata
@@ -396,60 +396,88 @@ def generate_cierre_escpos(recon: dict) -> dict:
     lines.append(f"Apertura:   {recon['fecha_apertura_str']}")
     lines.append(f"Cierre:     {recon['fecha_cierre_str']}")
     lines.append(f"Cotiz. BRL: 1 R$ = {recon['tasa_brl']:,.0f} Gs.")
-    lines.append(f"Cotiz. USD: 1 U$ = {recon['tasa_usd']:,.0f} Gs.")
+    if recon.get('efectivo_usd', 0) > 0 or recon.get('contado_usd', 0) > 0 or recon.get('fondo_usd', 0) > 0:
+        lines.append(f"Cotiz. USD: 1 U$ = {recon['tasa_usd']:,.0f} Gs.")
     lines.append("-" * W)
     
-    # Medios de pago
-    lines.append("[DESGLOSE DE MEDIOS DE PAGO]")
-    for item in recon["medios_pago_detallados"]:
-        lines.append(_format_two_col(f"  {item['label']}:", item['monto_formateado'], W))
-    lines.append("-" * W)
-    lines.append(_format_two_col("TOTAL VENTAS COBRADAS:", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
+    # 1. Fondos de Apertura Recibidos (Desglosados Bimonetarios)
+    lines.append("[1. FONDOS DE APERTURA RECIBIDOS]")
+    lines.append(_format_two_col("  Fondo Inicial Gs.:", f"{recon['fondo_pyg']:,.0f} Gs.", W))
+    lines.append(_format_two_col("  Fondo Inicial R$ (Vuelto):", f"R$ {recon['fondo_brl']:,.2f}", W))
+    if recon.get('fondo_usd', 0) > 0:
+        lines.append(_format_two_col("  Fondo Inicial US$:", f"US$ {recon['fondo_usd']:,.2f}", W))
     lines.append("-" * W)
 
-    # Terminales operadas (Modelo Nómada)
-    if len(recon.get("terminales_operadas", [])) > 1:
-        lines.append("[TERMINALES FISICAS OPERADAS]")
-        for t in recon["terminales_operadas"]:
-            lines.append(_format_two_col(f"  Punto {t['punto']} ({t['tickets']} tks):", f"{t['total']:,.0f} Gs.", W))
+    # 2. Comprobantes de Pago No Efectivo (para cotejo físico)
+    lines.append("[2. COMPROBANTES DE PAGO NO EFECTIVO]")
+    medios_no_ef = [item for item in recon.get("medios_pago_detallados", []) if "EFECTIVO" not in item.get("clave", "")]
+    tot_no_ef_gs = sum(item["monto_gs"] for item in medios_no_ef)
+    if medios_no_ef:
+        for item in medios_no_ef:
+            lines.append(_format_two_col(f"  {item['label']}:", item['monto_formateado'], W))
         lines.append("-" * W)
-    
-    # Conciliación
-    lines.append("[CONCILIACION EN GUARANIES]")
-    lines.append(_format_two_col("  Fondo Inicial Gs.:", f"{recon['fondo_pyg']:,.0f} Gs.", W))
-    if recon['fondo_brl'] > 0:
-        lines.append(_format_two_col("  Fondo Inicial R$:", f"R$ {recon['fondo_brl']:,.2f} ({recon['fondo_brl_gs']:,.0f} Gs.)", W))
-    if recon['fondo_usd'] > 0:
-        lines.append(_format_two_col("  Fondo Inicial US$:", f"US$ {recon['fondo_usd']:,.2f} ({recon['fondo_usd_gs']:,.0f} Gs.)", W))
-    lines.append(_format_two_col("  TOTAL APERTURA GS:", f"{recon['fondo_total_gs']:,.0f} Gs.", W))
-    lines.append(_format_two_col("  (+) Ventas Efectivo:", f"{recon['ventas_ef_total_gs']:,.0f} Gs.", W))
-    if recon['total_drops_gs'] > 0:
-        lines.append(_format_two_col("  (-) Retiros / Drops:", f"-{recon['total_drops_gs']:,.0f} Gs.", W))
+        lines.append(_format_two_col("  Total Comprobantes:", f"{tot_no_ef_gs:,.0f} Gs.", W))
+    else:
+        lines.append("  (Sin comprobantes no efectivo)")
+    lines.append(_format_two_col("TOTAL FACTURADO (Tickets):", f"{recon['total_cobrado_gs']:,.0f} Gs.", W))
     lines.append("-" * W)
-    lines.append(_format_two_col("TOTAL ESPERADO EN GAVETA:", f"{recon['esperado_total_gs']:,.0f} Gs.", W))
+
+    # 3. Efectivo Esperado en Gaveta
+    lines.append("[3. EFECTIVO ESPERADO EN GAVETA]")
+    lines.append(_format_two_col("  Devolución Fondo Gs.:", f"{recon['fondo_pyg']:,.0f} Gs.", W))
+    lines.append(_format_two_col("  (+) Ventas Efectivo Gs.:", f"{recon.get('efectivo_pyg', 0):,.0f} Gs.", W))
+    if recon.get('total_drops_gs', 0) > 0:
+        lines.append(_format_two_col("  (-) Retiros / Drops Gs.:", f"-{recon['total_drops_gs']:,.0f} Gs.", W))
+    esp_pyg = recon.get('esp_pyg', recon['fondo_pyg'] + recon.get('efectivo_pyg', 0) - recon.get('total_drops_gs', 0))
+    lines.append(_format_two_col("  >> Total Esperado Gs.:", f"{esp_pyg:,.0f} Gs.", W))
+    lines.append("")
+    lines.append(_format_two_col("  Devolución Fondo R$:", f"R$ {recon['fondo_brl']:,.2f}", W))
+    if recon.get('efectivo_brl', 0) > 0:
+        lines.append(_format_two_col("  (+) Cobros en Reales:", f"R$ {recon['efectivo_brl']:,.2f}", W))
+    esp_brl = recon.get('esp_brl', recon['fondo_brl'] + recon.get('efectivo_brl', 0))
+    lines.append(_format_two_col("  >> Total Esperado R$:", f"R$ {esp_brl:,.2f}", W))
+    if recon.get('efectivo_usd', 0) > 0 or recon.get('fondo_usd', 0) > 0:
+        esp_usd = recon['fondo_usd'] + recon.get('efectivo_usd', 0)
+        lines.append(_format_two_col("  >> Total Esperado US$:", f"US$ {esp_usd:,.2f}", W))
     lines.append("-" * W)
-    
-    # Arqueo Gaveta
-    lines.append("[ARQUEO REAL EN GAVETA]")
-    lines.append(_format_two_col("  Contado Gs.:", f"{recon['contado_pyg']:,.0f} Gs.", W))
-    if recon['contado_brl'] > 0 or recon['fondo_brl'] > 0:
-        lines.append(_format_two_col("  Contado R$:", f"R$ {recon['contado_brl']:,.2f} ({recon['contado_brl_gs']:,.0f} Gs.)", W))
-    if recon['contado_usd'] > 0 or recon['fondo_usd'] > 0:
-        lines.append(_format_two_col("  Contado US$:", f"US$ {recon['contado_usd']:,.2f} ({recon['contado_usd_gs']:,.0f} Gs.)", W))
-    lines.append(_format_two_col("TOTAL CONTADO GAVETA GS:", f"{recon['contado_total_gs']:,.0f} Gs.", W))
+
+    # 4. Arqueo Físico Real en Gaveta
+    lines.append("[4. ARQUEO FISICO REAL EN GAVETA]")
+    lines.append(_format_two_col("  Contado Guaraníes:", f"{recon['contado_pyg']:,.0f} Gs.", W))
+    lines.append("  (Fondo devuelto + Recaudación Gs.)")
+    lines.append(_format_two_col("  Contado Reales:", f"R$ {recon['contado_brl']:,.2f}", W))
+    lines.append(f"  ({recon['contado_brl_gs']:,.0f} Gs. equivalentes)")
+    if recon.get('contado_usd', 0) > 0:
+        lines.append(_format_two_col("  Contado Dólares:", f"US$ {recon['contado_usd']:,.2f}", W))
+        lines.append(f"  ({recon['contado_usd_gs']:,.0f} Gs. equivalentes)")
+    lines.append("-" * W)
+    lines.append(_format_two_col("TOTAL RENDIDO EN GAVETA:", f"{recon['contado_total_gs']:,.0f} Gs.", W))
     lines.append("=" * W)
-    
+
+    # 5. Conciliación y Dictamen
     dif = recon['diferencia_consolidada_gs']
     signo = "+" if dif > 0 else ""
     lines.append(_format_two_col("DIFERENCIA CONSOLIDADA GS:", f"{signo}{dif:,.0f} Gs.", W))
     estado_cuadre = "CUADRADO" if abs(dif) < 5000 else ("SOBRANTE" if dif > 0 else "FALTANTE")
-    lines.append(f"ESTADO: {estado_cuadre}".center(W))
+    lines.append(f"DICTAMEN AUDITORIA: {estado_cuadre}".center(W))
     lines.append("=" * W)
+
+    # Detalle de compensación por moneda
+    dif_mon_pyg = recon['contado_pyg'] - esp_pyg
+    dif_mon_brl = recon['contado_brl'] - esp_brl
+    comp_brl_gs = dif_mon_brl * recon['tasa_brl']
+    lines.append("Detalle por Moneda:")
+    signo_p = "+" if dif_mon_pyg >= 0 else ""
+    signo_b = "+" if dif_mon_brl >= 0 else ""
+    signo_cb = "+" if comp_brl_gs >= 0 else ""
+    lines.append(f"  • Guaraníes: {signo_p}{dif_mon_pyg:,.0f} Gs.")
+    lines.append(f"  • Reales:    {signo_b}{dif_mon_brl:,.2f} R$ ({signo_cb}{comp_brl_gs:,.0f} Gs.)")
+    lines.append("-" * W)
     lines.append("")
     lines.append("")
-    lines.append("Firma Cajero/a: _________________________")
+    lines.append("Firma Cajero/a:   ________________________")
     lines.append("")
-    lines.append("Firma Supervisora: ______________________")
+    lines.append("Firma Supervisora: _______________________")
     lines.append("")
     lines.append("")
     
@@ -463,7 +491,7 @@ def generate_cierre_escpos(recon: dict) -> dict:
     escpos_bytes.extend(ESC + b"t\x00")  # Code table PC437
     
     for l in lines:
-        if "=" in l or "EXTRA SUPERMERCADO" in l or "DIFERENCIA" in l or "TOTAL" in l or "ESTADO:" in l:
+        if "=" in l or "EXTRA SUPERMERCADO" in l or "DIFERENCIA" in l or "TOTAL" in l or "DICTAMEN" in l or "FONDOS" in l or "ARQUEO" in l or "ESPERADO" in l:
             escpos_bytes.extend(ESC + b"E\x01")  # Bold on
             escpos_bytes.extend(l.encode("latin1", errors="replace") + b"\n")
             escpos_bytes.extend(ESC + b"E\x00")  # Bold off
@@ -751,6 +779,9 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "efectivo_brl": float(efectivo_brl),
         "efectivo_usd": float(efectivo_usd),
         "ventas_ef_total_gs": float(ventas_ef_total_gs),
+        "esp_pyg": float(fondo_pyg + Decimal(str(efectivo_pyg)) - total_drops_gs),
+        "esp_brl": float(fondo_brl + Decimal(str(efectivo_brl))),
+        "esp_usd": float(fondo_usd + Decimal(str(efectivo_usd))),
         "total_drops_gs": float(total_drops_gs),
         "esperado_total_gs": float(esperado_total_gs),
         "contado_pyg": float(contado_pyg),
@@ -2448,6 +2479,7 @@ async def get_cierre_individual_report_data(db: AsyncSession, session_id: str, c
         "requiere_revision": count.requiere_revision if count else False,
         "observaciones": s.observaciones,
         "estado": s.estado,
+        "recon": recon,
     }
 
     return {
