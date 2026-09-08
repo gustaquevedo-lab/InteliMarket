@@ -13,27 +13,44 @@ Se restaura la última **copia física** y se le aplica el WAL hasta el momento
 elegido. **No se hace sobre la base en producción**: se levanta una instancia
 aparte, se saca lo que hace falta, y recién ahí se decide.
 
-```bash
-# 1. Traer la última copia física y el WAL desde minisforum-ia
-#    (desde minisforum, o pidiendo copia por otro medio: el canal de backup es
-#     de solo escritura a propósito, no permite bajar desde la VM)
+**Se hace EN minisforum-ia**, que es donde ya viven los archivos: tiene el mismo
+Postgres 18.6, es x86_64 y tiene espacio. Además el canal de respaldo es de solo
+escritura a propósito — desde la VM no se puede bajar nada.
 
-# 2. Descomprimir la copia física en un directorio nuevo
-mkdir -p /var/tmp/restore && cd /var/tmp/restore
-tar xzf base.tar.gz -C /var/tmp/restore
-tar xzf pg_wal.tar.gz -C /var/tmp/restore/pg_wal
+```bash
+# Rutas reales (verificadas 08-09-2026):
+#   copia física:  ~/backups-supermercado/basebackup/base_AAAAMMDD-HHMMSS/
+#   WAL:           ~/backups-supermercado/wal/*.gz
+#   dumps lógicos: ~/backups-supermercado/intelimarket_*.dump
+D=$HOME/backups-supermercado
+COPIA=$(ls -1dt $D/basebackup/base_* | head -1)
+
+# 1. Antes que nada: confirmar que la copia está sana
+gzip -t $COPIA/base.tar.gz && echo "copia integra"
+
+# 2. Descomprimir en un directorio NUEVO (nunca sobre algo existente)
+mkdir -p /var/tmp/restore/pg_wal
+tar xzf $COPIA/base.tar.gz    -C /var/tmp/restore
+tar xzf $COPIA/pg_wal.tar.gz  -C /var/tmp/restore/pg_wal
 
 # 3. Indicarle hasta dónde reproducir
 cat > /var/tmp/restore/postgresql.auto.conf <<EOF
-restore_command = 'gunzip -c /ruta/a/wal/%f.gz > %p'
+restore_command = 'gunzip -c $D/wal/%f.gz > %p'
 recovery_target_time = '2026-09-06 14:31:00-03'
 recovery_target_action = 'promote'
 EOF
 touch /var/tmp/restore/recovery.signal
+chmod 700 /var/tmp/restore
 
 # 4. Arrancar esa instancia en OTRO puerto, nunca sobre la de producción
+sudo chown -R postgres:postgres /var/tmp/restore
 sudo -u postgres /usr/lib/postgresql/18/bin/pg_ctl -D /var/tmp/restore -o "-p 5433" start
 ```
+
+La copia física **solo sirve junto con el WAL del período**: arranca en un
+segmento concreto (lo dice el archivo `*.backup` que está en `wal/`) y necesita
+todos los segmentos desde ahí. Si falta uno del medio, la reproducción se corta
+en ese punto.
 
 Después, con `psql -p 5433` se revisa que los datos estén como se esperaba y se
 copia lo necesario a producción.
@@ -88,6 +105,14 @@ sudo -u postgres psql -xc "SELECT archived_count, failed_count, last_archived_ti
 # ¿El buffer local se está vaciando? (debería tener pocos archivos)
 ls /var/backups/intelimarket-wal | wc -l
 tail -5 /home/intellihouse/ship_wal.log
+
+# ¿Hay espacio en disco? Con el disco lleno Postgres deja de aceptar escrituras
+# y el local deja de vender. Ya pasó el 08-09-2026, por 16 GB de logs.
+df -h /
+tail -5 /var/log/guard-disco.log
+
+# ¿La cadena de WAL está completa del lado de minisforum? (sin huecos)
+ssh intellihouse@100.104.93.77 'ls -1 ~/backups-supermercado/wal/*.gz | wc -l'
 
 # ¿La copia física semanal corrió?
 tail -5 /home/intellihouse/basebackup.log
