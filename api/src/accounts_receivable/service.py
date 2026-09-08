@@ -1123,7 +1123,7 @@ async def get_corporate_agreement_pending_docs(db: AsyncSession, company_id: str
             ar.id, ar.customer_id, ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
             ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
             COALESCE(c.razon_social, c.nombre_fantasia, 'Funcionario') as customer_name,
-            c.ruc as customer_ruc, c.ci_numero, c.telefono as customer_telefono,
+            c.ruc as customer_ruc, c.ci as ci_numero, c.telefono as customer_telefono,
             c.empresa_vinculada_nombre, c.empresa_vinculada_ruc,
             COALESCE(ca.limite_credito, c.limite_credito, 0) as limite_credito,
             COALESCE(ca.saldo_utilizado, c.credito_usado, 0) as credito_usado
@@ -1357,7 +1357,7 @@ async def get_corporate_remission_detail(db: AsyncSession, remission_id: str) ->
                 ar.id, ar.customer_id, ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
                 ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
                 COALESCE(c.razon_social, c.nombre_fantasia, 'Funcionario') as customer_name,
-                c.ruc as customer_ruc, c.ci_numero
+                c.ruc as customer_ruc, c.ci as ci_numero
             FROM accounts_receivable ar
             JOIN customers c ON c.id = ar.customer_id
             WHERE ar.corporate_remission_id = :rem_id
