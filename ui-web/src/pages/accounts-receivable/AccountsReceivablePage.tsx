@@ -4,7 +4,8 @@ import {
   Calendar, Eye, X, Package, Wallet, Sparkles, PhoneCall, CreditCard, Plus,
   TrendingUp, FileSpreadsheet, FileDown, CheckCircle2, ChevronDown, ChevronRight,
   User, Check, Phone, ArrowUpRight, ShieldCheck, RefreshCw, BarChart2,
-  Printer, QrCode, ExternalLink, CheckSquare, Square
+  Printer, QrCode, ExternalLink, CheckSquare, Square, Building2, Building,
+  Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter
 } from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -12,7 +13,8 @@ import { formatPYG, formatDate, formatPercentage } from "../../utils/format"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
-type TabType = "documentos" | "aging" | "scoring" | "recibos"
+type TabType = "documentos" | "aging" | "scoring" | "recibos" | "empresas_vinculadas" | "reportes"
+
 
 interface CustomerScore {
   id: string
@@ -139,11 +141,78 @@ export default function AccountsReceivablePage() {
   const [payObservaciones, setPayObservaciones] = useState("")
   const [submittingPayment, setSubmittingPayment] = useState(false)
 
+  // 🏛️ Tesorería, Bóveda y Bancos
+  const [bankAccounts, setBankAccounts] = useState<any[]>([])
+  const [payDestinoFondos, setPayDestinoFondos] = useState<"boveda" | "caja">("boveda")
+  const [payBankAccountId, setPayBankAccountId] = useState("")
+  const [payChequeNumero, setPayChequeNumero] = useState("")
+  const [payChequeBanco, setPayChequeBanco] = useState("")
+  const [payChequeLibrador, setPayChequeLibrador] = useState("")
+  const [payChequeRuc, setPayChequeRuc] = useState("")
+  const [payChequeFechaEmision, setPayChequeFechaEmision] = useState(() => new Date().toISOString().split("T")[0])
+  const [payChequeFechaCobro, setPayChequeFechaCobro] = useState(() => new Date().toISOString().split("T")[0])
+
+  // ⚡ Modal de Inicio Rápido de Cobro (Cabecera)
+  const [showQuickCobroModal, setShowQuickCobroModal] = useState(false)
+  const [quickCustomerSearch, setQuickCustomerSearch] = useState("")
+  const [quickCustomerResults, setQuickCustomerResults] = useState<any[]>([])
+  const [quickCustomerLoading, setQuickCustomerLoading] = useState(false)
+  const [paymentCustomerInfo, setPaymentCustomerInfo] = useState<{ razon_social: string; ruc?: string; empresa_vinculada?: string } | null>(null)
+
+  // 🏢 Convenios Corporativos y Nóminas (Empresas Vinculadas)
+  const [agreements, setAgreements] = useState<any[]>([])
+  const [agreementsLoading, setAgreementsLoading] = useState(false)
+  const [selectedEmpresa, setSelectedEmpresa] = useState<string | null>(null)
+  const [empresaPending, setEmpresaPending] = useState<any | null>(null)
+  const [empresaPendingLoading, setEmpresaPendingLoading] = useState(false)
+  const [remissions, setRemissions] = useState<any[]>([])
+  const [remissionsLoading, setRemissionsLoading] = useState(false)
+  const [showRemitModal, setShowRemitModal] = useState(false)
+  const [remitPeriodo, setRemitPeriodo] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [remitNotas, setRemitNotas] = useState("")
+  const [remitting, setRemitting] = useState(false)
+  const [showPayRemissionModal, setShowPayRemissionModal] = useState<any | null>(null)
+  const [payRemForm, setPayRemForm] = useState({
+    monto: "",
+    forma_pago: "transferencia",
+    bank_account_id: "",
+    referencia: "",
+    fecha_pago: new Date().toISOString().split("T")[0],
+    notas: "",
+  })
+  const [payingRemission, setPayingRemission] = useState(false)
+
+  // 📊 Filtros en línea del Centro de Reportes
+  const [repAgingDesde, setRepAgingDesde] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split("T")[0]
+  })
+  const [repAgingHasta, setRepAgingHasta] = useState(() => new Date().toISOString().split("T")[0])
+  const [repCobranzasDesde, setRepCobranzasDesde] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split("T")[0]
+  })
+  const [repCobranzasHasta, setRepCobranzasHasta] = useState(() => new Date().toISOString().split("T")[0])
+  const [repEmpresaExtracto, setRepEmpresaExtracto] = useState("")
+  const [repPeriodoExtracto, setRepPeriodoExtracto] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [repSelectedRemissionId, setRepSelectedRemissionId] = useState("")
+  const [repCustomerEstadoCuenta, setRepCustomerEstadoCuenta] = useState<{ id: string; razon_social: string; ruc?: string } | null>(null)
+  const [repCustSearchInput, setRepCustSearchInput] = useState("")
+  const [repCustSearchResults, setRepCustSearchResults] = useState<any[]>([])
+  const [repCustSearchOpen, setRepCustSearchOpen] = useState(false)
+  const [repCustSearchLoading, setRepCustSearchLoading] = useState(false)
+  const [repLoadingCard, setRepLoadingCard] = useState<string | null>(null)
+
   // Cobranzas + linea de credito
   const [collectionActions, setCollectionActions] = useState<CollectionAction[]>([])
   const [creditAccount, setCreditAccount] = useState<CreditAccount | null>(null)
   const [showCollectionForm, setShowCollectionForm] = useState(false)
   const [collectionForm, setCollectionForm] = useState({ tipo: "llamada", resultado: "", notas: "", contacto: "", proximo_contacto: "", compromiso_pago: "", monto_comprometido: "" })
+
 
   const toast = useToast()
 
@@ -182,6 +251,143 @@ export default function AccountsReceivablePage() {
     }, 300)
     return () => clearTimeout(t)
   }, [empresaSearchInput])
+
+  // Cargar cuentas bancarias activas para cobro en tesorería
+  useEffect(() => {
+    api.accountsReceivable.listBanks()
+      .then(rows => {
+        setBankAccounts(rows || [])
+        if (rows && rows.length > 0) setPayBankAccountId(rows[0].id)
+      })
+      .catch(() => setBankAccounts([]))
+  }, [])
+
+  // Buscador rápido de clientes para el modal de cabecera "Registrar Cobro"
+  useEffect(() => {
+    if (!quickCustomerSearch.trim()) { setQuickCustomerResults([]); return }
+    setQuickCustomerLoading(true)
+    const t = setTimeout(() => {
+      api.customers.list({ search: quickCustomerSearch.trim(), limit: 15 })
+        .then(rows => setQuickCustomerResults(rows))
+        .catch(() => setQuickCustomerResults([]))
+        .finally(() => setQuickCustomerLoading(false))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [quickCustomerSearch])
+
+  // Buscador de cliente para Reporte "Estado de Cuenta"
+  useEffect(() => {
+    if (!repCustSearchInput.trim()) { setRepCustSearchResults([]); return }
+    setRepCustSearchLoading(true)
+    const t = setTimeout(() => {
+      api.customers.list({ search: repCustSearchInput.trim(), limit: 15 })
+        .then(rows => setRepCustSearchResults(rows))
+        .catch(() => setRepCustSearchResults([]))
+        .finally(() => setRepCustSearchLoading(false))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [repCustSearchInput])
+
+  // Carga de Convenios y Remisiones al entrar a la pestaña
+  const fetchAgreements = async () => {
+    setAgreementsLoading(true)
+    try {
+      const data = await api.accountsReceivable.corporateAgreementsSummary()
+      setAgreements(data || [])
+    } catch {
+      toast.error("Error", "No se pudieron cargar los convenios de empresas vinculadas")
+    } finally {
+      setAgreementsLoading(false)
+    }
+  }
+
+  const fetchRemissions = async () => {
+    setRemissionsLoading(true)
+    try {
+      const data = await api.accountsReceivable.listCorporateRemissions()
+      setRemissions(data || [])
+    } catch {
+      toast.error("Error", "No se pudieron cargar las remisiones corporativas")
+    } finally {
+      setRemissionsLoading(false)
+    }
+  }
+
+  const handleSelectEmpresa = async (empresaNombre: string) => {
+    setSelectedEmpresa(empresaNombre)
+    setEmpresaPendingLoading(true)
+    try {
+      const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre)
+      setEmpresaPending(data)
+    } catch {
+      toast.error("Error", "No se pudieron cargar los documentos pendientes de la empresa")
+    } finally {
+      setEmpresaPendingLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "empresas_vinculadas") {
+      fetchAgreements()
+      fetchRemissions()
+    }
+  }, [tab])
+
+  const handleExecuteRemit = async () => {
+    if (!selectedEmpresa) return
+    setRemitting(true)
+    try {
+      const res = await api.accountsReceivable.createCorporateRemission({
+        empresa_vinculada_nombre: selectedEmpresa,
+        periodo_mes: remitPeriodo,
+        notas: remitNotas || undefined,
+      })
+      toast.success(
+        "Corte y Remisión ejecutada con éxito",
+        `Lote ${res.numero_remision} emitido. Se liberó la línea de crédito de ${res.cantidad_funcionarios} funcionarios socios Extra Club.`
+      )
+      setShowRemitModal(false)
+      setRemitNotas("")
+      fetchAgreements()
+      fetchRemissions()
+      handleSelectEmpresa(selectedEmpresa)
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error al ejecutar corte", e.message || "Ocurrió un error al procesar la remisión")
+    } finally {
+      setRemitting(false)
+    }
+  }
+
+  const handlePayRemission = async () => {
+    if (!showPayRemissionModal) return
+    const monto = parseFloat(payRemForm.monto)
+    if (!monto || monto <= 0) {
+      toast.error("Monto requerido", "Ingresá un monto válido pagado por la empresa")
+      return
+    }
+    setPayingRemission(true)
+    try {
+      const res = await api.accountsReceivable.payCorporateRemission(showPayRemissionModal.id, {
+        monto,
+        forma_pago: payRemForm.forma_pago,
+        bank_account_id: payRemForm.bank_account_id || undefined,
+        referencia: payRemForm.referencia || undefined,
+        fecha_pago: payRemForm.fecha_pago || undefined,
+        notas: payRemForm.notas || undefined,
+      })
+      toast.success("Pago de empresa registrado", `Se canceló ${formatPYG(monto)} del saldo adeudado por la empresa (${res.estado})`)
+      setShowPayRemissionModal(null)
+      fetchRemissions()
+      fetchAgreements()
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error al registrar pago", e.message || "No se pudo registrar el pago de la remisión")
+    } finally {
+      setPayingRemission(false)
+    }
+  }
+
 
   const fetchData = async () => {
     setLoading(true)
@@ -263,13 +469,39 @@ export default function AccountsReceivablePage() {
     api.accountsReceivable.list({ customer_id: customerId, limit: 500 }).then(setCustomerDocs).catch(() => setCustomerDocs([]))
   }
 
-  const openPaymentModal = async (customerId: string) => {
+  const openPaymentModal = async (customerId: string, custInfo?: { razon_social: string; ruc?: string; empresa_vinculada?: string }) => {
     setShowPaymentModal(customerId)
+    if (custInfo) {
+      setPaymentCustomerInfo(custInfo)
+    } else {
+      // Intentar obtener datos del cliente si no vinieron
+      const foundDoc = docs.find(d => (d.customer_id === customerId || (d as any).customer?.id === customerId))
+      if (foundDoc) {
+        setPaymentCustomerInfo({
+          razon_social: foundDoc.customer_name || (foundDoc as any).customer?.razon_social || "Cliente",
+          ruc: foundDoc.customer_ruc || (foundDoc as any).customer?.ruc,
+          empresa_vinculada: (foundDoc as any).customer?.empresa_vinculada_nombre,
+        })
+      } else {
+        setPaymentCustomerInfo(null)
+      }
+    }
     setAllocations({})
     setPayMontoGlobal("")
     setSelectedBatchDocs({})
     setPayReferencia("")
     setPayObservaciones("")
+    setPayDestinoFondos("boveda")
+    if (bankAccounts.length > 0 && !payBankAccountId) {
+      setPayBankAccountId(bankAccounts[0].id)
+    }
+    setPayChequeNumero("")
+    setPayChequeBanco("")
+    setPayChequeLibrador(custInfo?.razon_social || "")
+    setPayChequeRuc(custInfo?.ruc || "")
+    setPayChequeFechaEmision(new Date().toISOString().split("T")[0])
+    setPayChequeFechaCobro(new Date().toISOString().split("T")[0])
+
     setPendingLoading(true)
     try {
       const docs = await api.accountsReceivable.pendingForCustomer(customerId)
@@ -345,6 +577,14 @@ export default function AccountsReceivablePage() {
         fecha: payFecha,
         observaciones: payObservaciones || undefined,
         accounts_receivable_ids: selectedDocIds.length > 0 ? selectedDocIds : undefined,
+        bank_account_id: (payFormaPago === "transferencia" || payFormaPago === "pix" || payFormaPago === "qr") ? (payBankAccountId || undefined) : undefined,
+        destino_fondos: payFormaPago === "efectivo" ? payDestinoFondos : undefined,
+        cheque_numero: payFormaPago === "cheque" ? (payChequeNumero || undefined) : undefined,
+        cheque_banco: payFormaPago === "cheque" ? (payChequeBanco || undefined) : undefined,
+        cheque_librador: payFormaPago === "cheque" ? (payChequeLibrador || undefined) : undefined,
+        cheque_ruc: payFormaPago === "cheque" ? (payChequeRuc || undefined) : undefined,
+        cheque_fecha_emision: payFormaPago === "cheque" ? payChequeFechaEmision : undefined,
+        cheque_fecha_cobro: payFormaPago === "cheque" ? payChequeFechaCobro : undefined,
       })
 
       toast.success("Pago registrado con éxito", `${formatPYG(montoTotalPago)} imputado en cascada FIFO`)
@@ -497,6 +737,18 @@ export default function AccountsReceivablePage() {
 
           <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
             <button
+              onClick={() => {
+                setQuickCustomerSearch("")
+                setQuickCustomerResults([])
+                setShowQuickCobroModal(true)
+              }}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-950/40 border border-emerald-400/30 ring-2 ring-emerald-500/20 active:scale-95"
+              title="Registrar cobro directo de cliente con imputación bimonetaria / tesorería"
+            >
+              <Wallet className="w-4 h-4 text-emerald-100" />
+              <span>Registrar Cobro</span>
+            </button>
+            <button
               onClick={() => { setRefreshing(true); fetchData(); if (tab === "scoring") fetchScoring(); }}
               disabled={refreshing}
               className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 backdrop-blur-md transition shadow-sm"
@@ -505,12 +757,12 @@ export default function AccountsReceivablePage() {
               <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-indigo-400" : ""}`} />
             </button>
             <button
-              onClick={() => setShowReportModal(true)}
+              onClick={() => setTab("reportes")}
               className="px-3.5 py-2.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
-              title="Filtrar por período, cliente y empresa vinculada"
+              title="Acceder al Centro de Reportes Ejecutivos"
             >
-              <FileDown className="w-4 h-4 text-indigo-400" />
-              <span>Reportes / Aging</span>
+              <Layers className="w-4 h-4 text-indigo-400" />
+              <span>Centro de Reportes</span>
             </button>
             <button
               onClick={handleDownloadDeudaDetalladaPdf}
@@ -589,6 +841,8 @@ export default function AccountsReceivablePage() {
           { key: "documentos", label: "Documentos por Cobrar", icon: ReceiptText, count: docsTotal },
           { key: "aging", label: "Matriz de Aging (Antigüedad)", icon: BarChart2, count: aging?.por_clientes?.length },
           { key: "scoring", label: "Scoring Crediticio & Riesgo", icon: ShieldCheck, count: scores.length },
+          { key: "empresas_vinculadas", label: "Convenios & Nóminas", icon: Building2, count: agreements?.length },
+          { key: "reportes", label: "Centro de Reportes", icon: Layers },
         ].map((t) => {
           const Icon = t.icon
           const active = tab === t.key
@@ -1015,13 +1269,721 @@ export default function AccountsReceivablePage() {
               </div>
             </div>
           )}
+
+          {/* TAB 4: EMPRESAS VINCULADAS & NÓMINAS */}
+          {tab === "empresas_vinculadas" && (
+            <div className="space-y-6">
+              {/* Banner Explicativo de Convenio Corporativo */}
+              <div className="card p-5 bg-gradient-to-br from-slate-900 to-indigo-950 text-white border-indigo-500/20 shadow-xl">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1.5 max-w-3xl">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-black tracking-widest uppercase">
+                        CONVENIOS EXTRA CLUB · RETENCIÓN POR NÓMINA
+                      </span>
+                    </div>
+                    <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
+                      <Building2 className="w-5 h-5 text-indigo-400" />
+                      Gestión Integral de Convenios con Empresas Vinculadas
+                    </h2>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Los funcionarios socios de Extra Club compran a crédito personal vinculado a su empleador. Al finalizar el período, el supermercado genera los extractos masivos con talón de autorización de descuento y ejecuta el <strong>Corte y Remisión</strong>. En ese acto formal, la deuda se traspasa a la empresa vinculada y se <strong>libera inmediatamente la línea de crédito</strong> del funcionario.
+                    </p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-stretch gap-2.5 self-start md:self-auto">
+                    <button
+                      onClick={() => { fetchAgreements(); fetchRemissions(); }}
+                      disabled={agreementsLoading}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 transition flex items-center justify-center gap-1.5"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${agreementsLoading ? "animate-spin" : ""}`} />
+                      <span>Actualizar Convenios</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Métricas de Convenios */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4 pt-4 border-t border-slate-800/80">
+                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Empresas con Convenio Activo</span>
+                    <p className="text-xl font-black font-mono text-white mt-0.5">{agreements.length}</p>
+                  </div>
+                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Funcionarios con Saldo</span>
+                    <p className="text-xl font-black font-mono text-indigo-400 mt-0.5">
+                      {agreements.reduce((sum, a) => sum + (a.cantidad_funcionarios || 0), 0)}
+                    </p>
+                  </div>
+                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 col-span-2 sm:col-span-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Total a Facturar / Remitir</span>
+                    <p className="text-xl font-black font-mono text-amber-400 mt-0.5">
+                      {formatPYG(agreements.reduce((sum, a) => sum + (a.total_saldo_pendiente || 0), 0))}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabla de Empresas Vinculadas */}
+              <div className="card p-0 overflow-hidden">
+                <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      <Building className="w-4 h-4 text-indigo-500" />
+                      Planilla de Empresas Vinculadas con Consumos Pendientes
+                    </h3>
+                    <p className="text-xs text-gray-500">Seleccioná una empresa para auditar los vales individuales de sus empleados o generar el corte mensual.</p>
+                  </div>
+                </div>
+
+                {agreementsLoading ? (
+                  <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                ) : agreements.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400 text-xs">No hay empresas vinculadas con consumos pendientes de corte en este momento.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                          <th className="p-3.5">Empresa Vinculada</th>
+                          <th className="p-3.5">Funcionarios Activos</th>
+                          <th className="p-3.5">Facturas / Vales</th>
+                          <th className="p-3.5">Deuda Total Acumulada</th>
+                          <th className="p-3.5 text-right">Acciones de Corte</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {agreements.map((a, idx) => {
+                          const isSelected = selectedEmpresa === a.empresa_vinculada_nombre
+                          return (
+                            <tr
+                              key={idx}
+                              className={`transition-colors ${isSelected ? "bg-indigo-50/70 dark:bg-indigo-950/30" : "hover:bg-gray-50 dark:hover:bg-slate-800/50"}`}
+                            >
+                              <td className="p-3.5 font-bold text-gray-900 dark:text-white">
+                                <div className="flex items-center gap-2">
+                                  <Building2 className="w-4 h-4 text-indigo-500" />
+                                  <span>{a.empresa_vinculada_nombre}</span>
+                                </div>
+                              </td>
+                              <td className="p-3.5 font-mono font-semibold">
+                                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200">
+                                  {a.cantidad_funcionarios} funcionarios
+                                </span>
+                              </td>
+                              <td className="p-3.5 font-mono text-gray-600 dark:text-gray-300">
+                                {a.cantidad_documentos} vales
+                              </td>
+                              <td className="p-3.5 font-mono font-black text-sm text-gray-900 dark:text-white">
+                                {formatPYG(a.total_saldo_pendiente)}
+                              </td>
+                              <td className="p-3.5 text-right space-x-2">
+                                <button
+                                  onClick={() => handleSelectEmpresa(a.empresa_vinculada_nombre)}
+                                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition ${
+                                    isSelected
+                                      ? "bg-indigo-600 text-white"
+                                      : "btn-outline text-indigo-600 dark:text-indigo-400"
+                                  }`}
+                                >
+                                  {isSelected ? "Viendo Nómina" : "Ver Nómina"}
+                                </button>
+                                <button
+                                  onClick={() => api.accountsReceivable.downloadExtractosEmpresaPdf(a.empresa_vinculada_nombre, remitPeriodo)}
+                                  className="py-1.5 px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold transition inline-flex items-center gap-1"
+                                  title="Descargar Extractos Masivos de Funcionarios con Talón de Conformidad"
+                                >
+                                  <FileDown className="w-3.5 h-3.5" />
+                                  <span>Extractos (PDF)</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSelectedEmpresa(a.empresa_vinculada_nombre)
+                                    setShowRemitModal(true)
+                                  }}
+                                  className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition inline-flex items-center gap-1 shadow-sm"
+                                  title="Cerrar período, transferir deuda a la empresa y liberar línea del funcionario"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>Remitir a Empresa</span>
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Panel Drilldown: Nómina y Vales de la Empresa Seleccionada */}
+              {selectedEmpresa && (
+                <div className="card p-5 border-2 border-indigo-200 dark:border-indigo-900/60 bg-white dark:bg-slate-900 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100 dark:border-gray-800">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          PERÍODO EN CURSO
+                        </span>
+                        <h4 className="text-base font-extrabold text-gray-900 dark:text-white">
+                          Nómina de Descuento: {selectedEmpresa}
+                        </h4>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Vales y compras a crédito que serán descontados por Recursos Humanos en el corte {remitPeriodo}.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => api.accountsReceivable.downloadExtractosEmpresaPdf(selectedEmpresa, remitPeriodo)}
+                        className="btn-outline text-xs flex items-center gap-1.5 font-bold"
+                      >
+                        <FileDown className="w-4 h-4 text-indigo-500" />
+                        <span>Extractos Masivos (PDF)</span>
+                      </button>
+                      <button
+                        onClick={() => setShowRemitModal(true)}
+                        className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                      >
+                        <Send className="w-4 h-4" />
+                        <span>Generar Corte y Remitir</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {empresaPendingLoading ? (
+                    <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                  ) : !empresaPending || !empresaPending.funcionarios || empresaPending.funcionarios.length === 0 ? (
+                    <div className="text-center py-6 text-gray-400 text-xs">No hay documentos pendientes de remisión para esta empresa.</div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">Total Funcionarios</span>
+                          <p className="text-lg font-black font-mono text-gray-900 dark:text-white">{empresaPending.cantidad_funcionarios}</p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">Vales / Facturas</span>
+                          <p className="text-lg font-black font-mono text-gray-900 dark:text-white">{empresaPending.cantidad_documentos}</p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">Total a Retener</span>
+                          <p className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(empresaPending.total_deuda)}</p>
+                        </div>
+                      </div>
+
+                      <div className="divide-y divide-gray-100 dark:divide-gray-800 border rounded-xl overflow-hidden">
+                        {empresaPending.funcionarios.map((f: any, i: number) => (
+                          <div key={i} className="p-3.5 hover:bg-gray-50 dark:hover:bg-slate-800/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-gray-900 dark:text-white">{f.customer_nombre || "Funcionario"}</span>
+                                {f.customer_ruc && (
+                                  <span className="font-mono text-gray-400 text-[11px]">CI/RUC: {f.customer_ruc}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                {f.documentos?.map((d: any, di: number) => (
+                                  <span key={di} className="px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-800 font-mono text-[10px] text-gray-700 dark:text-gray-300">
+                                    {d.numero_documento}: {formatPYG(d.saldo_pendiente)}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 self-end sm:self-auto">
+                              <span className="text-gray-400 text-[11px]">{f.documentos?.length || 0} compras</span>
+                              <span className="font-mono font-black text-sm text-gray-900 dark:text-white">{formatPYG(f.total_saldo)}</span>
+                              <button
+                                onClick={() => openPaymentModal(f.customer_id, {
+                                  razon_social: f.customer_nombre,
+                                  ruc: f.customer_ruc,
+                                  empresa_vinculada: selectedEmpresa,
+                                })}
+                                className="btn-outline py-1 px-2.5 text-xs text-emerald-600 dark:text-emerald-400 border-emerald-300"
+                                title="Registrar cobro individual anticipado"
+                              >
+                                Cobro Anticipado
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Historial de Remisiones y Lotes Emitidos a Empresas */}
+              <div className="card p-0 overflow-hidden">
+                <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      <FileCheck className="w-4 h-4 text-emerald-500" />
+                      Historial de Remisiones & Deuda Corporativa de Empresas
+                    </h3>
+                    <p className="text-xs text-gray-500">Lotes formalmente remitidos a las empresas vinculadas. Al cobrar el lote, ingresa a tesorería y cancela la deuda corporativa.</p>
+                  </div>
+                </div>
+
+                {remissionsLoading ? (
+                  <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                ) : remissions.length === 0 ? (
+                  <div className="text-center py-10 text-gray-400 text-xs">No hay remisiones registradas en el historial.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                          <th className="p-3.5">N° Remisión</th>
+                          <th className="p-3.5">Empresa Vinculada</th>
+                          <th className="p-3.5">Período</th>
+                          <th className="p-3.5">Fecha Emisión</th>
+                          <th className="p-3.5">Funcionarios</th>
+                          <th className="p-3.5">Total Remitido</th>
+                          <th className="p-3.5">Saldo Pendiente</th>
+                          <th className="p-3.5">Estado</th>
+                          <th className="p-3.5 text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {remissions.map((r) => {
+                          const isPagado = r.estado === "PAGADO"
+                          return (
+                            <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
+                              <td className="p-3.5 font-mono font-black text-indigo-600 dark:text-indigo-400">
+                                {r.numero_remision}
+                              </td>
+                              <td className="p-3.5 font-bold text-gray-900 dark:text-white">
+                                {r.empresa_vinculada_nombre}
+                              </td>
+                              <td className="p-3.5 font-mono font-semibold">
+                                {r.periodo_mes}
+                              </td>
+                              <td className="p-3.5 text-gray-500 font-mono text-[11px]">
+                                {r.created_at ? new Date(r.created_at).toLocaleDateString("es-PY") : "—"}
+                              </td>
+                              <td className="p-3.5 font-mono">
+                                {r.cantidad_funcionarios} socios
+                              </td>
+                              <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
+                                {formatPYG(r.monto_total)}
+                              </td>
+                              <td className="p-3.5 font-mono font-black text-amber-600 dark:text-amber-400">
+                                {formatPYG(r.saldo_pendiente)}
+                              </td>
+                              <td className="p-3.5">
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  isPagado
+                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
+                                    : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
+                                }`}>
+                                  {isPagado ? "Cancelado" : "Pendiente Pago"}
+                                </span>
+                              </td>
+                              <td className="p-3.5 text-right space-x-2">
+                                <button
+                                  onClick={() => api.accountsReceivable.downloadRemisionPdf(r.id, r.numero_remision)}
+                                  className="btn-outline py-1 px-2.5 text-xs inline-flex items-center gap-1"
+                                  title="Descargar Acta de Remisión Consolidada con firma de recepción conforme"
+                                >
+                                  <Printer className="w-3.5 h-3.5 text-indigo-500" />
+                                  <span>Acta (PDF)</span>
+                                </button>
+                                {!isPagado && (
+                                  <button
+                                    onClick={() => {
+                                      setShowPayRemissionModal(r)
+                                      setPayRemForm({
+                                        monto: String(r.saldo_pendiente),
+                                        forma_pago: "transferencia",
+                                        bank_account_id: bankAccounts.length > 0 ? bankAccounts[0].id : "",
+                                        referencia: "",
+                                        fecha_pago: new Date().toISOString().split("T")[0],
+                                        notas: "",
+                                      })
+                                    }}
+                                    className="btn-primary py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs inline-flex items-center gap-1 shadow-sm font-bold"
+                                    title="Registrar pago de la empresa en tesorería"
+                                  >
+                                    <DollarSign className="w-3.5 h-3.5" />
+                                    <span>Cobrar Lote</span>
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: CENTRO DE REPORTES EJECUTIVOS */}
+          {tab === "reportes" && (
+            <div className="space-y-6">
+              {/* Header de la Pestaña */}
+              <div className="card p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border border-indigo-500/20 shadow-xl">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-black tracking-widest uppercase">
+                      CATÁLOGO EJECUTIVO DE REPORTES & EXPORTACIONES
+                    </span>
+                    <h2 className="text-xl font-black tracking-tight text-white mt-1 flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-indigo-400" />
+                      Centro de Reportes de Cuentas por Cobrar & Convenios
+                    </h2>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Generación directa en PDF institucional de Extra Supermercado y planillas Excel. Aplicá filtros específicos por cada necesidad de auditoría o cobranza.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid de las 6 Tarjetas Ejecutivas */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {/* TARJETA 1: Deuda Detallada */}
+                <div className="card p-5 flex flex-col justify-between border-t-4 border-t-emerald-500 shadow-md hover:shadow-lg transition">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black tracking-wider uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                        AUDITORÍA & COBRANZAS
+                      </span>
+                      <FileText className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white">
+                        Deuda Detallada por Factura (PDF)
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Reporte pormenorizado factura por factura con desglose de ítems, fechas de vencimiento, días de mora calculados y estética oficial idéntica al Arqueo de Caja.
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-gray-50 dark:bg-slate-800/70 rounded-xl space-y-2 border border-gray-100 dark:border-gray-700/60 text-xs">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Cliente (Opcional)</label>
+                        <input
+                          type="text"
+                          placeholder="Todos los clientes..."
+                          className="input-field text-xs py-1.5"
+                          value={reportCustomerName || customerSearchInput}
+                          onChange={e => {
+                            setCustomerSearchInput(e.target.value)
+                            setReportCustomerName("")
+                            setReportCustomerId("")
+                          }}
+                        />
+                        {customerSearchResults.length > 0 && !reportCustomerId && (
+                          <div className="max-h-28 overflow-y-auto bg-white dark:bg-slate-800 border rounded-lg mt-1 shadow-sm">
+                            {customerSearchResults.map(c => (
+                              <div
+                                key={c.id}
+                                onClick={() => {
+                                  setReportCustomerId(c.id)
+                                  setReportCustomerName(c.razon_social)
+                                  setCustomerSearchResults([])
+                                }}
+                                className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer text-[11px] truncate font-medium"
+                              >
+                                {c.razon_social} {c.ruc ? `(${c.ruc})` : ""}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Empresa Vinculada (Opcional)</label>
+                        <input
+                          type="text"
+                          placeholder="Filtrar por empresa..."
+                          className="input-field text-xs py-1.5"
+                          value={reportEmpresaVinculada}
+                          onChange={e => setReportEmpresaVinculada(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-4">
+                    <button
+                      onClick={handleDownloadDeudaDetalladaPdf}
+                      className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span>Descargar Deuda Detallada (PDF)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* TARJETA 2: Matriz Aging */}
+                <div className="card p-5 flex flex-col justify-between border-t-4 border-t-indigo-500 shadow-md hover:shadow-lg transition">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black tracking-wider uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
+                        ANÁLISIS DE RIESGO
+                      </span>
+                      <BarChart2 className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white">
+                        Matriz de Antigüedad / Aging
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Clasificación de la cartera por baldes temporales (Al día, 1-30d, 31-60d, 61-90d, +90d) y cálculo automático del Days Sales Outstanding (DSO).
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-gray-50 dark:bg-slate-800/70 rounded-xl space-y-2 border border-gray-100 dark:border-gray-700/60 text-xs">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Desde</label>
+                          <input type="date" className="input-field text-xs py-1" value={repAgingDesde} onChange={e => setRepAgingDesde(e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Hasta</label>
+                          <input type="date" className="input-field text-xs py-1" value={repAgingHasta} onChange={e => setRepAgingHasta(e.target.value)} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-4 grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => api.accountsReceivable.downloadAgingExcel({ fecha_desde: repAgingDesde, fecha_hasta: repAgingHasta })}
+                      className="py-2.5 px-3 btn-outline text-xs font-bold flex items-center justify-center gap-1.5"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                      <span>Excel</span>
+                    </button>
+                    <button
+                      onClick={() => api.accountsReceivable.downloadAgingPdf({ fecha_desde: repAgingDesde, fecha_hasta: repAgingHasta })}
+                      className="py-2.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <FileDown className="w-4 h-4" />
+                      <span>Aging PDF</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* TARJETA 3: Extractos Masivos de Convenio */}
+                <div className="card p-5 flex flex-col justify-between border-t-4 border-t-purple-500 shadow-md hover:shadow-lg transition">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black tracking-wider uppercase px-2 py-0.5 rounded bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+                        NÓMINAS & RRHH
+                      </span>
+                      <Users className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white">
+                        Extractos Masivos para Nómina (PDF)
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Legajo consolidado: genera 1 página A4 por funcionario con desglose de vales y el Talón de Conformidad de Descuento de Haberes para firma del empleado.
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-gray-50 dark:bg-slate-800/70 rounded-xl space-y-2 border border-gray-100 dark:border-gray-700/60 text-xs">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Empresa Vinculada</label>
+                        <select
+                          className="input-field text-xs py-1.5"
+                          value={repEmpresaExtracto}
+                          onChange={e => setRepEmpresaExtracto(e.target.value)}
+                        >
+                          <option value="">Seleccioná una empresa...</option>
+                          {agreements.map((a, idx) => (
+                            <option key={idx} value={a.empresa_vinculada_nombre}>
+                              {a.empresa_vinculada_nombre} ({a.cantidad_funcionarios} func.)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Período (YYYY-MM)</label>
+                        <input
+                          type="month"
+                          className="input-field text-xs py-1"
+                          value={repPeriodoExtracto}
+                          onChange={e => setRepPeriodoExtracto(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-4">
+                    <button
+                      onClick={() => {
+                        if (!repEmpresaExtracto) {
+                          toast.error("Empresa requerida", "Seleccioná la empresa vinculada para generar sus extractos")
+                          return
+                        }
+                        api.accountsReceivable.downloadExtractosEmpresaPdf(repEmpresaExtracto, repPeriodoExtracto)
+                      }}
+                      disabled={!repEmpresaExtracto}
+                      className="w-full py-2.5 px-4 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-extrabold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <DownloadCloud className="w-4 h-4" />
+                      <span>Generar Extractos Masivos (PDF)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* TARJETA 4: Acta de Remisión Consolidada */}
+                <div className="card p-5 flex flex-col justify-between border-t-4 border-t-blue-500 shadow-md hover:shadow-lg transition">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black tracking-wider uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                        COBRANZA CORPORATIVA
+                      </span>
+                      <FileCheck className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white">
+                        Acta de Remisión Consolidada (PDF)
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Nota de entrega formal para la gerencia de la empresa vinculada con 4 KPIs ejecutivos, planilla de retenciones y acta de recepción conforme con firma y sello.
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-gray-50 dark:bg-slate-800/70 rounded-xl space-y-2 border border-gray-100 dark:border-gray-700/60 text-xs">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Lote / Remisión Generada</label>
+                        <select
+                          className="input-field text-xs py-1.5"
+                          value={repSelectedRemissionId}
+                          onChange={e => setRepSelectedRemissionId(e.target.value)}
+                        >
+                          <option value="">Seleccioná un lote remitido...</option>
+                          {remissions.map(r => (
+                            <option key={r.id} value={r.id}>
+                              {r.numero_remision} - {r.empresa_vinculada_nombre} ({r.periodo_mes})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-4">
+                    <button
+                      onClick={() => {
+                        if (!repSelectedRemissionId) {
+                          toast.error("Lote requerido", "Seleccioná un lote de remisión para descargar el acta")
+                          return
+                        }
+                        const found = remissions.find(r => r.id === repSelectedRemissionId)
+                        api.accountsReceivable.downloadRemisionPdf(repSelectedRemissionId, found?.numero_remision)
+                      }}
+                      disabled={!repSelectedRemissionId}
+                      className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-extrabold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <Printer className="w-4 h-4" />
+                      <span>Descargar Acta Consolidada (PDF)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* TARJETA 5: Libro de Cobranzas */}
+                <div className="card p-5 flex flex-col justify-between border-t-4 border-t-teal-500 shadow-md hover:shadow-lg transition">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black tracking-wider uppercase px-2 py-0.5 rounded bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300">
+                        TESORERÍA & BÓVEDA
+                      </span>
+                      <Wallet className="w-5 h-5 text-teal-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white">
+                        Libro de Cobranzas y Recaudación
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Historial cronológico de todos los cobros asentados, detallando su canal de ingreso: Bóveda Central (efectivo), Cuentas Bancarias o Cheques.
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-gray-50 dark:bg-slate-800/70 rounded-xl space-y-2 border border-gray-100 dark:border-gray-700/60 text-xs">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Desde</label>
+                          <input type="date" className="input-field text-xs py-1" value={repCobranzasDesde} onChange={e => setRepCobranzasDesde(e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Hasta</label>
+                          <input type="date" className="input-field text-xs py-1" value={repCobranzasHasta} onChange={e => setRepCobranzasHasta(e.target.value)} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-4 grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => api.accountsReceivable.downloadCobranzasExcel({ fecha_desde: repCobranzasDesde, fecha_hasta: repCobranzasHasta })}
+                      className="py-2.5 px-3 btn-outline text-xs font-bold flex items-center justify-center gap-1.5"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                      <span>Excel</span>
+                    </button>
+                    <button
+                      onClick={() => api.accountsReceivable.downloadCobranzasPdf({ fecha_desde: repCobranzasDesde, fecha_hasta: repCobranzasHasta })}
+                      className="py-2.5 px-3 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <FileDown className="w-4 h-4" />
+                      <span>Cobranzas PDF</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* TARJETA 6: Scoring & Matriz de Riesgo */}
+                <div className="card p-5 flex flex-col justify-between border-t-4 border-t-amber-500 shadow-md hover:shadow-lg transition">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black tracking-wider uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                        GESTIÓN DE RIESGO
+                      </span>
+                      <ShieldCheck className="w-5 h-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white">
+                        Scoring y Líneas de Crédito
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Acceso a la evaluación algorítmica del comportamiento de pago (1 a 100), tasa de puntualidad, días de mora histórica y límites asignados a cada cliente.
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl space-y-1.5 border border-amber-200 dark:border-amber-900/60 text-xs">
+                      <p className="text-amber-800 dark:text-amber-300 text-[11px] font-medium">
+                        Podés consultar la matriz de clientes clasificados por nivel de riesgo (Excelente, Bueno, Regular, Riesgoso) y recalcular automáticamente con base en el historial de ventas.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-800 mt-4">
+                    <button
+                      onClick={() => setTab("scoring")}
+                      className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-white font-extrabold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Ver Módulo de Scoring</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
-      {/* MODAL: Registrar Cobro Multi-Factura con Cascada FIFO */}
+      {/* MODAL: Registrar Cobro Multi-Factura con Cascada FIFO e Imputación a Tesorería */}
       {showPaymentModal && (
         <div className="modal-overlay" onClick={() => setShowPaymentModal(null)}>
-          <div className="modal-content max-w-2xl" onClick={e => e.stopPropagation()}>
+          <div className="modal-content max-w-3xl" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -1029,7 +1991,7 @@ export default function AccountsReceivablePage() {
                   Registrar Cobro de Cliente · Imputación por Lote / FIFO
                 </h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  Aplicá pagos globales en cascada a las facturas más antiguas primero, o personalizá el lote y los pagos parciales.
+                  Amortización en cascada a facturas más antiguas, asignación bimonetaria e ingreso real a Tesorería (Bóveda / Bancos / Cheques).
                 </p>
               </div>
               <button onClick={() => setShowPaymentModal(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded">
@@ -1037,14 +1999,39 @@ export default function AccountsReceivablePage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Tarjeta de Información del Cliente */}
+              {paymentCustomerInfo && (
+                <div className="p-3.5 rounded-xl bg-slate-900 text-white border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase">Cliente a Cobrar</div>
+                    <div className="text-sm font-black flex items-center gap-2">
+                      <User className="w-4 h-4 text-emerald-400" />
+                      <span>{paymentCustomerInfo.razon_social}</span>
+                      {paymentCustomerInfo.ruc && (
+                        <span className="text-xs font-mono text-slate-400">({paymentCustomerInfo.ruc})</span>
+                      )}
+                    </div>
+                  </div>
+                  {paymentCustomerInfo.empresa_vinculada && (
+                    <div className="text-right">
+                      <span className="text-[10px] font-bold text-indigo-300 uppercase block">Empresa Vinculada</span>
+                      <span className="text-xs font-semibold text-white">{paymentCustomerInfo.empresa_vinculada}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Parámetros Básicos del Cobro */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="label-field">Forma de Pago</label>
                   <select className="input-field text-xs" value={payFormaPago} onChange={e => setPayFormaPago(e.target.value)}>
-                    <option value="efectivo">Efectivo</option>
-                    <option value="transferencia">Transferencia Bancaria</option>
-                    <option value="cheque">Cheque</option>
+                    <option value="efectivo">Efectivo (Gs. / R$ / US$)</option>
+                    <option value="transferencia">Transferencia Bancaria (SIPAP)</option>
+                    <option value="pix">PIX (Banco Central do Brasil)</option>
+                    <option value="qr">Cobro QR Dinelco / Bancard</option>
+                    <option value="cheque">Cheque Recibido (Al día o Diferido)</option>
                     <option value="tarjeta_debito">Tarjeta Débito</option>
                     <option value="tarjeta_credito">Tarjeta Crédito</option>
                   </select>
@@ -1058,6 +2045,145 @@ export default function AccountsReceivablePage() {
                   <input className="input-field text-xs" type="date" value={payFecha} onChange={e => setPayFecha(e.target.value)} />
                 </div>
               </div>
+
+              {/* 🏛️ PANEL DINÁMICO DE TESORERÍA / DESTINO DE FONDOS */}
+              {payFormaPago === "efectivo" && (
+                <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-900 dark:text-amber-300">
+                    <Landmark className="w-4 h-4 text-amber-600" />
+                    <span>Destino del Efectivo Cobrado</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <label className={`p-2.5 rounded-lg border flex items-center gap-2 cursor-pointer transition ${
+                      payDestinoFondos === "boveda"
+                        ? "bg-amber-100/60 dark:bg-amber-900/40 border-amber-400 font-bold"
+                        : "border-gray-200 dark:border-slate-700"
+                    }`}>
+                      <input
+                        type="radio"
+                        name="destino_fondos"
+                        value="boveda"
+                        checked={payDestinoFondos === "boveda"}
+                        onChange={() => setPayDestinoFondos("boveda")}
+                      />
+                      <span>🏛️ Bóveda Central (Ingreso directo de Tesorería)</span>
+                    </label>
+                    <label className={`p-2.5 rounded-lg border flex items-center gap-2 cursor-pointer transition ${
+                      payDestinoFondos === "caja"
+                        ? "bg-amber-100/60 dark:bg-amber-900/40 border-amber-400 font-bold"
+                        : "border-gray-200 dark:border-slate-700"
+                    }`}>
+                      <input
+                        type="radio"
+                        name="destino_fondos"
+                        value="caja"
+                        checked={payDestinoFondos === "caja"}
+                        onChange={() => setPayDestinoFondos("caja")}
+                      />
+                      <span>🛒 Caja de Salón (Imputar a sesión de cajera)</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {(payFormaPago === "transferencia" || payFormaPago === "pix" || payFormaPago === "qr") && (
+                <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-blue-900 dark:text-blue-300">
+                    <span className="flex items-center gap-2">
+                      <Landmark className="w-4 h-4 text-blue-600" />
+                      Cuenta Bancaria Receptora
+                    </span>
+                    <span className="text-[11px] font-normal text-blue-700 dark:text-blue-400">Acredita saldo y asienta la transacción</span>
+                  </div>
+                  <select
+                    className="input-field text-xs w-full font-medium"
+                    value={payBankAccountId}
+                    onChange={e => setPayBankAccountId(e.target.value)}
+                  >
+                    {bankAccounts.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.banco_nombre} — Cuenta {b.numero_cuenta} ({b.moneda}) · Saldo: {formatPYG(b.saldo_actual)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {payFormaPago === "cheque" && (
+                <div className="p-3.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-purple-900 dark:text-purple-300">
+                    <span className="flex items-center gap-2">
+                      <ReceiptText className="w-4 h-4 text-purple-600" />
+                      Datos del Cheque Recibido en Pago
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-purple-200 dark:bg-purple-900 text-purple-900 dark:text-purple-200 font-extrabold">
+                      CARTERA DE CHEQUES
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">N° de Cheque</label>
+                      <input
+                        className="input-field text-xs font-mono"
+                        placeholder="00012345"
+                        value={payChequeNumero}
+                        onChange={e => setPayChequeNumero(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Banco Emisor</label>
+                      <input
+                        className="input-field text-xs"
+                        placeholder="Ej: Banco Continental / Itaú"
+                        value={payChequeBanco}
+                        onChange={e => setPayChequeBanco(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Librador / Titular</label>
+                      <input
+                        className="input-field text-xs"
+                        placeholder="Nombre o razón social"
+                        value={payChequeLibrador}
+                        onChange={e => setPayChequeLibrador(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">RUC / CI Librador</label>
+                      <input
+                        className="input-field text-xs font-mono"
+                        placeholder="Documento"
+                        value={payChequeRuc}
+                        onChange={e => setPayChequeRuc(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha Emisión</label>
+                      <input
+                        type="date"
+                        className="input-field text-xs"
+                        value={payChequeFechaEmision}
+                        onChange={e => setPayChequeFechaEmision(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha de Cobro / Vencimiento</label>
+                      <input
+                        type="date"
+                        className="input-field text-xs"
+                        value={payChequeFechaCobro}
+                        onChange={e => setPayChequeFechaCobro(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {payChequeFechaCobro > new Date().toISOString().split("T")[0] && (
+                    <div className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Cheque Diferido: quedará asentado en Cartera de Cheques a Depositar hasta la fecha de cobro indicada.</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Herramienta de Pago Global en Cascada FIFO */}
               <div className="p-4 rounded-xl bg-indigo-50/60 dark:bg-slate-800/80 border border-indigo-200 dark:border-indigo-900/40 space-y-3">
@@ -1208,6 +2334,253 @@ export default function AccountsReceivablePage() {
                 className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs disabled:opacity-50 flex items-center gap-2"
               >
                 {submittingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar e Imputar Cobro"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Inicio Rápido de Cobro desde Cabecera */}
+      {showQuickCobroModal && (
+        <div className="modal-overlay" onClick={() => setShowQuickCobroModal(false)}>
+          <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Wallet className="w-5 h-5 text-emerald-500" />
+                Registrar Cobro · Seleccionar Cliente
+              </h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Buscá al cliente o socio Extra Club por nombre o documento para imputar su pago en cascada FIFO.
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="relative">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Nombre del cliente, RUC o cédula de identidad..."
+                  className="input-field text-xs pl-9 w-full font-medium"
+                  value={quickCustomerSearch}
+                  onChange={e => setQuickCustomerSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              {quickCustomerLoading ? (
+                <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+              ) : quickCustomerResults.length === 0 ? (
+                <div className="text-center py-6 text-gray-400 text-xs">
+                  {quickCustomerSearch.trim() ? "No se encontraron clientes con ese criterio" : "Escribí al menos 2 letras para buscar clientes..."}
+                </div>
+              ) : (
+                <div className="max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 border rounded-xl">
+                  {quickCustomerResults.map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        setShowQuickCobroModal(false)
+                        openPaymentModal(c.id, {
+                          razon_social: c.razon_social || "Cliente sin nombre",
+                          ruc: c.ruc,
+                          empresa_vinculada: c.empresa_vinculada_nombre,
+                        })
+                      }}
+                      className="w-full text-left p-3 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <div className="font-extrabold text-gray-900 dark:text-white">{c.razon_social || "Sin nombre"}</div>
+                        <div className="text-[11px] text-gray-400 font-mono">CI/RUC: {c.ruc || "—"}</div>
+                        {c.empresa_vinculada_nombre && (
+                          <div className="text-[10px] text-indigo-500 font-bold mt-0.5">
+                            🏛️ Empresa: {c.empresa_vinculada_nombre}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                        <span>Cobrar</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t flex justify-end">
+              <button onClick={() => setShowQuickCobroModal(false)} className="btn-outline text-xs">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Confirmar Corte y Remisión a Empresa Vinculada */}
+      {showRemitModal && selectedEmpresa && (
+        <div className="modal-overlay" onClick={() => setShowRemitModal(false)}>
+          <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Send className="w-5 h-5 text-emerald-500" />
+                Corte y Remisión a Empresa Vinculada
+              </h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Traspaso formal de la deuda a la empresa y liberación inmediata de crédito para los funcionarios.
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div className="p-4 rounded-xl bg-slate-900 text-white space-y-2">
+                <div className="text-xs font-bold text-slate-300">Empresa Receptora</div>
+                <div className="text-base font-black text-indigo-400">{selectedEmpresa}</div>
+                {empresaPending && (
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800 text-[11px]">
+                    <div>Funcionarios: <strong className="text-white">{empresaPending.cantidad_funcionarios}</strong></div>
+                    <div>Total Deuda: <strong className="text-emerald-400">{formatPYG(empresaPending.total_deuda)}</strong></div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="label-field">Período de Liquidación (Mes)</label>
+                <input
+                  type="month"
+                  className="input-field text-xs"
+                  value={remitPeriodo}
+                  onChange={e => setRemitPeriodo(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="label-field">Notas u Observaciones del Lote</label>
+                <textarea
+                  className="input-field text-xs h-20"
+                  placeholder="Ej: Remisión nómina mensual correspondiente a los consumos de supermercado..."
+                  value={remitNotas}
+                  onChange={e => setRemitNotas(e.target.value)}
+                />
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 text-[11px] text-emerald-900 dark:text-emerald-300 leading-relaxed font-medium">
+                ✅ <strong>Efecto Inmediato de Línea de Crédito:</strong> Al confirmar la remisión, todas las facturas del período pasarán a estado <code>REMITIDO_EMPRESA</code> y el cupo de crédito disponible de los funcionarios se reestablecerá instantáneamente para que sigan comprando.
+              </div>
+            </div>
+
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button onClick={() => setShowRemitModal(false)} className="btn-ghost text-xs">Cancelar</button>
+              <button
+                onClick={handleExecuteRemit}
+                disabled={remitting}
+                className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2"
+              >
+                {remitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar y Remitir Deuda"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Cobro de Remisión por Empresa Vinculada */}
+      {showPayRemissionModal && (
+        <div className="modal-overlay" onClick={() => setShowPayRemissionModal(null)}>
+          <div className="modal-content max-w-lg" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-emerald-500" />
+                Registrar Pago de Empresa Vinculada
+              </h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Ingreso a tesorería de la transferencia o cheque emitido por la empresa para cancelar el lote remitido.
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div className="p-3.5 rounded-xl bg-slate-900 text-white space-y-1">
+                <div className="text-[10px] font-bold text-slate-400 uppercase">Lote de Remisión</div>
+                <div className="text-sm font-black text-indigo-400">{showPayRemissionModal.numero_remision} · {showPayRemissionModal.empresa_vinculada_nombre}</div>
+                <div className="text-xs text-slate-300">Saldo pendiente: <strong className="text-amber-400 font-mono">{formatPYG(showPayRemissionModal.saldo_pendiente)}</strong></div>
+              </div>
+
+              <div>
+                <label className="label-field">Monto a Cancelar (₲)</label>
+                <input
+                  type="number"
+                  className="input-field text-xs font-mono font-bold"
+                  value={payRemForm.monto}
+                  onChange={e => setPayRemForm({ ...payRemForm, monto: e.target.value })}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label-field">Forma de Pago</label>
+                  <select
+                    className="input-field text-xs"
+                    value={payRemForm.forma_pago}
+                    onChange={e => setPayRemForm({ ...payRemForm, forma_pago: e.target.value })}
+                  >
+                    <option value="transferencia">Transferencia Bancaria (SIPAP)</option>
+                    <option value="cheque">Cheque Corporativo</option>
+                    <option value="efectivo">Efectivo en Bóveda</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label-field">Fecha de Pago</label>
+                  <input
+                    type="date"
+                    className="input-field text-xs"
+                    value={payRemForm.fecha_pago}
+                    onChange={e => setPayRemForm({ ...payRemForm, fecha_pago: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {payRemForm.forma_pago === "transferencia" && (
+                <div>
+                  <label className="label-field">Cuenta Bancaria de Depósito</label>
+                  <select
+                    className="input-field text-xs"
+                    value={payRemForm.bank_account_id}
+                    onChange={e => setPayRemForm({ ...payRemForm, bank_account_id: e.target.value })}
+                  >
+                    {bankAccounts.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.banco_nombre} — Cta. {b.numero_cuenta} ({b.moneda})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="label-field">N° Boleta / Referencia Bancaria</label>
+                <input
+                  type="text"
+                  placeholder="Ej: SIPAP 4589201"
+                  className="input-field text-xs"
+                  value={payRemForm.referencia}
+                  onChange={e => setPayRemForm({ ...payRemForm, referencia: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="label-field">Notas / Observaciones</label>
+                <textarea
+                  className="input-field text-xs h-16"
+                  placeholder="Detalles adicionales del cobro..."
+                  value={payRemForm.notas}
+                  onChange={e => setPayRemForm({ ...payRemForm, notas: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button onClick={() => setShowPayRemissionModal(null)} className="btn-ghost text-xs">Cancelar</button>
+              <button
+                onClick={handlePayRemission}
+                disabled={payingRemission}
+                className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2"
+              >
+                {payingRemission ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar Cobro de Empresa"}
               </button>
             </div>
           </div>
