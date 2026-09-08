@@ -3,7 +3,7 @@
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, timezone, date, timedelta, time
 from zoneinfo import ZoneInfo
 from decimal import Decimal
 import uuid
@@ -2069,7 +2069,18 @@ async def deposit_vault_to_bank(
 
 # ── Datos para reportes PDF ────────────────────────────────────────────
 
-async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: datetime, fecha_hasta: datetime) -> list[dict]:
+async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date | datetime, fecha_hasta: date | datetime) -> list[dict]:
+    py_tz = ZoneInfo("America/Asuncion")
+    if isinstance(fecha_desde, date) and not isinstance(fecha_desde, datetime):
+        fecha_desde = datetime.combine(fecha_desde, time.min, tzinfo=py_tz)
+    elif isinstance(fecha_desde, datetime) and fecha_desde.tzinfo is None:
+        fecha_desde = fecha_desde.replace(tzinfo=py_tz)
+
+    if isinstance(fecha_hasta, date) and not isinstance(fecha_hasta, datetime):
+        fecha_hasta = datetime.combine(fecha_hasta, time.max, tzinfo=py_tz)
+    elif isinstance(fecha_hasta, datetime) and fecha_hasta.tzinfo is None:
+        fecha_hasta = fecha_hasta.replace(tzinfo=py_tz)
+
     query = (
         select(CashSession, CashCount, CashRegister.nombre)
         .join(CashRegister, CashRegister.id == CashSession.register_id)
@@ -2111,9 +2122,13 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         for sid, fp_raw, mon, monto in pay_res.all():
             if sid not in payments_by_session:
                 payments_by_session[sid] = {
-                    "tarjeta": Decimal("0"),
+                    "debito": Decimal("0"),
+                    "credito": Decimal("0"),
+                    "bancard": Decimal("0"),
+                    "dinelco": Decimal("0"),
+                    "qr": Decimal("0"),
+                    "pix": Decimal("0"),
                     "transferencia": Decimal("0"),
-                    "qr_pix": Decimal("0"),
                     "extra_club": Decimal("0"),
                     "cheque": Decimal("0"),
                     "otro": Decimal("0"),
@@ -2130,15 +2145,22 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
                     payments_by_session[sid]["efectivo_usd"] += m
                 else:
                     payments_by_session[sid]["efectivo_pyg"] += m
-            elif any(t in fp for t in ["TARJETA", "BANCARD", "DINELCO", "DEBITO", "CREDITO"]) and "QR" not in fp:
-                payments_by_session[sid]["tarjeta"] += m
-            elif "QR" in fp or "PIX" in fp:
-                payments_by_session[sid]["qr_pix"] += m
-            elif "TRANSFERENCIA" in fp or "TRANSF" in fp:
+            elif "DINELCO" in fp and "QR" not in fp:
+                payments_by_session[sid]["dinelco"] += m
+            elif "CREDITO" in fp and "QR" not in fp and "NOTA" not in fp:
+                payments_by_session[sid]["credito"] += m
+            elif ("DEBITO" in fp or "BANCARD" in fp or "TARJETA" in fp) and "QR" not in fp:
+                payments_by_session[sid]["debito"] += m
+                payments_by_session[sid]["bancard"] += m
+            elif "PIX" in fp:
+                payments_by_session[sid]["pix"] += m
+            elif "QR" in fp:
+                payments_by_session[sid]["qr"] += m
+            elif "TRANSFERENCIA" in fp or "TRANSF" in fp or "SIPAP" in fp:
                 payments_by_session[sid]["transferencia"] += m
             elif "EXTRA_CLUB" in fp or "CLUB" in fp or "CREDITO_CLIENTE" in fp:
                 payments_by_session[sid]["extra_club"] += m
-            elif "CHEQUE" in fp:
+            elif "CHEQUE" in fp or "VALE" in fp:
                 payments_by_session[sid]["cheque"] += m
             else:
                 payments_by_session[sid]["otro"] += m
@@ -2147,20 +2169,31 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
     for session_obj, count, register_nombre in rows:
         pays = payments_by_session.get(session_obj.id, {})
 
-        # Desglose de medios electrónicos certificados por el POS
-        m_tarjeta = float(count.monto_tarjeta or 0) or float(pays.get("tarjeta", 0))
-        m_transf_qr = float(count.monto_transferencia or 0) or float(pays.get("transferencia", 0) + pays.get("qr_pix", 0))
+        # Desglose de medios electrónicos certificados por el POS clasificados para Tesorería
+        m_debito = float(pays.get("debito", 0))
+        m_credito = float(pays.get("credito", 0))
+        m_bancard = float(pays.get("bancard", 0)) or m_debito
+        m_dinelco = float(pays.get("dinelco", 0))
+        m_qr = float(pays.get("qr", 0))
+        m_pix = float(pays.get("pix", 0))
+        m_transf = float(pays.get("transferencia", 0))
         m_extra_club = float(pays.get("extra_club", 0))
         m_cheque = float(count.monto_cheque or 0) or float(pays.get("cheque", 0))
         m_otro = float(count.monto_otro or 0) or float(pays.get("otro", 0))
+
+        # Compatibilidad con cierres donde la cajera digitó manualmente count.monto_tarjeta
+        legacy_tarjeta = float(count.monto_tarjeta or 0)
+        if legacy_tarjeta > 0 and (m_debito + m_credito + m_bancard + m_dinelco) == 0:
+            m_debito = legacy_tarjeta
+            m_bancard = legacy_tarjeta
 
         # Efectivo contado en gaveta
         m_ef_pyg = float(count.monto_efectivo or 0)
         m_ef_brl = float(count.monto_efectivo_brl or 0)
         m_ef_usd = float(count.monto_efectivo_usd or 0)
 
-        # Monto total declarado de la sesión: Efectivo físico contado en gaveta (PYG + divisas) + Medios de pago electrónicos certificados por el POS
-        monto_electronico = m_tarjeta + m_transf_qr + m_extra_club + m_cheque + m_otro
+        # Monto total declarado de la sesión: Efectivo físico contado en gaveta (PYG + divisas) + Medios electrónicos certificados por el POS
+        monto_electronico = m_debito + m_credito + m_dinelco + m_qr + m_pix + m_transf + m_extra_club + m_cheque + m_otro
         efectivo_total_contado = float(count.monto_total or 0)
         monto_declarado_total = efectivo_total_contado + monto_electronico
 
@@ -2179,11 +2212,18 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "monto_efectivo": m_ef_pyg,
             "monto_efectivo_usd": m_ef_usd,
             "monto_efectivo_brl": m_ef_brl,
-            "monto_tarjeta": m_tarjeta,
-            "monto_transferencia": m_transf_qr,
+            "monto_debito": m_debito,
+            "monto_credito": m_credito,
+            "monto_bancard": m_bancard,
+            "monto_dinelco": m_dinelco,
+            "monto_qr": m_qr,
+            "monto_pix": m_pix,
+            "monto_transferencia": m_transf,
             "monto_extra_club": m_extra_club,
             "monto_cheque": m_cheque,
             "monto_otro": m_otro,
+            # Campos retrocompatibles
+            "monto_tarjeta": m_debito + m_credito + m_dinelco,
             "monto_total": monto_declarado_total,
             "diferencia": diferencia_gs,
             "diferencia_usd": float(count.diferencia_usd or 0),

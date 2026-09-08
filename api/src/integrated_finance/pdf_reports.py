@@ -195,12 +195,13 @@ def _base_landscape_doc(buffer, title: str, company: dict, generated_by: str = "
     styles.add(ParagraphStyle("MetaRight", fontName=FONT_REGULAR, fontSize=7.5, leading=10, textColor=GRAY_MEDIUM, alignment=TA_RIGHT))
     styles.add(ParagraphStyle("Eyebrow", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=WHITE, alignment=TA_LEFT))
     # Estilos tipográficos para celdas matriciales
-    styles.add(ParagraphStyle("CellText", fontName=FONT_REGULAR, fontSize=6.8, leading=8.5, textColor=GRAY_DARK))
-    styles.add(ParagraphStyle("CellTextBold", fontName=FONT_BOLD, fontSize=6.8, leading=8.5, textColor=GRAY_DARK))
-    styles.add(ParagraphStyle("CellNum", fontName=FONT_REGULAR, fontSize=6.8, leading=8.5, textColor=GRAY_DARK, alignment=TA_RIGHT))
-    styles.add(ParagraphStyle("CellNumBold", fontName=FONT_BOLD, fontSize=6.8, leading=8.5, textColor=GRAY_DARK, alignment=TA_RIGHT))
-    styles.add(ParagraphStyle("CellHead", fontName=FONT_BOLD, fontSize=6.8, leading=8.5, textColor=WHITE))
-    styles.add(ParagraphStyle("CellHeadRight", fontName=FONT_BOLD, fontSize=6.8, leading=8.5, textColor=WHITE, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellText", fontName=FONT_REGULAR, fontSize=6.5, leading=8.5, textColor=GRAY_DARK))
+    styles.add(ParagraphStyle("CellTextBold", fontName=FONT_BOLD, fontSize=6.5, leading=8.5, textColor=GRAY_DARK))
+    styles.add(ParagraphStyle("CellNum", fontName=FONT_REGULAR, fontSize=6.5, leading=8.5, textColor=GRAY_DARK, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellNumBold", fontName=FONT_BOLD, fontSize=6.5, leading=8.5, textColor=GRAY_DARK, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellHead", fontName=FONT_BOLD, fontSize=6.5, leading=8.5, textColor=HexColor("#0F172A")))
+    styles.add(ParagraphStyle("CellHeadRight", fontName=FONT_BOLD, fontSize=6.5, leading=8.5, textColor=HexColor("#0F172A"), alignment=TA_RIGHT))
+    styles.add(ParagraphStyle("CellHeadCenter", fontName=FONT_BOLD, fontSize=6.5, leading=8.5, textColor=HexColor("#0F172A"), alignment=TA_CENTER))
     return doc, styles
 
 
@@ -209,14 +210,14 @@ def _build(doc, elements):
 
 
 def _accent_bar(report_title: str) -> Table:
-    """Franja superior de color solido con el nombre del reporte en mayusculas
-    -- reemplaza al subtitulo suelto de antes, da un punto de color premium
-    arriba de todo sin ocupar una linea extra de texto plano."""
-    t = Table([[Paragraph(report_title.upper(), ParagraphStyle("EyebrowInline", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=WHITE))]], colWidths=[180 * mm])
+    """Franja superior con el nombre del reporte en mayúsculas
+    -- estilo claro de impresión ejecutiva (ahorro de tinta)."""
+    t = Table([[Paragraph(report_title.upper(), ParagraphStyle("EyebrowInline", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=HexColor("#0F172A")))]], colWidths=[186 * mm])
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), PRIMARY_COLOR),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
         ("LEFTPADDING", (0, 0), (-1, -1), 8),
     ]))
     return t
@@ -309,14 +310,15 @@ def _company_landscape_header(company: dict, styles, report_title: str, subtitle
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
 
-    # Accent bar horizontal de 273mm
+    # Accent bar horizontal de 273mm con fondo claro para impresión
     bar_p = Paragraph(
         f"<b>{(subtitle or report_title).upper()}</b>",
-        ParagraphStyle("EyebrowLandscape", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=WHITE)
+        ParagraphStyle("EyebrowLandscape", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=HexColor("#0F172A"))
     )
     accent_t = Table([[bar_p]], colWidths=[273 * mm])
     accent_t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#0F172A")),
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LEFTPADDING", (0, 0), (-1, -1), 8),
