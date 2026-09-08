@@ -71,6 +71,10 @@ async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
     db.add(product)
     await db.flush()
     await db.refresh(product)
+    # Mismo motivo que en list_products: ProductResponse expone supplier_nombre
+    # y categoria a traves de relaciones. Si no se cargan aca, pydantic las
+    # dereferencia al serializar y SQLAlchemy corta con MissingGreenlet.
+    await db.refresh(product, ["categoria", "supplier"])
     return product
 
 
@@ -254,9 +258,15 @@ async def list_products(
     except ValueError:
         c_uuid = UUID("00000000-0000-0000-0000-000000000010")
 
+    # supplier va cargado SI O SI: ProductResponse expone supplier_nombre, que es
+    # una propiedad de Python sobre la relacion. Sin el selectinload, pydantic la
+    # dereferencia al serializar --fuera del contexto async-- y SQLAlchemy corta
+    # con MissingGreenlet, devolviendo 500. Y solo falla cuando hay resultados,
+    # asi que una busqueda sin coincidencias parece sana: el error se ve como
+    # "a veces no busca".
     query = (
         select(Product)
-        .options(selectinload(Product.categoria))
+        .options(selectinload(Product.categoria), selectinload(Product.supplier))
         .where(Product.company_id == c_uuid)
     )
 
