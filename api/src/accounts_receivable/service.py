@@ -1108,6 +1108,9 @@ async def get_corporate_agreements_summary(db: AsyncSession, company_id: str) ->
     for r in result.fetchall():
         d = dict(r._mapping)
         d["deuda_pendiente_corte"] = float(d["deuda_pendiente_corte"])
+        d["empresa_vinculada_nombre"] = d["empresa_nombre"]
+        d["total_saldo_pendiente"] = d["deuda_pendiente_corte"]
+        d["cantidad_funcionarios"] = d["funcionarios_con_deuda"]
         rows.append(d)
     return rows
 
