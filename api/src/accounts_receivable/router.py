@@ -410,6 +410,52 @@ async def export_corporate_agreement_extractos_pdf(
     )
 
 
+@router.get("/companies/{company_id}/accounts-receivable/corporate-agreements/{empresa_nombre}/consolidado.pdf")
+async def export_corporate_agreement_consolidado_pdf(
+    company_id: str,
+    empresa_nombre: str,
+    periodo: str = Query(..., description="Período de corte, ej. 2026-09"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera la Planilla Consolidada de Nómina (PDF A4) con lista completa de funcionarios,
+    comprobantes, importes, totalizado en números y letras, y el Acta Formal de Recepción
+    y Compromiso de Pago Corporativo con espacio para firmas y sellos."""
+    data = await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Administración"
+
+    func_list = data.get("funcionarios", [])
+    remission_preview = {
+        "numero_remision": f"CONSOL-{periodo.replace('-', '')}",
+        "empresa_vinculada_nombre": empresa_nombre,
+        "empresa_vinculada_ruc": func_list[0].get("empresa_vinculada_ruc", "—") if func_list else "—",
+        "periodo_mes": periodo,
+        "fecha_remision": date.today(),
+        "monto_total": data.get("total_deuda", 0),
+        "saldo_pendiente": data.get("total_deuda", 0),
+        "cantidad_funcionarios": data.get("total_funcionarios", len(func_list)),
+        "cantidad_documentos": data.get("total_documentos", 0),
+        "estado": "PENDIENTE_CORTE",
+        "funcionarios": func_list,
+    }
+
+    pdf_bytes = ar_pdf_reports.generate_remision_consolidada_pdf(
+        company=company,
+        remission=remission_preview,
+        generated_by=generated_by,
+    )
+    safe_name = empresa_nombre.replace(" ", "_").lower()
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=consolidado_nomina_{safe_name}_{periodo}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
 @router.post("/companies/{company_id}/accounts-receivable/corporate-agreements/remit")
 async def create_corporate_remission_endpoint(
     company_id: str,

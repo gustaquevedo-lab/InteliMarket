@@ -1499,6 +1499,14 @@ export default function AccountsReceivablePage() {
 
                     <div className="flex items-center gap-2 flex-wrap">
                       <button
+                        onClick={() => api.accountsReceivable.downloadConsolidadoEmpresaPdf(selectedEmpresa, remitPeriodo)}
+                        className="btn-outline text-xs flex items-center gap-1.5 font-bold border-indigo-300 text-indigo-700 dark:text-indigo-300 bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+                        title="Descargar Planilla Consolidada con cuadro totalizador y espacio para firmas de RRHH / Supermercado"
+                      >
+                        <Printer className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        <span>Planilla Consolidada con Firmas (PDF)</span>
+                      </button>
+                      <button
                         onClick={() => api.accountsReceivable.downloadExtractosEmpresaPdf(selectedEmpresa, remitPeriodo)}
                         className="btn-outline text-xs flex items-center gap-1.5 font-bold"
                       >

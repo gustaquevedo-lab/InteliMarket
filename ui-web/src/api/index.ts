@@ -1669,6 +1669,7 @@ export const api = {
     corporateAgreementsSummary: () => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/summary`),
     corporateAgreementPendingDocs: (empresa: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/pending-docs`),
     downloadExtractosEmpresaPdf: (empresa: string, periodo: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/extractos.pdf`, { periodo }, `extractos_${empresa.replace(/\s+/g, '_')}_${periodo}.pdf`),
+    downloadConsolidadoEmpresaPdf: (empresa: string, periodo: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/${encodeURIComponent(empresa)}/consolidado.pdf`, { periodo }, `consolidado_${empresa.replace(/\s+/g, '_')}_${periodo}.pdf`),
     createCorporateRemission: (data: { empresa_vinculada_nombre: string; periodo_mes: string; fecha_corte?: string; accounts_receivable_ids?: string[]; notas?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/remit`, data),
     listCorporateRemissions: (empresa?: string) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions`, empresa ? { empresa_nombre: empresa } : undefined),
     getCorporateRemissionDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}`),
