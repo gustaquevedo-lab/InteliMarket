@@ -725,7 +725,24 @@ export default function SupervisorPage() {
     return () => { cancelled = true }
   }, [isAuthorized])
 
-  // ── POLLING DE ALTA PRIORIDAD (CADA 1.5s EN PISO) ────────────────────────
+  // ── APROBACIONES DE CRÉDITO PENDIENTES ───────────────────────────────────
+  const fetchCreditApprovals = useCallback(async () => {
+    try {
+      const pendientes = (await api.creditApprovalRequests.list({ estado: "pendiente" })) || []
+      const list = (pendientes || []) as CreditApprovalRequest[]
+      if (isInitializedPendingRef.current && list.length > prevCreditRef.current) {
+        setAlarmMuted(false)
+        emitSound("aprobacion")
+        systemNotify("Aprobación de Crédito Requerida", `${list.length} pedido(s) de crédito esperando autorización.`)
+      }
+      prevCreditRef.current = list.length
+      setCreditApprovals(list)
+    } catch {
+      // Ignorar fallo puntual
+    }
+  }, [emitSound])
+
+  // ── AUTORIZACIONES DE PISO Y BÓVEDA (ALTA PRIORIDAD) ─────────────────────
   const fetchPending = useCallback(async () => {
     try {
       const [reqs, vApprovals] = await Promise.all([
@@ -736,8 +753,9 @@ export default function SupervisorPage() {
       const newVault = vApprovals || []
       const currentTotal = newReqs.length + newVault.length
 
-      // Si aumentaron los pedidos pendientes (incluyendo de 0 a 1), sonar alerta y vibrar
+      // Si aumentaron los pedidos pendientes (incluyendo de 0 a 1), sonar alarma PedidosYa
       if (isInitializedPendingRef.current && currentTotal > prevPendingCountRef.current) {
+        setAlarmMuted(false)
         emitSound("nuevo_pedido")
         systemNotify("Nueva autorización en piso", `${currentTotal} pedido(s) de cajera esperando respuesta.`)
       }
@@ -752,10 +770,9 @@ export default function SupervisorPage() {
     }
   }, [emitSound])
 
-  // ── POLLING GENERAL DE CAJAS & RETIROS (FILTRADO ESTRICTO: HOY Y AYER) ───
+  // ── SESIONES DE CAJA, ENTREGAS Y RETIROS CASH DROP ────────────────────────
   const fetchData = useCallback(async () => {
     try {
-      // FILTRO ESTRICTO: Solo cajas de HOY o del DÍA ANTERIOR
       const limiteAyer = new Date()
       limiteAyer.setDate(limiteAyer.getDate() - 1)
       limiteAyer.setHours(0, 0, 0, 0)
@@ -766,13 +783,11 @@ export default function SupervisorPage() {
         api.caja.cashDropRequests.list("pendiente"),
       ])
 
-      // Filtrado estricto en frontend para blindar que nunca aparezcan cajas del mes pasado
       const validSessions = (sess || []).filter((s) => {
         const apertura = new Date(s.fecha_apertura).getTime()
         return apertura >= limiteAyer.getTime()
       })
 
-      // Alertar si aumentó el número de cajas con alerta de Drop Cash
       const dropAlertsCount = validSessions.filter((s) => s.cash_drop_alert).length
       const retirosCount = (ret || []).length
       const handoffsCount = (ho || []).length
@@ -783,8 +798,9 @@ export default function SupervisorPage() {
           systemNotify("Drop Cash urgente", `La caja superó su tope de efectivo: ${dropAlertsCount} caso(s).`)
         }
         if (retirosCount > prevRetirosRef.current) {
+          setAlarmMuted(false)
           emitSound("nuevo_retiro")
-          systemNotify("Retiro solicitado", `Una cajera pidió un Drop Cash de ${retirosCount - prevRetirosRef.current} retiro(s).`)
+          systemNotify("Retiro solicitado", `Una cajera pidió un Drop Cash (${retirosCount} pendientes).`)
         }
         if (handoffsCount > prevHandoffsRef.current) {
           emitSound("nueva_entrega")
@@ -808,129 +824,201 @@ export default function SupervisorPage() {
     }
   }, [emitSound])
 
-  // ── SCREEN WAKE LOCK (IMPEDIR SUSPENSIÓN DE PANTALLA Y CONGELAMIENTO EN CELULAR) ──
-  useEffect(() => {
-    if (!isAuthorized || !onDuty) return
-    let wakeLockObj: any = null
-    let isCancelled = false
+  // ── SINCRONIZACIÓN UNIFICADA REACTIVA (TIMEOUT Y ABORT CONTROLLER) ─────────
+  const syncAbortRef = useRef<AbortController | null>(null)
 
-    const acquireLock = async () => {
-      if (typeof navigator !== "undefined" && "wakeLock" in navigator && document.visibilityState === "visible") {
-        try {
-          wakeLockObj = await (navigator as any).wakeLock.request("screen")
-          wakeLockObj.addEventListener("release", () => {
-            if (!isCancelled && document.visibilityState === "visible" && onDuty) {
-              acquireLock()
-            }
-          })
-        } catch {
-          // WakeLock bloqueado por ahorro de batería del SO
-        }
+  const syncAllNow = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!isAuthorized) return
+    try {
+      setIsSyncing(true)
+      if (syncAbortRef.current) {
+        syncAbortRef.current.abort()
       }
-    }
+      const controller = new AbortController()
+      syncAbortRef.current = controller
+      const timeoutTimer = setTimeout(() => controller.abort(), 4500)
 
-    acquireLock()
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        acquireLock()
-        fetchPending()
-        fetchData()
+      await Promise.allSettled([
+        fetchPending(),
+        fetchData(),
+        fetchCreditApprovals(),
+      ])
+      clearTimeout(timeoutTimer)
+      setLastSync(new Date())
+      setSyncError(null)
+    } catch {
+      if (!opts?.silent) {
+        setSyncError("Reconectando...")
       }
+    } finally {
+      setIsSyncing(false)
     }
+  }, [isAuthorized, fetchPending, fetchData, fetchCreditApprovals])
 
-    document.addEventListener("visibilitychange", handleVisibility)
-    window.addEventListener("focus", handleVisibility)
-    window.addEventListener("online", handleVisibility)
+  // ── SCREEN WAKE LOCK BLINDADO (EVITA SUSPENSIÓN Y CONGELAMIENTO EN CELULAR) ─
+  const wakeLockRef = useRef<any>(null)
 
-    return () => {
-      isCancelled = true
-      document.removeEventListener("visibilitychange", handleVisibility)
-      window.removeEventListener("focus", handleVisibility)
-      window.removeEventListener("online", handleVisibility)
-      if (wakeLockObj) wakeLockObj.release().catch(() => {})
-    }
-  }, [isAuthorized, onDuty, fetchPending, fetchData])
-
-  // ── CANAL DE EVENTOS EN TIEMPO REAL (SSE) PARA RESPUESTA INMEDIATA (<10ms) ──
-  useEffect(() => {
-    if (!isAuthorized || !onDuty) return
-
-    let eventSource: EventSource | null = null
-    let reconnectTimeout: any = null
-    let isCancelled = false
-
-    const connectSse = () => {
+  const acquireLock = useCallback(async () => {
+    if (!keepScreenOn || !onDuty) return
+    if (typeof navigator !== "undefined" && "wakeLock" in navigator && document.visibilityState === "visible") {
       try {
-        const companyId = COMPANY_ID
-        eventSource = api.events.stream(companyId)
-
-        eventSource.onopen = () => {
-          if (!isCancelled) {
-            setIsSseConnected(true)
-            setSyncError(null)
-          }
+        if (wakeLockRef.current) {
+          try { await wakeLockRef.current.release() } catch {}
+          wakeLockRef.current = null
         }
-
-        eventSource.onmessage = (event) => {
-          if (isCancelled || !event.data) return
-          try {
-            const payload = JSON.parse(event.data)
-            if (
-              payload.type === "supervisor_request_new" ||
-              payload.type === "supervisor_request_resolved" ||
-              payload.type === "cash_drop_requested" ||
-              payload.type === "cash_session"
-            ) {
-              // Actualización inmediata sin esperar polling
-              fetchPending()
-              fetchData()
-              if (payload.type === "supervisor_request_new") {
-                emitSound("nuevo_pedido")
-                systemNotify("Nueva solicitud de cajera", `${payload.cajero_nombre || "Cajera"} en ${payload.caja_nombre || "Caja"}: ${payload.descripcion || "Intervención requerida"}`)
-              } else if (payload.type === "cash_drop_requested") {
-                emitSound("nuevo_retiro")
-                systemNotify("Retiro Drop Cash", `${payload.cajero_nombre || "Cajera"} solicitó retiro.`)
-              }
-            }
-          } catch {
-            // Ignorar ping / keepalive
+        wakeLockRef.current = await (navigator as any).wakeLock.request("screen")
+        wakeLockRef.current.addEventListener("release", () => {
+          wakeLockRef.current = null
+          if (document.visibilityState === "visible" && keepScreenOn && onDuty) {
+            acquireLock()
           }
-        }
-
-        eventSource.onerror = () => {
-          if (isCancelled) return
-          setIsSseConnected(false)
-          if (eventSource) {
-            eventSource.close()
-            eventSource = null
-          }
-          // Auto-reconexión inmediata
-          clearTimeout(reconnectTimeout)
-          reconnectTimeout = setTimeout(connectSse, 2500)
-        }
+        })
       } catch {
-        setIsSseConnected(false)
+        // Bloqueado por ahorro de batería del SO
       }
     }
+  }, [keepScreenOn, onDuty])
 
-    // Carga inicial
-    fetchPending()
-    fetchData()
+  useEffect(() => {
+    if (keepScreenOn) {
+      acquireLock()
+    } else if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => {})
+      wakeLockRef.current = null
+    }
+  }, [keepScreenOn, acquireLock])
+
+  // ── CANAL EN TIEMPO REAL (SSE) CON RECONEXIÓN INMEDIATA (<50ms) ───────────
+  const eventSourceRef = useRef<EventSource | null>(null)
+  const reconnectTimeoutRef = useRef<any>(null)
+
+  const connectSse = useCallback(() => {
+    if (!isAuthorized || !onDuty) return
+
+    // Destruir socket zombi previo si existiera
+    if (eventSourceRef.current) {
+      try { eventSourceRef.current.close() } catch {}
+      eventSourceRef.current = null
+    }
+    clearTimeout(reconnectTimeoutRef.current)
+
+    try {
+      const companyId = COMPANY_ID
+      const es = api.events.stream(companyId)
+      eventSourceRef.current = es
+
+      es.onopen = () => {
+        setIsSseConnected(true)
+        setSyncError(null)
+      }
+
+      es.onmessage = (event) => {
+        if (!event.data) return
+        try {
+          const payload = JSON.parse(event.data)
+          const evtType = payload.type
+
+          if (
+            evtType === "supervisor_request_new" ||
+            evtType === "supervisor_request_resolved" ||
+            evtType === "cash_drop_requested" ||
+            evtType === "cash_session" ||
+            evtType === "credit_approval_requested" ||
+            evtType === "credit_approval_resolved"
+          ) {
+            // Refresco instantáneo concurrente
+            syncAllNow({ silent: true })
+
+            if (evtType === "supervisor_request_new") {
+              setAlarmMuted(false)
+              emitSound("nuevo_pedido")
+              systemNotify(
+                "Nueva solicitud de cajera",
+                `${payload.cajero_nombre || "Cajera"} en ${payload.caja_nombre || "Caja"}: ${payload.descripcion || "Intervención requerida"}`
+              )
+            } else if (evtType === "credit_approval_requested") {
+              setAlarmMuted(false)
+              emitSound("aprobacion")
+              systemNotify(
+                "Solicitud de Crédito Retenida",
+                `Cliente: ${payload.customer_nombre || "Cliente"} | Compra: ${formatPYG(payload.monto || 0)}`
+              )
+            } else if (evtType === "cash_drop_requested") {
+              setAlarmMuted(false)
+              emitSound("nuevo_retiro")
+              systemNotify("Retiro Drop Cash", `${payload.cajero_nombre || "Cajera"} solicitó retiro de caja.`)
+            }
+          }
+        } catch {
+          // Keepalive
+        }
+      }
+
+      es.onerror = () => {
+        setIsSseConnected(false)
+        if (eventSourceRef.current) {
+          try { eventSourceRef.current.close() } catch {}
+          eventSourceRef.current = null
+        }
+        // Reconexión rápida a los 1200ms
+        clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = setTimeout(connectSse, 1200)
+      }
+    } catch {
+      setIsSseConnected(false)
+    }
+  }, [isAuthorized, onDuty, syncAllNow, emitSound])
+
+  // ── BLINDAJE ANTE PANTALLA APAGADA Y RETORNO DE REPOSO (WAKE / RESUME) ────
+  useEffect(() => {
+    if (!isAuthorized || !onDuty) return
+
+    // Carga inicial y conexión SSE
+    syncAllNow()
     connectSse()
 
-    // Polling de respaldo (cada 5s con SSE activo, cada 2s si SSE está reconectando)
-    const intervalPending = setInterval(fetchPending, isSseConnected ? 5000 : 2000)
-    const intervalData = setInterval(fetchData, 8000)
+    const handleWakeAndResume = () => {
+      if (document.visibilityState === "visible") {
+        // 1. Reanudar AudioContext si el móvil lo durmió
+        unlockAudioContext().then((ok) => { if (ok) setAudioReady(true) })
+        // 2. Reactivar pantalla siempre activa
+        acquireLock()
+        // 3. Reconectar SSE de inmediato (elimina socket zombi half-open)
+        connectSse()
+        // 4. Sincronizar datos al instante
+        syncAllNow()
+        // 5. Segundo chequeo a los 750ms para compensar demora del chip WiFi/4G
+        setTimeout(() => syncAllNow({ silent: true }), 750)
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleWakeAndResume)
+    window.addEventListener("focus", handleWakeAndResume)
+    window.addEventListener("online", handleWakeAndResume)
+    window.addEventListener("pageshow", handleWakeAndResume)
+
+    // Polling adaptativo continuo (cada 3.5s si SSE activo, cada 1.5s si está reconectando)
+    const pollInterval = setInterval(() => {
+      syncAllNow({ silent: true })
+    }, isSseConnected ? 3500 : 1500)
 
     return () => {
-      isCancelled = true
-      clearInterval(intervalPending)
-      clearInterval(intervalData)
-      clearTimeout(reconnectTimeout)
-      if (eventSource) eventSource.close()
+      document.removeEventListener("visibilitychange", handleWakeAndResume)
+      window.removeEventListener("focus", handleWakeAndResume)
+      window.removeEventListener("online", handleWakeAndResume)
+      window.removeEventListener("pageshow", handleWakeAndResume)
+      clearInterval(pollInterval)
+      clearTimeout(reconnectTimeoutRef.current)
+      if (eventSourceRef.current) {
+        try { eventSourceRef.current.close() } catch {}
+        eventSourceRef.current = null
+      }
+      if (wakeLockRef.current) {
+        try { wakeLockRef.current.release() } catch {}
+        wakeLockRef.current = null
+      }
     }
-  }, [isAuthorized, onDuty, fetchPending, fetchData, emitSound, isSseConnected])
+  }, [isAuthorized, onDuty, syncAllNow, connectSse, acquireLock, isSseConnected])
 
   // ── DATOS SECUNDARIOS (EQUIPO) ──────────────────────────────────
   const fetchVaultAndTeam = useCallback(async () => {
@@ -1006,26 +1094,6 @@ try {
     try { await api.notifications.markAllAsRead() } catch (e) { void e }
   }
 
-  // ── APROBACIONES DE CRÉDITO PENDIENTES ───────────────────────────────────
-  const fetchCreditApprovals = useCallback(async () => {
-    try {
-      const pendientes = (await api.creditApprovalRequests.list({ estado: "pendiente" })) || []
-      if (pendientes.length > prevCreditRef.current && prevCreditRef.current !== 0) {
-        emitSound("aprobacion")
-        systemNotify("Aprobación de crédito en espera", `${pendientes.length} pedido(s) pendientes.`)
-      }
-      prevCreditRef.current = pendientes.length
-      setCreditApprovals(pendientes as CreditApprovalRequest[])
-    } catch (e) { void e }
-  }, [emitSound])
-
-  useEffect(() => {
-    if (!isAuthorized) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch asíncrono intencional
-    fetchCreditApprovals()
-    const interval = setInterval(fetchCreditApprovals, 15000)
-    return () => clearInterval(interval)
-  }, [isAuthorized, fetchCreditApprovals])
 
   const resolveCreditApproval = async (id: string, aprobado: boolean, motivo?: string) => {
     setResolvingId(`cred-${id}`)
@@ -1432,6 +1500,19 @@ try {
   const totalPendientes = pendingItems.length + retiros.length + creditApprovals.length
   const firstName = (user.nombre || "").split(" ")[0]
 
+  // ── LOOP INSISTENTE DE ALARMA PEDIDOSYA MIENTRAS HAYA PEDIDOS PENDIENTES ─
+  useEffect(() => {
+    if (!soundEnabled || alarmMuted || !isAuthorized || !onDuty) return
+    if (totalPendientes === 0) return
+
+    // Suena la alarma cada 12 segundos si hay pedidos esperando y no se silenciaron
+    const loopTimer = setInterval(() => {
+      playPedidosYaAlarm()
+    }, 12000)
+
+    return () => clearInterval(loopTimer)
+  }, [soundEnabled, alarmMuted, isAuthorized, onDuty, totalPendientes])
+
   const tabs: { key: Tab; label: string; icon: typeof Home; badge?: number }[] = [
     { key: "inicio", label: "Autorizar", icon: ShieldAlert, badge: totalPendientes },
     { key: "cajas", label: "Radar", icon: Wallet, badge: cashDropAlerts.length },
@@ -1457,6 +1538,11 @@ try {
                 <span className="text-[8.5px] font-black uppercase px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
                   Supervisor
                 </span>
+                {keepScreenOn && (
+                  <span className="text-[8.5px] font-black uppercase px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0 flex items-center gap-0.5">
+                    ⚡ Despierto
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 truncate">
                 <span className={`w-2 h-2 rounded-full shrink-0 ${syncError ? "bg-rose-500" : isSseConnected ? "bg-emerald-500 shadow-xs shadow-emerald-500" : "bg-amber-400"} animate-pulse`} />
@@ -1469,6 +1555,49 @@ try {
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            {/* Botón sincronizar manual */}
+            <button
+              onClick={() => syncAllNow()}
+              disabled={isSyncing}
+              title="Sincronizar datos ahora"
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-amber-500 transition cursor-pointer"
+            >
+              <RefreshCcw className={`w-4 h-4 ${isSyncing ? "animate-spin text-amber-500" : ""}`} />
+            </button>
+
+            {/* Toggle de pantalla despierta */}
+            <button
+              onClick={toggleKeepScreenOn}
+              title={keepScreenOn ? "Pantalla siempre activa (Sin reposo)" : "Pantalla normal"}
+              className={`p-2 rounded-xl border transition cursor-pointer ${
+                keepScreenOn
+                  ? "bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-xs shadow-amber-500/20"
+                  : "bg-slate-100 dark:bg-slate-900 text-slate-400 border-slate-200 dark:border-slate-800"
+              }`}
+            >
+              <span className="text-xs font-black">⚡</span>
+            </button>
+
+            {/* Botón de prueba o silenciar alarma */}
+            {totalPendientes > 0 && !alarmMuted ? (
+              <button
+                onClick={muteCurrentAlarm}
+                title="Silenciar alarma de pedidos actual"
+                className="px-2 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-[10px] flex items-center gap-1 animate-pulse shadow-md shadow-rose-500/30 cursor-pointer"
+              >
+                <VolumeX className="w-3.5 h-3.5" />
+                <span>Silenciar</span>
+              </button>
+            ) : (
+              <button
+                onClick={testAlarmSound}
+                title="Probar Alarma PedidosYa (Volumen y Vibración)"
+                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-amber-500 hover:bg-amber-500/10 transition cursor-pointer"
+              >
+                <Volume2 className="w-4 h-4" />
+              </button>
+            )}
+
             <a
               href={`http://${typeof window !== "undefined" ? window.location.hostname : "192.168.0.10"}:8080/extra-supervisor.apk`}
               download="extra-supervisor.apk"
@@ -1478,6 +1607,7 @@ try {
               <Download className="w-3.5 h-3.5" />
               <span>APK</span>
             </a>
+
             {installPrompt && !isInstalled && (
               <button
                 onClick={installApp}
@@ -1501,7 +1631,7 @@ try {
             </button>
             <button
               onClick={toggleSound}
-              title={soundEnabled ? "Silenciar alertas sonoras" : "Activar alertas sonoras"}
+              title={soundEnabled ? "Silenciar todas las alertas" : "Activar alertas sonoras"}
               className={`p-2 rounded-xl border transition cursor-pointer ${
                 soundEnabled
                   ? "bg-amber-500/10 text-amber-500 border-amber-500/30"
@@ -1527,11 +1657,43 @@ try {
           </div>
         </div>
 
+        {/* ── BANNER DE ALARMA SONORA EN ESPERA DE ACTIVACIÓN TÁCTIL ── */}
+        {!audioReady && (
+          <div
+            onClick={testAlarmSound}
+            className="mb-2.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 p-2.5 text-slate-950 font-black flex items-center justify-between gap-2 shadow-lg shadow-amber-500/25 cursor-pointer animate-pulse"
+          >
+            <div className="flex items-center gap-2 text-xs">
+              <Volume2 className="w-4 h-4 shrink-0" />
+              <span>🔊 Toca aquí para asegurar alarma fuerte tipo PedidosYa</span>
+            </div>
+            <span className="bg-slate-950 text-amber-400 text-[10px] px-2 py-0.5 rounded-lg font-mono uppercase shrink-0">
+              Probar
+            </span>
+          </div>
+        )}
+
+        {/* ── TIRA DE AVISO DE PEDIDOS ACTIVOS SONANDO ── */}
+        {totalPendientes > 0 && !alarmMuted && (
+          <div className="mb-2.5 rounded-2xl bg-rose-500 text-white px-3 py-2 flex items-center justify-between gap-2 shadow-lg shadow-rose-500/25 animate-pulse">
+            <div className="flex items-center gap-2 text-xs font-black">
+              <Flame className="w-4 h-4 animate-bounce shrink-0" />
+              <span>{totalPendientes} pedido(s) en espera · Alarma PedidosYa activa</span>
+            </div>
+            <button
+              onClick={muteCurrentAlarm}
+              className="px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 text-white text-[10px] font-black cursor-pointer flex items-center gap-1 shrink-0"
+            >
+              <VolumeX className="w-3.5 h-3.5" /> Silenciar
+            </button>
+          </div>
+        )}
+
         {/* Tira de alertas de conexión */}
         {syncError && (
           <div className="mb-2 rounded-xl bg-rose-500/15 border border-rose-500/30 px-3 py-2 flex items-center gap-2 text-[11px] font-bold text-rose-600 dark:text-rose-300">
             <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
-            <span>Sin conexión con el servidor. Reintentando en segundo plano...</span>
+            <span>Sin conexión con el servidor. Reconectando inmediatamente...</span>
           </div>
         )}
 
