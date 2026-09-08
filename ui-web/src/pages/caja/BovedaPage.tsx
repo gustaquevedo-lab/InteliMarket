@@ -77,8 +77,11 @@ export default function BovedaPage() {
   const handleExportMovimientos = async () => {
     setExportingPdf(true)
     try {
-      const hasta = new Date().toISOString().slice(0, 10)
-      const desde = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+      const getPyDate = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Asuncion' }).format(d)
+      const hasta = getPyDate()
+      const dDesde = new Date()
+      dDesde.setDate(dDesde.getDate() - 30)
+      const desde = getPyDate(dDesde)
       await downloadPdf(`/v1/vault/export/movimientos.pdf?fecha_desde=${desde}&fecha_hasta=${hasta}`, "libro_movimientos_boveda.pdf")
     } catch {
       toast.error("Error", "No se pudo generar el PDF de movimientos")

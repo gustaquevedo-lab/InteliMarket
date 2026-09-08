@@ -7,6 +7,7 @@ wordmark de InteliMarket dibujado en vector) + metadata de auditoria (tipo de
 reporte, fecha/hora de generacion, usuario que lo genero). Pie de pagina con
 paginacion real (Pagina X de Y) y datos de la empresa en cada hoja.
 """
+from __future__ import annotations
 import io
 import os
 from datetime import date, datetime
@@ -65,17 +66,29 @@ def _fmt_gs(v) -> str:
 
 
 def _logo_flowable(company: dict):
+    # 1. Logo local de Extra Supermercado si existe
+    local_logo = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "logo_extra.png")
+    if os.path.exists(local_logo):
+        try:
+            img = Image(local_logo)
+            img._restrictSize(38 * mm, 15 * mm)
+            return img
+        except Exception:
+            pass
+
+    # 2. Logo remoto si viene configurado
     logo_url = company.get("logo_url")
     if logo_url:
         try:
-            resp = requests.get(logo_url, timeout=3)
+            resp = requests.get(logo_url, timeout=2)
             if resp.ok and resp.content:
                 img = Image(io.BytesIO(resp.content))
-                img._restrictSize(30 * mm, 16 * mm)
+                img._restrictSize(38 * mm, 15 * mm)
                 return img
         except Exception:
-            pass  # logo del cliente no disponible -- cae al wordmark propio, no rompe el reporte
+            pass  # logo del cliente no disponible -- cae al wordmark propio
 
+    # 3. Wordmark vectorial de respaldo
     d = Drawing(42 * mm, 14 * mm)
     d.add(Rect(0, 2, 11 * mm, 11 * mm, rx=2, ry=2, fillColor=PRIMARY_COLOR, strokeColor=None))
     d.add(String(5.5 * mm, 5.3 * mm, "IM", fontSize=8.5, fillColor=WHITE, textAnchor="middle", fontName=FONT_BOLD))
@@ -84,13 +97,13 @@ def _logo_flowable(company: dict):
 
 
 class _AuditedCanvas(pdfcanvas.Canvas):
-    """Canvas que numera 'Pagina X de Y' de verdad (requiere saber el total de
-    paginas antes de dibujar el pie, por eso se buffean y se dibujan en save())."""
+    """Canvas que numera 'Página X de Y' de verdad (requiere saber el total de
+    páginas antes de dibujar el pie, por eso se buffean y se dibujan en save())."""
 
     def __init__(self, *args, footer_left="", footer_right="", **kwargs):
         pdfcanvas.Canvas.__init__(self, *args, **kwargs)
         self._saved_states = []
-        self._footer_left = footer_left
+        self._footer_left = footer_left or "Intelimarket — ERP Hecho para crecer"
         self._footer_right = footer_right
 
     def showPage(self):
@@ -106,36 +119,38 @@ class _AuditedCanvas(pdfcanvas.Canvas):
         pdfcanvas.Canvas.save(self)
 
     def _draw_footer(self, total_pages):
-        self.setStrokeColor(GRAY_LIGHT)
+        self.setStrokeColor(HexColor("#E2E8F0"))
         self.setLineWidth(0.5)
-        self.line(MARGIN, 16 * mm, PAGE_W - MARGIN, 16 * mm)
-        self.setFont(FONT_REGULAR, 7)
+        self.line(MARGIN, 13 * mm, PAGE_W - MARGIN, 13 * mm)
+        self.setFont(FONT_REGULAR, 7.5)
         self.setFillColor(GRAY_MEDIUM)
-        self.drawString(MARGIN, 11 * mm, self._footer_left)
-        self.drawRightString(PAGE_W - MARGIN, 11 * mm, f"Página {self._pageNumber} de {total_pages}")
-        self.drawCentredString(PAGE_W / 2, 7 * mm, self._footer_right)
+        # Izquierda: Intelimarket (branding de plataforma)
+        self.drawString(MARGIN, 8.5 * mm, self._footer_left)
+        # Centro: Libre
+        # Derecha: Paginación X de Y
+        self.drawRightString(PAGE_W - MARGIN, 8.5 * mm, f"Página {self._pageNumber} de {total_pages}")
 
 
 def _base_doc(buffer, title: str, company: dict, generated_by: str = "") -> tuple:
-    footer_left = f"{company.get('razon_social', 'Empresa')} · RUC: {company.get('ruc', 'N/A')}"
-    footer_right = "Generado por InteliMarket ERP — documento de uso interno"
+    # Pie de página oficial: izquierda Intelimarket, centro libre, derecha paginación
+    footer_left = "Intelimarket — ERP Hecho para crecer"
 
     def _canvasmaker(*args, **kwargs):
-        return _AuditedCanvas(*args, footer_left=footer_left, footer_right=footer_right, **kwargs)
+        return _AuditedCanvas(*args, footer_left=footer_left, footer_right="", **kwargs)
 
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
-        rightMargin=MARGIN, leftMargin=MARGIN, topMargin=15 * mm, bottomMargin=22 * mm,
+        rightMargin=MARGIN, leftMargin=MARGIN, topMargin=12 * mm, bottomMargin=18 * mm,
         title=title,
     )
     doc._audited_canvasmaker = _canvasmaker
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle("Header", fontName=FONT_BOLD, fontSize=13, leading=15, textColor=GRAY_DARK, spaceAfter=1))
-    styles.add(ParagraphStyle("Sub", fontName=FONT_REGULAR, fontSize=8, leading=10, textColor=GRAY_MEDIUM))
-    styles.add(ParagraphStyle("SectionTitle", fontName=FONT_BOLD, fontSize=11, leading=14, textColor=GRAY_DARK, spaceBefore=10, spaceAfter=4))
-    styles.add(ParagraphStyle("Small", fontName=FONT_REGULAR, fontSize=8, leading=11, textColor=GRAY_MEDIUM))
+    styles.add(ParagraphStyle("Header", fontName=FONT_BOLD, fontSize=12, leading=14, textColor=GRAY_DARK, spaceAfter=1))
+    styles.add(ParagraphStyle("Sub", fontName=FONT_REGULAR, fontSize=7.5, leading=9.5, textColor=GRAY_MEDIUM))
+    styles.add(ParagraphStyle("SectionTitle", fontName=FONT_BOLD, fontSize=10, leading=13, textColor=GRAY_DARK, spaceBefore=8, spaceAfter=4))
+    styles.add(ParagraphStyle("Small", fontName=FONT_REGULAR, fontSize=7.5, leading=10, textColor=GRAY_MEDIUM))
     styles.add(ParagraphStyle("MetaRight", fontName=FONT_REGULAR, fontSize=7.5, leading=10, textColor=GRAY_MEDIUM, alignment=TA_RIGHT))
-    styles.add(ParagraphStyle("Eyebrow", fontName=FONT_BOLD, fontSize=8.5, leading=11, textColor=WHITE, alignment=TA_LEFT))
+    styles.add(ParagraphStyle("Eyebrow", fontName=FONT_BOLD, fontSize=8, leading=10, textColor=WHITE, alignment=TA_LEFT))
     return doc, styles
 
 
@@ -158,23 +173,30 @@ def _accent_bar(report_title: str) -> Table:
 
 
 def _company_header(company: dict, styles, report_title: str, subtitle: str, generated_by: str = "") -> list:
-    # Hora real de Paraguay -- el servidor corre en UTC (datetime.now() sin
-    # tz daba la hora del servidor, ~4 horas adelantada de la hora real).
+    # Hora real de Paraguay (America/Asuncion)
     now = datetime.now(PY_TZ)
+    fantasia = company.get("nombre_fantasia") or "EXTRA SUPERMERCADO MAYORISTA"
+    razon = company.get("razon_social") or "GRUPO SANTA TERESA E.A.S."
+    ruc = company.get("ruc") or "80150377-9"
+    direccion = company.get("direccion") or "Alejo Garcia esq. Carlos Antonio López"
+    ciudad = company.get("ciudad") or "Pedro Juan Caballero"
+
     meta_lines = [
-        Paragraph(f"<b>Generado:</b> {now.strftime('%d/%m/%Y %H:%M')}", styles["MetaRight"]),
-        Paragraph(f"<b>Por:</b> {generated_by or 'Sistema'}", styles["MetaRight"]),
+        Paragraph(f"<b>Fecha Emisión:</b> {now.strftime('%d/%m/%Y %H:%M')}", styles["MetaRight"]),
+        Paragraph(f"<b>Auditor/a:</b> {generated_by or 'Sistema'}", styles["MetaRight"]),
+        Paragraph("<b>Zona Horaria:</b> America/Asuncion (PYT)", styles["MetaRight"]),
     ]
     header_table = Table(
         [[
             _logo_flowable(company),
             [
-                Paragraph(company.get("razon_social", "Empresa"), styles["Header"]),
-                Paragraph(f"RUC: {company.get('ruc', 'N/A')}", styles["Sub"]),
+                Paragraph(fantasia.upper(), styles["Header"]),
+                Paragraph(f"<b>{razon}</b> · RUC: {ruc}", styles["Sub"]),
+                Paragraph(f"{direccion} · {ciudad}, Paraguay", styles["Sub"]),
             ],
             meta_lines,
         ]],
-        colWidths=[38 * mm, 87 * mm, 55 * mm],
+        colWidths=[40 * mm, 85 * mm, 55 * mm],
     )
     header_table.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -183,16 +205,13 @@ def _company_header(company: dict, styles, report_title: str, subtitle: str, gen
         ("TOPPADDING", (0, 0), (-1, -1), 0),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
-    # Orden: primero los datos de la empresa (quien emite el reporte), el
-    # nombre del reporte va debajo — antes la franja de titulo iba arriba de
-    # todo, como si el reporte importara mas que quien lo emite.
     return [
         header_table,
-        Spacer(1, 8),
-        _accent_bar(subtitle),
-        Spacer(1, 8),
+        Spacer(1, 6),
+        _accent_bar(subtitle or report_title),
+        Spacer(1, 6),
         HRFlowable(width="100%", thickness=0.75, color=GRAY_LIGHT),
-        Spacer(1, 8),
+        Spacer(1, 6),
     ]
 
 

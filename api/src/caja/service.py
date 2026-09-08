@@ -2085,22 +2085,29 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
     result = await db.execute(query)
     out = []
     for session_obj, count, register_nombre in result.all():
-        # count.monto_total ya es el efectivo contado (monto_cierre_real) y
-        # count.diferencia = contado - esperado, asi que
-        # (monto_total - diferencia) YA es el esperado completo (que ya
-        # incluye el fondo de apertura, sumado en close_session). Sumar
-        # monto_apertura de nuevo aca duplicaba el fondo en cada fila del
-        # arqueo diario -- el PDF mostraba un "esperado" inflado que nunca
-        # cuadraba con la diferencia real de la misma fila.
         monto_cierre_esperado = float(count.monto_total) - float(count.diferencia or 0)
         out.append({
-            "cajero_nombre": session_obj.cajero_nombre,
-            "register_nombre": register_nombre,
+            "session_id": str(session_obj.id),
+            "cajero_nombre": session_obj.cajero_nombre or "—",
+            "register_nombre": register_nombre or "Caja",
+            "fecha_apertura": session_obj.fecha_apertura,
             "fecha_cierre": session_obj.fecha_cierre,
+            "monto_apertura": float(session_obj.monto_apertura or 0),
             "monto_cierre_esperado": monto_cierre_esperado,
-            "monto_cierre": float(session_obj.monto_cierre) if session_obj.monto_cierre is not None else None,
-            "diferencia": float(count.diferencia) if count.diferencia is not None else None,
+            "monto_cierre": float(session_obj.monto_cierre) if session_obj.monto_cierre is not None else float(count.monto_total or 0),
+            "monto_efectivo": float(count.monto_efectivo or 0),
+            "monto_efectivo_usd": float(count.monto_efectivo_usd or 0),
+            "monto_efectivo_brl": float(count.monto_efectivo_brl or 0),
+            "monto_tarjeta": float(count.monto_tarjeta or 0),
+            "monto_transferencia": float(count.monto_transferencia or 0),
+            "monto_cheque": float(count.monto_cheque or 0),
+            "monto_otro": float(count.monto_otro or 0),
+            "monto_total": float(count.monto_total or 0),
+            "diferencia": float(count.diferencia) if count.diferencia is not None else 0.0,
+            "diferencia_usd": float(count.diferencia_usd or 0),
+            "diferencia_brl": float(count.diferencia_brl or 0),
             "requiere_revision": bool(count.requiere_revision),
+            "observaciones": count.observaciones or session_obj.observaciones or "",
         })
     return out
 

@@ -373,15 +373,27 @@ export default function CajaPage() {
     }
   }
 
+  const getPyDateStr = (dateObj: Date = new Date()) => {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Asuncion' }).format(dateObj)
+  }
+
   const [exportingArqueo, setExportingArqueo] = useState(false)
-  const handleExportArqueo = async () => {
+  const [showExportArqueoModal, setShowExportArqueoModal] = useState(false)
+  const [arqueoFechaDesde, setArqueoFechaDesde] = useState(() => getPyDateStr())
+  const [arqueoFechaHasta, setArqueoFechaHasta] = useState(() => getPyDateStr())
+
+  const handleExportArqueo = async (desdeCustom?: string, hastaCustom?: string) => {
     setExportingArqueo(true)
     try {
-      const hasta = new Date().toISOString().slice(0, 10)
-      const desde = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10)
-      await downloadPdf(`/v1/caja/export/arqueo.pdf?fecha_desde=${desde}&fecha_hasta=${hasta}`, "acta_arqueo_caja.pdf")
+      const desde = desdeCustom || arqueoFechaDesde || getPyDateStr()
+      const hasta = hastaCustom || arqueoFechaHasta || getPyDateStr()
+      await downloadPdf(
+        `/v1/caja/export/arqueo.pdf?fecha_desde=${desde}&fecha_hasta=${hasta}`,
+        `acta_arqueo_consolidado_${desde}_${hasta}.pdf`
+      )
+      setShowExportArqueoModal(false)
     } catch {
-      toast.error("Error", "No se pudo generar el PDF de arqueo")
+      toast.error("Error", "No se pudo generar el Acta de Arqueo Consolidada")
     } finally {
       setExportingArqueo(false)
     }
@@ -677,7 +689,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-emerald-400" : ""}`} />
             </button>
             <button
-              onClick={handleExportArqueo}
+              onClick={() => setShowExportArqueoModal(true)}
               disabled={exportingArqueo}
               className="px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-bold transition flex items-center gap-2 shadow-sm"
             >
@@ -2592,6 +2604,146 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 No se pudo cargar el ticket térmico.
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EXPORTAR ACTA DE ARQUEO CONSOLIDADA A4 */}
+      {showExportArqueoModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-white">Acta de Arqueo Consolidada</h3>
+                  <p className="text-[11px] text-slate-400">Formato oficial A4 Vertical · Auditoría de Cajas</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowExportArqueoModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Accesos rápidos */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Períodos Rápidos</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const hoy = getPyDateStr()
+                    setArqueoFechaDesde(hoy)
+                    setArqueoFechaHasta(hoy)
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold border border-slate-700 transition text-center"
+                >
+                  📅 Hoy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ayer = new Date()
+                    ayer.setDate(ayer.getDate() - 1)
+                    const ayerStr = getPyDateStr(ayer)
+                    setArqueoFechaDesde(ayerStr)
+                    setArqueoFechaHasta(ayerStr)
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold border border-slate-700 transition text-center"
+                >
+                  ⏮ Ayer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date()
+                    d.setDate(d.getDate() - 7)
+                    setArqueoFechaDesde(getPyDateStr(d))
+                    setArqueoFechaHasta(getPyDateStr())
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold border border-slate-700 transition text-center"
+                >
+                  🗓 Últimos 7 Días
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date()
+                    d.setDate(d.getDate() - 30)
+                    setArqueoFechaDesde(getPyDateStr(d))
+                    setArqueoFechaHasta(getPyDateStr())
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold border border-slate-700 transition text-center"
+                >
+                  📊 Últimos 30 Días
+                </button>
+              </div>
+            </div>
+
+            {/* Selectores de Rango Manual */}
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Fecha Desde</label>
+                <input
+                  type="date"
+                  value={arqueoFechaDesde}
+                  onChange={(e) => setArqueoFechaDesde(e.target.value)}
+                  className="w-full bg-slate-800/90 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Fecha Hasta</label>
+                <input
+                  type="date"
+                  value={arqueoFechaHasta}
+                  onChange={(e) => setArqueoFechaHasta(e.target.value)}
+                  className="w-full bg-slate-800/90 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-800/50 rounded-xl border border-slate-750 text-[11px] text-slate-400 space-y-1">
+              <p className="font-semibold text-slate-300">Detalles incluidos en el documento:</p>
+              <ul className="list-disc list-inside space-y-0.5 text-slate-400">
+                <li>Desglose por cajera y caja registradora</li>
+                <li>Totales por efectivo (₲, R$, US$), tarjetas, transferencias y cheques</li>
+                <li>Diferencias, faltantes/sobrantes y dictamen de auditoría</li>
+                <li>Triple firma de conformidad legal y custodia de fondos</li>
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowExportArqueoModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExportArqueo(arqueoFechaDesde, arqueoFechaHasta)}
+                disabled={exportingArqueo}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition disabled:opacity-50"
+              >
+                {exportingArqueo ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Generando Acta...</span>
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-4 h-4" />
+                    <span>Descargar Acta A4</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
