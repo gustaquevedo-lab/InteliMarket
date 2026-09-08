@@ -2348,6 +2348,14 @@ export default function POSPage() {
     const promoPrice = (product as any).en_promocion && (product as any).precio_promo
       ? Number((product as any).precio_promo)
       : null
+    // El conector Ñemuha, cuando el producto tiene promo activa, sincroniza
+    // precio_venta = precio de promo y respalda el precio original en
+    // precio_regular (ver nemuha_connector/service.py). Si se usara precio_venta
+    // como base para calcular el ahorro, quedaría igual al precio de promo y
+    // el cartel de ahorro nunca se mostraría.
+    const basePrice = promoPrice !== null && Number(product.precio_regular) > 0
+      ? Number(product.precio_regular)
+      : unitPrice
     const effectivePrice = promoPrice !== null ? promoPrice : unitPrice
 
     if (isPesable) {
@@ -2360,7 +2368,7 @@ export default function POSPage() {
           product_id: product.id,
           nombre: product.nombre,
           precio: effectivePrice,
-          precio_base: unitPrice,
+          precio_base: basePrice,
           sku: product.sku || "",
           codigo_barra: product.codigo_barra,
           imagen_url: product.imagen_url,
@@ -2400,7 +2408,7 @@ export default function POSPage() {
           product_id: product.id,
           nombre: product.nombre,
           precio: effectivePrice,
-          precio_base: unitPrice,
+          precio_base: basePrice,
           sku: product.sku || "",
           codigo_barra: product.codigo_barra,
           imagen_url: product.imagen_url,
