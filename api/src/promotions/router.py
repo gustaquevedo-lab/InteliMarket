@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
@@ -11,7 +11,7 @@ from api.src.promotions.schemas import (
     ProductDualPriceResponse, ReactivatePromoInput, RecordVendorCreditNoteInput,
     VendorClaimResponse, ApproveLossPromoInput,
     AuthorizeFlashGraceInput, AuthorizeFlashGraceResponse,
-    ExpiringPromotionAlert
+    ExpiringPromotionAlert, PromotionAnalytics360Response
 )
 
 router = APIRouter(
@@ -209,4 +209,52 @@ async def list_promotion_usage(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.list_usage(db, user["company_id"], promo_id, limit, offset)
+    import uuid
+    try:
+        pid = uuid.UUID(promo_id)
+        cid = uuid.UUID(str(user["company_id"]))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de promoción inválido")
+    return await service.list_usage(db, cid, pid, limit, offset)
+
+
+@router.get("/{promo_id}/analytics-360", response_model=PromotionAnalytics360Response)
+async def get_promotion_analytics_360(
+    promo_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Retorna visión 360° de la promoción: KPIs financieros, series de desempeño, ranking de productos y Trade Intelligence."""
+    import uuid
+    try:
+        pid = uuid.UUID(promo_id)
+        cid = uuid.UUID(str(user["company_id"]))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de promoción inválido")
+    return await service.get_promotion_analytics_360(db, cid, pid)
+
+
+@router.get("/{promo_id}/report-pdf")
+async def get_promotion_report_pdf(
+    promo_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera y descarga el Informe Oficial de la Promoción para Encargados de Salón y Cajas en formato PDF."""
+    import uuid
+    try:
+        pid = uuid.UUID(promo_id)
+        cid = uuid.UUID(str(user["company_id"]))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de promoción inválido")
+
+    user_name = user.get("nombre") or user.get("email") or "Encargado de Salón"
+    pdf_bytes = await service.generate_promotion_report_pdf(db, cid, pid, user_name)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="informe_oficial_promocion_{promo_id[:8]}.pdf"'
+        }
+    )

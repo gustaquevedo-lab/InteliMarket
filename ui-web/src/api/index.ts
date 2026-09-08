@@ -2109,6 +2109,19 @@ export const api = {
     authorizeFlashGrace: (data: any) => client.post<any>("/v1/promotions/authorize-flash-grace", data),
     calculate: (data: any) => client.post<any>("/v1/promotions/calculate", data),
     usage: (id: string, params?: { limit?: number; offset?: number }) => client.get<PromotionUsage[]>(`/v1/promotions/${id}/usage`, params as any),
+    analytics360: (id: string) => client.get<any>(`/v1/promotions/${id}/analytics-360`),
+    downloadReportPdf: (id: string, nombre?: string) => {
+      const cleanName = (nombre || "promocion").toLowerCase().replace(/[^a-z0-9]/gi, "_");
+      return downloadAuthenticated(`/v1/promotions/${id}/report-pdf`, {}, `informe_promocion_${cleanName}.pdf`);
+    },
+    getReportPdfBlob: async (id: string) => {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch(`/api/v1/promotions/${id}/report-pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("Error al obtener PDF");
+      return await res.blob();
+    },
   },
   expenses: {
     categories: {

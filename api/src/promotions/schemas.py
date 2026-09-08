@@ -344,3 +344,90 @@ class CalculatePromoResponse(BaseModel):
     total_final: float
     ahorro_total_compra: float
     recuadro_ticket_texto: str
+
+
+# ── SCHEMAS SUITE 360° & REPORTE EJECUTIVO DE PROMOCIÓN ────────────────────
+
+class DailyPerformancePoint(BaseModel):
+    fecha: str
+    dia_semana: str
+    total_ventas_pyg: float = 0
+    total_regular_pyg: float = 0
+    descuento_otorgado_pyg: float = 0
+    unidades_vendidas: float = 0
+    tickets_count: int = 0
+
+
+class ProductPerformancePoint(BaseModel):
+    producto_id: str
+    nombre: str
+    codigo_barra: Optional[str] = None
+    costo_promedio: float = 0
+    precio_regular: float = 0
+    precio_promocional: float = 0
+    unidades_vendidas: float = 0
+    total_ventas_pyg: float = 0
+    descuento_total_pyg: float = 0
+    margen_bruto_pyg: float = 0
+    margen_pct: float = 0
+    es_bajo_costo: bool = False
+
+
+class CustomerBuyerPoint(BaseModel):
+    cliente_id: Optional[str] = None
+    nombre: str
+    ruc: Optional[str] = None
+    telefono: Optional[str] = None
+    cantidad_tickets: int = 0
+    unidades_compradas: float = 0
+    total_gastado_pyg: float = 0
+    descuento_obtenido_pyg: float = 0
+    ultimo_ticket_fecha: Optional[str] = None
+
+
+class PromotionAIInsight(BaseModel):
+    calificacion_general: str  # "excelente", "muy_buena", "regular", "deficitaria"
+    score_eficiencia: int  # 0 a 100
+    resumen_ejecutivo: str
+    analisis_elasticidad: str
+    analisis_margen: str
+    recomendacion_proveedor: str
+    puntos_clave: list[str] = []
+
+
+class PromotionAnalytics360Response(BaseModel):
+    promotion_id: str
+    nombre: str
+    tipo: str
+    origen: str
+    financiamiento: str
+    estado: str
+    activo: bool
+    valido_desde: date
+    valido_hasta: date
+    supplier_nombre: Optional[str] = None
+    supplier_ruc: Optional[str] = None
+
+    # Métricas Financieras Globales
+    total_ventas_promo_pyg: float = 0
+    total_ventas_regular_pyg: float = 0
+    total_descuento_cedido_pyg: float = 0
+    total_costo_mercaderia_pyg: float = 0
+    total_nc_scanback_pyg: float = 0
+    total_aporte_tienda_pyg: float = 0
+    margen_bruto_real_pyg: float = 0
+    margen_bruto_real_pct: float = 0
+    unidades_totales_vendidas: float = 0
+    tickets_totales_count: int = 0
+    ticket_promedio_promo_pyg: float = 0
+    uplift_rotacion_pct: float = 0  # Crecimiento % vs período previo
+
+    # Series y Tablas Detalladas
+    evolucion_diaria: list[DailyPerformancePoint] = []
+    ranking_productos: list[ProductPerformancePoint] = []
+    top_clientes: list[CustomerBuyerPoint] = []
+    desglose_medios_pago: list[dict] = []
+
+    # Inteligencia de Trade Marketing
+    trade_intelligence: PromotionAIInsight
+

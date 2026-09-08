@@ -14,6 +14,7 @@ import { api, type Promotion, type Product, type Supplier, type Category } from 
 import { useToast } from "../../context/ToastContext"
 import { useConfirm } from "../../components/ConfirmDialog"
 import { formatPYG, formatDate } from "../../utils/format"
+import { Promotion360Modal } from "./Promotion360Modal"
 
 type PromoTab = "activas" | "vencimientos" | "sell_out" | "pendientes" | "pausadas" | "todas"
 
@@ -81,6 +82,7 @@ export default function PromocionesPage() {
 
   // Modales y Drawers
   const [viewingPromo, setViewingPromo] = useState<Promotion | null>(null)
+  const [promo360Id, setPromo360Id] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showSellOutModal, setShowSellOutModal] = useState(false)
   const [selectedPromo, setSelectedPromo] = useState<Promotion | null>(null)
@@ -974,7 +976,7 @@ export default function PromocionesPage() {
                     return (
                       <tr
                         key={promo.id}
-                        onClick={() => setViewingPromo(promo)}
+                        onClick={() => setPromo360Id(promo.id)}
                         className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition cursor-pointer"
                       >
                         {/* Estado / Toggle */}
@@ -1144,8 +1146,23 @@ export default function PromocionesPage() {
                             )}
 
                             <button
-                              onClick={() => setViewingPromo(promo)}
-                              title="Ver Ficha Técnica"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setPromo360Id(promo.id)
+                              }}
+                              title="Visión 360° & Informe Oficial para Encargados"
+                              className="px-2.5 py-1.5 rounded-xl border border-amber-300 dark:border-amber-700/80 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center gap-1.5 font-black text-[10px] shadow-sm transition"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                              <span>360° & Informe</span>
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setViewingPromo(promo)
+                              }}
+                              title="Ver Ficha Técnica Lateral"
                               className="p-1.5 rounded-xl border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-300"
                             >
                               <Eye className="w-3.5 h-3.5" />
@@ -1454,25 +1471,38 @@ export default function PromocionesPage() {
             </div>
 
             {/* Footer Drawer */}
-            <div className="p-5 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between gap-3 bg-gray-50/50 dark:bg-slate-900/30">
+            <div className="p-5 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between gap-2 bg-gray-50/50 dark:bg-slate-900/30 flex-wrap">
               <button
-                onClick={() => handleTogglePromo(viewingPromo)}
-                className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 ${
-                  viewingPromo.activo
-                    ? "border border-gray-300 dark:border-slate-700 hover:bg-gray-100 text-gray-700 dark:text-gray-300"
-                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
-                }`}
+                onClick={() => {
+                  setPromo360Id(viewingPromo.id)
+                  setViewingPromo(null)
+                }}
+                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 shadow"
               >
-                {viewingPromo.activo ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                <span>{viewingPromo.activo ? "Pausar Promoción" : "Activar Promoción"}</span>
+                <Sparkles className="w-4 h-4" />
+                <span>Visión 360° & Informe Oficial</span>
               </button>
 
-              <button
-                onClick={() => setViewingPromo(null)}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 text-xs font-bold"
-              >
-                Cerrar Ficha
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleTogglePromo(viewingPromo)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    viewingPromo.activo
+                      ? "border border-gray-300 dark:border-slate-700 hover:bg-gray-100 text-gray-700 dark:text-gray-300"
+                      : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  }`}
+                >
+                  {viewingPromo.activo ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  <span>{viewingPromo.activo ? "Pausar" : "Activar"}</span>
+                </button>
+
+                <button
+                  onClick={() => setViewingPromo(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 text-xs font-bold"
+                >
+                  Cerrar
+                </button>
+              </div>
             </div>
           </div>
         </div>,
@@ -2965,6 +2995,15 @@ export default function PromocionesPage() {
           </div>
         </div>,
         document.body
+      )}
+
+      {/* ── 🌟 MODAL VISIÓN 360° & INFORME OFICIAL PARA ENCARGADOS ────── */}
+      {promo360Id && (
+        <Promotion360Modal
+          promoId={promo360Id}
+          onClose={() => setPromo360Id(null)}
+          onUpdate={loadData}
+        />
       )}
 
     </div>
