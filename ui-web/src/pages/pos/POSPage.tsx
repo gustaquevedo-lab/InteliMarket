@@ -5163,18 +5163,32 @@ export default function POSPage() {
   }
 
   // ── CÁLCULOS DE TOTALES Y MULTIMONEDA ──────────────────────────────────────
-  const { totalBrutoPyg, totalBasePyg, totalAhorroPyg, descuentoTotalPyg, totalPyg, totalBrl, totalUsd, gravada10Pyg, gravada5Pyg, exentaPyg, iva10Pyg, iva5Pyg } = useMemo(() => {
+  const { totalBrutoPyg, totalBasePyg, totalAhorroPyg, ahorroPromoPyg, ahorroMayoristaPyg, descuentoTotalPyg, totalPyg, totalBrl, totalUsd, gravada10Pyg, gravada5Pyg, exentaPyg, iva10Pyg, iva5Pyg } = useMemo(() => {
     let totBruto = 0
     let totBase = 0
     let g10 = 0
     let g5 = 0
     let ex = 0
+    // Desglose del ahorro por fuente para el recuadro impreso del ticket
+    // (SECCIÓN A del diseñador: "En Promociones" vs "En Precios Mayoristas"):
+    // un item con en_promocion=true bajó de precio por una promoción activa;
+    // cualquier otro item cuyo precio quedó por debajo de precio_base bajó
+    // por un escalón de precio por cantidad (applyTieredPrice / mayorista).
+    let ahorroPromo = 0
+    let ahorroMayorista = 0
 
     for (const item of cart) {
       const lineTotal = item.precio * item.quantity
       const lineBase = (Number(item.precio_base) || Number(item.precio) || 0) * item.quantity
       totBruto += lineTotal
       totBase += lineBase
+
+      const lineAhorro = Math.max(0, lineBase - lineTotal)
+      if ((item as any).en_promocion) {
+        ahorroPromo += lineAhorro
+      } else {
+        ahorroMayorista += lineAhorro
+      }
 
       if (item.iva_tasa === 10) {
         g10 += lineTotal
@@ -5209,6 +5223,8 @@ export default function POSPage() {
       totalBrutoPyg: Math.round(totBruto),
       totalBasePyg: Math.round(totBase),
       totalAhorroPyg: totalAhorro,
+      ahorroPromoPyg: Math.round(ahorroPromo),
+      ahorroMayoristaPyg: Math.round(ahorroMayorista),
       descuentoTotalPyg: Math.round(descMonto),
       totalPyg: Math.round(netTot),
       totalBrl: totBrl,
@@ -6281,8 +6297,17 @@ export default function POSPage() {
             // texto queda desplazado hacia la derecha en el papel.
             if (isClubMember) {
               t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_ahorro_con_descuento || 'TU EXTRA AHORRO HOY:') + ESCPOS_BOLD_OFF + '\n'
-              if (tpl.subtitulo_ahorro_promo) t += escposWrapText(tpl.subtitulo_ahorro_promo, W)
-              if (tpl.subtitulo_ahorro_mayorista) t += escposWrapText(tpl.subtitulo_ahorro_mayorista, W)
+              // Monto real junto a cada etiqueta configurada (antes solo se
+              // imprimia el texto de la etiqueta, sin el numero calculado).
+              if (ahorroPromoPyg > 0) {
+                t += escposTwoCol(tpl.subtitulo_ahorro_promo || '- En Promociones:', `-${fmtGs(ahorroPromoPyg)}`, W) + '\n'
+              }
+              if (ahorroMayoristaPyg > 0) {
+                t += escposTwoCol(tpl.subtitulo_ahorro_mayorista || '- En Precios Mayoristas:', `-${fmtGs(ahorroMayoristaPyg)}`, W) + '\n'
+              }
+              if (ahorroPromoPyg + ahorroMayoristaPyg > 0) {
+                t += ESCPOS_BOLD_ON + escposTwoCol('TOTAL EXTRA AHORRO:', `-${fmtGs(ahorroPromoPyg + ahorroMayoristaPyg)}`, W) + ESCPOS_BOLD_OFF + '\n'
+              }
             } else {
               t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_invitacion_ahorro || 'SUMATE AL EXTRA AHORRO DIARIO!') + ESCPOS_BOLD_OFF + '\n'
               // Las 3 lineas configurables -- se imprimen si tienen contenido
