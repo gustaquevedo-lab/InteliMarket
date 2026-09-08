@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
@@ -31,6 +31,70 @@ async def list_categories(company_id: str, db: AsyncSession = Depends(get_db)):
 
 
 # Products
+@router.post("/products/upload-image")
+async def upload_product_image(
+    file: UploadFile = File(...),
+    product_id: str | None = Form(None),
+    sku: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Sube una imagen de producto desde el equipo local, la valida, optimiza
+    (redimensión a máx 1000x1000 con LANCZOS, corrección EXIF y compresión WebP/PNG)
+    y la guarda en /uploads/products/. Retorna la URL servida por el servidor.
+    """
+    import io
+    import time
+    import uuid
+    import re
+    from pathlib import Path
+    from PIL import Image, ImageOps
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="El archivo está vacío.")
+
+    try:
+        image = Image.open(io.BytesIO(content))
+        image = ImageOps.exif_transpose(image)
+    except Exception as img_err:
+        raise HTTPException(status_code=400, detail=f"Formato de imagen inválido: {str(img_err)}")
+
+    if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+        image = image.convert("RGBA")
+    else:
+        image = image.convert("RGB")
+
+    try:
+        image.thumbnail((1000, 1000), Image.Resampling.LANCZOS)
+    except Exception:
+        pass
+
+    upload_dir = Path("uploads/products")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    clean_id = re.sub(r"[^a-zA-Z0-9_\-]", "", (product_id or sku or "prod"))[:30]
+    filename = f"prod_{clean_id}_{int(time.time())}_{uuid.uuid4().hex[:6]}.webp"
+    file_path = upload_dir / filename
+
+    try:
+        image.save(file_path, format="WEBP", quality=88, method=6)
+    except Exception:
+        filename = f"prod_{clean_id}_{int(time.time())}_{uuid.uuid4().hex[:6]}.png"
+        file_path = upload_dir / filename
+        image.save(file_path, format="PNG", optimize=True)
+
+    image_url = f"/uploads/products/{filename}"
+
+    if product_id:
+        try:
+            await service.update_product(db, product_id, ProductUpdate(imagen_url=image_url))
+        except Exception as e:
+            logger.warning("No se pudo actualizar imagen_url directo en producto %s: %s", product_id, e)
+
+    return {"url": image_url, "filename": filename}
+
+
 @router.post("/products", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 async def create_product(body: ProductCreate, db: AsyncSession = Depends(get_db)):
     existing = await service.get_product_by_sku(db, str(body.company_id), body.sku)

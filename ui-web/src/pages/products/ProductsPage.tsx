@@ -396,6 +396,51 @@ export default function ProductsPage() {
     pack_etiqueta: "Caja x12",
   })
 
+  // Carga de Imagen local desde computadora
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const imageFileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleUploadImageFile = async (file: File) => {
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      toast.error("Formato inválido", "Por favor selecciona un archivo de imagen (PNG, JPG, WEBP o GIF).")
+      return
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      toast.error("Archivo muy pesado", "La imagen no debe superar los 12MB.")
+      return
+    }
+
+    try {
+      setUploadingImage(true)
+      const res = await api.products.uploadImage(file, editingProduct?.id, form.sku)
+      setForm((prev) => ({ ...prev, imagen_url: res.url }))
+      toast.success("Foto Cargada", "La imagen ha sido optimizada y asignada al producto.")
+    } catch (err: any) {
+      toast.error("Error al subir imagen", err.message || "No se pudo subir la foto.")
+    } finally {
+      setUploadingImage(false)
+      if (imageFileInputRef.current) imageFileInputRef.current.value = ""
+    }
+  }
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) handleUploadImageFile(file)
+  }
+
+  const handleImageDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const file = e.dataTransfer.files?.[0]
+    if (file) handleUploadImageFile(file)
+  }
+
+  const handleRemoveImage = () => {
+    setForm((prev) => ({ ...prev, imagen_url: "" }))
+    if (imageFileInputRef.current) imageFileInputRef.current.value = ""
+  }
+
   // Módulo de Variantes
   const [selectedParentProductId, setSelectedParentProductId] = useState<string>("")
   const [selectedParentProduct, setSelectedParentProduct] = useState<Product | null>(null)
@@ -2713,23 +2758,121 @@ export default function ProductsPage() {
 
                   <div>
                     <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      URL Imagen del Producto (Foto Kiosko & POS)
+                      Modalidad de Venta
                     </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="url"
-                        value={form.imagen_url}
-                        onChange={(e) => setForm({ ...form, imagen_url: e.target.value })}
-                        className="input-field w-full text-xs"
-                        placeholder="https://.../foto-producto.jpg"
-                      />
-                      {form.imagen_url && (
-                        <div className="w-8 h-8 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-100 flex items-center justify-center">
-                          <img src={form.imagen_url} alt="Preview" className="w-full h-full object-cover" onError={(e) => { (e.target as any).style.display = "none" }} />
+                    <div className="flex items-center gap-2 h-[38px] px-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        {form.unidad_medida === "KG" || form.tipo_venta === "peso" ? "⚖️ Venta por Peso (Balanza)" : "📦 Venta Unitaria / Bulto"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Foto del Producto desde archivo de computadora */}
+                <div className="bg-slate-50/80 dark:bg-slate-900/40 rounded-xl p-3 border border-slate-200/80 dark:border-slate-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      Foto del Producto (Kiosko & POS)
+                    </label>
+                    <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200/60 dark:border-emerald-800/40">
+                      Carga directa desde esta computadora
+                    </span>
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={imageFileInputRef}
+                    onChange={handleImageFileChange}
+                    accept="image/png, image/jpeg, image/webp, image/gif"
+                    className="hidden"
+                  />
+
+                  {form.imagen_url ? (
+                    <div className="flex items-center gap-4 p-2.5 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                      <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 shrink-0 flex items-center justify-center">
+                        <img
+                          src={form.imagen_url}
+                          alt={form.nombre || "Preview"}
+                          className="w-full h-full object-contain p-1"
+                          onError={(e) => { (e.target as any).style.display = "none" }}
+                        />
+                        {uploadingImage && (
+                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                            <Loader2 className="w-6 h-6 text-white animate-spin" />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                            Foto vinculada correctamente
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate font-mono mb-2">
+                          {form.imagen_url}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => imageFileInputRef.current?.click()}
+                            disabled={uploadingImage}
+                            className="px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-lg border border-emerald-200 dark:border-emerald-800/60 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            {uploadingImage ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Upload className="w-3.5 h-3.5" />
+                            )}
+                            Cambiar foto de la PC
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleRemoveImage}
+                            disabled={uploadingImage}
+                            className="px-2.5 py-1 text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg border border-rose-200 dark:border-rose-800/60 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Quitar foto
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => imageFileInputRef.current?.click()}
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+                      onDrop={handleImageDrop}
+                      className={`group border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+                        uploadingImage
+                          ? "border-emerald-500 bg-emerald-50/30 dark:bg-emerald-950/20"
+                          : "border-slate-300 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-500 bg-white/60 dark:bg-slate-800/40 hover:bg-emerald-50/20"
+                      }`}
+                    >
+                      {uploadingImage ? (
+                        <div className="py-2 flex flex-col items-center justify-center gap-1.5">
+                          <Loader2 className="w-6 h-6 text-emerald-600 animate-spin" />
+                          <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                            Subiendo y optimizando foto desde tu equipo...
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="py-1 flex flex-col items-center justify-center gap-1">
+                          <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <Upload className="w-4 h-4" />
+                          </div>
+                          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                            Haz clic para seleccionar la foto desde esta computadora
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Arrastra aquí el archivo o haz clic para buscarlo • PNG, JPG, WEBP
+                          </div>
                         </div>
                       )}
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 <div>

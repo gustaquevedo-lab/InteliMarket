@@ -951,6 +951,13 @@ export const api = {
     get360: (id: string) => client.get<Product360Response>(`/v1/products/${id}/360`),
     create: (data: Partial<Product> & { sku: string; nombre: string }) => client.post<Product>("/v1/products", { ...data, company_id: COMPANY_ID }),
     update: (id: string, data: Partial<Product>) => client.patch<Product>(`/v1/products/${id}`, data),
+    uploadImage: (file: File, productId?: string, sku?: string) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      if (productId) formData.append("product_id", productId)
+      if (sku) formData.append("sku", sku)
+      return requestMultipart<{ url: string; filename: string }>("/v1/products/upload-image", formData)
+    },
     delete: (id: string) => client.delete<void>(`/v1/products/${id}`),
     variants: {
       list: (productId?: string) => client.get<ProductVariant[]>(`/v1/companies/${COMPANY_ID}/variants`, { product_id: productId } as any),
