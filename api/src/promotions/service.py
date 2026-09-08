@@ -1323,7 +1323,10 @@ async def get_promotion_analytics_360(
         top_clientes.append(CustomerBuyerPoint(**cdata))
     top_clientes.sort(key=lambda x: x.total_gastado_pyg, reverse=True)
 
-    aporte_prov_pct = float(p.aporte_proveedor_pct or 0)
+    aporte_prov_pct = float(
+        getattr(p, 'porcentaje_aporte_proveedor', None) or
+        getattr(p, 'aporte_proveedor_pct', None) or 0
+    )
     nc_scanback = round(total_descuento * (aporte_prov_pct / 100))
     aporte_tienda = max(0.0, total_descuento - nc_scanback)
     margen_bruto_real = total_ventas_promo - total_costo + nc_scanback
@@ -1513,30 +1516,30 @@ async def generate_promotion_report_pdf(
     promo_dict = {
         "id": str(promo.id),
         "nombre": promo.nombre,
-        "descripcion": promo.descripcion,
+        "descripcion": getattr(promo, 'descripcion', '') or '',
         "tipo": promo.tipo,
         "origen": getattr(promo, 'origen', 'manual') or 'manual',
         "financiamiento": getattr(promo, 'financiamiento', 'propio') or 'propio',
         "valido_desde": promo.valido_desde,
         "valido_hasta": promo.valido_hasta,
-        "hora_desde": promo.hora_desde,
-        "hora_hasta": promo.hora_hasta,
-        "dias_semana": promo.dias_semana,
-        "limite_unidades_por_ticket": promo.limite_unidades_por_ticket,
-        "stock_limite_unidades": promo.stock_limite_unidades,
-        "unidades_vendidas_promo": promo.unidades_vendidas_promo,
-        "es_acumulable": promo.es_acumulable,
-        "es_exclusiva": promo.es_exclusiva,
-        "prioridad": promo.prioridad,
+        "hora_desde": getattr(promo, 'horario_desde', None) or getattr(promo, 'hora_desde', None),
+        "hora_hasta": getattr(promo, 'horario_hasta', None) or getattr(promo, 'hora_hasta', None),
+        "dias_semana": getattr(promo, 'dias_semana', None),
+        "limite_unidades_por_ticket": getattr(promo, 'limite_por_compra', None) or getattr(promo, 'limite_unidades_por_ticket', None),
+        "stock_limite_unidades": getattr(promo, 'stock_limite_unidades', None),
+        "unidades_vendidas_promo": getattr(promo, 'unidades_vendidas_promo', None),
+        "es_acumulable": getattr(promo, 'combinable', False),
+        "es_exclusiva": not getattr(promo, 'combinable', False),
+        "prioridad": getattr(promo, 'prioridad', 1),
         "supplier_nombre": sup_nombre,
         "supplier_ruc": sup_ruc,
-        "aporte_proveedor_pct": promo.aporte_proveedor_pct,
-        "aporte_tienda_pct": promo.aporte_tienda_pct,
-        "monto_total_nc_comprometido": promo.monto_total_nc_comprometido,
-        "monto_nc_recuperado": promo.monto_nc_recuperado,
-        "numero_nota_credito_proveedor": promo.numero_nota_credito_proveedor,
+        "aporte_proveedor_pct": float(getattr(promo, 'porcentaje_aporte_proveedor', 0) or 0),
+        "aporte_tienda_pct": float(getattr(promo, 'porcentaje_aporte_tienda', 0) or 0),
+        "monto_total_nc_comprometido": getattr(promo, 'monto_total_nc_comprometido', 0),
+        "monto_nc_recuperado": getattr(promo, 'nc_monto_total', 0),
+        "numero_nota_credito_proveedor": getattr(promo, 'nc_numero_proveedor', None),
         "estado": promo.estado,
-        "motivo_perdida": promo.motivo_perdida,
+        "motivo_perdida": getattr(promo, 'motivo_perdida', None),
     }
 
     return generate_promotion_official_report_pdf(company, promo_dict, products_details, user_name)
