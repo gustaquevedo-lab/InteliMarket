@@ -469,7 +469,11 @@ export default function AccountsReceivablePage() {
     api.accountsReceivable.list({ customer_id: customerId, limit: 500 }).then(setCustomerDocs).catch(() => setCustomerDocs([]))
   }
 
-  const openPaymentModal = async (customerId: string, custInfo?: { razon_social: string; ruc?: string; empresa_vinculada?: string }) => {
+  const openPaymentModal = async (
+    customerId: string,
+    custInfo?: { razon_social: string; ruc?: string; empresa_vinculada?: string },
+    targetDoc?: { id: string; saldo_pendiente: number }
+  ) => {
     setShowPaymentModal(customerId)
     if (custInfo) {
       setPaymentCustomerInfo(custInfo)
@@ -486,9 +490,15 @@ export default function AccountsReceivablePage() {
         setPaymentCustomerInfo(null)
       }
     }
-    setAllocations({})
-    setPayMontoGlobal("")
-    setSelectedBatchDocs({})
+    if (targetDoc) {
+      setAllocations({ [targetDoc.id]: String(targetDoc.saldo_pendiente) })
+      setPayMontoGlobal(String(targetDoc.saldo_pendiente))
+      setSelectedBatchDocs({ [targetDoc.id]: true })
+    } else {
+      setAllocations({})
+      setPayMontoGlobal("")
+      setSelectedBatchDocs({})
+    }
     setPayReferencia("")
     setPayObservaciones("")
     setPayDestinoFondos("boveda")
@@ -504,10 +514,12 @@ export default function AccountsReceivablePage() {
 
     setPendingLoading(true)
     try {
-      const docs = await api.accountsReceivable.pendingForCustomer(customerId)
-      setPendingDocs(docs)
+      const fetchedDocs = await api.accountsReceivable.pendingForCustomer(customerId)
+      setPendingDocs(fetchedDocs)
       const initBatch: Record<string, boolean> = {}
-      docs.forEach(d => { initBatch[d.id] = true })
+      fetchedDocs.forEach(d => {
+        initBatch[d.id] = targetDoc ? d.id === targetDoc.id : true
+      })
       setSelectedBatchDocs(initBatch)
     } catch {
       toast.error("Error", "No se pudieron cargar los documentos pendientes")
@@ -978,7 +990,15 @@ export default function AccountsReceivablePage() {
                                 </button>
                                 {d.estado === "pendiente" && d.customer_id && (
                                   <button
-                                    onClick={() => openPaymentModal(d.customer_id!)}
+                                    onClick={() => openPaymentModal(
+                                      d.customer_id!,
+                                      {
+                                        razon_social: d.customer_name || "Cliente",
+                                        ruc: d.customer_ruc,
+                                        empresa_vinculada: (d as any).customer?.empresa_vinculada_nombre,
+                                      },
+                                      { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
+                                    )}
                                     className="btn-primary py-1 px-2.5 text-xs"
                                   >
                                     Cobrar
@@ -1103,7 +1123,11 @@ export default function AccountsReceivablePage() {
                                     <FileDown className="w-3.5 h-3.5 text-red-500" /> Estado de Cuenta
                                   </button>
                                   <button
-                                    onClick={() => openPaymentModal(c.customer_id)}
+                                    onClick={() => openPaymentModal(c.customer_id, {
+                                      razon_social: c.customer_name || "Cliente",
+                                      ruc: c.customer_ruc,
+                                      empresa_vinculada: (c as any).empresa_vinculada_nombre,
+                                    })}
                                     className="btn-primary py-1 px-2.5 text-xs"
                                   >
                                     Cobrar
@@ -1144,11 +1168,30 @@ export default function AccountsReceivablePage() {
                                               Emisión: {d.fecha_emision} · Vence: {d.fecha_vencimiento}
                                             </div>
                                           </div>
-                                          <div className="text-right">
-                                            <div className="font-mono font-bold text-gray-900 dark:text-white">{formatPYG(d.saldo_pendiente)}</div>
-                                            <span className={`text-[10px] font-semibold ${d.estado === "pagado" ? "text-emerald-600" : "text-amber-600"}`}>
-                                              {d.estado === "pagado" ? "Pagado" : `${d.dias_mora || 0}d mora`}
-                                            </span>
+                                          <div className="flex items-center gap-2.5">
+                                            <div className="text-right">
+                                              <div className="font-mono font-bold text-gray-900 dark:text-white">{formatPYG(d.saldo_pendiente)}</div>
+                                              <span className={`text-[10px] font-semibold ${d.estado === "pagado" ? "text-emerald-600" : "text-amber-600"}`}>
+                                                {d.estado === "pagado" ? "Pagado" : `${d.dias_mora || 0}d mora`}
+                                              </span>
+                                            </div>
+                                            {d.estado !== "pagado" && (
+                                              <button
+                                                onClick={() => openPaymentModal(
+                                                  c.customer_id,
+                                                  {
+                                                    razon_social: c.customer_name || "Cliente",
+                                                    ruc: c.customer_ruc,
+                                                    empresa_vinculada: (c as any).empresa_vinculada_nombre,
+                                                  },
+                                                  { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
+                                                )}
+                                                className="btn-primary py-1 px-2 text-[11px]"
+                                                title="Cobrar esta factura puntual"
+                                              >
+                                                Cobrar
+                                              </button>
+                                            )}
                                           </div>
                                         </div>
                                       ))}
@@ -1253,7 +1296,9 @@ export default function AccountsReceivablePage() {
                               </td>
                               <td className="p-3.5 text-right">
                                 <button
-                                  onClick={() => openPaymentModal(s.customer_id)}
+                                  onClick={() => openPaymentModal(s.customer_id, {
+                                    razon_social: s.customer_nombre || "Cliente",
+                                  })}
                                   className="btn-outline py-1 px-2.5 text-xs"
                                 >
                                   Cobrar

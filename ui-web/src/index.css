@@ -157,7 +157,18 @@
      pantalla completa (POSPage, CajaRapidaPage, CarniceriaTvDigitalPage), que tambien
      matchean fixed+inset-0+bg- pero no son overlays de modal: sin esta exclusion el
      padding-top forzado empujaba el header de esas paginas ~76px hacia abajo. ── */
-  .modal-overlay,
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto;
+    z-index: 100 !important;
+    padding-top: max(4.75rem, env(safe-area-inset-top)) !important;
+    padding-bottom: 2rem !important;
+  }
+
+  .modal-content {
+    @apply bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-slate-700 w-full overflow-hidden my-auto;
+    max-height: calc(100vh - 6.5rem) !important;
+  }
+
   div[class*="fixed"][class*="inset-0"][class*="bg-"]:not(:empty):not(aside):not([class*="h-screen"]):not([class*="w-screen"]) {
     z-index: 100 !important;
     padding-top: max(4.75rem, env(safe-area-inset-top)) !important;
@@ -165,7 +176,6 @@
     overflow-y: auto !important;
   }
 
-  .modal-content,
   .modal-overlay > div,
   div[class*="fixed"][class*="inset-0"][class*="bg-"]:not(:empty):not(aside):not([class*="h-screen"]):not([class*="w-screen"]) > div {
     max-height: calc(100vh - 6.5rem) !important;
