@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from "react"
+import { createPortal } from "react-dom"
 import {
   X, Sparkles, Package, Tag, Barcode, DollarSign, TrendingUp, TrendingDown,
   Building2, ShoppingCart, Layers, Lock, Unlock, Save, AlertTriangle,
@@ -262,9 +263,9 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [onClose])
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[80] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 md:py-10 md:px-8 overflow-y-auto"
+      className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 md:py-10 md:px-8 overflow-y-auto"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -1178,6 +1179,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
 
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

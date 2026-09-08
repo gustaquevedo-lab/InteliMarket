@@ -2572,7 +2572,7 @@ export default function ProductsPage() {
         />
       )}
       {selectedProduct360Id && loading360 && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center">
+        <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center">
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 flex flex-col items-center gap-3 shadow-2xl">
             <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
             <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Cargando Ficha 360°...</p>
