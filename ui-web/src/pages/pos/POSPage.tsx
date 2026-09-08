@@ -2771,77 +2771,80 @@ export default function POSPage() {
 
       // ── Impresión ESC/POS Nativa para Impresora Térmica ZKP8008 ────────
       if ((window as any).electronAPI?.printEscPos) {
-        const W = ESCPOS_LINE_WIDTH
-        let t = ESCPOS_INIT
-        t += ESCPOS_ALIGN_CENTER
-        t += ESCPOS_BOLD_ON + "EXTRA SUPERMERCADO MAYORISTA\n" + ESCPOS_BOLD_OFF
-        t += "GRUPO SANTA TERESA E.A.S.\n"
-        t += "RUC: 80150377-9\n"
-        t += ESCPOS_BOLD_ON + "CIERRE DE TURNO / ARQUEO DE CAJA\n" + ESCPOS_BOLD_OFF
-        t += escposDashes(W) + "\n"
-        t += ESCPOS_ALIGN_LEFT
-        t += `Cajero/a:    ${escposStripAccents(user?.nombre || "Cajero")}\n`
-        t += `Caja / Boca: ${escposStripAccents(puntoNombre)} (${escposStripAccents(puntoEmision || "012")})\n`
-        t += `Fecha/Hora:  ${escposFormatDateTime(new Date())}\n`
-        t += `Turno ID:    ${currentSessionId.slice(0, 8).toUpperCase()}\n`
-        t += escposDashes(W) + "\n"
-        t += ESCPOS_BOLD_ON + "FONDOS DE APERTURA INICIAL:\n" + ESCPOS_BOLD_OFF
-        t += escposTwoCol("  Guaranies (PYG):", `GS. ${formatPYG(fondoPyg)}`, W) + "\n"
-        if (fondoBrl > 0 || contadoBrl > 0) {
-          t += escposTwoCol("  Reales (BRL):", `R$ ${fondoBrl.toFixed(2)}`, W) + "\n"
-        }
-        if (fondoUsd > 0 || contadoUsd > 0) {
-          t += escposTwoCol("  Dolares (USD):", `US$ ${fondoUsd.toFixed(2)}`, W) + "\n"
-        }
-        t += escposDashes(W) + "\n"
-
-        if ((result.desglose_formas_pago || []).length > 0) {
-          t += ESCPOS_BOLD_ON + "VENTAS DEL TURNO POR FORMA DE PAGO:\n" + ESCPOS_BOLD_OFF
-          for (const p of result.desglose_formas_pago) {
-            const label = "  " + (FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago) + (p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : "") + ":"
-            const mTxt = p.moneda === "PYG" ? `GS. ${formatPYG(p.monto)}` : `${p.moneda} ${Number(p.monto).toFixed(2)}`
-            t += escposTwoCol(label, mTxt, W) + "\n"
+        let b64 = (result as any).ticket_escpos_b64
+        if (!b64) {
+          const W = ESCPOS_LINE_WIDTH
+          let t = ESCPOS_INIT
+          t += ESCPOS_ALIGN_CENTER
+          t += ESCPOS_BOLD_ON + "EXTRA SUPERMERCADO MAYORISTA\n" + ESCPOS_BOLD_OFF
+          t += "GRUPO SANTA TERESA E.A.S.\n"
+          t += "RUC: 80150377-9\n"
+          t += ESCPOS_BOLD_ON + "CIERRE DE TURNO / ARQUEO DE CAJA\n" + ESCPOS_BOLD_OFF
+          t += escposDashes(W) + "\n"
+          t += ESCPOS_ALIGN_LEFT
+          t += `Cajero/a:    ${escposStripAccents(user?.nombre || "Cajero")}\n`
+          t += `Caja / Boca: ${escposStripAccents(puntoNombre)} (${escposStripAccents(puntoEmision || "012")})\n`
+          t += `Fecha/Hora:  ${escposFormatDateTime(new Date())}\n`
+          t += `Turno ID:    ${currentSessionId.slice(0, 8).toUpperCase()}\n`
+          t += escposDashes(W) + "\n"
+          t += ESCPOS_BOLD_ON + "FONDOS DE APERTURA INICIAL:\n" + ESCPOS_BOLD_OFF
+          t += escposTwoCol("  Guaranies (PYG):", `GS. ${formatPYG(fondoPyg)}`, W) + "\n"
+          if (fondoBrl > 0 || contadoBrl > 0) {
+            t += escposTwoCol("  Reales (BRL):", `R$ ${fondoBrl.toFixed(2)}`, W) + "\n"
+          }
+          if (fondoUsd > 0 || contadoUsd > 0) {
+            t += escposTwoCol("  Dolares (USD):", `US$ ${fondoUsd.toFixed(2)}`, W) + "\n"
           }
           t += escposDashes(W) + "\n"
+
+          if ((result.desglose_formas_pago || []).length > 0) {
+            t += ESCPOS_BOLD_ON + "VENTAS DEL TURNO POR FORMA DE PAGO:\n" + ESCPOS_BOLD_OFF
+            for (const p of result.desglose_formas_pago) {
+              const label = "  " + (FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago) + (p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : "") + ":"
+              const mTxt = p.moneda === "PYG" ? `GS. ${formatPYG(p.monto)}` : `${p.moneda} ${Number(p.monto).toFixed(2)}`
+              t += escposTwoCol(label, mTxt, W) + "\n"
+            }
+            t += escposDashes(W) + "\n"
+          }
+
+          t += ESCPOS_BOLD_ON + "CONCILIACION DE EFECTIVO EN GAVETA:\n" + ESCPOS_BOLD_OFF
+          t += "[GUARANIES - PYG]\n"
+          t += escposTwoCol("  Fondo Inicial:", `GS. ${formatPYG(fondoPyg)}`, W) + "\n"
+          t += escposTwoCol("  Ventas en Efectivo:", `+GS. ${formatPYG(Number(result.monto_cierre_esperado || 0) - fondoPyg)}`, W) + "\n"
+          t += escposTwoCol("  Total Esperado:", `GS. ${formatPYG(result.monto_cierre_esperado)}`, W) + "\n"
+          t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado Fisico:", `GS. ${formatPYG(contado)}`, W) + ESCPOS_BOLD_OFF + "\n"
+          t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA PYG:", `${diferencia >= 0 ? "+" : ""}GS. ${formatPYG(diferencia)}`, W) + ESCPOS_BOLD_OFF + "\n"
+
+          if (fondoBrl > 0 || contadoBrl > 0 || result.diferencia_brl) {
+            t += "\n[REALES - BRL]\n"
+            t += escposTwoCol("  Fondo Inicial:", `R$ ${fondoBrl.toFixed(2)}`, W) + "\n"
+            t += escposTwoCol("  Total Esperado:", `R$ ${Number(resAny?.monto_cierre_esperado_brl || (fondoBrl + contadoBrl - difBrl)).toFixed(2)}`, W) + "\n"
+            t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado Fisico:", `R$ ${contadoBrl.toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
+            t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA BRL:", `${difBrl >= 0 ? "+" : ""}R$ ${Number(difBrl).toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
+          }
+
+          if (fondoUsd > 0 || contadoUsd > 0 || result.diferencia_usd) {
+            t += "\n[DOLARES - USD]\n"
+            t += escposTwoCol("  Fondo Inicial:", `US$ ${fondoUsd.toFixed(2)}`, W) + "\n"
+            t += escposTwoCol("  Total Esperado:", `US$ ${Number(resAny?.monto_cierre_esperado_usd || (fondoUsd + contadoUsd - difUsd)).toFixed(2)}`, W) + "\n"
+            t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado Fisico:", `US$ ${contadoUsd.toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
+            t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA USD:", `${difUsd >= 0 ? "+" : ""}US$ ${Number(difUsd).toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
+          }
+
+          if (result.requiere_revision) {
+            t += "\n" + ESCPOS_BOLD_ON + ESCPOS_ALIGN_CENTER
+            t += "! DIFERENCIA FUERA DE TOLERANCIA !\n"
+            t += "REQUIERE REVISION DE SUPERVISION\n" + ESCPOS_BOLD_OFF + ESCPOS_ALIGN_LEFT
+          }
+
+          t += escposDashes(W) + "\n\n"
+          t += "Firma Cajero/a: _________________________\n\n"
+          t += "Firma Supervisora: ______________________\n\n\n\n\n\n"
+          t += GS + 'V' + '\x01'
+
+          b64 = escposToBase64(t)
         }
 
-        t += ESCPOS_BOLD_ON + "CONCILIACION DE EFECTIVO EN GAVETA:\n" + ESCPOS_BOLD_OFF
-        t += "[GUARANIES - PYG]\n"
-        t += escposTwoCol("  Fondo Inicial:", `GS. ${formatPYG(fondoPyg)}`, W) + "\n"
-        t += escposTwoCol("  Ventas en Efectivo:", `+GS. ${formatPYG(Number(result.monto_cierre_esperado || 0) - fondoPyg)}`, W) + "\n"
-        t += escposTwoCol("  Total Esperado:", `GS. ${formatPYG(result.monto_cierre_esperado)}`, W) + "\n"
-        t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado Fisico:", `GS. ${formatPYG(contado)}`, W) + ESCPOS_BOLD_OFF + "\n"
-        t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA PYG:", `${diferencia >= 0 ? "+" : ""}GS. ${formatPYG(diferencia)}`, W) + ESCPOS_BOLD_OFF + "\n"
-
-        if (fondoBrl > 0 || contadoBrl > 0 || result.diferencia_brl) {
-          t += "\n[REALES - BRL]\n"
-          t += escposTwoCol("  Fondo Inicial:", `R$ ${fondoBrl.toFixed(2)}`, W) + "\n"
-          t += escposTwoCol("  Total Esperado:", `R$ ${Number(resAny?.monto_cierre_esperado_brl || (fondoBrl + contadoBrl - difBrl)).toFixed(2)}`, W) + "\n"
-          t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado Fisico:", `R$ ${contadoBrl.toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
-          t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA BRL:", `${difBrl >= 0 ? "+" : ""}R$ ${Number(difBrl).toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
-        }
-
-        if (fondoUsd > 0 || contadoUsd > 0 || result.diferencia_usd) {
-          t += "\n[DOLARES - USD]\n"
-          t += escposTwoCol("  Fondo Inicial:", `US$ ${fondoUsd.toFixed(2)}`, W) + "\n"
-          t += escposTwoCol("  Total Esperado:", `US$ ${Number(resAny?.monto_cierre_esperado_usd || (fondoUsd + contadoUsd - difUsd)).toFixed(2)}`, W) + "\n"
-          t += ESCPOS_BOLD_ON + escposTwoCol("  Total Contado Fisico:", `US$ ${contadoUsd.toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
-          t += ESCPOS_BOLD_ON + escposTwoCol("  DIFERENCIA USD:", `${difUsd >= 0 ? "+" : ""}US$ ${Number(difUsd).toFixed(2)}`, W) + ESCPOS_BOLD_OFF + "\n"
-        }
-
-
-        if (result.requiere_revision) {
-          t += "\n" + ESCPOS_BOLD_ON + ESCPOS_ALIGN_CENTER
-          t += "! DIFERENCIA FUERA DE TOLERANCIA !\n"
-          t += "REQUIERE REVISION DE SUPERVISION\n" + ESCPOS_BOLD_OFF + ESCPOS_ALIGN_LEFT
-        }
-
-        t += escposDashes(W) + "\n\n"
-        t += "Firma Cajero/a: _________________________\n\n"
-        t += "Firma Supervisora: ______________________\n\n\n\n\n\n"
-        t += GS + 'V' + '\x01'
-
-        const b64 = escposToBase64(t)
         setLastCierreEscPosB64(b64)
         const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
         try {
@@ -2850,7 +2853,9 @@ export default function POSPage() {
           console.error("Error al imprimir ESC/POS:", printErr)
         }
       } else {
-        const body = buildTicketPrelude("CIERRE DE CAJA / ARQUEO") + `
+        const body = (result as any).ticket_text
+          ? `<div style="padding: 10px; font-family: monospace; font-size: 11px; white-space: pre-wrap;">${(result as any).ticket_text}</div>`
+          : (buildTicketPrelude("CIERRE DE CAJA / ARQUEO") + `
           <div style="padding: 4px 0; font-size: 10px;">
             <div>Cajero/a: ${user?.nombre || "-"}</div>
             <div>Caja: ${puntoNombre}</div>
@@ -2877,7 +2882,7 @@ export default function POSPage() {
             <div style="margin-top:10px;">Firma Supervisora: _________________________</div>
           </div>
           <br/><br/>
-        </div>`
+        </div>`)
         setLastCierreTicketHtml(body)
         await printTicketHtml(body)
       }
