@@ -724,7 +724,7 @@ def generate_extractos_empresa_pdf(
     elements = []
 
     now_py = datetime.now(PY_TZ).strftime("%d/%m/%Y %H:%M")
-    logo = _logo_flowable(company, max_width=38 * mm, max_height=13 * mm)
+    logo = _logo_flowable(company, max_w=38 * mm, max_h=13 * mm)
     razon_social = company.get("razon_social") or "GRUPO SANTA TERESA E.A.S."
     nombre_fantasia = company.get("nombre_fantasia") or "Extra Supermercado Mayorista"
     ruc_empresa = company.get("ruc") or "80150377-9"
@@ -920,7 +920,7 @@ def generate_remision_consolidada_pdf(
     doc, styles = _base_doc(buffer, f"Remision_{remission.get('numero_remision')}", company, generated_by)
     elements = []
 
-    logo = _logo_flowable(company, max_width=42 * mm, max_height=14 * mm)
+    logo = _logo_flowable(company, max_w=42 * mm, max_h=14 * mm)
     razon_social = company.get("razon_social") or "GRUPO SANTA TERESA E.A.S."
     nombre_fantasia = company.get("nombre_fantasia") or "Extra Supermercado Mayorista"
     ruc_empresa = company.get("ruc") or "80150377-9"
