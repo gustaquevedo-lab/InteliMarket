@@ -9,6 +9,38 @@
 
 ---
 
+## 🖥️ SESIÓN 2026-09-08 — Bug visual Electron (header/modal), ahorro roto por sync Ñemuha, y PENDIENTE: migrar blindaje de modales
+
+### 1. (✅ RESUELTO) Gap en el header + modal de Cobro no cubría toda la pantalla
+
+Reportado en Caja 2 y Caja 5: al entrar, hueco vacío arriba del header; al presionar Cobrar, el modal no llegaba hasta el borde de la pantalla y dejaba ver el carrito atrás. Se investigó primero como si fuera un bug de Electron (2 rebuilds fallidos del `.app.asar`, revertidos) — **no era Electron, era CSS puro**, reproducible igual en navegador normal.
+
+**Causa raíz real**: `ui-web/src/index.css` tiene una regla global ("blindaje de modales") que fuerza `padding-top: 4.75rem !important` a cualquier `div[class*="fixed"][class*="inset-0"][class*="bg-"]`, para que ningún modal quede tapado por el header. El selector adivina por texto de clase, no por intención — y el contenedor raíz de **POSPage.tsx**, **CajaRapidaPage.tsx** y **CarniceriaTvDigitalPage.tsx** (páginas de pantalla completa, no modales) también matchean esas 3 subcadenas, así que recibían el mismo padding forzado: header empujado 76px hacia abajo, y el modal de Cobro (anidado adentro, con la misma regla aplicada dos veces) quedaba recortado.
+
+**Fix aplicado** (commits `8e6c96f`, y el modal además reforzado con `createPortal` a `document.body` en un commit previo de la misma sesión): se excluyó del selector wildcard a los elementos con `h-screen`/`w-screen` en su clase — los modales reales nunca usan esas clases, solo las páginas raíz. Verificado en navegador (padding-top pasa de 76px a 0px) y en Caja 2 real vía WinRM, incluyendo el ciclo abrir/cerrar modal que antes rompía el header.
+
+### 2. (✅ RESUELTO) "Monto ahorrado" dejó de aparecer en pantalla y nunca se imprimía en el ticket
+
+- **En pantalla**: el conector Ñemuha (`api/src/nemuha_connector/service.py:2368-2388`), cuando un producto tiene una promoción activa, sincroniza `precio_venta` = precio de promo (para que escanear el código ya cobre con descuento) y guarda el precio original en `precio_regular`. El cálculo de ahorro en el carrito (`POSPage.tsx`/`CajaRapidaPage.tsx`, función `handleAddToCart`) usaba `precio_venta` como precio base — que ya venía igualado al de promo, así que el ahorro daba 0 para **todas** las promociones activas (confirmado: las 20 promos activas en ese momento tenían `precio_venta == precio_fijo_promocional`). Fix: usar `product.precio_regular` como base cuando el producto está en promo (commit `d03ce5a`).
+- **En el ticket impreso**: nunca estuvo realmente conectado (se revisó todo el historial de git). El diseñador de facturas (`SettingsPage.tsx`) tiene una vista previa con montos de ejemplo hardcodeados, pero el código real de impresión (`POSPage.tsx`/`CajaRapidaPage.tsx`, generación ESCPOS) solo imprimía las etiquetas de texto configuradas, sin el número calculado. Se agregó el desglose real (`ahorroPromoPyg` / `ahorroMayoristaPyg`, separando ahorro por promoción vs. por escalón mayorista) y se imprime junto a cada etiqueta + una línea "TOTAL EXTRA AHORRO" (commit `16dd67d`).
+- Además, ese recuadro se mostraba/ocultaba según `isClubMember` — una variable que en realidad indica "¿se pagó con el medio Extra Club?", no "¿hubo ahorro?". Una venta con descuento pagada en efectivo o tarjeta nunca mostraba el recuadro. Cambiado a mostrarse siempre que hubo ahorro real, sin importar el medio de pago (commit `22ac157`).
+
+### 3. 🔜 PENDIENTE — Migrar el blindaje de modales de selector-por-adivinanza a clase explícita
+
+El fix del punto 1 (excluir `h-screen`/`w-screen`) resolvió el bug real y es estable, pero sigue siendo un parche sobre un selector CSS que **adivina** qué es un modal por substring de clase (`fixed` + `inset-0` + `bg-*`) en vez de preguntarlo explícitamente. Si en el futuro se crea una página nueva de pantalla completa que no use `h-screen`/`w-screen` (por ejemplo con `h-dvh` o un estilo inline), puede volver a matchear por accidente y reproducir el mismo bug.
+
+**Solución robusta, para cuando haya menos presión**: dejar de adivinar.
+
+- **Relevado el alcance real** (2026-09-08): hoy hay **223 divs de overlay en 61 archivos** que dependen del selector wildcard en `ui-web/src/index.css` (`.modal-overlay, div[class*="fixed"][class*="inset-0"][class*="bg-"]...`). La clase `.modal-overlay` ya existe como alternativa en esa misma regla, pero **ningún modal la usa hoy** — se agregó la clase en algún momento y nunca se migró nada a usarla.
+- **Plan de 3 pasos**:
+  1. Agregar la clase `modal-overlay` al `className` de cada uno de los 223 divs de overlay (edición mecánica y repetitiva; los 61 archivos son prácticamente todos los módulos del sistema: SalesPage, PurchasesPage, ProductsPage, SettingsPage, SupervisorPage, etc. — buscar con el mismo patrón usado para relevar: `grep -rlE 'className="[^"]*\bfixed\b[^"]*\binset-0\b[^"]*\bbg-' ui-web/src/pages/ ui-web/src/components/`).
+  2. **No borrar el wildcard todavía** — dejarlo convivir con `.modal-overlay` como red de seguridad. Verificar por conteo que "divs con `.modal-overlay`" == "divs que matcheaban el wildcard viejo" (mismo grep de arriba, contando).
+  3. Recién con ese conteo cuadrado, borrar el selector wildcard de `ui-web/src/index.css`, dejando solo `.modal-overlay`. Deploy y verificación visual de una muestra representativa de módulos (no los 223 uno por uno).
+- **Riesgo**: bajo por edición individual, pero el radio de impacto es amplio (toca casi todo el sistema en producción). El riesgo real es humano — olvidarse un div — de ahí el paso 2 (no borrar el wildcard hasta confirmar cobertura completa por conteo).
+- **No es de ningún módulo específico del cliente** — es deuda técnica de infraestructura CSS, no depende de que el cliente pida nada puntual. Se puede encarar en cualquier sesión tranquila.
+
+---
+
 ## 📦 SESIÓN 2026-09-03 (tarde) — Códigos de pack/caja (Fase 1: alta en Productos)
 
 Feature nueva pedida por el cliente: muchos productos se venden/reciben en cajas o packs sellados con un código de barra **distinto** al del producto suelto. Plan completo en `/Users/gustaquevedo/.claude/plans/flickering-leaping-rossum.md` (4 fases). **Esta sesión implementó solo la Fase 1** (a pedido explícito del cliente: "no tenemos esos productos registrados, empecemos por el alta").
