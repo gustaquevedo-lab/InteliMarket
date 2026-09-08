@@ -124,6 +124,8 @@ class ProductResponse(BaseModel):
     # Escala mayorista preferencial / primer escalón (sp_tiered_prices)
     precio_mayorista: Optional[Decimal] = None
     precio_mayorista_min_qty: Optional[int] = None
+    # Precio de venta promedio histórico ponderado real (en caja)
+    precio_promedio_real: Optional[Decimal] = None
 
     class Config:
         from_attributes = True

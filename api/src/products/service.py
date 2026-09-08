@@ -419,6 +419,29 @@ async def list_products(
                 p.__dict__["precio_mayorista"] = None
                 p.__dict__["precio_mayorista_min_qty"] = None
 
+        # 4. Asociar Precio de Venta Promedio Ponderado Real (PVPromedio efectivo de ventas)
+        sales_agg_res = await db.execute(
+            text("""
+                SELECT product_id,
+                       COALESCE(SUM(total), 0) as total_monto,
+                       COALESCE(SUM(cantidad), 0) as total_qty
+                FROM sale_items
+                WHERE product_id = ANY(:p_ids)
+                GROUP BY product_id
+            """),
+            {"p_ids": p_ids}
+        )
+        sales_agg_map = {
+            r.product_id: (float(r.total_monto) / float(r.total_qty)) if float(r.total_qty) > 0 else None
+            for r in sales_agg_res
+        }
+        for p in products:
+            pvp_real = sales_agg_map.get(p.id)
+            if pvp_real is not None:
+                p.__dict__["precio_promedio_real"] = Decimal(str(round(pvp_real, 0)))
+            else:
+                p.__dict__["precio_promedio_real"] = None
+
     return products
 
 
