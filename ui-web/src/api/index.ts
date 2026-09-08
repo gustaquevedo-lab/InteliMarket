@@ -1140,6 +1140,52 @@ export const api = {
       downloadAuthenticated("/v1/caja/export/arqueo.pdf", { fecha_desde, fecha_hasta }, `acta_arqueo_consolidado_${fecha_desde}_${fecha_hasta}.pdf`),
     downloadCierrePdf: (sessionId: string) =>
       downloadAuthenticated(`/v1/cash-sessions/${sessionId}/export/cierre.pdf`, undefined, `cierre_caja_${sessionId.slice(0, 8)}.pdf`),
+    reports: {
+      salesByCashier: (params: { fecha_desde: string; fecha_hasta: string; cajero_nombre?: string }) =>
+        client.get<{
+          fecha_desde: string
+          fecha_hasta: string
+          cajero_filtro?: string
+          totales: {
+            total_ventas: number
+            total_tickets: number
+            total_descuentos: number
+            ticket_promedio_general: number
+            total_cajeros_activos: number
+          }
+          cajeros: {
+            cajero_nombre: string
+            cantidad_tickets: number
+            total_ventas: number
+            total_descuentos: number
+            ticket_promedio: number
+            cantidad_turnos: number
+            primera_venta: string | null
+            ultima_venta: string | null
+          }[]
+        }>("/v1/caja/reports/sales-by-cashier", params as any),
+      downloadSalesByCashierPdf: (fecha_desde: string, fecha_hasta: string, cajero_nombre?: string) =>
+        downloadAuthenticated("/v1/caja/reports/sales-by-cashier/export.pdf", { fecha_desde, fecha_hasta, ...(cajero_nombre ? { cajero_nombre } : {}) }, `ventas_por_cajero_${fecha_desde}_${fecha_hasta}.pdf`),
+      salesByPaymentMethod: (params: { fecha_desde: string; fecha_hasta: string }) =>
+        client.get<{
+          fecha_desde: string
+          fecha_hasta: string
+          total_recaudado_pyg: number
+          total_operaciones: number
+          efectivo_brl_recaudado: number
+          efectivo_usd_recaudado: number
+          medios_pago: {
+            key: string
+            label: string
+            moneda: string
+            monto: number
+            operaciones: number
+            porcentaje: number
+          }[]
+        }>("/v1/caja/reports/sales-by-payment-method", params as any),
+      downloadSalesByPaymentMethodPdf: (fecha_desde: string, fecha_hasta: string) =>
+        downloadAuthenticated("/v1/caja/reports/sales-by-payment-method/export.pdf", { fecha_desde, fecha_hasta }, `ventas_por_medio_pago_${fecha_desde}_${fecha_hasta}.pdf`),
+    },
   },
   vault: {
     dashboard: () => client.get<VaultDashboard>("/v1/vault/dashboard"),

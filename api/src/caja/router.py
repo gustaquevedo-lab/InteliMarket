@@ -387,6 +387,70 @@ async def export_vault_movimientos_pdf(
     return _pdf_response(pdf_bytes, f"movimientos_de_boveda_{fecha_desde}_{fecha_hasta}.pdf")
 
 
+@router.get("/caja/reports/sales-by-cashier")
+async def get_sales_by_cashier_report_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    cajero_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_sales_by_cashier_report(
+        db, user["company_id"], fecha_desde, fecha_hasta, cajero_nombre
+    )
+
+
+@router.get("/caja/reports/sales-by-cashier/export.pdf")
+async def export_sales_by_cashier_pdf_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    cajero_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user["company_id"]
+    data = await service.get_sales_by_cashier_report(
+        db, company_id, fecha_desde, fecha_hasta, cajero_nombre
+    )
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_ventas_por_cajero_pdf(
+        company, data, fecha_desde, fecha_hasta, generated_by
+    )
+    return _pdf_response(pdf_bytes, f"ventas_por_cajero_{fecha_desde}_{fecha_hasta}.pdf")
+
+
+@router.get("/caja/reports/sales-by-payment-method")
+async def get_sales_by_payment_method_report_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_sales_by_payment_method_report(
+        db, user["company_id"], fecha_desde, fecha_hasta
+    )
+
+
+@router.get("/caja/reports/sales-by-payment-method/export.pdf")
+async def export_sales_by_payment_method_pdf_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user["company_id"]
+    data = await service.get_sales_by_payment_method_report(
+        db, company_id, fecha_desde, fecha_hasta
+    )
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+    pdf_bytes = pdf_reports.generate_ventas_por_medio_pago_pdf(
+        company, data, fecha_desde, fecha_hasta, generated_by
+    )
+    return _pdf_response(pdf_bytes, f"ventas_por_medio_pago_{fecha_desde}_{fecha_hasta}.pdf")
+
+
 @router.post("/vault/deposit")
 async def vault_deposit(body: DepositVaultEntriesRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     result = await service.request_or_execute_vault_deposit(

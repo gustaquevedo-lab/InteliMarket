@@ -4,7 +4,8 @@ import {
   DollarSign, CheckCircle, XCircle, AlertCircle, CreditCard, AlertTriangle,
   Settings, X, ShieldCheck, Clock, EyeOff, Calculator, FileText, Download,
   Layers, Users, RefreshCw, Printer, Check, ChevronRight, Activity, ShieldAlert,
-  Coins, Sparkles, Building2, Store, Lock, KeyRound, Heart
+  Coins, Sparkles, Building2, Store, Lock, KeyRound, Heart, FileSpreadsheet,
+  BarChart3, Calendar, Filter, PieChart, Receipt
 } from "lucide-react"
 import {
   api,
@@ -96,8 +97,21 @@ const DENOMINACIONES_PYG = [
 
 export default function CajaPage() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "entregas" | "historial" | "cajeros" | "donaciones">("registers")
+  const [activeTab, setActiveTab] = useState<"registers" | "sessions" | "entregas" | "historial" | "cajeros" | "donaciones" | "reportes">("registers")
   
+  // ── CENTRO DE REPORTES DE CAJA (PARAGUAY TIMEZONE) ──
+  const getInitialPyDate = () => {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion" }).format(new Date())
+  }
+  const [repFechaDesde, setRepFechaDesde] = useState(() => getInitialPyDate())
+  const [repFechaHasta, setRepFechaHasta] = useState(() => getInitialPyDate())
+  const [repCajeroFiltro, setRepCajeroFiltro] = useState("")
+  const [repLoading, setRepLoading] = useState(false)
+  const [salesByCashierData, setSalesByCashierData] = useState<any | null>(null)
+  const [salesByPaymentData, setSalesByPaymentData] = useState<any | null>(null)
+  const [repActiveSubTab, setRepActiveSubTab] = useState<"cajeros" | "medios_pago" | "actas">("cajeros")
+  const [downloadingRepPdf, setDownloadingRepPdf] = useState(false)
+
   // ── DONACIONES & RSE ("ABRE TU CORAZÓN" - CENTRO AMOR Y ESPERANZA) ──
   const [donationStats, setDonationStats] = useState<DonationStats | null>(null)
   const [donationRanking, setDonationRanking] = useState<CajeroSolidarioRankingItem[]>([])
@@ -327,8 +341,32 @@ export default function CajaPage() {
     }
   }
 
+  const fetchReportesCaja = async (desde = repFechaDesde, hasta = repFechaHasta, cajero = repCajeroFiltro) => {
+    setRepLoading(true)
+    try {
+      const [cashierRes, paymentRes] = await Promise.all([
+        api.caja.reports.salesByCashier({
+          fecha_desde: desde,
+          fecha_hasta: hasta,
+          cajero_nombre: cajero.trim() || undefined,
+        }),
+        api.caja.reports.salesByPaymentMethod({
+          fecha_desde: desde,
+          fecha_hasta: hasta,
+        }),
+      ])
+      setSalesByCashierData(cashierRes)
+      setSalesByPaymentData(paymentRes)
+    } catch {
+      toast.error("Error", "No se pudieron cargar los reportes de caja")
+    } finally {
+      setRepLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (activeTab === "donaciones") fetchDonationsData()
+    if (activeTab === "reportes" && !salesByCashierData) fetchReportesCaja()
   }, [activeTab])
 
   const handleLiquidarDonaciones = async () => {
@@ -757,6 +795,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
           { key: "historial", label: "Historial de Arqueos & Cierres", icon: Clock },
           { key: "cajeros", label: "Scorecard de Cajeros", icon: Users },
           { key: "donaciones", label: "❤️ Donaciones & RSE", icon: Heart, count: donationStats?.cantidad_donaciones },
+          { key: "reportes", label: "📊 Centro de Reportes", icon: FileSpreadsheet },
         ].map((t) => {
           const Icon = t.icon
           const active = activeTab === t.key
@@ -1553,6 +1592,443 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 📊 TAB 7: CENTRO DE REPORTES DE CAJA */}
+      {activeTab === "reportes" && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Barra Superior de Filtros de Reportes (Zona Horaria Paraguay) */}
+          <div className="card p-4 space-y-4 border border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h2 className="text-base font-black text-gray-900 dark:text-white flex items-center gap-2">
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  Centro de Reportes Analíticos de Caja & Arqueos
+                </h2>
+                <p className="text-xs text-gray-500">
+                  Consolidados de ventas crudas por cajero, recaudación por medios de pago y reimpresión de actas formales.
+                </p>
+              </div>
+
+              {/* Selector de Subpestaña de Reporte */}
+              <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl gap-1">
+                {[
+                  { id: "cajeros", label: "Ventas por Cajero", icon: Users },
+                  { id: "medios_pago", label: "Ventas por Medio de Pago", icon: CreditCard },
+                  { id: "actas", label: "Reimpresión de Actas", icon: Printer },
+                ].map(sub => {
+                  const SubIcon = sub.icon
+                  const isSel = repActiveSubTab === sub.id
+                  return (
+                    <button
+                      key={sub.id}
+                      onClick={() => setRepActiveSubTab(sub.id as any)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                        isSel
+                          ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                      }`}
+                    >
+                      <SubIcon className="w-3.5 h-3.5" />
+                      <span>{sub.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Controles de Filtro: Rango de Fechas & Cajero */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                  Fecha Desde (Hora PY)
+                </label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    value={repFechaDesde}
+                    onChange={e => setRepFechaDesde(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                  Fecha Hasta (Hora PY)
+                </label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    value={repFechaHasta}
+                    onChange={e => setRepFechaHasta(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                  Filtrar por Cajero (Opcional)
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Todos los cajeros..."
+                    value={repCajeroFiltro}
+                    onChange={e => setRepCajeroFiltro(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => fetchReportesCaja()}
+                  disabled={repLoading}
+                  className="flex-1 btn-primary py-2 text-xs font-bold flex items-center justify-center gap-2 shadow-sm"
+                >
+                  {repLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  <span>Actualizar</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* SUBTAB 1: REPORTE DE VENTAS POR CAJERO */}
+          {repActiveSubTab === "cajeros" && (
+            <div className="space-y-4">
+              {/* Tarjetas KPI de Ventas por Cajero */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="card p-4 bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 rounded-2xl">
+                  <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Total Ventas Brutas</span>
+                  <p className="text-xl font-black font-mono text-gray-900 dark:text-white mt-1">
+                    {formatPYG(salesByCashierData?.totales?.total_ventas || 0)}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Montos crudos facturados en caja</p>
+                </div>
+
+                <div className="card p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                  <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Total Tickets Emitidos</span>
+                  <p className="text-xl font-black font-mono text-gray-900 dark:text-white mt-1">
+                    {(salesByCashierData?.totales?.total_tickets || 0).toLocaleString("es-PY")}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Comprobantes procesados</p>
+                </div>
+
+                <div className="card p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                  <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Ticket Promedio General</span>
+                  <p className="text-xl font-black font-mono text-gray-900 dark:text-white mt-1">
+                    {formatPYG(salesByCashierData?.totales?.ticket_promedio_general || 0)}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Promedio por comprobante</p>
+                </div>
+
+                <div className="card p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                  <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Cajeros Activos</span>
+                  <p className="text-xl font-black font-mono text-gray-900 dark:text-white mt-1">
+                    {salesByCashierData?.totales?.total_cajeros_activos || 0}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Personal con ventas registradas</p>
+                </div>
+              </div>
+
+              {/* Tabla de Desglose por Cajero */}
+              <div className="card overflow-hidden">
+                <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                      <Users className="w-4 h-4 text-emerald-600" />
+                      Planilla Consolidada de Ventas por Cajero
+                    </h3>
+                    <p className="text-xs text-gray-400">Totalización de ventas brutas, tickets y productividad por cajero</p>
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      setDownloadingRepPdf(true)
+                      try {
+                        await api.caja.reports.downloadSalesByCashierPdf(repFechaDesde, repFechaHasta, repCajeroFiltro.trim() || undefined)
+                      } finally {
+                        setDownloadingRepPdf(false)
+                      }
+                    }}
+                    disabled={downloadingRepPdf}
+                    className="btn-outline text-xs flex items-center gap-2 font-bold hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-300"
+                  >
+                    {downloadingRepPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                    <span>Descargar Reporte con Firmas (PDF)</span>
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-gray-50 dark:bg-slate-800/80 text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                      <tr>
+                        <th className="p-3 w-12 text-center">#</th>
+                        <th className="p-3">Nombre del Cajero / Usuario</th>
+                        <th className="p-3 text-center">Turnos</th>
+                        <th className="p-3 text-right">Tickets Emitidos</th>
+                        <th className="p-3 text-right">Ticket Promedio</th>
+                        <th className="p-3 text-right font-black">Total Facturado (₲)</th>
+                        <th className="p-3 text-right">% Participación</th>
+                        <th className="p-3 text-center">Horario Actividad</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {repLoading ? (
+                        <tr><td colSpan={8} className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-primary" /></td></tr>
+                      ) : !salesByCashierData || salesByCashierData.cajeros.length === 0 ? (
+                        <tr><td colSpan={8} className="p-8 text-center text-gray-400">No se encontraron ventas para el período seleccionado.</td></tr>
+                      ) : (
+                        salesByCashierData.cajeros.map((c: any, idx: number) => {
+                          const totGen = salesByCashierData.totales?.total_ventas || 1
+                          const pct = ((c.total_ventas / totGen) * 100).toFixed(1)
+                          return (
+                            <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                              <td className="p-3 text-center font-bold text-gray-400">{idx + 1}</td>
+                              <td className="p-3 font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-center text-xs">
+                                  {c.cajero_nombre.slice(0, 2).toUpperCase()}
+                                </div>
+                                <span>{c.cajero_nombre}</span>
+                              </td>
+                              <td className="p-3 text-center font-mono font-bold text-gray-600 dark:text-gray-300">
+                                {c.cantidad_turnos}
+                              </td>
+                              <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">
+                                {c.cantidad_tickets.toLocaleString("es-PY")}
+                              </td>
+                              <td className="p-3 text-right font-mono text-gray-600 dark:text-gray-300">
+                                {formatPYG(c.ticket_promedio)}
+                              </td>
+                              <td className="p-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                                {formatPYG(c.total_ventas)}
+                              </td>
+                              <td className="p-3 text-right">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+                                  {pct}%
+                                </span>
+                              </td>
+                              <td className="p-3 text-center text-[10px] text-gray-400 font-mono">
+                                {c.primera_venta ? `${formatDateTime(c.primera_venta).slice(11, 16)} a ${formatDateTime(c.ultima_venta).slice(11, 16)}` : "—"}
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SUBTAB 2: REPORTE DE VENTAS POR MEDIOS DE PAGO */}
+          {repActiveSubTab === "medios_pago" && (
+            <div className="space-y-4">
+              {/* Tarjetas KPI de Medios de Pago */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="card p-4 bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/20 rounded-2xl">
+                  <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Total Recaudado (PYG)</span>
+                  <p className="text-xl font-black font-mono text-gray-900 dark:text-white mt-1">
+                    {formatPYG(salesByPaymentData?.total_recaudado_pyg || 0)}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Ingresos totales convertidos</p>
+                </div>
+
+                <div className="card p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                  <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Total Operaciones</span>
+                  <p className="text-xl font-black font-mono text-gray-900 dark:text-white mt-1">
+                    {(salesByPaymentData?.total_operaciones || 0).toLocaleString("es-PY")}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Cobros procesados</p>
+                </div>
+
+                <div className="card p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                  <span className="text-[11px] font-bold text-amber-500 uppercase tracking-wider">Reales en Gaveta (R$)</span>
+                  <p className="text-xl font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
+                    R$ {(salesByPaymentData?.efectivo_brl_recaudado || 0).toLocaleString("es-PY", { minimumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Cobro físico en moneda extranjera</p>
+                </div>
+
+                <div className="card p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                  <span className="text-[11px] font-bold text-emerald-500 uppercase tracking-wider">Dólares en Gaveta (US$)</span>
+                  <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                    US$ {(salesByPaymentData?.efectivo_usd_recaudado || 0).toLocaleString("es-PY", { minimumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Cobro físico en moneda extranjera</p>
+                </div>
+              </div>
+
+              {/* Tabla de Medios de Pago */}
+              <div className="card overflow-hidden">
+                <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                      <CreditCard className="w-4 h-4 text-blue-600" />
+                      Distribución por Medio de Pago & Canal Operativo
+                    </h3>
+                    <p className="text-xs text-gray-400">Desglose de recaudación: efectivo, divisas, tarjetas, transferencias y convenios</p>
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      setDownloadingRepPdf(true)
+                      try {
+                        await api.caja.reports.downloadSalesByPaymentMethodPdf(repFechaDesde, repFechaHasta)
+                      } finally {
+                        setDownloadingRepPdf(false)
+                      }
+                    }}
+                    disabled={downloadingRepPdf}
+                    className="btn-outline text-xs flex items-center gap-2 font-bold hover:bg-blue-50 dark:hover:bg-blue-950/30 text-blue-700 dark:text-blue-300 border-blue-300"
+                  >
+                    {downloadingRepPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                    <span>Descargar Informe de Recaudación (PDF)</span>
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-gray-50 dark:bg-slate-800/80 text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                      <tr>
+                        <th className="p-3 w-12 text-center">#</th>
+                        <th className="p-3">Medio de Pago / Canal</th>
+                        <th className="p-3 text-center">Moneda</th>
+                        <th className="p-3 text-right">Cantidad Cobros</th>
+                        <th className="p-3 text-right font-black">Monto Recaudado</th>
+                        <th className="p-3 text-right">% Participación (PYG)</th>
+                        <th className="p-3 w-40">Proporción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {repLoading ? (
+                        <tr><td colSpan={7} className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-primary" /></td></tr>
+                      ) : !salesByPaymentData || salesByPaymentData.medios_pago.length === 0 ? (
+                        <tr><td colSpan={7} className="p-8 text-center text-gray-400">No hay movimientos de pago registrados.</td></tr>
+                      ) : (
+                        salesByPaymentData.medios_pago.map((m: any, idx: number) => {
+                          const isDivisa = m.moneda !== "PYG"
+                          const montoFmt = isDivisa
+                            ? `${m.moneda} ${m.monto.toLocaleString("es-PY", { minimumFractionDigits: 2 })}`
+                            : formatPYG(m.monto)
+                          return (
+                            <tr key={idx} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                              <td className="p-3 text-center font-bold text-gray-400">{idx + 1}</td>
+                              <td className="p-3 font-bold text-gray-900 dark:text-white">
+                                {m.label}
+                              </td>
+                              <td className="p-3 text-center">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-extrabold ${
+                                  m.moneda === "BRL" ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300" :
+                                  m.moneda === "USD" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" :
+                                  "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                }`}>
+                                  {m.moneda}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">
+                                {m.operaciones.toLocaleString("es-PY")}
+                              </td>
+                              <td className="p-3 text-right font-mono font-black text-blue-600 dark:text-blue-400 text-sm">
+                                {montoFmt}
+                              </td>
+                              <td className="p-3 text-right font-mono font-bold text-gray-700 dark:text-gray-300">
+                                {isDivisa ? "Divisa" : `${m.porcentaje}%`}
+                              </td>
+                              <td className="p-3">
+                                {!isDivisa && (
+                                  <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                                    <div
+                                      className="bg-blue-600 h-2 rounded-full"
+                                      style={{ width: `${Math.min(100, m.porcentaje)}%` }}
+                                    />
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SUBTAB 3: REIMPRESIÓN CENTRALIZADA DE ACTAS */}
+          {repActiveSubTab === "actas" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Tarjeta 1: Acta de Arqueo Consolidada */}
+              <div className="card p-6 space-y-4 border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white">
+                      Acta de Arqueo Consolidado (PDF Horizontal)
+                    </h3>
+                    <p className="text-xs text-gray-400">
+                      Documento formal en formato apaisado A4 con detalle de todas las terminales y horas de cierre
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Genera la planilla unificada que incluye todas las sesiones cerradas en el rango de fechas seleccionado (<b>{repFechaDesde}</b> al <b>{repFechaHasta}</b>), con el desglose de gaveta, fondos iniciales, canales de recaudación y espacio para las 3 firmas institucionales.
+                </p>
+
+                <div className="pt-2">
+                  <button
+                    onClick={() => api.caja.downloadArqueoConsolidadoPdf(repFechaDesde, repFechaHasta)}
+                    className="w-full btn-primary py-2.5 text-xs font-bold flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Descargar Acta de Arqueo Consolidado</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Tarjeta 2: Cierres Individuales de Sesión */}
+              <div className="card p-6 space-y-4 border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                    <Receipt className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white">
+                      Acta de Cierre Individual de Turno
+                    </h3>
+                    <p className="text-xs text-gray-400">
+                      Reimpresión directa del comprobante de cierre de una cajera específica
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Si necesitás reimprimir el acta de cierre de una sesión pasada con su conteo ciego, desglose bimonetario y firma de entrega a supervisión, podés acceder al historial de cierres.
+                </p>
+
+                <div className="pt-2">
+                  <button
+                    onClick={() => setActiveTab("historial")}
+                    className="w-full btn-outline py-2.5 text-xs font-bold flex items-center justify-center gap-2"
+                  >
+                    <Clock className="w-4 h-4 text-indigo-500" />
+                    <span>Ir al Historial de Sesiones Cerradas</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

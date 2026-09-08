@@ -2527,3 +2527,238 @@ async def update_session_fondo_inicial(
     return session_obj
 
 
+# ── Reportes Especializados de Ventas por Cajero y Medios de Pago ─────
+
+def _parse_range_asuncion(fecha_desde: date | datetime | str, fecha_hasta: date | datetime | str) -> tuple[datetime, datetime]:
+    py_tz = ZoneInfo("America/Asuncion")
+    if isinstance(fecha_desde, str):
+        fecha_desde = date.fromisoformat(fecha_desde.strip())
+    if isinstance(fecha_hasta, str):
+        fecha_hasta = date.fromisoformat(fecha_hasta.strip())
+
+    if isinstance(fecha_desde, date) and not isinstance(fecha_desde, datetime):
+        dt_desde = datetime.combine(fecha_desde, time.min, tzinfo=py_tz)
+    elif isinstance(fecha_desde, datetime) and fecha_desde.tzinfo is None:
+        dt_desde = fecha_desde.replace(tzinfo=py_tz)
+    else:
+        dt_desde = fecha_desde
+
+    if isinstance(fecha_hasta, date) and not isinstance(fecha_hasta, datetime):
+        dt_hasta = datetime.combine(fecha_hasta, time.max, tzinfo=py_tz)
+    elif isinstance(fecha_hasta, datetime) and fecha_hasta.tzinfo is None:
+        dt_hasta = fecha_hasta.replace(tzinfo=py_tz)
+    else:
+        dt_hasta = fecha_hasta
+
+    return dt_desde, dt_hasta
+
+
+async def get_sales_by_cashier_report(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: date | datetime | str,
+    fecha_hasta: date | datetime | str,
+    cajero_nombre: str | None = None,
+) -> dict:
+    """Reporte de ventas brutas agrupadas por cajero/usuario para arqueo y control de recaudación."""
+    dt_desde, dt_hasta = _parse_range_asuncion(fecha_desde, fecha_hasta)
+    comp_uuid = uuid.UUID(company_id)
+
+    query = (
+        select(
+            func.coalesce(CashSession.cajero_nombre, User.nombre, 'Sin Cajero Asignado').label("cajero_nombre"),
+            func.count(Sale.id).label("cantidad_tickets"),
+            func.coalesce(func.sum(Sale.total), 0).label("total_ventas"),
+            func.coalesce(func.sum(Sale.descuento_total), 0).label("total_descuentos"),
+            func.min(Sale.fecha).label("primera_venta"),
+            func.max(Sale.fecha).label("ultima_venta"),
+            func.count(func.distinct(Sale.session_id)).label("cantidad_turnos"),
+        )
+        .select_from(Sale)
+        .outerjoin(CashSession, CashSession.id == Sale.session_id)
+        .outerjoin(User, User.id == Sale.user_id)
+        .where(
+            Sale.company_id == comp_uuid,
+            Sale.fecha >= dt_desde,
+            Sale.fecha <= dt_hasta,
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+        )
+    )
+
+    if cajero_nombre and cajero_nombre.strip():
+        query = query.where(func.coalesce(CashSession.cajero_nombre, User.nombre).ilike(f"%{cajero_nombre.strip()}%"))
+
+    query = query.group_by(func.coalesce(CashSession.cajero_nombre, User.nombre, 'Sin Cajero Asignado'))
+    query = query.order_by(func.coalesce(func.sum(Sale.total), 0).desc())
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    cajeros = []
+    gran_total_ventas = Decimal("0")
+    gran_total_tickets = 0
+    gran_total_descuentos = Decimal("0")
+
+    for r in rows:
+        tot = Decimal(str(r.total_ventas or 0))
+        tix = int(r.cantidad_tickets or 0)
+        desc = Decimal(str(r.total_descuentos or 0))
+        prom = tot / tix if tix > 0 else Decimal("0")
+
+        gran_total_ventas += tot
+        gran_total_tickets += tix
+        gran_total_descuentos += desc
+
+        cajeros.append({
+            "cajero_nombre": r.cajero_nombre,
+            "cantidad_tickets": tix,
+            "total_ventas": float(tot),
+            "total_descuentos": float(desc),
+            "ticket_promedio": float(prom),
+            "cantidad_turnos": int(r.cantidad_turnos or 0),
+            "primera_venta": _to_asuncion_tz(r.primera_venta).isoformat() if r.primera_venta else None,
+            "ultima_venta": _to_asuncion_tz(r.ultima_venta).isoformat() if r.ultima_venta else None,
+        })
+
+    ticket_promedio_general = float(gran_total_ventas / gran_total_tickets) if gran_total_tickets > 0 else 0.0
+
+    return {
+        "fecha_desde": dt_desde.strftime("%Y-%m-%d"),
+        "fecha_hasta": dt_hasta.strftime("%Y-%m-%d"),
+        "cajero_filtro": cajero_nombre,
+        "totales": {
+            "total_ventas": float(gran_total_ventas),
+            "total_tickets": gran_total_tickets,
+            "total_descuentos": float(gran_total_descuentos),
+            "ticket_promedio_general": ticket_promedio_general,
+            "total_cajeros_activos": len(cajeros),
+        },
+        "cajeros": cajeros,
+    }
+
+
+async def get_sales_by_payment_method_report(
+    db: AsyncSession,
+    company_id: str,
+    fecha_desde: date | datetime | str,
+    fecha_hasta: date | datetime | str,
+) -> dict:
+    """Reporte de recaudación agrupado por medios de pago para arqueo de caja y tesorería."""
+    dt_desde, dt_hasta = _parse_range_asuncion(fecha_desde, fecha_hasta)
+    comp_uuid = uuid.UUID(company_id)
+
+    query = (
+        select(
+            SalePayment.forma_pago,
+            SalePayment.moneda,
+            func.count(SalePayment.id).label("cantidad_operaciones"),
+            func.coalesce(func.sum(SalePayment.monto), 0).label("monto_total"),
+        )
+        .select_from(SalePayment)
+        .join(Sale, Sale.id == SalePayment.sale_id)
+        .where(
+            Sale.company_id == comp_uuid,
+            Sale.fecha >= dt_desde,
+            Sale.fecha <= dt_hasta,
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+        )
+        .group_by(SalePayment.forma_pago, SalePayment.moneda)
+        .order_by(func.coalesce(func.sum(SalePayment.monto), 0).desc())
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    methods_dict = {
+        "efectivo_pyg": {"label": "Efectivo Guaraníes (₲)", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+        "efectivo_brl": {"label": "Efectivo Reales (R$)", "moneda": "BRL", "monto": Decimal("0"), "operaciones": 0},
+        "efectivo_usd": {"label": "Efectivo Dólares (US$)", "moneda": "USD", "monto": Decimal("0"), "operaciones": 0},
+        "bancard": {"label": "Tarjetas Bancard (Débito/Crédito)", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+        "dinelco": {"label": "Tarjetas Dinelco", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+        "qr": {"label": "Pagos con Código QR", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+        "pix": {"label": "Transferencia PIX Brasil", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+        "transferencia": {"label": "Transferencia Bancaria / SIPAP", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+        "extra_club": {"label": "Crédito Extra Club / Vales Convenios", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+        "cheque": {"label": "Cheques Recibidos", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+        "otros": {"label": "Otros Medios de Pago", "moneda": "PYG", "monto": Decimal("0"), "operaciones": 0},
+    }
+
+    total_recaudado_pyg = Decimal("0")
+    total_operaciones = 0
+
+    for r in rows:
+        fp = (r.forma_pago or "").upper()
+        mon = (r.moneda or "PYG").upper()
+        m = Decimal(str(r.monto_total or 0))
+        ops = int(r.cantidad_operaciones or 0)
+        total_operaciones += ops
+
+        if "EFECTIVO" in fp:
+            if mon == "BRL":
+                methods_dict["efectivo_brl"]["monto"] += m
+                methods_dict["efectivo_brl"]["operaciones"] += ops
+            elif mon == "USD":
+                methods_dict["efectivo_usd"]["monto"] += m
+                methods_dict["efectivo_usd"]["operaciones"] += ops
+            else:
+                methods_dict["efectivo_pyg"]["monto"] += m
+                methods_dict["efectivo_pyg"]["operaciones"] += ops
+                total_recaudado_pyg += m
+        elif "DINELCO" in fp and "QR" not in fp:
+            methods_dict["dinelco"]["monto"] += m
+            methods_dict["dinelco"]["operaciones"] += ops
+            total_recaudado_pyg += m
+        elif any(t in fp for t in ["BANCARD", "TARJETA", "DEBITO", "CREDITO"]) and "QR" not in fp:
+            methods_dict["bancard"]["monto"] += m
+            methods_dict["bancard"]["operaciones"] += ops
+            total_recaudado_pyg += m
+        elif "PIX" in fp:
+            methods_dict["pix"]["monto"] += m
+            methods_dict["pix"]["operaciones"] += ops
+            total_recaudado_pyg += m
+        elif "QR" in fp:
+            methods_dict["qr"]["monto"] += m
+            methods_dict["qr"]["operaciones"] += ops
+            total_recaudado_pyg += m
+        elif any(t in fp for t in ["TRANSFERENCIA", "TRANSF", "SIPAP"]):
+            methods_dict["transferencia"]["monto"] += m
+            methods_dict["transferencia"]["operaciones"] += ops
+            total_recaudado_pyg += m
+        elif any(t in fp for t in ["EXTRA_CLUB", "CLUB", "CREDITO", "VALE", "CONVENIO"]):
+            methods_dict["extra_club"]["monto"] += m
+            methods_dict["extra_club"]["operaciones"] += ops
+            total_recaudado_pyg += m
+        elif "CHEQUE" in fp:
+            methods_dict["cheque"]["monto"] += m
+            methods_dict["cheque"]["operaciones"] += ops
+            total_recaudado_pyg += m
+        else:
+            methods_dict["otros"]["monto"] += m
+            methods_dict["otros"]["operaciones"] += ops
+            total_recaudado_pyg += m
+
+    breakdown = []
+    for k, v in methods_dict.items():
+        m_val = float(v["monto"])
+        pct = float((v["monto"] / total_recaudado_pyg) * 100) if (total_recaudado_pyg > 0 and v["moneda"] == "PYG") else 0.0
+        breakdown.append({
+            "key": k,
+            "label": v["label"],
+            "moneda": v["moneda"],
+            "monto": m_val,
+            "operaciones": v["operaciones"],
+            "porcentaje": round(pct, 2),
+        })
+
+    return {
+        "fecha_desde": dt_desde.strftime("%Y-%m-%d"),
+        "fecha_hasta": dt_hasta.strftime("%Y-%m-%d"),
+        "total_recaudado_pyg": float(total_recaudado_pyg),
+        "total_operaciones": total_operaciones,
+        "efectivo_brl_recaudado": float(methods_dict["efectivo_brl"]["monto"]),
+        "efectivo_usd_recaudado": float(methods_dict["efectivo_usd"]["monto"]),
+        "medios_pago": breakdown,
+    }
+
+
+

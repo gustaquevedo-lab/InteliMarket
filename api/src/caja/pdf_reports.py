@@ -17,6 +17,7 @@ def _to_asuncion_tz(dt: datetime | None) -> datetime | None:
 
 from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, KeepTogether
 
 from api.src.integrated_finance.pdf_reports import (
@@ -903,5 +904,266 @@ def generate_treasury_remittance_pdf(
 
     _build(doc, elements)
     return buffer.getvalue()
+
+
+# ── Reporte PDF: Ventas por Cajero ─────────────────────────────────────
+
+def generate_ventas_por_cajero_pdf(
+    company: dict,
+    report_data: dict,
+    fecha_desde: date | str,
+    fecha_hasta: date | str,
+    generated_by: str = "",
+) -> bytes:
+    """Genera el reporte institucional en PDF (A4 Portrait) de ventas agrupadas por cajero/usuario."""
+    from decimal import Decimal
+    buffer = io.BytesIO()
+    doc, styles = _base_doc(buffer, "Reporte de Ventas por Cajero", company, generated_by)
+
+    f_desde_str = fecha_desde.strftime("%d/%m/%Y") if isinstance(fecha_desde, (date, datetime)) else str(fecha_desde)
+    f_hasta_str = fecha_hasta.strftime("%d/%m/%Y") if isinstance(fecha_hasta, (date, datetime)) else str(fecha_hasta)
+    subtitulo = f"Período Auditado: Del {f_desde_str} al {f_hasta_str}"
+    if report_data.get("cajero_filtro"):
+        subtitulo += f" | Cajero Filtrado: {report_data['cajero_filtro']}"
+
+    elements = _company_header(
+        company, styles, "REPORTE CONSOLIDADO DE VENTAS POR CAJERO",
+        subtitulo, generated_by,
+    )
+
+    totales = report_data.get("totales", {})
+    cajeros = report_data.get("cajeros", [])
+
+    # 1. KPI CARDS
+    tot_ventas = Decimal(str(totales.get("total_ventas") or 0))
+    tot_tickets = totales.get("total_tickets") or 0
+    tix_prom = Decimal(str(totales.get("ticket_promedio_general") or 0))
+    cajeros_activos = totales.get("total_cajeros_activos") or len(cajeros)
+
+    kpi_style_val = ParagraphStyle("KVal", fontName=FONT_BOLD, fontSize=11, textColor=PRIMARY_COLOR, alignment=1)
+    kpi_style_sub = ParagraphStyle("KSub", fontName="Helvetica", fontSize=7, textColor=GRAY_MEDIUM, alignment=1)
+
+    kpi_data = [
+        [
+            [Paragraph("TOTAL VENTAS BRUTAS", kpi_style_sub), Paragraph(_fmt_gs(tot_ventas), kpi_style_val)],
+            [Paragraph("CANTIDAD DE TICKETS", kpi_style_sub), Paragraph(f"{tot_tickets:,}".replace(",", "."), kpi_style_val)],
+            [Paragraph("TICKET PROMEDIO", kpi_style_sub), Paragraph(_fmt_gs(tix_prom), kpi_style_val)],
+            [Paragraph("CAJEROS ACTIVOS", kpi_style_sub), Paragraph(str(cajeros_activos), kpi_style_val)],
+        ]
+    ]
+    t_kpi = Table(kpi_data, colWidths=[47.5 * mm, 47.5 * mm, 47.5 * mm, 47.5 * mm])
+    t_kpi.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("LINEAFTER", (0, 0), (-2, 0), 0.5, HexColor("#CBD5E1")),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elements.append(t_kpi)
+    elements.append(Spacer(1, 12))
+
+    # 2. TABLA DE CAJEROS
+    table_data = [[
+        Paragraph("<font size=7.5 color='white'><b>#</b></font>", styles["Normal"]),
+        Paragraph("<font size=7.5 color='white'><b>NOMBRE DEL CAJERO / USUARIO</b></font>", styles["Normal"]),
+        Paragraph("<font size=7.5 color='white'><b>TURNOS</b></font>", ParagraphStyle("ThC", parent=styles["Normal"], alignment=1)),
+        Paragraph("<font size=7.5 color='white'><b>TICKETS</b></font>", ParagraphStyle("ThR", parent=styles["Normal"], alignment=2)),
+        Paragraph("<font size=7.5 color='white'><b>TICKET PROM. (₲)</b></font>", ParagraphStyle("ThR2", parent=styles["Normal"], alignment=2)),
+        Paragraph("<font size=7.5 color='white'><b>TOTAL FACTURADO (₲)</b></font>", ParagraphStyle("ThR3", parent=styles["Normal"], alignment=2)),
+        Paragraph("<font size=7.5 color='white'><b>% PART.</b></font>", ParagraphStyle("ThR4", parent=styles["Normal"], alignment=2)),
+    ]]
+
+    for i, c in enumerate(cajeros, start=1):
+        c_monto = Decimal(str(c.get("total_ventas") or 0))
+        pct = (c_monto / tot_ventas * 100) if tot_ventas > 0 else Decimal("0")
+        table_data.append([
+            str(i),
+            c.get("cajero_nombre") or "Cajero",
+            str(c.get("cantidad_turnos") or 1),
+            f"{c.get('cantidad_tickets', 0):,}".replace(",", "."),
+            _fmt_val(c.get("ticket_promedio")),
+            _fmt_val(c_monto),
+            f"{float(pct):.1f}%",
+        ])
+
+    # Fila de Totales
+    table_data.append([
+        "",
+        "TOTALES GENERALES",
+        "",
+        f"{tot_tickets:,}".replace(",", "."),
+        _fmt_val(tix_prom),
+        _fmt_val(tot_ventas),
+        "100.0%",
+    ])
+
+    t_cajeros = Table(table_data, colWidths=[8 * mm, 62 * mm, 18 * mm, 22 * mm, 30 * mm, 34 * mm, 16 * mm], repeatRows=1)
+    t_cajeros.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (2, 0), (2, -1), "CENTER"),
+        ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, GRAY_LIGHT]),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#E2E8F0")),
+        ("FONTNAME", (0, -1), (-1, -1), FONT_BOLD),
+        ("LINEABOVE", (0, -1), (-1, -1), 1, PRIMARY_COLOR),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(t_cajeros)
+    elements.append(Spacer(1, 16))
+
+    # 3. FIRMAS
+    firmas = [
+        ["_________________________________________", "_________________________________________"],
+        ["RESPONSABLE DE AUDITORÍA / CAJAS", "GERENCIA DE ADMINISTRACIÓN Y FINANZAS"],
+        ["Extra Supermercado Mayorista", "GRUPO SANTA TERESA E.A.S."],
+    ]
+    t_firmas = Table(firmas, colWidths=[95 * mm, 95 * mm])
+    t_firmas.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("FONTNAME", (0, 1), (-1, 1), FONT_BOLD),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(KeepTogether([t_firmas]))
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
+
+# ── Reporte PDF: Ventas por Medio de Pago ─────────────────────────────
+
+def generate_ventas_por_medio_pago_pdf(
+    company: dict,
+    report_data: dict,
+    fecha_desde: date | str,
+    fecha_hasta: date | str,
+    generated_by: str = "",
+) -> bytes:
+    """Genera el reporte institucional en PDF (A4 Portrait) de recaudación agrupada por medios de pago."""
+    from decimal import Decimal
+    buffer = io.BytesIO()
+    doc, styles = _base_doc(buffer, "Reporte de Recaudación por Medios de Pago", company, generated_by)
+
+    f_desde_str = fecha_desde.strftime("%d/%m/%Y") if isinstance(fecha_desde, (date, datetime)) else str(fecha_desde)
+    f_hasta_str = fecha_hasta.strftime("%d/%m/%Y") if isinstance(fecha_hasta, (date, datetime)) else str(fecha_hasta)
+    subtitulo = f"Período Auditado: Del {f_desde_str} al {f_hasta_str}"
+
+    elements = _company_header(
+        company, styles, "REPORTE DE RECAUDACIÓN POR MEDIOS DE PAGO",
+        subtitulo, generated_by,
+    )
+
+    tot_recaudado = Decimal(str(report_data.get("total_recaudado_pyg") or 0))
+    tot_ops = report_data.get("total_operaciones") or 0
+    brl_monto = Decimal(str(report_data.get("efectivo_brl_recaudado") or 0))
+    usd_monto = Decimal(str(report_data.get("efectivo_usd_recaudado") or 0))
+    medios = report_data.get("medios_pago", [])
+
+    kpi_style_val = ParagraphStyle("KValMP", fontName=FONT_BOLD, fontSize=11, textColor=PRIMARY_COLOR, alignment=1)
+    kpi_style_sub = ParagraphStyle("KSubMP", fontName="Helvetica", fontSize=7, textColor=GRAY_MEDIUM, alignment=1)
+
+    kpi_data = [
+        [
+            [Paragraph("TOTAL RECAUDADO (PYG)", kpi_style_sub), Paragraph(_fmt_gs(tot_recaudado), kpi_style_val)],
+            [Paragraph("TOTAL OPERACIONES", kpi_style_sub), Paragraph(f"{tot_ops:,}".replace(",", "."), kpi_style_val)],
+            [Paragraph("REALES EN GAVETA (R$)", kpi_style_sub), Paragraph(f"R$ {_fmt_val(brl_monto, is_divisa=True)}", kpi_style_val)],
+            [Paragraph("DÓLARES EN GAVETA (US$)", kpi_style_sub), Paragraph(f"US$ {_fmt_val(usd_monto, is_divisa=True)}", kpi_style_val)],
+        ]
+    ]
+    t_kpi = Table(kpi_data, colWidths=[47.5 * mm, 47.5 * mm, 47.5 * mm, 47.5 * mm])
+    t_kpi.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("LINEAFTER", (0, 0), (-2, 0), 0.5, HexColor("#CBD5E1")),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elements.append(t_kpi)
+    elements.append(Spacer(1, 12))
+
+    table_data = [[
+        Paragraph("<font size=7.5 color='white'><b>#</b></font>", styles["Normal"]),
+        Paragraph("<font size=7.5 color='white'><b>CANAL / MEDIO DE COBRO</b></font>", styles["Normal"]),
+        Paragraph("<font size=7.5 color='white'><b>MONEDA</b></font>", ParagraphStyle("ThCM", parent=styles["Normal"], alignment=1)),
+        Paragraph("<font size=7.5 color='white'><b>TRANSACCIONES</b></font>", ParagraphStyle("ThRM", parent=styles["Normal"], alignment=2)),
+        Paragraph("<font size=7.5 color='white'><b>MONTO TOTAL RECAUDADO</b></font>", ParagraphStyle("ThRM2", parent=styles["Normal"], alignment=2)),
+        Paragraph("<font size=7.5 color='white'><b>% DEL TOTAL (PYG)</b></font>", ParagraphStyle("ThRM3", parent=styles["Normal"], alignment=2)),
+    ]]
+
+    for i, m in enumerate(medios, start=1):
+        mon = m.get("moneda", "PYG")
+        m_val = m.get("monto", 0)
+        if mon == "BRL":
+            m_str = f"R$ {_fmt_val(m_val, is_divisa=True)}"
+            pct_str = "Divisa"
+        elif mon == "USD":
+            m_str = f"US$ {_fmt_val(m_val, is_divisa=True)}"
+            pct_str = "Divisa"
+        else:
+            m_str = f"₲ {_fmt_val(m_val)}"
+            pct_str = f"{m.get('porcentaje', 0):.1f}%"
+
+        table_data.append([
+            str(i),
+            m.get("label", "Medio de Pago"),
+            mon,
+            f"{m.get('operaciones', 0):,}".replace(",", "."),
+            m_str,
+            pct_str,
+        ])
+
+    # Fila de Totales
+    table_data.append([
+        "",
+        "TOTAL COBRADO EN GUARANÍES",
+        "PYG",
+        f"{tot_ops:,}".replace(",", "."),
+        f"₲ {_fmt_val(tot_recaudado)}",
+        "100.0%",
+    ])
+
+    t_medios = Table(table_data, colWidths=[8 * mm, 72 * mm, 18 * mm, 28 * mm, 38 * mm, 26 * mm], repeatRows=1)
+    t_medios.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (2, 0), (2, -1), "CENTER"),
+        ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, GRAY_LIGHT]),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#E2E8F0")),
+        ("FONTNAME", (0, -1), (-1, -1), FONT_BOLD),
+        ("LINEABOVE", (0, -1), (-1, -1), 1, PRIMARY_COLOR),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(t_medios)
+    elements.append(Spacer(1, 16))
+
+    firmas = [
+        ["_________________________________________", "_________________________________________"],
+        ["RESPONSABLE DE TESORERÍA / BÓVEDA", "GERENCIA DE ADMINISTRACIÓN Y FINANZAS"],
+        ["Extra Supermercado Mayorista", "GRUPO SANTA TERESA E.A.S."],
+    ]
+    t_firmas = Table(firmas, colWidths=[95 * mm, 95 * mm])
+    t_firmas.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("FONTNAME", (0, 1), (-1, 1), FONT_BOLD),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(KeepTogether([t_firmas]))
+
+    _build(doc, elements)
+    return buffer.getvalue()
+
 
 

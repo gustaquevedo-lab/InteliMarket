@@ -4,7 +4,7 @@ import {
   TrendingDown, TrendingUp, AlertTriangle, Clock, Landmark, CheckCircle,
   XCircle, FileText, Lock, KeyRound, DollarSign, ArrowUpRight, ArrowDownRight,
   ChevronRight, Building2, Store, Activity, Layers, Download, Check, Sparkles, X,
-  PackageCheck, Inbox, Send
+  PackageCheck, Inbox, Send, FileSpreadsheet, Calendar, Search, Printer, Wallet
 } from "lucide-react"
 import { api, downloadAuthenticated, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -26,10 +26,21 @@ interface ArCustomerAging {
   saldo_total: number
 }
 
-type ActiveVaultTab = "custodia" | "remesas" | "bancos" | "calce" | "movimientos"
+type ActiveVaultTab = "custodia" | "remesas" | "bancos" | "calce" | "movimientos" | "reportes"
 
 export default function BovedaPage() {
   const [activeTab, setActiveTab] = useState<ActiveVaultTab>("custodia")
+  const getInitialBovedaDates = () => {
+    const now = new Date()
+    const pyStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion" }).format(now)
+    const dDesde = new Date()
+    dDesde.setDate(dDesde.getDate() - 30)
+    const desdeStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion" }).format(dDesde)
+    return { desde: desdeStr, hasta: pyStr }
+  }
+  const [bovRepDesde, setBovRepDesde] = useState(() => getInitialBovedaDates().desde)
+  const [bovRepHasta, setBovRepHasta] = useState(() => getInitialBovedaDates().hasta)
+  const [downloadingBovPdf, setDownloadingBovPdf] = useState(false)
   const [remittances, setRemittances] = useState<any[]>([])
   const [receivingRemittanceId, setReceivingRemittanceId] = useState<string | null>(null)
   const [banks, setBanks] = useState<BankAccount[]>([])
@@ -455,6 +466,7 @@ export default function BovedaPage() {
           { key: "bancos", label: "Cuentas Bancarias & Depósitos", icon: Landmark, count: banks.length },
           { key: "calce", label: "Auditoría de Calce (AP vs AR)", icon: Activity },
           { key: "movimientos", label: "Libro Diario de Bóveda", icon: History },
+          { key: "reportes", label: "📊 Centro de Reportes", icon: FileSpreadsheet },
         ].map((t) => {
           const Icon = t.icon
           const active = activeTab === t.key
@@ -900,6 +912,237 @@ export default function BovedaPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* 📊 TAB 6: CENTRO DE REPORTES DE BÓVEDA & TESORERÍA */}
+      {activeTab === "reportes" && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Barra Superior de Filtros */}
+          <div className="card p-5 space-y-4 border border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  Centro de Reportes de Bóveda & Tesorería
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Libros diarios, conciliación de remesas de supervisión, blindados bancarios y fondos fijos autorizados.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    setDownloadingBovPdf(true)
+                    try {
+                      await downloadPdf(
+                        `/v1/vault/export/movimientos.pdf?fecha_desde=${bovRepDesde}&fecha_hasta=${bovRepHasta}`,
+                        `movimientos_de_boveda_${bovRepDesde}_${bovRepHasta}.pdf`
+                      )
+                    } catch {
+                      toast.error("Error", "No se pudo generar el Libro Diario de Bóveda")
+                    } finally {
+                      setDownloadingBovPdf(false)
+                    }
+                  }}
+                  disabled={downloadingBovPdf}
+                  className="btn-primary py-2 px-3.5 text-xs font-bold flex items-center gap-2 shadow-sm"
+                >
+                  {downloadingBovPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                  <span>Descargar Libro de Bóveda (PDF)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Selector de Rango de Fechas */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 items-end">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                  Fecha Desde (Hora PY)
+                </label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    value={bovRepDesde}
+                    onChange={e => setBovRepDesde(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                  Fecha Hasta (Hora PY)
+                </label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    value={bovRepHasta}
+                    onChange={e => setBovRepHasta(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono outline-none text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <button
+                  onClick={() => load()}
+                  className="w-full btn-outline py-2 text-xs font-bold flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Actualizar Datos</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Cuadrícula de 4 Reportes Especializados de Tesorería */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Tarjeta 1: Libro Diario de Custodia y Movimientos */}
+            <div className="card p-5 space-y-3 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+                  <Lock className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                    Libro Diario de Bóveda (Custodia & Traspasos)
+                  </h4>
+                  <p className="text-xs text-gray-400">Auditoría cronológica de ingresos y egresos de caudales</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl space-y-1 text-xs font-mono">
+                <div className="flex justify-between text-gray-500">
+                  <span>Custodia Actual PYG:</span>
+                  <span className="font-bold text-emerald-600">{formatPYG(saldoBovedaPYG)}</span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Divisas en Custodia:</span>
+                  <span>R$ {saldoBovedaBRL.toLocaleString("es-PY")} · USD ${saldoBovedaUSD.toLocaleString("es-PY")}</span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Movimientos Registrados:</span>
+                  <span className="font-bold text-gray-900 dark:text-white">{movements.length}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={handleExportMovimientos}
+                disabled={exportingPdf}
+                className="w-full btn-outline py-2 text-xs font-bold flex items-center justify-center gap-2"
+              >
+                {exportingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4 text-emerald-600" />}
+                <span>Imprimir Libro Diario Oficial</span>
+              </button>
+            </div>
+
+            {/* Tarjeta 2: Sobres de Supervisión & Remesas de Caja */}
+            <div className="card p-5 space-y-3 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                  <PackageCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                    Remesas y Sobres de Supervisión
+                  </h4>
+                  <p className="text-xs text-gray-400">Cotejo de remesas remitidas desde el salón de cajas</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl space-y-1 text-xs font-mono">
+                <div className="flex justify-between text-gray-500">
+                  <span>Remesas en Tránsito:</span>
+                  <span className="font-bold text-amber-500">{remittances.filter(r => r.estado === "en_transito").length}</span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Remesas Recibidas en Bóveda:</span>
+                  <span className="font-bold text-emerald-600">{remittances.filter(r => r.estado === "recibido_en_boveda").length}</span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Entregas de Caja Pendientes:</span>
+                  <span className="font-bold text-indigo-500">{vaultEntries.length}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setActiveTab("remesas")}
+                className="w-full btn-outline py-2 text-xs font-bold flex items-center justify-center gap-2"
+              >
+                <PackageCheck className="w-4 h-4 text-indigo-500" />
+                <span>Gestionar y Visar Sobres</span>
+              </button>
+            </div>
+
+            {/* Tarjeta 3: Depósitos Bancarios & Blindados */}
+            <div className="card p-5 space-y-3 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+                  <Landmark className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                    Remesas Bancarias & Blindados
+                  </h4>
+                  <p className="text-xs text-gray-400">Trazabilidad Bóveda -&gt; Cuentas Corrientes del Supermercado</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl space-y-1 text-xs font-mono">
+                <div className="flex justify-between text-gray-500">
+                  <span>Cuentas Bancarias Activas:</span>
+                  <span className="font-bold text-blue-500">{banks.length}</span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Saldo Consolidado en Bancos:</span>
+                  <span className="font-bold text-blue-600">{formatPYG(saldoTotalPYG)}</span>
+                </div>
+                <div className="flex justify-between text-gray-500">
+                  <span>Depósitos Registrados:</span>
+                  <span className="font-bold text-gray-900 dark:text-white">{deposits.length}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setActiveTab("bancos")}
+                className="w-full btn-outline py-2 text-xs font-bold flex items-center justify-center gap-2"
+              >
+                <Landmark className="w-4 h-4 text-blue-500" />
+                <span>Ver Cuentas y Conciliaciones</span>
+              </button>
+            </div>
+
+            {/* Tarjeta 4: Asignación y Rendición de Fondos Fijos */}
+            <div className="card p-5 space-y-3 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400">
+                  <Wallet className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                    Fondos Fijos de Sectores (Caja Chica)
+                  </h4>
+                  <p className="text-xs text-gray-400">Circuito de compras menores blindado sin tocar ventas</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Según las normas de control de Extra Supermercado, la recaudación de cajas registradoras tiene como destino exclusivo el banco. Los gastos operativos se solventan mediante fondos fijos con montos autorizados y reposición documentada.
+              </p>
+
+              <button
+                onClick={() => { window.location.href = "/caja-chica" }}
+                className="w-full btn-outline py-2 text-xs font-bold flex items-center justify-center gap-2 border-purple-300 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30"
+              >
+                <Wallet className="w-4 h-4 text-purple-500" />
+                <span>Ir al Módulo de Fondos Fijos (Caja Chica)</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
