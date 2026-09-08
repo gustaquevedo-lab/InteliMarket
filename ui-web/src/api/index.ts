@@ -55,9 +55,13 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
               if (refreshData.refresh_token) localStorage.setItem("refresh_token", refreshData.refresh_token)
               return refreshData.access_token as string
             } else {
-              localStorage.removeItem("access_token")
-              localStorage.removeItem("refresh_token")
-              localStorage.removeItem("user_email")
+              // Ver la nota de mas abajo: una estacion nunca se queda sin
+              // credencial, porque no hay nadie que pueda volver a entrar.
+              if (!localStorage.getItem("station_token")) {
+                localStorage.removeItem("access_token")
+                localStorage.removeItem("refresh_token")
+                localStorage.removeItem("user_email")
+              }
               return null
             }
           } catch {
@@ -74,9 +78,21 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
       }
     } else {
-      localStorage.removeItem("access_token")
-      localStorage.removeItem("refresh_token")
-      localStorage.removeItem("user_email")
+      // Estacion de etiquetas: no tiene refresh_token y su credencial dura
+      // anios. Borrarla ante un 401 pasajero la deja pidiendo contrasena a
+      // alguien que no tiene ninguna. Se reintenta una vez con la credencial
+      // guardada y, si tampoco va, se conserva: preferimos un error visible
+      // a una estacion inutilizable.
+      const estacion = localStorage.getItem("station_token")
+      if (estacion) {
+        localStorage.setItem("access_token", estacion)
+        headers["Authorization"] = `Bearer ${estacion}`
+        response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
+      } else {
+        localStorage.removeItem("access_token")
+        localStorage.removeItem("refresh_token")
+        localStorage.removeItem("user_email")
+      }
     }
   }
 

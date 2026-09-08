@@ -48,8 +48,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           foto_url: (u as any).foto_url,
         })
       }).catch(() => {
-        localStorage.removeItem("access_token")
-        localStorage.removeItem("user_email")
+        // Una estacion de etiquetas no tiene a nadie que sepa una contrasena:
+        // si /auth/me falla por un corte pasajero, borrar su credencial la deja
+        // muerta hasta que un administrador genere un enlace nuevo. Se conserva
+        // y se reintenta en la proxima carga.
+        if (!localStorage.getItem("station_token")) {
+          localStorage.removeItem("access_token")
+          localStorage.removeItem("user_email")
+        }
       }).finally(() => setLoading(false))
     } else {
       setLoading(false)
@@ -97,6 +103,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("access_token")
     localStorage.removeItem("refresh_token")
     localStorage.removeItem("user_email")
+    // Salir a proposito si desarma la estacion: es un acto deliberado de una
+    // persona, a diferencia de un 401 pasajero.
+    localStorage.removeItem("station_token")
     setUser(null)
   }
 
