@@ -2564,9 +2564,11 @@ async def get_sales_by_cashier_report(
     dt_desde, dt_hasta = _parse_range_asuncion(fecha_desde, fecha_hasta)
     comp_uuid = uuid.UUID(company_id)
 
+    cajero_expr = func.coalesce(CashSession.cajero_nombre, User.nombre, 'Sin Cajero Asignado')
+
     query = (
         select(
-            func.coalesce(CashSession.cajero_nombre, User.nombre, 'Sin Cajero Asignado').label("cajero_nombre"),
+            cajero_expr.label("cajero_nombre"),
             func.count(Sale.id).label("cantidad_tickets"),
             func.coalesce(func.sum(Sale.total), 0).label("total_ventas"),
             func.coalesce(func.sum(Sale.descuento_total), 0).label("total_descuentos"),
@@ -2586,9 +2588,9 @@ async def get_sales_by_cashier_report(
     )
 
     if cajero_nombre and cajero_nombre.strip():
-        query = query.where(func.coalesce(CashSession.cajero_nombre, User.nombre).ilike(f"%{cajero_nombre.strip()}%"))
+        query = query.where(cajero_expr.ilike(f"%{cajero_nombre.strip()}%"))
 
-    query = query.group_by(func.coalesce(CashSession.cajero_nombre, User.nombre, 'Sin Cajero Asignado'))
+    query = query.group_by(cajero_expr)
     query = query.order_by(func.coalesce(func.sum(Sale.total), 0).desc())
 
     result = await db.execute(query)
