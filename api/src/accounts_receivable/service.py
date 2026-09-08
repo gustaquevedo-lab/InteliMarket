@@ -1,9 +1,11 @@
+from __future__ import annotations
 from decimal import Decimal
 from datetime import datetime, timezone, date, timedelta
 import uuid
 
 from sqlalchemy import select, text, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
+
 
 
 async def search_empresas_vinculadas(db: AsyncSession, company_id: str, search: str) -> list[str]:
@@ -570,3 +572,318 @@ async def list_payments_period(db: AsyncSession, company_id: str, fecha_desde: d
             d["allocations"] = _json.loads(d["allocations"])
         rows.append(d)
     return rows
+
+
+# ── Cobranza Global en Cascada (FIFO) ──────────────────────────────────
+
+async def apply_global_payment(
+    db: AsyncSession,
+    company_id: str,
+    data,
+    registrado_por: str | None,
+) -> dict:
+    """Aplica un pago global en cascada FIFO (más antiguas primero) a las facturas
+    pendientes de un cliente. Si el usuario seleccionó un lote específico de
+    facturas (accounts_receivable_ids), se aplica en orden de vencimiento sobre ese lote.
+    Si sobra dinero luego de saldar una factura, se amortiza la siguiente.
+    Actualiza cuentas por cobrar, líneas de crédito y rastro de auditoría."""
+    query = """
+        SELECT id, numero_documento, fecha_emision, fecha_vencimiento, monto_original, saldo_pendiente, customer_id
+        FROM accounts_receivable
+        WHERE company_id = :company_id AND customer_id = :customer_id AND estado = 'pendiente' AND saldo_pendiente > 0
+    """
+    params = {"company_id": company_id, "customer_id": str(data.customer_id)}
+
+    if data.accounts_receivable_ids:
+        query += " AND id = ANY(:ids)"
+        params["ids"] = [str(i) for i in data.accounts_receivable_ids]
+
+    query += " ORDER BY fecha_vencimiento ASC NULLS LAST, fecha_emision ASC, created_at ASC"
+
+    result = await db.execute(text(query), params)
+    docs = result.fetchall()
+
+    if not docs:
+        return {"error": "El cliente no posee facturas pendientes de cobro para imputar el pago."}
+
+    total_deuda = sum(Decimal(str(d.saldo_pendiente)) for d in docs)
+    monto_pago = Decimal(str(data.monto_total))
+
+    if monto_pago > total_deuda:
+        return {
+            "error": f"El monto del pago (Gs. {int(monto_pago):,}) excede el total de saldo pendiente disponible (Gs. {int(total_deuda):,})."
+        }
+
+    payment_id = uuid.uuid4()
+    fecha_pago = data.fecha or date.today()
+
+    await db.execute(
+        text("""
+            INSERT INTO receivable_payments
+                (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por)
+            VALUES (:id, :company_id, :customer_id, :monto_total, :moneda, :forma_pago, :referencia, :fecha, :observaciones, :registrado_por)
+        """),
+        {
+            "id": payment_id,
+            "company_id": company_id,
+            "customer_id": str(data.customer_id),
+            "monto_total": float(monto_pago),
+            "moneda": data.moneda or "PYG",
+            "forma_pago": data.forma_pago or "efectivo",
+            "referencia": data.referencia,
+            "fecha": fecha_pago,
+            "observaciones": data.observaciones,
+            "registrado_por": registrado_por,
+        },
+    )
+
+    restante = monto_pago
+    aplicados = []
+
+    for doc in docs:
+        if restante <= Decimal("0"):
+            break
+
+        saldo_actual = Decimal(str(doc.saldo_pendiente))
+        monto_a_aplicar = min(restante, saldo_actual)
+
+        if monto_a_aplicar <= Decimal("0"):
+            continue
+
+        nuevo_saldo = saldo_actual - monto_a_aplicar
+        nuevo_estado = "pagado" if nuevo_saldo <= Decimal("0") else "pendiente"
+
+        await db.execute(
+            text("""
+                UPDATE accounts_receivable
+                SET saldo_pendiente = :saldo, estado = :estado, ultimo_pago = NOW()
+                WHERE id = :id
+            """),
+            {
+                "saldo": float(max(Decimal("0"), nuevo_saldo)),
+                "estado": nuevo_estado,
+                "id": str(doc.id),
+            },
+        )
+
+        await db.execute(
+            text("""
+                INSERT INTO receivable_payment_allocations (receivable_payment_id, accounts_receivable_id, monto)
+                VALUES (:payment_id, :ar_id, :monto)
+            """),
+            {
+                "payment_id": payment_id,
+                "ar_id": str(doc.id),
+                "monto": float(monto_a_aplicar),
+            },
+        )
+
+        aplicados.append({
+            "accounts_receivable_id": str(doc.id),
+            "numero_documento": doc.numero_documento,
+            "monto_aplicado": float(monto_a_aplicar),
+            "saldo_anterior": float(saldo_actual),
+            "nuevo_saldo": float(max(Decimal("0"), nuevo_saldo)),
+            "nuevo_estado": nuevo_estado,
+        })
+
+        restante -= monto_a_aplicar
+
+    # Actualizar línea de crédito
+    await db.execute(
+        text("""
+            UPDATE credit_accounts
+            SET saldo_utilizado = GREATEST(0, saldo_utilizado - :monto),
+                saldo_disponible = LEAST(limite_credito, saldo_disponible + :monto)
+            WHERE company_id = :company_id AND customer_id = :customer_id
+        """),
+        {"monto": float(monto_pago), "company_id": company_id, "customer_id": str(data.customer_id)},
+    )
+    nuevo_saldo_utilizado = await db.execute(
+        text("SELECT saldo_utilizado FROM credit_accounts WHERE company_id = :company_id AND customer_id = :customer_id"),
+        {"company_id": company_id, "customer_id": str(data.customer_id)},
+    )
+    row = nuevo_saldo_utilizado.first()
+    if row is not None:
+        await db.execute(
+            text("UPDATE customers SET credito_usado = :monto WHERE id = :customer_id"),
+            {"monto": float(row.saldo_utilizado), "customer_id": str(data.customer_id)},
+        )
+
+    await db.flush()
+    return {
+        "payment_id": str(payment_id),
+        "id": str(payment_id),
+        "numero_recibo": f"REC-{str(payment_id)[:8].upper()}",
+        "monto_total": float(monto_pago),
+        "documentos_afectados": len(aplicados),
+        "allocations": aplicados,
+    }
+
+
+# ── Datos para Reporte Detallado de Deuda y Recibo A6 ─────────────────
+
+async def get_deuda_detallada_data(
+    db: AsyncSession,
+    company_id: str,
+    customer_id: str | None = None,
+    empresa_vinculada: str | None = None,
+    solo_con_saldo: bool = True,
+) -> dict:
+    """Trae la información estructurada y agrupada por cliente de las facturas y
+    deudas pendientes para el reporte detallado en PDF, con soporte para filtrado
+    por cliente específico y empresa vinculada."""
+    today = date.today()
+    query = """
+        SELECT
+            ar.id, ar.customer_id, ar.sale_id, ar.numero_documento,
+            ar.fecha_emision, ar.fecha_vencimiento, ar.moneda,
+            ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
+            COALESCE(c.razon_social, c.nombre_fantasia, 'Cliente') as customer_name,
+            c.nombre_fantasia, c.ruc as customer_ruc,
+            c.telefono as customer_telefono, c.empresa_vinculada_nombre, c.empresa_vinculada_ruc,
+            COALESCE(ca.limite_credito, c.limite_credito, 0) as limite_credito,
+            CASE
+                WHEN ar.estado <> 'pendiente' THEN 0
+                WHEN ar.fecha_vencimiento IS NULL THEN 0
+                ELSE (DATE(:today) - ar.fecha_vencimiento)::int
+            END as dias_mora
+        FROM accounts_receivable ar
+        LEFT JOIN customers c ON c.id = ar.customer_id
+        LEFT JOIN credit_accounts ca ON ca.customer_id = ar.customer_id AND ca.company_id = ar.company_id
+        WHERE ar.company_id = :company_id
+    """
+    params = {"company_id": company_id, "today": today}
+
+    if solo_con_saldo:
+        query += " AND ar.estado = 'pendiente' AND ar.saldo_pendiente > 0"
+    if customer_id:
+        query += " AND ar.customer_id = :customer_id"
+        params["customer_id"] = customer_id
+    if empresa_vinculada:
+        query += " AND c.empresa_vinculada_nombre ILIKE :empresa_vinculada"
+        params["empresa_vinculada"] = f"%{empresa_vinculada.strip()}%"
+
+    query += " ORDER BY COALESCE(c.razon_social, 'Cliente') ASC, ar.fecha_vencimiento ASC NULLS LAST, ar.fecha_emision ASC"
+
+    result = await db.execute(text(query), params)
+    rows = result.fetchall()
+
+    clientes_dict: dict = {}
+    total_general_saldo = Decimal("0")
+    total_general_original = Decimal("0")
+    total_facturas = len(rows)
+
+    b_al_dia = Decimal("0")
+    b_1_30 = Decimal("0")
+    b_31_60 = Decimal("0")
+    b_61_90 = Decimal("0")
+    b_91_plus = Decimal("0")
+
+    for r in rows:
+        cid = str(r.customer_id)
+        saldo = Decimal(str(r.saldo_pendiente or 0))
+        orig = Decimal(str(r.monto_original or 0))
+        dias = r.dias_mora or 0
+
+        total_general_saldo += saldo
+        total_general_original += orig
+
+        if dias <= 0:
+            b_al_dia += saldo
+        elif dias <= 30:
+            b_1_30 += saldo
+        elif dias <= 60:
+            b_31_60 += saldo
+        elif dias <= 90:
+            b_61_90 += saldo
+        else:
+            b_91_plus += saldo
+
+        if cid not in clientes_dict:
+            clientes_dict[cid] = {
+                "customer_id": cid,
+                "customer_name": r.customer_name,
+                "customer_ruc": r.customer_ruc or "—",
+                "customer_telefono": r.customer_telefono or "—",
+                "empresa_vinculada_nombre": r.empresa_vinculada_nombre,
+                "empresa_vinculada_ruc": r.empresa_vinculada_ruc,
+                "limite_credito": Decimal(str(r.limite_credito or 0)),
+                "saldo_total": Decimal("0"),
+                "monto_original_total": Decimal("0"),
+                "facturas": [],
+            }
+
+        cl = clientes_dict[cid]
+        cl["saldo_total"] += saldo
+        cl["monto_original_total"] += orig
+        cl["facturas"].append({
+            "id": str(r.id),
+            "numero_documento": r.numero_documento or "S/N",
+            "fecha_emision": r.fecha_emision,
+            "fecha_vencimiento": r.fecha_vencimiento,
+            "monto_original": orig,
+            "saldo_pendiente": saldo,
+            "dias_mora": dias,
+            "estado": r.estado,
+        })
+
+    clientes_list = sorted(clientes_dict.values(), key=lambda c: c["saldo_total"], reverse=True)
+
+    return {
+        "total_saldo_general": total_general_saldo,
+        "total_original_general": total_general_original,
+        "total_facturas": total_facturas,
+        "total_clientes": len(clientes_list),
+        "total_vencido": b_1_30 + b_31_60 + b_61_90 + b_91_plus,
+        "buckets": {
+            "al_dia": b_al_dia,
+            "dias_1_30": b_1_30,
+            "dias_31_60": b_31_60,
+            "dias_61_90": b_61_90,
+            "dias_91_plus": b_91_plus,
+        },
+        "clientes": clientes_list,
+        "fecha_corte": today,
+    }
+
+
+async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | None:
+    """Trae toda la información de un pago registrado, el cliente, la empresa
+    y las facturas amortizadas con sus montos imputados y saldos restantes."""
+    q_pay = text("""
+        SELECT
+            rp.id, rp.company_id, rp.customer_id, rp.monto_total, rp.moneda,
+            rp.forma_pago, rp.referencia, rp.fecha, rp.observaciones, rp.created_at,
+            c.razon_social as customer_name, c.nombre_fantasia, c.ruc as customer_ruc,
+            c.telefono as customer_telefono, c.empresa_vinculada_nombre,
+            comp.razon_social as comp_razon_social, comp.ruc as comp_ruc,
+            comp.nombre_fantasia as comp_nombre_fantasia, comp.logo_url as comp_logo_url
+        FROM receivable_payments rp
+        LEFT JOIN customers c ON c.id = rp.customer_id
+        LEFT JOIN companies comp ON comp.id = rp.company_id
+        WHERE rp.id = :id
+    """)
+    r_pay = await db.execute(q_pay, {"id": payment_id})
+    row = r_pay.fetchone()
+    if not row:
+        return None
+
+    q_alloc = text("""
+        SELECT
+            rpa.id, rpa.monto,
+            ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
+            ar.monto_original, ar.saldo_pendiente, ar.estado
+        FROM receivable_payment_allocations rpa
+        LEFT JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
+        WHERE rpa.receivable_payment_id = :payment_id
+        ORDER BY ar.fecha_vencimiento ASC NULLS LAST, ar.fecha_emision ASC
+    """)
+    alloc_res = await db.execute(q_alloc, {"payment_id": payment_id})
+    allocations = [dict(a._mapping) for a in alloc_res.fetchall()]
+
+    pay_dict = dict(row._mapping)
+    pay_dict["allocations"] = allocations
+    pay_dict["numero_recibo"] = f"REC-{str(payment_id)[:8].upper()}"
+    return pay_dict
+

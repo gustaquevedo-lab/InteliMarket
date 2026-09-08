@@ -68,6 +68,19 @@ class ReceivablePaymentCreate(BaseModel):
     allocations: list[ReceivableAllocationInput] = Field(min_length=1)
 
 
+class ReceivableGlobalPaymentCreate(BaseModel):
+    customer_id: UUID
+    monto_total: Decimal = Field(gt=0)
+    moneda: str = "PYG"
+    forma_pago: Optional[str] = "efectivo"
+    referencia: Optional[str] = None
+    fecha: Optional[date] = None
+    observaciones: Optional[str] = None
+    # Si viene None o vacío, se aplica en cascada FIFO a todas las facturas pendientes
+    # Si viene con IDs, se aplica en cascada FIFO sólo a las facturas seleccionadas
+    accounts_receivable_ids: Optional[list[UUID]] = None
+
+
 class ReceivablePaymentResponse(BaseModel):
     id: UUID
     company_id: UUID
@@ -84,3 +97,20 @@ class ReceivablePaymentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ReceiptVerificationResponse(BaseModel):
+    valido: bool = True
+    payment_id: UUID
+    numero_recibo: str
+    fecha: date
+    fecha_hora_emision: datetime
+    monto_total: Decimal
+    moneda: str
+    forma_pago: Optional[str] = None
+    referencia: Optional[str] = None
+    observaciones: Optional[str] = None
+    cliente: dict
+    empresa: dict
+    allocations: list[dict]
+

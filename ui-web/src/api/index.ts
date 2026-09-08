@@ -140,10 +140,10 @@ export const client = {
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: "DELETE" }),
 }
 
-async function downloadAuthenticated(path: string, params: Record<string, string | undefined> | undefined, filename: string) {
+async function downloadAuthenticated(path: string, params: Record<string, any> | undefined, filename: string) {
   const token = localStorage.getItem("access_token")
   const cleanPath = path.startsWith("/") ? path : `/${path}`
-  const qs = params ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== "")) as Record<string, string>).toString() : ""
+  const qs = params ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)]))).toString() : ""
   const sep = cleanPath.includes("?") ? "&" : "?"
   const url = `${API_BASE}${cleanPath}${qs ? `${sep}${qs}` : ""}`
   const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
@@ -1617,11 +1617,26 @@ export const api = {
     searchEmpresasVinculadas: (search: string) => client.get<string[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/empresas-vinculadas`, { search }),
     downloadAgingExcel: (params?: { fecha_desde?: string; fecha_hasta?: string; customer_id?: string; empresa_vinculada?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/aging.xlsx`, params, "aging_cuentas_por_cobrar.xlsx"),
     downloadAgingPdf: (params?: { fecha_desde?: string; fecha_hasta?: string; customer_id?: string; empresa_vinculada?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/aging.pdf`, params, "aging_cuentas_por_cobrar.pdf"),
+    downloadDeudaDetalladaPdf: (params?: { customer_id?: string; empresa_vinculada?: string; solo_con_saldo?: boolean }) =>
+      downloadAuthenticated(
+        `/v1/companies/${COMPANY_ID}/accounts-receivable/export/deuda-detallada.pdf`,
+        params ? {
+          customer_id: params.customer_id,
+          empresa_vinculada: params.empresa_vinculada,
+          solo_con_saldo: params.solo_con_saldo !== undefined ? String(params.solo_con_saldo) : undefined,
+        } : undefined,
+        "deuda_detallada_cuentas_por_cobrar.pdf"
+      ),
+
     downloadCobranzasExcel: (params?: { fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/cobranzas.xlsx`, params, "cobranzas.xlsx"),
     downloadCobranzasPdf: (params?: { fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/cobranzas.pdf`, params, "cobranzas.pdf"),
+    downloadReceiptA6Pdf: (paymentId: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/${paymentId}/receipt.pdf`, undefined, `recibo_${paymentId.slice(0, 8)}.pdf`),
     pendingForCustomer: (customerId: string) => client.get<{ id: string; numero_documento: string; fecha_emision: string; fecha_vencimiento: string | null; moneda: string; monto_original: number; saldo_pendiente: number; dias_mora: number }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/pending`),
     registerPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; allocations: { accounts_receivable_id: string; monto: number }[] }) =>
       client.post<{ id: string; monto_total: number; allocations: { accounts_receivable_id: string; monto: number; nuevo_saldo: number; nuevo_estado: string }[] }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments`, data),
+    applyGlobalPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; accounts_receivable_ids?: string[] }) =>
+      client.post<{ id: string; payment_id: string; numero_recibo: string; monto_total: number; documentos_afectados: number; allocations: any[] }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/apply-global`, data),
+    verifyReceipt: (paymentId: string) => client.get<any>(`/v1/accounts-receivable/receipts/${paymentId}/verify`),
     documentPayments: (id: string) => client.get<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),
     customerPayments: (customerId: string) => client.get<{ id: string; fecha: string; monto_total: number; forma_pago: string | null; referencia: string | null; observaciones: string | null; created_at: string; allocations: { accounts_receivable_id: string; numero_documento: string; monto: number }[] }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/payments`),
   },

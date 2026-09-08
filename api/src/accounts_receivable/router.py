@@ -1,5 +1,7 @@
+from __future__ import annotations
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
+
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -8,7 +10,7 @@ from api.src.db import get_db
 from api.src.accounts_receivable import service
 from api.src.accounts_receivable import export_service as ar_export_service
 from api.src.accounts_receivable import pdf_reports as ar_pdf_reports
-from api.src.accounts_receivable.schemas import ReceivablePaymentCreate
+from api.src.accounts_receivable.schemas import ReceivablePaymentCreate, ReceivableGlobalPaymentCreate
 from api.src.integrated_finance import pdf_reports
 from api.src.auth.middleware import require_auth
 
@@ -16,9 +18,20 @@ router = APIRouter(prefix="/api/v1", tags=["accounts-receivable"])
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
-    r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    r = await db.execute(
+        text("SELECT razon_social, ruc, logo_url, nombre_fantasia, direccion, ciudad FROM companies WHERE id = :cid"),
+        {"cid": company_id}
+    )
     row = r.first()
-    return {"razon_social": row.razon_social, "ruc": row.ruc, "logo_url": row.logo_url} if row else {"razon_social": "Empresa", "ruc": "N/A"}
+    return {
+        "razon_social": (row.razon_social if row and row.razon_social else None) or "GRUPO SANTA TERESA E.A.S.",
+        "ruc": (row.ruc if row and row.ruc else None) or "80150377-9",
+        "logo_url": row.logo_url if row else None,
+        "nombre_fantasia": getattr(row, "nombre_fantasia", None) or "Extra Supermercado Mayorista",
+        "direccion": getattr(row, "direccion", None) or "Alejo Garcia esq. Carlos Antonio López",
+        "ciudad": getattr(row, "ciudad", None) or "Pedro Juan Caballero",
+    }
+
 
 
 @router.get("/companies/{company_id}/accounts-receivable")
@@ -189,3 +202,148 @@ async def customer_statement_pdf(company_id: str, customer_id: str, db: AsyncSes
             "Content-Length": str(len(pdf_bytes)),
         },
     )
+
+
+# ── Reporte Detallado de Deuda por Cliente en PDF ──────────────────────
+
+@router.get("/companies/{company_id}/accounts-receivable/export/deuda-detallada.pdf")
+async def export_deuda_detallada_pdf(
+    company_id: str,
+    customer_id: str | None = Query(None),
+    empresa_vinculada: str | None = Query(None),
+    solo_con_saldo: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el reporte detallado de cuentas por cobrar en PDF con la nueva estética
+    institucional (idéntica a Arqueo de Caja), con logo de Extra Supermercado,
+    KPI cards, desglose por cliente y detalle completo de facturas."""
+    data = await service.get_deuda_detallada_data(
+        db, company_id, customer_id=customer_id, empresa_vinculada=empresa_vinculada, solo_con_saldo=solo_con_saldo
+    )
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+
+    # Obtener nombre del cliente para el subtítulo si vino customer_id
+    filtro_cliente_nombre = None
+    if customer_id and data.get("clientes"):
+        filtro_cliente_nombre = data["clientes"][0].get("customer_name")
+
+    pdf_bytes = ar_pdf_reports.generate_deuda_detallada_pdf(
+        company,
+        data,
+        filtro_empresa=empresa_vinculada,
+        filtro_cliente=filtro_cliente_nombre,
+        generated_by=generated_by,
+    )
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": "attachment; filename=deuda_detallada_cuentas_por_cobrar.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+# ── Cobro Global en Cascada FIFO ───────────────────────────────────────
+
+@router.post("/companies/{company_id}/accounts-receivable/payments/apply-global")
+async def apply_global_payment_endpoint(
+    company_id: str,
+    body: ReceivableGlobalPaymentCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Aplica un pago global en cascada FIFO a las facturas del cliente
+    (a las más antiguas primero, y si hay remanente a las más nuevas).
+    Permite tanto pagos de contado como pagos parciales o sobre un lote seleccionado."""
+    result = await service.apply_global_payment(db, company_id, body, user.get("id"))
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+# ── Recibo de Cobro en Formato A6 Horizontal con QR ───────────────────
+
+@router.get("/companies/{company_id}/accounts-receivable/payments/{payment_id}/receipt.pdf")
+async def export_payment_receipt_pdf(
+    company_id: str,
+    payment_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el Recibo de Cobranza Oficial en A6 horizontal (148mm x 105mm) con logo,
+    imputación de facturas, monto en letras y números, firmas y código QR."""
+    receipt_data = await service.get_payment_receipt_data(db, payment_id)
+    if not receipt_data:
+        raise HTTPException(status_code=404, detail="Recibo de pago no encontrado")
+
+    company = await _get_company_info(db, company_id)
+    pdf_bytes = ar_pdf_reports.generate_recibo_a6_pdf(company, receipt_data)
+
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=recibo_{receipt_data.get('numero_recibo', payment_id[:8])}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+# ── Verificación Pública de Recibo (QR Scan) ──────────────────────────
+
+@router.get("/accounts-receivable/receipts/{payment_id}/verify")
+async def verify_payment_receipt(
+    payment_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Endpoint PÚBLICO para escanear el QR del recibo físico A6. No requiere autenticación.
+    Devuelve los datos de validación oficial del cobro, cliente, importes e imputaciones."""
+    data = await service.get_payment_receipt_data(db, payment_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Recibo de cobro no encontrado o inválido.")
+
+    created_at = data.get("created_at")
+    fecha_hora_str = ""
+    if created_at and hasattr(created_at, "astimezone"):
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=ar_pdf_reports.ZoneInfo("UTC"))
+        fecha_hora_str = created_at.astimezone(ar_pdf_reports.PY_TZ).strftime("%d/%m/%Y %H:%M")
+
+    return {
+        "valido": True,
+        "payment_id": str(data["id"]),
+        "numero_recibo": data.get("numero_recibo"),
+        "fecha": str(data.get("fecha")),
+        "fecha_hora": fecha_hora_str,
+        "monto_total": float(data.get("monto_total") or 0),
+        "moneda": data.get("moneda") or "PYG",
+        "forma_pago": data.get("forma_pago") or "efectivo",
+        "referencia": data.get("referencia"),
+        "observaciones": data.get("observaciones"),
+        "cliente": {
+            "razon_social": data.get("customer_name") or data.get("nombre_fantasia") or "Cliente",
+            "ruc": data.get("customer_ruc") or "—",
+            "telefono": data.get("customer_telefono") or "—",
+            "empresa_vinculada": data.get("empresa_vinculada_nombre"),
+        },
+        "empresa": {
+            "razon_social": data.get("comp_razon_social") or "GRUPO SANTA TERESA E.A.S.",
+            "nombre_fantasia": data.get("comp_nombre_fantasia") or "Extra Supermercado Mayorista",
+            "ruc": data.get("comp_ruc") or "80150377-9",
+        },
+        "allocations": [
+            {
+                "numero_documento": a.get("numero_documento") or "S/N",
+                "fecha_vencimiento": str(a.get("fecha_vencimiento")) if a.get("fecha_vencimiento") else None,
+                "monto_original": float(a.get("monto_original") or 0),
+                "monto_aplicado": float(a.get("monto") or 0),
+                "saldo_pendiente": float(a.get("saldo_pendiente") or 0),
+                "estado": a.get("estado"),
+            }
+            for a in data.get("allocations", [])
+        ],
+    }
+

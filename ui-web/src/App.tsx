@@ -124,6 +124,8 @@ const EcommerceCart = lazy(() => import("./pages/ecommerce/EcommerceCart"))
 const EcommerceCheckout = lazy(() => import("./pages/ecommerce/EcommerceCheckout"))
 const EcommerceOrders = lazy(() => import("./pages/ecommerce/EcommerceOrders"))
 const EcommerceOrderDetail = lazy(() => import("./pages/ecommerce/EcommerceOrderDetail"))
+const VerificarReciboPage = lazy(() => import("./pages/public/VerificarReciboPage"))
+
 const VariantsPage = lazy(() => import("./pages/variants/VariantsPage"))
 const KitsPage = lazy(() => import("./pages/kits/KitsPage"))
 const PriceListsPage = lazy(() => import("./pages/price-lists/PriceListsPage"))
@@ -207,7 +209,9 @@ function AppRoutes() {
       <Route path="/tienda/dashboard" element={<Suspense fallback={<PageLoader />}><EcommerceOrders /></Suspense>} />
       <Route path="/verificador" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
       <Route path="/consulta-precios" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
+      <Route path="/verificar-recibo/:paymentId" element={<Suspense fallback={<PageLoader />}><VerificarReciboPage /></Suspense>} />
       <Route path="/tv/carniceria" element={<Suspense fallback={<PageLoader />}><CarniceriaTvDigitalPage /></Suspense>} />
+
       <Route path="/operaciones-salon" element={<Suspense fallback={<PageLoader />}><SalonOperacionesPwaPage /></Suspense>} />
       <Route path="/deposito" element={<Suspense fallback={<PageLoader />}><DepositoRecepcionPage /></Suspense>} />
       <Route path="/dock" element={<Navigate to="/deposito" replace />} />

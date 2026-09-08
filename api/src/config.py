@@ -1,6 +1,9 @@
+from __future__ import annotations
 """Configuration settings for InteliMarket API"""
 
+from typing import Optional
 from pydantic_settings import BaseSettings
+
 from functools import lru_cache
 
 
@@ -16,7 +19,8 @@ class Settings(BaseSettings):
     # Search path opcional (ej. "sandbox,public") para levantar un entorno
     # sandbox contra el mismo Postgres sin tocar el DATABASE_URL -- asyncpg
     # exige server_settings como dict, no como query param de la URL.
-    db_search_path: str | None = None
+    db_search_path: Optional[str] = None
+
     db_pool_size: int = 20
     db_max_overflow: int = 10
 

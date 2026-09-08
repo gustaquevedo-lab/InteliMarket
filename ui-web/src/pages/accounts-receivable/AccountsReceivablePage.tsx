@@ -3,7 +3,8 @@ import {
   Search, ReceiptText, Clock, AlertTriangle, DollarSign, FileText, Loader2,
   Calendar, Eye, X, Package, Wallet, Sparkles, PhoneCall, CreditCard, Plus,
   TrendingUp, FileSpreadsheet, FileDown, CheckCircle2, ChevronDown, ChevronRight,
-  User, Check, Phone, ArrowUpRight, ShieldCheck, RefreshCw, BarChart2
+  User, Check, Phone, ArrowUpRight, ShieldCheck, RefreshCw, BarChart2,
+  Printer, QrCode, ExternalLink, CheckSquare, Square
 } from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -53,7 +54,7 @@ interface SummaryData {
   pendientes: number
   vencidos: number
   monto_vencido: number
-  dso: number | null
+  dso?: number | null
 }
 
 interface PendingDoc {
@@ -69,12 +70,10 @@ interface PendingDoc {
 
 interface CollectionAction {
   id: string
-  customer_id: string
-  receivable_id?: string | null
   tipo: string
-  fecha: string
   resultado?: string | null
   notas?: string | null
+  fecha: string
   contacto?: string | null
   proximo_contacto?: string | null
   compromiso_pago?: string | null
@@ -104,17 +103,19 @@ export default function AccountsReceivablePage() {
   const [recentPayments, setRecentPayments] = useState<any[]>([])
   const [paymentsLoading, setPaymentsLoading] = useState(false)
 
-  // Reportes exportables (Aging / Cobranzas)
+  // Reportes exportables (Aging / Cobranzas / Deuda Detallada)
   const [reportFechaDesde, setReportFechaDesde] = useState(() => {
     const d = new Date()
     d.setDate(d.getDate() - 30)
     return d.toISOString().split("T")[0]
   })
   const [reportFechaHasta, setReportFechaHasta] = useState(() => new Date().toISOString().split("T")[0])
-  const [reportCustomerId, setReportCustomerId] = useState("")
-  const [reportCustomerName, setReportCustomerName] = useState("")
-  const [reportEmpresaVinculada, setReportEmpresaVinculada] = useState("")
+  const [reportCustomerId, setReportCustomerId] = useState<string>("")
+  const [reportCustomerName, setReportCustomerName] = useState<string>("")
+  const [reportEmpresaVinculada, setReportEmpresaVinculada] = useState<string>("")
   const [showReportModal, setShowReportModal] = useState(false)
+
+  // Typeahead del modal de reporte
   const [customerSearchInput, setCustomerSearchInput] = useState("")
   const [customerSearchResults, setCustomerSearchResults] = useState<{ id: string; razon_social: string; ruc?: string }[]>([])
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false)
@@ -124,11 +125,14 @@ export default function AccountsReceivablePage() {
   const [empresaSearchOpen, setEmpresaSearchOpen] = useState(false)
   const [empresaSearchLoading, setEmpresaSearchLoading] = useState(false)
 
-  // Registrar pago
+  // Registrar pago & Cobro Global FIFO
   const [showPaymentModal, setShowPaymentModal] = useState<string | null>(null)
   const [pendingDocs, setPendingDocs] = useState<PendingDoc[]>([])
   const [pendingLoading, setPendingLoading] = useState(false)
   const [allocations, setAllocations] = useState<Record<string, string>>({})
+  const [payMontoGlobal, setPayMontoGlobal] = useState<string>("")
+  const [selectedBatchDocs, setSelectedBatchDocs] = useState<Record<string, boolean>>({})
+  const [completedReceipt, setCompletedReceipt] = useState<{ id: string; numero_recibo: string; monto_total: number; documentos_afectados: number } | null>(null)
   const [payFormaPago, setPayFormaPago] = useState("efectivo")
   const [payReferencia, setPayReferencia] = useState("")
   const [payFecha, setPayFecha] = useState(() => new Date().toISOString().split("T")[0])
@@ -262,12 +266,17 @@ export default function AccountsReceivablePage() {
   const openPaymentModal = async (customerId: string) => {
     setShowPaymentModal(customerId)
     setAllocations({})
+    setPayMontoGlobal("")
+    setSelectedBatchDocs({})
     setPayReferencia("")
     setPayObservaciones("")
     setPendingLoading(true)
     try {
       const docs = await api.accountsReceivable.pendingForCustomer(customerId)
       setPendingDocs(docs)
+      const initBatch: Record<string, boolean> = {}
+      docs.forEach(d => { initBatch[d.id] = true })
+      setSelectedBatchDocs(initBatch)
     } catch {
       toast.error("Error", "No se pudieron cargar los documentos pendientes")
       setPendingDocs([])
@@ -278,34 +287,77 @@ export default function AccountsReceivablePage() {
 
   const montoTotalPago = Object.values(allocations).reduce((sum, v) => sum + (parseFloat(v) || 0), 0)
 
-  const handleAutoDistribuir = () => {
-    const monto = prompt("¿Cuánto pagó el cliente en total? (₲)")
-    if (!monto) return
-    let restante = parseFloat(monto) || 0
+  const handleDistribuirFifo = (montoInput?: number) => {
+    const total = montoInput !== undefined ? montoInput : parseFloat(payMontoGlobal) || 0
+    if (total <= 0) {
+      toast.error("Monto requerido", "Ingresá el monto que abonó el cliente para distribuirlo en cascada.")
+      return
+    }
+    let restante = total
     const nuevas: Record<string, string> = {}
-    for (const d of pendingDocs) {
+    const docsFiltrados = pendingDocs.filter(d => selectedBatchDocs[d.id] !== false)
+
+    for (const d of docsFiltrados) {
       if (restante <= 0) break
-      const aplicar = Math.min(restante, d.saldo_pendiente)
-      if (aplicar > 0) { nuevas[d.id] = String(aplicar); restante -= aplicar }
+      const saldo = d.saldo_pendiente || 0
+      const aplicar = Math.min(restante, saldo)
+      if (aplicar > 0) {
+        nuevas[d.id] = String(aplicar)
+        restante -= aplicar
+      }
     }
     setAllocations(nuevas)
+    setPayMontoGlobal(String(total))
+  }
+
+  const handleToggleDocBatch = (id: string) => {
+    const nextState = { ...selectedBatchDocs, [id]: !selectedBatchDocs[id] }
+    setSelectedBatchDocs(nextState)
+    const total = parseFloat(payMontoGlobal) || 0
+    if (total > 0) {
+      let restante = total
+      const nuevas: Record<string, string> = {}
+      const docsFiltrados = pendingDocs.filter(d => nextState[d.id] !== false)
+      for (const d of docsFiltrados) {
+        if (restante <= 0) break
+        const aplicar = Math.min(restante, d.saldo_pendiente || 0)
+        if (aplicar > 0) {
+          nuevas[d.id] = String(aplicar)
+          restante -= aplicar
+        }
+      }
+      setAllocations(nuevas)
+    }
   }
 
   const handleSubmitPayment = async () => {
     if (!showPaymentModal) return
     const allocs = Object.entries(allocations).filter(([, v]) => parseFloat(v) > 0).map(([id, v]) => ({ accounts_receivable_id: id, monto: parseFloat(v) }))
-    if (allocs.length === 0) { toast.error("Error", "Asigná un monto a al menos un documento"); return }
+    if (allocs.length === 0) { toast.error("Error", "Asigná o distribuí un monto a al menos una factura"); return }
     setSubmittingPayment(true)
     try {
-      const res = await api.accountsReceivable.registerPayment({
-        customer_id: showPaymentModal, monto_total: montoTotalPago, forma_pago: payFormaPago,
-        referencia: payReferencia || undefined, fecha: payFecha, observaciones: payObservaciones || undefined,
-        allocations: allocs,
+      const selectedDocIds = Object.keys(allocations).filter(id => (parseFloat(allocations[id]) || 0) > 0)
+      const res = await api.accountsReceivable.applyGlobalPayment({
+        customer_id: showPaymentModal,
+        monto_total: montoTotalPago,
+        forma_pago: payFormaPago,
+        referencia: payReferencia || undefined,
+        fecha: payFecha,
+        observaciones: payObservaciones || undefined,
+        accounts_receivable_ids: selectedDocIds.length > 0 ? selectedDocIds : undefined,
       })
-      toast.success("Pago registrado", `${formatPYG(montoTotalPago)} aplicado a ${allocs.length} documento(s)`)
+
+      toast.success("Pago registrado con éxito", `${formatPYG(montoTotalPago)} imputado en cascada FIFO`)
       setShowPaymentModal(null)
       fetchData()
       if (expandedCustomer) openCustomer(expandedCustomer)
+
+      setCompletedReceipt({
+        id: res.payment_id || res.id,
+        numero_recibo: res.numero_recibo || `REC-${(res.payment_id || res.id).slice(0, 8).toUpperCase()}`,
+        monto_total: montoTotalPago,
+        documentos_afectados: res.documentos_afectados || allocs.length,
+      })
     } catch (e: any) {
       toast.error("Error", e.message || "No se pudo registrar el pago")
     } finally {
@@ -352,6 +404,13 @@ export default function AccountsReceivablePage() {
   }
   const handleDownloadAgingExcel = () => api.accountsReceivable.downloadAgingExcel(agingReportParams).catch((e: any) => toast.error("Error", e.message))
   const handleDownloadAgingPdf = () => api.accountsReceivable.downloadAgingPdf(agingReportParams).catch((e: any) => toast.error("Error", e.message))
+  const handleDownloadDeudaDetalladaPdf = () =>
+    api.accountsReceivable.downloadDeudaDetalladaPdf({
+      customer_id: reportCustomerId || undefined,
+      empresa_vinculada: reportEmpresaVinculada.trim() || undefined,
+      solo_con_saldo: true,
+    }).catch((e: any) => toast.error("Error", e.message))
+
   const resetReportFilters = () => {
     setReportCustomerId("")
     setReportCustomerName("")
@@ -448,12 +507,22 @@ export default function AccountsReceivablePage() {
             <button
               onClick={() => setShowReportModal(true)}
               className="px-3.5 py-2.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+              title="Filtrar por período, cliente y empresa vinculada"
             >
               <FileDown className="w-4 h-4 text-indigo-400" />
-              <span>Generar Reporte</span>
+              <span>Reportes / Aging</span>
+            </button>
+            <button
+              onClick={handleDownloadDeudaDetalladaPdf}
+              className="px-3.5 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/30 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+              title="Descargar PDF con estética Arqueo y desglose detallado de facturas"
+            >
+              <FileText className="w-4 h-4 text-emerald-400" />
+              <span>Deuda Detallada (PDF)</span>
             </button>
           </div>
         </div>
+
 
         {/* 📊 BARRA DE KPIS EJECUTIVOS */}
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mt-6 pt-6 border-t border-slate-800/80">
@@ -949,19 +1018,26 @@ export default function AccountsReceivablePage() {
         </>
       )}
 
-      {/* MODAL: Registrar Cobro Multi-Factura */}
+      {/* MODAL: Registrar Cobro Multi-Factura con Cascada FIFO */}
       {showPaymentModal && (
         <div className="modal-overlay" onClick={() => setShowPaymentModal(null)}>
           <div className="modal-content max-w-2xl" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <Wallet className="w-5 h-5 text-primary" />
-                Registrar Cobro de Cliente
-              </h3>
-              <p className="text-xs text-gray-500 mt-1">Imputá el monto recibido entre las facturas pendientes del cliente</p>
+            <div className="p-6 border-b flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Wallet className="w-5 h-5 text-emerald-500" />
+                  Registrar Cobro de Cliente · Imputación por Lote / FIFO
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Aplicá pagos globales en cascada a las facturas más antiguas primero, o personalizá el lote y los pagos parciales.
+                </p>
+              </div>
+              <button onClick={() => setShowPaymentModal(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded">
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="label-field">Forma de Pago</label>
@@ -983,11 +1059,54 @@ export default function AccountsReceivablePage() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Facturas Pendientes de Cobro</span>
-                <button onClick={handleAutoDistribuir} className="btn-outline py-1 px-2.5 text-xs text-primary font-semibold">
-                  Distribuir Automáticamente (FIFO)
-                </button>
+              {/* Herramienta de Pago Global en Cascada FIFO */}
+              <div className="p-4 rounded-xl bg-indigo-50/60 dark:bg-slate-800/80 border border-indigo-200 dark:border-indigo-900/40 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-indigo-500" />
+                    Pago Global en Cascada FIFO
+                  </span>
+                  <span className="text-[11px] text-gray-500">Amortiza las más viejas primero</span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-mono text-xs font-bold">₲</span>
+                    <input
+                      type="number"
+                      placeholder="Monto global que abonó el cliente..."
+                      className="input-field text-xs pl-7 font-mono font-bold"
+                      value={payMontoGlobal}
+                      onChange={e => setPayMontoGlobal(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") handleDistribuirFifo() }}
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleDistribuirFifo()}
+                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <span>Aplicar Cascada FIFO</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const totalLote = pendingDocs
+                        .filter(d => selectedBatchDocs[d.id] !== false)
+                        .reduce((sum, d) => sum + (d.saldo_pendiente || 0), 0)
+                      handleDistribuirFifo(totalLote)
+                    }}
+                    className="px-3 py-2 btn-outline text-xs text-gray-700 dark:text-gray-300 font-semibold"
+                    title="Cubre la totalidad de las facturas seleccionadas"
+                  >
+                    Saldar Lote Completo
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                  Lote de Facturas Pendientes ({pendingDocs.length})
+                </span>
+                <span className="text-[11px] text-gray-400">Podés desmarcar facturas o ajustar montos manualmente</span>
               </div>
 
               {pendingLoading ? (
@@ -996,44 +1115,153 @@ export default function AccountsReceivablePage() {
                 <div className="text-center py-6 text-gray-400 text-xs">Este cliente no tiene facturas pendientes de cobro</div>
               ) : (
                 <div className="space-y-2">
-                  {pendingDocs.map(doc => (
-                    <div key={doc.id} className="p-3 rounded-lg border bg-gray-50/50 dark:bg-slate-800/40 flex items-center justify-between gap-3 text-xs">
-                      <div>
-                        <div className="font-bold text-gray-900 dark:text-white font-mono">{doc.numero_documento}</div>
-                        <div className="text-gray-400 text-[11px]">
-                          Vence: {doc.fecha_vencimiento} · Saldo actual: <span className="font-bold text-gray-700 dark:text-gray-300">{formatPYG(doc.saldo_pendiente)}</span>
+                  {pendingDocs.map(doc => {
+                    const isSelected = selectedBatchDocs[doc.id] !== false
+                    const allocVal = parseFloat(allocations[doc.id] || "0")
+                    const isTotal = allocVal >= doc.saldo_pendiente && allocVal > 0
+                    const isPartial = allocVal > 0 && allocVal < doc.saldo_pendiente
+                    const saldoRestante = Math.max(0, doc.saldo_pendiente - allocVal)
+
+                    return (
+                      <div
+                        key={doc.id}
+                        className={`p-3 rounded-xl border transition-all ${
+                          isSelected
+                            ? allocVal > 0
+                              ? "bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/60"
+                              : "bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700"
+                            : "bg-gray-50/50 dark:bg-slate-900/40 border-gray-200 dark:border-slate-800 opacity-60"
+                        } flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleDocBatch(doc.id)}
+                            className="mt-0.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400"
+                            title={isSelected ? "Excluir del lote" : "Incluir en el lote"}
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                            ) : (
+                              <Square className="w-4 h-4" />
+                            )}
+                          </button>
+
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-gray-900 dark:text-white font-mono">{doc.numero_documento}</span>
+                              {isTotal && (
+                                <span className="px-2 py-0.2 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 text-[10px] font-bold">
+                                  Cancelada Total
+                                </span>
+                              )}
+                              {isPartial && (
+                                <span className="px-2 py-0.2 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 text-[10px] font-bold">
+                                  Pago Parcial
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-gray-400 text-[11px] mt-0.5">
+                              Vence: {doc.fecha_vencimiento || "—"} · Saldo actual: <span className="font-bold text-gray-700 dark:text-gray-300">{formatPYG(doc.saldo_pendiente)}</span>
+                              {allocVal > 0 && (
+                                <span className="ml-2 text-indigo-600 dark:text-indigo-400 font-medium">
+                                  (Resta: {formatPYG(saldoRestante)})
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                          <span className="text-gray-400 text-[11px]">₲</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            className="input-field text-right w-36 font-mono font-bold text-xs"
+                            value={allocations[doc.id] || ""}
+                            onChange={e => setAllocations({ ...allocations, [doc.id]: e.target.value })}
+                            disabled={!isSelected}
+                          />
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-400 text-[11px]">₲</span>
-                        <input
-                          type="number"
-                          placeholder="0"
-                          className="input-field text-right w-32 font-mono font-bold text-xs"
-                          value={allocations[doc.id] || ""}
-                          onChange={e => setAllocations({ ...allocations, [doc.id]: e.target.value })}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
 
-              <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Total a Imputar</span>
-                <span className="text-xl font-extrabold text-primary font-mono">{formatPYG(montoTotalPago)}</span>
+              <div className="p-4 rounded-xl bg-slate-900 text-white flex items-center justify-between shadow-sm">
+                <div>
+                  <span className="text-xs font-bold text-slate-300 block">Total Cobro Imputado</span>
+                  <span className="text-[11px] text-slate-400">
+                    {Object.values(allocations).filter(v => (parseFloat(v) || 0) > 0).length} factura(s) amortizada(s)
+                  </span>
+                </div>
+                <span className="text-xl font-extrabold text-emerald-400 font-mono">{formatPYG(montoTotalPago)}</span>
               </div>
             </div>
 
             <div className="p-6 border-t flex justify-end gap-3">
               <button onClick={() => setShowPaymentModal(null)} className="btn-ghost text-xs">Cancelar</button>
-              <button onClick={handleSubmitPayment} disabled={submittingPayment || montoTotalPago <= 0} className="btn-primary text-xs disabled:opacity-50 flex items-center gap-2">
-                {submittingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar Cobro"}
+              <button
+                onClick={handleSubmitPayment}
+                disabled={submittingPayment || montoTotalPago <= 0}
+                className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs disabled:opacity-50 flex items-center gap-2"
+              >
+                {submittingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar e Imputar Cobro"}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* MODAL: Cobro Exitoso & Recibo A6 con QR */}
+      {completedReceipt && (
+        <div className="modal-overlay" onClick={() => setCompletedReceipt(null)}>
+          <div className="modal-content max-w-md text-center p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="w-14 h-14 bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 rounded-full flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h3 className="text-lg font-extrabold text-gray-900 dark:text-white">¡Cobro Registrado con Éxito!</h3>
+              <p className="text-xs text-gray-500 mt-1">El saldo se ha actualizado en cascada FIFO y se emitió el recibo de cobro oficial.</p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 space-y-1">
+              <div className="text-xs text-gray-500">Recibo de Cobranza N°</div>
+              <div className="text-lg font-mono font-black text-indigo-600 dark:text-indigo-400">{completedReceipt.numero_recibo}</div>
+              <div className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(completedReceipt.monto_total)}</div>
+              <div className="text-[11px] text-gray-400 pt-1">{completedReceipt.documentos_afectados} factura(s) amortizada(s)</div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                onClick={() => api.accountsReceivable.downloadReceiptA6Pdf(completedReceipt.id)}
+                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Descargar Recibo A6 con QR (PDF)</span>
+              </button>
+
+              <button
+                onClick={() => window.open(`/verificar-recibo/${completedReceipt.id}`, "_blank")}
+                className="w-full py-2.5 px-4 btn-outline text-xs font-semibold flex items-center justify-center gap-2"
+              >
+                <QrCode className="w-4 h-4 text-indigo-500" />
+                <span>Verificar Recibo en Línea (Página QR)</span>
+                <ExternalLink className="w-3 h-3 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="border-t pt-3">
+              <button onClick={() => setCompletedReceipt(null)} className="btn-ghost text-xs w-full">
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* MODAL: Generar Reporte de Cuentas por Cobrar */}
       {showReportModal && (
@@ -1168,23 +1396,33 @@ export default function AccountsReceivablePage() {
               </div>
             </div>
 
-            <div className="p-6 border-t flex items-center justify-between gap-3">
-              <button onClick={resetReportFilters} className="btn-ghost text-xs">Limpiar filtros</button>
-              <div className="flex items-center gap-2">
+            <div className="p-6 border-t flex flex-col sm:flex-row items-center justify-between gap-3">
+              <button onClick={resetReportFilters} className="btn-ghost text-xs self-start sm:self-auto">Limpiar filtros</button>
+              <div className="flex items-center gap-2 flex-wrap justify-end w-full sm:w-auto">
                 <button
                   onClick={() => { handleDownloadAgingExcel(); setShowReportModal(false) }}
-                  className="btn-outline text-xs flex items-center gap-2"
+                  className="btn-outline text-xs flex items-center gap-1.5"
+                  title="Exportar matriz de vencimientos en Excel"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-500" /> Excel
                 </button>
                 <button
                   onClick={() => { handleDownloadAgingPdf(); setShowReportModal(false) }}
-                  className="btn-primary text-xs flex items-center gap-2"
+                  className="btn-outline text-xs flex items-center gap-1.5"
+                  title="Descargar matriz de aging en PDF"
                 >
-                  <FileDown className="w-4 h-4" /> Descargar PDF
+                  <FileDown className="w-4 h-4 text-indigo-500" /> Aging PDF
+                </button>
+                <button
+                  onClick={() => { handleDownloadDeudaDetalladaPdf(); setShowReportModal(false) }}
+                  className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs flex items-center gap-1.5 shadow-sm"
+                  title="Generar reporte completo con desglose factura por factura y estética oficial Arqueo"
+                >
+                  <FileText className="w-4 h-4" /> Deuda Detallada (PDF)
                 </button>
               </div>
             </div>
+
           </div>
         </div>
       )}
@@ -1230,11 +1468,21 @@ export default function AccountsReceivablePage() {
                   <h5 className="font-bold text-gray-500 uppercase tracking-wider mb-2 text-[11px]">Historial de Pagos Aplicados</h5>
                   <div className="space-y-1">
                     {docPayments.map(p => (
-                      <div key={p.id} className="p-2 rounded bg-emerald-50/50 text-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300 flex items-center justify-between">
+                      <div key={p.id} className="p-2 rounded bg-emerald-50/50 text-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300 flex items-center justify-between gap-2">
                         <span>{p.fecha} · {p.forma_pago || "Pago"} {p.referencia ? `(${p.referencia})` : ""}</span>
-                        <span className="font-mono font-bold">{formatPYG(p.monto)}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold">{formatPYG(p.monto)}</span>
+                          <button
+                            onClick={() => api.accountsReceivable.downloadReceiptA6Pdf(p.id)}
+                            className="p-1 rounded hover:bg-emerald-200/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 transition"
+                            title="Descargar Recibo de Cobro A6 con QR (PDF)"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
+
                   </div>
                 </div>
               )}
