@@ -69,7 +69,7 @@ async def aging_report(company_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/companies/{company_id}/accounts-receivable/empresas-vinculadas")
-async def search_empresas_vinculadas(company_id: str, search: str = Query(..., min_length=1), db: AsyncSession = Depends(get_db)):
+async def search_empresas_vinculadas(company_id: str, search: str = Query("", min_length=0), db: AsyncSession = Depends(get_db)):
     """Typeahead de empresas vinculadas (customers.empresa_vinculada_nombre) para
     el filtro del reporte de aging -- sin esto el usuario tiene que adivinar el
     nombre exacto en un campo de texto libre."""

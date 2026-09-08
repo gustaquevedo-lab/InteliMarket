@@ -8,16 +8,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 
-async def search_empresas_vinculadas(db: AsyncSession, company_id: str, search: str) -> list[str]:
-    result = await db.execute(
-        text("""
-            SELECT DISTINCT trim(empresa_vinculada_nombre) as nombre
-            FROM customers
-            WHERE company_id = :company_id AND empresa_vinculada_nombre ILIKE :search
-            ORDER BY nombre LIMIT 20
-        """),
-        {"company_id": company_id, "search": f"%{search}%"},
-    )
+async def search_empresas_vinculadas(db: AsyncSession, company_id: str, search: str = "") -> list[str]:
+    filter_sql = "AND empresa_vinculada_nombre ILIKE :search" if (search and search.strip()) else ""
+    query = f"""
+        SELECT DISTINCT trim(empresa_vinculada_nombre) as nombre
+        FROM customers
+        WHERE company_id = :company_id AND empresa_vinculada_nombre IS NOT NULL AND trim(empresa_vinculada_nombre) <> ''
+        {filter_sql}
+        ORDER BY nombre LIMIT 50
+    """
+    params = {"company_id": company_id}
+    if search and search.strip():
+        params["search"] = f"%{search.strip()}%"
+    result = await db.execute(text(query), params)
     return [row.nombre for row in result.all() if row.nombre]
 
 
@@ -342,7 +345,8 @@ async def _record_treasury_ingress(
     forma_pago = (getattr(data, "forma_pago", None) or "efectivo").lower()
     bank_account_id = getattr(data, "bank_account_id", None)
     caja_session_id = getattr(data, "caja_session_id", None)
-    destino_fondos = getattr(data, "destino_fondos", None) or ("banco" if forma_pago in ("transferencia", "pix", "qr") else "boveda")
+    es_bancario = forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr")
+    destino_fondos = getattr(data, "destino_fondos", None) or ("banco" if es_bancario else "boveda")
 
     vault_entry_id = None
     cheque_id = None
@@ -368,9 +372,11 @@ async def _record_treasury_ingress(
                     "user_id": registrado_por,
                 },
             )
-    elif forma_pago in ("transferencia", "pix", "qr"):
+    elif forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr"):
         if bank_account_id:
             bank_tx_id = uuid.uuid4()
+            desc_tipo = "Depósito Bancario" if "deposito" in forma_pago else ("PIX" if forma_pago == "pix" else ("QR" if forma_pago == "qr" else "Transferencia"))
+            ref_str = f" - Boleta/Ref: {getattr(data, 'referencia', '')}" if getattr(data, "referencia", None) else ""
             await db.execute(
                 text("""
                     INSERT INTO bank_transactions
@@ -385,7 +391,7 @@ async def _record_treasury_ingress(
                     "fecha": getattr(data, "fecha", None) or date.today(),
                     "monto": float(monto),
                     "moneda": getattr(data, "moneda", "PYG") or "PYG",
-                    "descripcion": f"Cobro AR Recibo #{numero_recibo} - Cliente: {customer_name}",
+                    "descripcion": f"Cobro AR {desc_tipo} Recibo #{numero_recibo}{ref_str} - Cliente: {customer_name}",
                     "referencia": getattr(data, "referencia", None),
                     "contraparte": customer_name,
                 },
@@ -1419,7 +1425,7 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
     numero_recibo = f"REC-CORP-{rem.numero_remision}"
     forma_pago = (data.forma_pago or "transferencia").lower()
 
-    if forma_pago in ("transferencia", "pix", "qr") and getattr(data, "bank_account_id", None):
+    if forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr") and getattr(data, "bank_account_id", None):
         bank_tx_id = uuid.uuid4()
         await db.execute(
             text("""

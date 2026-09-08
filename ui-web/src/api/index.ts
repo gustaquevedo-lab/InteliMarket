@@ -1674,7 +1674,7 @@ export const api = {
     getCorporateRemissionDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}`),
     downloadRemisionPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pdf`, undefined, `remision_${numero || id.slice(0, 8)}.pdf`),
     payCorporateRemission: (id: string, data: { monto: number; forma_pago?: string; bank_account_id?: string; destino_fondos?: string; referencia?: string; fecha_pago?: string; notas?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pay`, data),
-    listBanks: () => client.get<any[]>("/v1/banks"),
+    listBanks: () => client.get<any[]>("/v1/financial/banks", { company_id: COMPANY_ID } as any),
   },
 
   backups: {

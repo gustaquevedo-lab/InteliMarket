@@ -133,6 +133,7 @@ export default function AccountsReceivablePage() {
   const [pendingLoading, setPendingLoading] = useState(false)
   const [allocations, setAllocations] = useState<Record<string, string>>({})
   const [payMontoGlobal, setPayMontoGlobal] = useState<string>("")
+  const [payMontoGlobalError, setPayMontoGlobalError] = useState<string | null>(null)
   const [selectedBatchDocs, setSelectedBatchDocs] = useState<Record<string, boolean>>({})
   const [completedReceipt, setCompletedReceipt] = useState<{ id: string; numero_recibo: string; monto_total: number; documentos_afectados: number } | null>(null)
   const [payFormaPago, setPayFormaPago] = useState("efectivo")
@@ -252,7 +253,7 @@ export default function AccountsReceivablePage() {
     return () => clearTimeout(t)
   }, [empresaSearchInput])
 
-  // Cargar cuentas bancarias activas para cobro en tesorería
+  // Cargar cuentas bancarias activas para cobro en tesorería y convenios
   useEffect(() => {
     api.accountsReceivable.listBanks()
       .then(rows => {
@@ -260,6 +261,8 @@ export default function AccountsReceivablePage() {
         if (rows && rows.length > 0) setPayBankAccountId(rows[0].id)
       })
       .catch(() => setBankAccounts([]))
+    fetchAgreements()
+    fetchRemissions()
   }, [])
 
   // Buscador rápido de clientes para el modal de cabecera "Registrar Cobro"
@@ -327,7 +330,7 @@ export default function AccountsReceivablePage() {
   }
 
   useEffect(() => {
-    if (tab === "empresas_vinculadas") {
+    if (tab === "empresas_vinculadas" || tab === "reportes") {
       fetchAgreements()
       fetchRemissions()
     }
@@ -363,7 +366,7 @@ export default function AccountsReceivablePage() {
     if (!showPayRemissionModal) return
     const monto = parseFloat(payRemForm.monto)
     if (!monto || monto <= 0) {
-      toast.error("Monto requerido", "Ingresá un monto válido pagado por la empresa")
+      toast.warning("Monto requerido", "Ingresá un monto válido pagado por la empresa")
       return
     }
     setPayingRemission(true)
@@ -534,9 +537,10 @@ export default function AccountsReceivablePage() {
   const handleDistribuirFifo = (montoInput?: number) => {
     const total = montoInput !== undefined ? montoInput : parseFloat(payMontoGlobal) || 0
     if (total <= 0) {
-      toast.error("Monto requerido", "Ingresá el monto que abonó el cliente para distribuirlo en cascada.")
+      setPayMontoGlobalError("Ingresá el monto que abonó el cliente para distribuirlo en cascada.")
       return
     }
+    setPayMontoGlobalError(null)
     let restante = total
     const nuevas: Record<string, string> = {}
     const docsFiltrados = pendingDocs.filter(d => selectedBatchDocs[d.id] !== false)
@@ -577,7 +581,7 @@ export default function AccountsReceivablePage() {
   const handleSubmitPayment = async () => {
     if (!showPaymentModal) return
     const allocs = Object.entries(allocations).filter(([, v]) => parseFloat(v) > 0).map(([id, v]) => ({ accounts_receivable_id: id, monto: parseFloat(v) }))
-    if (allocs.length === 0) { toast.error("Error", "Asigná o distribuí un monto a al menos una factura"); return }
+    if (allocs.length === 0) { toast.warning("Monto no asignado", "Asigná o distribuí un monto a al menos una factura"); return }
     setSubmittingPayment(true)
     try {
       const selectedDocIds = Object.keys(allocations).filter(id => (parseFloat(allocations[id]) || 0) > 0)
@@ -589,7 +593,7 @@ export default function AccountsReceivablePage() {
         fecha: payFecha,
         observaciones: payObservaciones || undefined,
         accounts_receivable_ids: selectedDocIds.length > 0 ? selectedDocIds : undefined,
-        bank_account_id: (payFormaPago === "transferencia" || payFormaPago === "pix" || payFormaPago === "qr") ? (payBankAccountId || undefined) : undefined,
+        bank_account_id: (payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr") ? (payBankAccountId || undefined) : undefined,
         destino_fondos: payFormaPago === "efectivo" ? payDestinoFondos : undefined,
         cheque_numero: payFormaPago === "cheque" ? (payChequeNumero || undefined) : undefined,
         cheque_banco: payFormaPago === "cheque" ? (payChequeBanco || undefined) : undefined,
@@ -1708,47 +1712,135 @@ export default function AccountsReceivablePage() {
                       </p>
                     </div>
 
-                    <div className="p-3 bg-gray-50 dark:bg-slate-800/70 rounded-xl space-y-2 border border-gray-100 dark:border-gray-700/60 text-xs">
+                    <div className="p-3 bg-gray-50 dark:bg-slate-800/70 rounded-xl space-y-2.5 border border-gray-100 dark:border-gray-700/60 text-xs">
+                      {/* Cliente */}
                       <div>
                         <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Cliente (Opcional)</label>
-                        <input
-                          type="text"
-                          placeholder="Todos los clientes..."
-                          className="input-field text-xs py-1.5"
-                          value={reportCustomerName || customerSearchInput}
-                          onChange={e => {
-                            setCustomerSearchInput(e.target.value)
-                            setReportCustomerName("")
-                            setReportCustomerId("")
-                          }}
-                        />
-                        {customerSearchResults.length > 0 && !reportCustomerId && (
-                          <div className="max-h-28 overflow-y-auto bg-white dark:bg-slate-800 border rounded-lg mt-1 shadow-sm">
-                            {customerSearchResults.map(c => (
-                              <div
-                                key={c.id}
-                                onClick={() => {
-                                  setReportCustomerId(c.id)
-                                  setReportCustomerName(c.razon_social)
-                                  setCustomerSearchResults([])
-                                }}
-                                className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer text-[11px] truncate font-medium"
-                              >
-                                {c.razon_social} {c.ruc ? `(${c.ruc})` : ""}
+                        {reportCustomerId ? (
+                          <div className="input-field text-xs flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800">
+                            <span className="font-bold text-emerald-800 dark:text-emerald-300 truncate">
+                              👤 {reportCustomerName}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setReportCustomerId("")
+                                setReportCustomerName("")
+                                setCustomerSearchInput("")
+                              }}
+                              className="text-gray-400 hover:text-rose-500 p-0.5"
+                              title="Quitar filtro de cliente"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="Todos los clientes (escribí para buscar)..."
+                              className="input-field text-xs py-1.5"
+                              value={customerSearchInput}
+                              onChange={e => {
+                                setCustomerSearchInput(e.target.value)
+                              }}
+                            />
+                            {customerSearchLoading && (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            )}
+                            {customerSearchResults.length > 0 && (
+                              <div className="absolute z-20 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg">
+                                {customerSearchResults.map(c => (
+                                  <div
+                                    key={c.id}
+                                    onClick={() => {
+                                      setReportCustomerId(c.id)
+                                      setReportCustomerName(c.razon_social)
+                                      setCustomerSearchResults([])
+                                      setCustomerSearchInput("")
+                                    }}
+                                    className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer text-xs truncate font-medium flex items-center justify-between"
+                                  >
+                                    <span>{c.razon_social}</span>
+                                    {c.ruc && <span className="text-[10px] text-gray-400 font-mono">({c.ruc})</span>}
+                                  </div>
+                                ))}
                               </div>
-                            ))}
+                            )}
                           </div>
                         )}
                       </div>
+
+                      {/* Empresa Vinculada */}
                       <div>
-                        <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Empresa Vinculada (Opcional)</label>
-                        <input
-                          type="text"
-                          placeholder="Filtrar por empresa..."
-                          className="input-field text-xs py-1.5"
-                          value={reportEmpresaVinculada}
-                          onChange={e => setReportEmpresaVinculada(e.target.value)}
-                        />
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-bold text-gray-400 uppercase">Empresa Vinculada (Opcional)</label>
+                          {agreements.length > 0 && (
+                            <span className="text-[10px] text-indigo-500 font-medium">{agreements.length} convenios</span>
+                          )}
+                        </div>
+                        {reportEmpresaVinculada ? (
+                          <div className="input-field text-xs flex items-center justify-between bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-800">
+                            <span className="font-bold text-indigo-800 dark:text-indigo-300 truncate">
+                              🏢 {reportEmpresaVinculada}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setReportEmpresaVinculada("")
+                                setEmpresaSearchInput("")
+                              }}
+                              className="text-gray-400 hover:text-rose-500 p-0.5"
+                              title="Quitar filtro de empresa"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="Todas las empresas vinculadas..."
+                              className="input-field text-xs py-1.5"
+                              value={empresaSearchInput}
+                              onChange={e => {
+                                setEmpresaSearchInput(e.target.value)
+                                setEmpresaSearchOpen(true)
+                              }}
+                              onFocus={() => {
+                                setEmpresaSearchOpen(true)
+                                if (!empresaSearchInput.trim()) {
+                                  api.accountsReceivable.searchEmpresasVinculadas("")
+                                    .then(rows => setEmpresaSearchResults(rows))
+                                    .catch(() => {})
+                                }
+                              }}
+                            />
+                            {empresaSearchLoading && (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            )}
+                            {empresaSearchOpen && (
+                              <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg">
+                                {empresaSearchResults.length === 0 && agreements.length === 0 ? (
+                                  <div className="p-2.5 text-xs text-gray-400 text-center">No se encontraron empresas</div>
+                                ) : (
+                                  (empresaSearchResults.length > 0 ? empresaSearchResults : agreements.map(a => a.empresa_vinculada_nombre)).map(nombre => (
+                                    <div
+                                      key={nombre}
+                                      onClick={() => {
+                                        setReportEmpresaVinculada(nombre)
+                                        setEmpresaSearchOpen(false)
+                                        setEmpresaSearchInput("")
+                                      }}
+                                      className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer text-xs font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2"
+                                    >
+                                      <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                      <span className="truncate">{nombre}</span>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1864,7 +1956,7 @@ export default function AccountsReceivablePage() {
                     <button
                       onClick={() => {
                         if (!repEmpresaExtracto) {
-                          toast.error("Empresa requerida", "Seleccioná la empresa vinculada para generar sus extractos")
+                          toast.warning("Empresa requerida", "Seleccioná la empresa vinculada para generar sus extractos")
                           return
                         }
                         api.accountsReceivable.downloadExtractosEmpresaPdf(repEmpresaExtracto, repPeriodoExtracto)
@@ -1919,7 +2011,7 @@ export default function AccountsReceivablePage() {
                     <button
                       onClick={() => {
                         if (!repSelectedRemissionId) {
-                          toast.error("Lote requerido", "Seleccioná un lote de remisión para descargar el acta")
+                          toast.warning("Lote requerido", "Seleccioná un lote de remisión para descargar el acta")
                           return
                         }
                         const found = remissions.find(r => r.id === repSelectedRemissionId)
@@ -2073,6 +2165,7 @@ export default function AccountsReceivablePage() {
                   <label className="label-field">Forma de Pago</label>
                   <select className="input-field text-xs" value={payFormaPago} onChange={e => setPayFormaPago(e.target.value)}>
                     <option value="efectivo">Efectivo (Gs. / R$ / US$)</option>
+                    <option value="deposito_bancario">Depósito Bancario (Boleta / Cta. Cte.)</option>
                     <option value="transferencia">Transferencia Bancaria (SIPAP)</option>
                     <option value="pix">PIX (Banco Central do Brasil)</option>
                     <option value="qr">Cobro QR Dinelco / Bancard</option>
@@ -2082,8 +2175,15 @@ export default function AccountsReceivablePage() {
                   </select>
                 </div>
                 <div>
-                  <label className="label-field">N° Referencia / Boleta</label>
-                  <input className="input-field text-xs" placeholder="Ej: Transf. 984124" value={payReferencia} onChange={e => setPayReferencia(e.target.value)} />
+                  <label className="label-field">
+                    {payFormaPago === "deposito_bancario" ? "N° Boleta de Depósito *" : "N° Referencia / Boleta"}
+                  </label>
+                  <input
+                    className={`input-field text-xs ${payFormaPago === "deposito_bancario" && !payReferencia ? "border-blue-400 bg-blue-50/20" : ""}`}
+                    placeholder={payFormaPago === "deposito_bancario" ? "Ej: Boleta Dep. N° 451829" : "Ej: Transf. 984124"}
+                    value={payReferencia}
+                    onChange={e => setPayReferencia(e.target.value)}
+                  />
                 </div>
                 <div>
                   <label className="label-field">Fecha de Cobro</label>
@@ -2131,25 +2231,31 @@ export default function AccountsReceivablePage() {
                 </div>
               )}
 
-              {(payFormaPago === "transferencia" || payFormaPago === "pix" || payFormaPago === "qr") && (
+              {(payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr") && (
                 <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold text-blue-900 dark:text-blue-300">
                     <span className="flex items-center gap-2">
                       <Landmark className="w-4 h-4 text-blue-600" />
-                      Cuenta Bancaria Receptora
+                      {payFormaPago === "deposito_bancario" ? "Cuenta Bancaria Receptora del Depósito" : "Cuenta Bancaria Receptora"}
                     </span>
-                    <span className="text-[11px] font-normal text-blue-700 dark:text-blue-400">Acredita saldo y asienta la transacción</span>
+                    <span className="text-[11px] font-normal text-blue-700 dark:text-blue-400">
+                      {payFormaPago === "deposito_bancario" ? "Acredita saldo en la Cta. Cte. seleccionada según la boleta" : "Acredita saldo y asienta la transacción"}
+                    </span>
                   </div>
                   <select
                     className="input-field text-xs w-full font-medium"
                     value={payBankAccountId}
                     onChange={e => setPayBankAccountId(e.target.value)}
                   >
-                    {bankAccounts.map(b => (
-                      <option key={b.id} value={b.id}>
-                        {b.banco_nombre} — Cuenta {b.numero_cuenta} ({b.moneda}) · Saldo: {formatPYG(b.saldo_actual)}
-                      </option>
-                    ))}
+                    {bankAccounts.length === 0 ? (
+                      <option value="">Cargando cuentas bancarias activas...</option>
+                    ) : (
+                      bankAccounts.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.banco_nombre} — {b.tipo_cuenta ? b.tipo_cuenta.replace('_', ' ').toUpperCase() : 'Cuenta'} {b.numero_cuenta} ({b.moneda}) · Saldo: {formatPYG(b.saldo_actual)}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
               )}
@@ -2246,15 +2352,20 @@ export default function AccountsReceivablePage() {
                     <input
                       type="number"
                       placeholder="Monto global que abonó el cliente..."
-                      className="input-field text-xs pl-7 font-mono font-bold"
+                      className={`input-field text-xs pl-7 font-mono font-bold transition ${
+                        payMontoGlobalError ? "border-rose-500 ring-2 ring-rose-200 dark:ring-rose-900/50" : ""
+                      }`}
                       value={payMontoGlobal}
-                      onChange={e => setPayMontoGlobal(e.target.value)}
+                      onChange={e => {
+                        setPayMontoGlobal(e.target.value)
+                        if (payMontoGlobalError) setPayMontoGlobalError(null)
+                      }}
                       onKeyDown={e => { if (e.key === "Enter") handleDistribuirFifo() }}
                     />
                   </div>
                   <button
                     onClick={() => handleDistribuirFifo()}
-                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
+                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm shrink-0"
                   >
                     <span>Aplicar Cascada FIFO</span>
                   </button>
@@ -2265,12 +2376,18 @@ export default function AccountsReceivablePage() {
                         .reduce((sum, d) => sum + (d.saldo_pendiente || 0), 0)
                       handleDistribuirFifo(totalLote)
                     }}
-                    className="px-3 py-2 btn-outline text-xs text-gray-700 dark:text-gray-300 font-semibold"
+                    className="px-3 py-2 btn-outline text-xs text-gray-700 dark:text-gray-300 font-semibold shrink-0"
                     title="Cubre la totalidad de las facturas seleccionadas"
                   >
                     Saldar Lote Completo
                   </button>
                 </div>
+                {payMontoGlobalError && (
+                  <div className="text-[11px] text-rose-600 dark:text-rose-400 font-bold flex items-center gap-1.5 mt-1.5 bg-rose-50 dark:bg-rose-950/40 p-2 rounded-lg border border-rose-200 dark:border-rose-900/60 animate-in fade-in duration-200">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                    <span>{payMontoGlobalError}</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between pt-1">
@@ -2564,6 +2681,7 @@ export default function AccountsReceivablePage() {
                     onChange={e => setPayRemForm({ ...payRemForm, forma_pago: e.target.value })}
                   >
                     <option value="transferencia">Transferencia Bancaria (SIPAP)</option>
+                    <option value="deposito_bancario">Depósito Bancario (Boleta / Cta. Cte.)</option>
                     <option value="cheque">Cheque Corporativo</option>
                     <option value="efectivo">Efectivo en Bóveda</option>
                   </select>
@@ -2579,9 +2697,11 @@ export default function AccountsReceivablePage() {
                 </div>
               </div>
 
-              {payRemForm.forma_pago === "transferencia" && (
+              {(payRemForm.forma_pago === "transferencia" || payRemForm.forma_pago === "deposito_bancario") && (
                 <div>
-                  <label className="label-field">Cuenta Bancaria de Depósito</label>
+                  <label className="label-field">
+                    {payRemForm.forma_pago === "deposito_bancario" ? "Cuenta Bancaria Receptora del Depósito" : "Cuenta Bancaria de Depósito"}
+                  </label>
                   <select
                     className="input-field text-xs"
                     value={payRemForm.bank_account_id}
@@ -2589,7 +2709,7 @@ export default function AccountsReceivablePage() {
                   >
                     {bankAccounts.map(b => (
                       <option key={b.id} value={b.id}>
-                        {b.banco_nombre} — Cta. {b.numero_cuenta} ({b.moneda})
+                        {b.banco_nombre} — {b.tipo_cuenta ? b.tipo_cuenta.replace('_', ' ').toUpperCase() : 'Cta.'} {b.numero_cuenta} ({b.moneda})
                       </option>
                     ))}
                   </select>
