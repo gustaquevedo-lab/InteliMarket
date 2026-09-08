@@ -2448,9 +2448,10 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
     return count
 
 
-async def sync_promotions(db: AsyncSession, company_id: str, since: date | None = None) -> int:
+async def sync_promotions(db: AsyncSession, company_id: str, since: date | None = None, return_details: bool = False) -> int | dict:
     """Sincroniza promociones y precios de oferta desde ven_promocao de MySQL Ñemuha.
-    Permite que cualquier oferta o promoción cargada en el legacy impacte de inmediato.
+    Permite que cualquier oferta o promoción cargada en el legacy impacte de inmediato,
+    y desactiva las promociones eliminadas o expiradas en el legacy.
     """
     cid = UUID(company_id) if isinstance(company_id, str) else company_id
 
@@ -2485,6 +2486,10 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
     existing_map = {p.legacy_id: p for p in res_exist.scalars().all()}
 
     count = 0
+    imported_count = 0
+    updated_count = 0
+    deactivated_count = 0
+
     try:
         from zoneinfo import ZoneInfo
         asuncion_tz = ZoneInfo("America/Asuncion")
@@ -2493,8 +2498,11 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
     today = datetime.now(asuncion_tz).date() if asuncion_tz else date.today()
     today_dow = (today.weekday() + 1) % 7
 
+    seen_legacy_ids = set()
+
     for r in rows:
         legacy_id = r["ID_PROMOCAO"]
+        seen_legacy_ids.add(legacy_id)
         prod_sku = str(r["ID_PRODUTO"]).strip()
         matched_items = sku_to_prods.get(prod_sku, [])
         all_matched_ids = set()
@@ -2559,6 +2567,7 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
                 changed = True
             if changed:
                 promo.updated_at = func.now()
+                updated_count += 1
                 count += 1
         else:
             new_promo = Promotion(
@@ -2567,7 +2576,7 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
                 descripcion=r.get("OBSERVACAO") or f"Sincronizado de Ñemuha legacy ID {legacy_id}",
                 tipo="precio_fijo_oferta",
                 precio_fijo_promocional=precio_promo,
-                aplica_a="producto" if prod_ids else "carrito",
+                aplica_a="producto",
                 producto_ids=prod_ids,
                 origen="accion_proveedor" if r.get("TIPO_PROMOCAO") == "ESTOQUE_LIMITADO" else "iniciativa_propia",
                 financiamiento="propio_supermercado",
@@ -2582,7 +2591,18 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
             )
             db.add(new_promo)
             existing_map[legacy_id] = new_promo
+            imported_count += 1
             count += 1
+
+    # 3.1. Desactivar promociones eliminadas o que ya no están vigentes en MySQL Ñemuha
+    for lid, promo in existing_map.items():
+        if promo.origen_fuente in ("nemuha", "nemuha_sync") and promo.activo and promo.estado == "activa":
+            if lid not in seen_legacy_ids:
+                promo.activo = False
+                promo.estado = "finalizada_por_fecha"
+                promo.updated_at = func.now()
+                deactivated_count += 1
+                count += 1
 
     await db.flush()
 
@@ -2610,7 +2630,7 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
 
     if best_promo_by_pid:
         target_pids = list(best_promo_by_pid.keys())
-        prods_res = await db.execute(select(Product).where(Product.id.in_(target_pids)))
+        prods_res = await db.execute(select(Product).where(Product.company_id == cid, Product.id.in_(target_pids)))
         for p in prods_res.scalars().all():
             promo_p = best_promo_by_pid[p.id]
             # Guardar precio_regular si aún no estaba guardado y precio_venta es el original
@@ -2619,6 +2639,29 @@ async def sync_promotions(db: AsyncSession, company_id: str, since: date | None 
             if p.precio_venta != promo_p:
                 p.precio_venta = promo_p
                 p.updated_at = func.now()
+
+    # 4.1. Revertir a precio regular cualquier producto que ya no tenga promo activa hoy
+    rev_q = await db.execute(
+        select(Product).where(
+            Product.company_id == cid,
+            Product.precio_regular != None,
+            ~Product.id.in_(list(best_promo_by_pid.keys())) if best_promo_by_pid else True,
+        )
+    )
+    for p in rev_q.scalars().all():
+        if p.precio_regular is not None:
+            p.precio_venta = p.precio_regular
+            p.precio_regular = None
+            p.updated_at = func.now()
+
+    if return_details:
+        return {
+            "importados": imported_count,
+            "actualizados": updated_count,
+            "desactivados": deactivated_count,
+            "total_evaluados": len(rows),
+            "total_cambios": count,
+        }
 
     return count
 
