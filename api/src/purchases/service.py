@@ -2363,27 +2363,24 @@ async def calculate_smart_replenishment_preview(
             y -= 1
         meses_labels.append(month_names_es[m - 1])
     
-    where_clauses = ["p.company_id = :cid", "p.activo = true"]
+    where_clauses = ["p.company_id = :cid", "p.activo = true", "p.nombre NOT LIKE 'Producto legacy #%'"]
     params: dict = {"cid": cid, "days": dias_hist, "limit": limit}
     
     if supplier_id:
         params["supplier_id"] = supplier_id
         where_clauses.append("""
             (
-                EXISTS (
-                    SELECT 1 FROM purchase_order_items poi2
-                    JOIN purchase_orders po2 ON po2.id = poi2.purchase_order_id
-                    WHERE po2.supplier_id = :supplier_id AND poi2.product_id = p.id
-                )
-                OR EXISTS (
-                    SELECT 1 FROM purchase_receipt_items pri2
-                    JOIN purchase_receipts pr2 ON pr2.id = pri2.receipt_id
-                    WHERE pr2.supplier_id = :supplier_id AND pri2.product_id = p.id
-                )
-                OR EXISTS (
-                    SELECT 1 FROM supplier_invoice_items sii2
-                    JOIN supplier_invoices si2 ON si2.id = sii2.invoice_id
-                    WHERE si2.supplier_id = :supplier_id AND sii2.product_id = p.id
+                p.supplier_id = :supplier_id
+                OR (
+                    p.supplier_id IS NULL
+                    AND (
+                        last_sup.last_sup_id = :supplier_id
+                        OR EXISTS (
+                            SELECT 1 FROM purchase_order_items poi2
+                            JOIN purchase_orders po2 ON po2.id = poi2.purchase_order_id
+                            WHERE po2.supplier_id = :supplier_id AND poi2.product_id = p.id
+                        )
+                    )
                 )
             )
         """)
@@ -2418,9 +2415,10 @@ async def calculate_smart_replenishment_preview(
             COALESCE(sales_4m.v_m4, 0) as v_m4,
             COALESCE(sales_4m.v_promo_qty, 0) as v_promo_qty,
             COALESCE(promo_flag.en_promo_activa, false) as en_promo_flag,
-            last_sup.last_sup_id,
-            last_sup.last_sup_name
+            COALESCE(p.supplier_id, last_sup.last_sup_id) as last_sup_id,
+            COALESCE(p_sup.razon_social, last_sup.last_sup_name) as last_sup_name
         FROM products p
+        LEFT JOIN suppliers p_sup ON p_sup.id = p.supplier_id
         LEFT JOIN (
             SELECT product_id, SUM(cantidad) as total_stock
             FROM stock

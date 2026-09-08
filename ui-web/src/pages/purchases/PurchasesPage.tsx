@@ -1075,7 +1075,11 @@ export default function PurchasesPage() {
     }
     setSearchingProductsPO(true)
     try {
-      const res = await api.products.list({ search: q.trim(), limit: 12 } as any)
+      const res = await api.products.list({
+        search: q.trim(),
+        limit: 12,
+        supplier_id: manualPOSupplierId || undefined,
+      } as any)
       setProductSearchResultsPO(Array.isArray(res) ? res : (res as any)?.items || [])
     } catch {
       setProductSearchResultsPO([])

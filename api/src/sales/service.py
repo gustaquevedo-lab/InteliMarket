@@ -492,10 +492,42 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             # Gerente aprueben la excepcion (ver credit_accounts.service).
             sale.estado = "pend_aprob_credito"
             await db.flush()
-            await create_approval_request(
+            app_req = await create_approval_request(
                 db, data.company_id, sale.id, data.customer_id, check["credit_account_id"],
                 monto_credito, check["limite_credito"], check["saldo_disponible"],
             )
+            # Notificar a Supervisores y Administradores / Gerentes
+            try:
+                from api.src.customers.models import Customer
+                cust_res = await db.execute(select(Customer.razon_social).where(Customer.id == data.customer_id))
+                cust_nom = cust_res.scalar() or "Cliente"
+                exceso = max(Decimal("0"), monto_credito - (check.get("saldo_disponible") or Decimal("0")))
+
+                from api.src.notifications import service as notif_service
+                from api.src.auth.models import User
+                target_users = await db.execute(
+                    select(User.id).where(
+                        User.rol.in_(["admin", "administrador", "gerente", "supervisor"]),
+                        User.activo == True,
+                    )
+                )
+                notif_body = (
+                    f"Cliente: {cust_nom} | Compra: {monto_credito:,.0f} Gs. "
+                    f"| Límite: {check.get('limite_credito', 0):,.0f} Gs. | Exceso: {exceso:,.0f} Gs."
+                )
+                for (t_uid,) in target_users.all():
+                    await notif_service.create_notification(
+                        db,
+                        uuid.UUID(str(data.company_id)),
+                        t_uid,
+                        "Solicitud de Crédito Retenida en Caja",
+                        notif_body,
+                        "credito",
+                        "/supervisor",
+                    )
+            except Exception as notif_err:
+                logger.warning("Error creando notificaciones de crédito: %s", notif_err)
+
             await db.flush()
             await db.refresh(sale)
             return sale

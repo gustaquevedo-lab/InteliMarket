@@ -251,6 +251,7 @@ async def get_approval_request(db: AsyncSession, request_id: str) -> CreditAppro
 
 async def approve_credit_request(db: AsyncSession, request_id: str, user_id: str, tenant_id: str) -> dict:
     from api.src.rbac.service import get_user_roles
+    from api.src.auth.models import User
 
     request = await get_approval_request(db, request_id)
     if not request:
@@ -258,16 +259,24 @@ async def approve_credit_request(db: AsyncSession, request_id: str, user_id: str
     if request.estado != "pendiente":
         return {"error": f"La solicitud ya está en estado '{request.estado}'"}
 
+    # Resolver roles del usuario
+    user_res = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    user_obj = user_res.scalar_one_or_none()
+    user_rol = (user_obj.rol or "").lower() if user_obj else ""
+    is_super = user_obj.is_superadmin or user_rol in ("admin", "administrador", "gerente")
+
     roles = {r["role_name"] for r in await get_user_roles(db, uuid.UUID(user_id), uuid.UUID(tenant_id))}
-    # Un solo llamado llena UN solo slot, incluso si la persona tiene ambos
-    # roles -- si no, alguien con Supervisor+Gerente podria auto-aprobar los
-    # dos niveles en una sola accion, rompiendo el control de doble aprobacion.
+    if user_rol == "supervisor":
+        roles.add("Supervisor")
+    if is_super:
+        roles.update({"Supervisor", "Gerente", "Administrador"})
+
     filled_now = None
     if "Supervisor" in roles and not request.aprobado_supervisor_id:
         request.aprobado_supervisor_id = uuid.UUID(user_id)
         request.aprobado_supervisor_at = datetime.now(timezone.utc)
         filled_now = "supervisor"
-    elif "Gerente" in roles and not request.aprobado_gerente_id:
+    elif ("Gerente" in roles or is_super) and not request.aprobado_gerente_id:
         request.aprobado_gerente_id = uuid.UUID(user_id)
         request.aprobado_gerente_at = datetime.now(timezone.utc)
         filled_now = "gerente"
@@ -285,9 +294,6 @@ async def approve_credit_request(db: AsyncSession, request_id: str, user_id: str
 
         await db.flush()
     else:
-        # Aprobación parcial (solo un slot llenado) — el router no llama
-        # fire_sale_side_effects en este caso, así que necesitamos commitear aquí
-        # para que la firma del supervisor/gerente persista en la BD.
         await db.commit()
 
     await db.refresh(request)
@@ -297,6 +303,7 @@ async def approve_credit_request(db: AsyncSession, request_id: str, user_id: str
 async def reject_credit_request(db: AsyncSession, request_id: str, user_id: str, tenant_id: str, motivo: str) -> dict:
     from api.src.rbac.service import get_user_roles
     from api.src.sales.models import Sale
+    from api.src.auth.models import User
 
     request = await get_approval_request(db, request_id)
     if not request:
@@ -304,8 +311,20 @@ async def reject_credit_request(db: AsyncSession, request_id: str, user_id: str,
     if request.estado != "pendiente":
         return {"error": f"La solicitud ya está en estado '{request.estado}'"}
 
-    roles = {r["role_name"] for r in await get_user_roles(db, uuid.UUID(user_id), uuid.UUID(tenant_id))}
-    if "Supervisor" not in roles and "Gerente" not in roles:
+    user_res = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    user_obj = user_res.scalar_one_or_none()
+    user_rol = (user_obj.rol or "").lower() if user_obj else ""
+    is_authorized = (
+        (user_obj and user_obj.is_superadmin)
+        or user_rol in ("supervisor", "admin", "administrador", "gerente")
+    )
+
+    if not is_authorized:
+        roles = {r["role_name"] for r in await get_user_roles(db, uuid.UUID(user_id), uuid.UUID(tenant_id))}
+        if "Supervisor" in roles or "Gerente" in roles or "Administrador" in roles:
+            is_authorized = True
+
+    if not is_authorized:
         return {"error": "No autorizado: se requiere rol Supervisor o Gerente"}
 
     request.estado = "rechazado"

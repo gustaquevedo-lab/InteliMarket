@@ -56,7 +56,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   )
 
   const success = useCallback((title: string, message?: string) => addToast({ type: "success", title, message }), [addToast])
-  const error = useCallback((title: string, message?: string, errorDetails?: string) => addToast({ type: "error", title, message, errorDetails, duration: 8000 }), [addToast])
+  const error = useCallback((title: string, message?: string, errorDetails?: string) => {
+    let cleanMsg = message || ""
+    if (cleanMsg.toLowerCase().includes("failed to fetch")) {
+      cleanMsg = "Error de conexión con el servidor central. Verifique su conexión de red local."
+    }
+    let cleanTitle = title
+    if (cleanTitle.toLowerCase().includes("failed to fetch")) {
+      cleanTitle = "Error de red"
+    }
+    return addToast({ type: "error", title: cleanTitle, message: cleanMsg, errorDetails, duration: 8000 })
+  }, [addToast])
   const warning = useCallback((title: string, message?: string) => addToast({ type: "warning", title, message }), [addToast])
   const info = useCallback((title: string, message?: string) => addToast({ type: "info", title, message }), [addToast])
 

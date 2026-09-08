@@ -152,22 +152,64 @@ async def remove_user_role(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid
 
 
 async def get_user_roles(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid.UUID) -> List[dict]:
-    result = await db.execute(
-        select(UserRole, Role).join(Role, Role.id == UserRole.role_id).where(
-            UserRole.user_id == user_id,
-            UserRole.tenant_id == tenant_id
+    from api.src.auth.models import User
+
+    roles_list = []
+
+    # 1. Resolver rol primario desde la tabla users
+    try:
+        user_res = await db.execute(select(User).where(User.id == user_id))
+        user_obj = user_res.scalar_one_or_none()
+        if user_obj:
+            rol = (user_obj.rol or "").lower()
+            if user_obj.is_superadmin or rol in ("admin", "administrador"):
+                roles_list.extend([
+                    {"user_id": str(user_id), "tenant_id": str(tenant_id), "role_id": "system-admin", "role_name": "Administrador", "created_at": None},
+                    {"user_id": str(user_id), "tenant_id": str(tenant_id), "role_id": "system-gerente", "role_name": "Gerente", "created_at": None},
+                    {"user_id": str(user_id), "tenant_id": str(tenant_id), "role_id": "system-supervisor", "role_name": "Supervisor", "created_at": None},
+                    {"user_id": str(user_id), "tenant_id": str(tenant_id), "role_id": "system-finanzas", "role_name": "Finanzas", "created_at": None},
+                ])
+            elif rol == "gerente":
+                roles_list.extend([
+                    {"user_id": str(user_id), "tenant_id": str(tenant_id), "role_id": "system-gerente", "role_name": "Gerente", "created_at": None},
+                    {"user_id": str(user_id), "tenant_id": str(tenant_id), "role_id": "system-supervisor", "role_name": "Supervisor", "created_at": None},
+                ])
+            elif rol == "supervisor":
+                roles_list.append(
+                    {"user_id": str(user_id), "tenant_id": str(tenant_id), "role_id": "system-supervisor", "role_name": "Supervisor", "created_at": None}
+                )
+            elif rol == "cajero":
+                roles_list.append(
+                    {"user_id": str(user_id), "tenant_id": str(tenant_id), "role_id": "system-cajero", "role_name": "Cajero", "created_at": None}
+                )
+            elif rol:
+                roles_list.append(
+                    {"user_id": str(user_id), "tenant_id": str(tenant_id), "role_id": f"system-{rol}", "role_name": rol.capitalize(), "created_at": None}
+                )
+    except Exception:
+        pass
+
+    # 2. Complementar con tabla user_roles si existe
+    try:
+        result = await db.execute(
+            select(UserRole, Role).join(Role, Role.id == UserRole.role_id).where(
+                UserRole.user_id == user_id,
+                UserRole.tenant_id == tenant_id
+            )
         )
-    )
-    return [
-        {
-            "user_id": str(ur.user_id),
-            "tenant_id": str(ur.tenant_id),
-            "role_id": str(role.id),
-            "role_name": role.name,
-            "created_at": ur.created_at,
-        }
-        for ur, role in result.all()
-    ]
+        for ur, role in result.all():
+            if not any(r["role_name"] == role.name for r in roles_list):
+                roles_list.append({
+                    "user_id": str(ur.user_id),
+                    "tenant_id": str(ur.tenant_id),
+                    "role_id": str(role.id),
+                    "role_name": role.name,
+                    "created_at": ur.created_at,
+                })
+    except Exception:
+        pass
+
+    return roles_list
 
 
 async def check_permission(db: AsyncSession, user_id: uuid.UUID, tenant_id: uuid.UUID, permission: str) -> bool:

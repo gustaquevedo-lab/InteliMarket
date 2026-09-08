@@ -34,7 +34,15 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
   if (token) headers["Authorization"] = `Bearer ${token}`
   const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
-  let response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${cleanEndpoint}`, { ...options, headers })
+  } catch (err: any) {
+    if (err?.name === "TypeError" || String(err?.message || "").toLowerCase().includes("failed to fetch")) {
+      throw new Error("Error de conexión con el servidor central. Verifique su red local.")
+    }
+    throw err
+  }
 
   // Manejo de expiración de sesión (401)
   if (response.status === 401 && !cleanEndpoint.includes("/auth/")) {
@@ -146,7 +154,15 @@ export async function downloadAuthenticated(path: string, params: Record<string,
   const qs = params ? new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)]))).toString() : ""
   const sep = cleanPath.includes("?") ? "&" : "?"
   const url = `${API_BASE}${cleanPath}${qs ? `${sep}${qs}` : ""}`
-  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  let res: Response
+  try {
+    res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  } catch (err: any) {
+    if (err?.name === "TypeError" || String(err?.message || "").toLowerCase().includes("failed to fetch")) {
+      throw new Error("Error de conexión con el servidor central al descargar el archivo. Verifique su red local.")
+    }
+    throw err
+  }
   if (!res.ok) throw new Error(`No se pudo descargar el archivo (${res.status})`)
   const blob = await res.blob()
   const isPdf = filename.toLowerCase().endsWith(".pdf")

@@ -315,16 +315,22 @@ async def list_approval_requests(
     requests = await service.list_approval_requests(db, user["company_id"], estado=estado)
     return [
         {
-            "id": str(r.id), "sale_id": str(r.sale_id), "customer_id": str(r.customer_id),
-            "customer_nombre": r.customer_nombre, "monto": float(r.monto),
-            "limite_credito": float(r.limite_credito) if r.limite_credito is not None else None,
-            "saldo_disponible": float(r.saldo_disponible) if r.saldo_disponible is not None else None,
+            "id": str(r.id),
+            "sale_id": str(r.sale_id),
+            "customer_id": str(r.customer_id),
+            "customer_nombre": r.customer_nombre or "Cliente",
+            "cliente_nombre": r.customer_nombre or "Cliente",
+            "monto": float(r.monto),
+            "limite_credito": float(r.limite_credito) if r.limite_credito is not None else 0.0,
+            "saldo_disponible": float(r.saldo_disponible) if r.saldo_disponible is not None else 0.0,
+            "exceso": max(0.0, float(r.monto) - (float(r.saldo_disponible) if r.saldo_disponible is not None else 0.0)),
             "estado": r.estado,
-            # No hay columna "motivo" propia -- se infiere de los mismos datos
-            # guardados al crear la solicitud: si el saldo disponible ya
-            # alcanzaba el monto, la venta no quedo retenida por limite, asi
-            # que fue por mora (ver credit_accounts.service.get_credit_check).
-            "motivo": "mora" if (r.saldo_disponible is not None and float(r.saldo_disponible) >= float(r.monto)) else "limite",
+            "motivo_clave": "mora" if (r.saldo_disponible is not None and float(r.saldo_disponible) >= float(r.monto)) else "limite",
+            "motivo": (
+                "Cliente con cuotas vencidas en mora"
+                if (r.saldo_disponible is not None and float(r.saldo_disponible) >= float(r.monto))
+                else f"Excede límite disponible (Límite: {float(r.limite_credito or 0):,.0f} Gs. · Saldo Disp.: {float(r.saldo_disponible or 0):,.0f} Gs.)"
+            ),
             "aprobado_supervisor_id": str(r.aprobado_supervisor_id) if r.aprobado_supervisor_id else None,
             "aprobado_gerente_id": str(r.aprobado_gerente_id) if r.aprobado_gerente_id else None,
             "created_at": r.created_at,

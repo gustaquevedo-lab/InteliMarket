@@ -273,11 +273,16 @@ async def list_products(
     if supplier_id:
         try:
             supp_uuid = UUID(supplier_id)
-            query = (
-                query.join(PurchaseOrderItem, PurchaseOrderItem.product_id == Product.id)
+            po_subquery = (
+                select(PurchaseOrderItem.product_id)
                 .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderItem.purchase_order_id)
                 .where(PurchaseOrder.supplier_id == supp_uuid)
-                .distinct()
+            )
+            query = query.where(
+                or_(
+                    Product.supplier_id == supp_uuid,
+                    and_(Product.supplier_id.is_(None), Product.id.in_(po_subquery)),
+                )
             )
         except ValueError:
             pass
