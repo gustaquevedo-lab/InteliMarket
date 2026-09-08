@@ -2122,8 +2122,6 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         for sid, fp_raw, mon, monto in pay_res.all():
             if sid not in payments_by_session:
                 payments_by_session[sid] = {
-                    "debito": Decimal("0"),
-                    "credito": Decimal("0"),
                     "bancard": Decimal("0"),
                     "dinelco": Decimal("0"),
                     "qr": Decimal("0"),
@@ -2147,10 +2145,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
                     payments_by_session[sid]["efectivo_pyg"] += m
             elif "DINELCO" in fp and "QR" not in fp:
                 payments_by_session[sid]["dinelco"] += m
-            elif "CREDITO" in fp and "QR" not in fp and "NOTA" not in fp:
-                payments_by_session[sid]["credito"] += m
-            elif ("DEBITO" in fp or "BANCARD" in fp or "TARJETA" in fp) and "QR" not in fp:
-                payments_by_session[sid]["debito"] += m
+            elif any(t in fp for t in ["BANCARD", "TARJETA", "DEBITO", "CREDITO"]) and "QR" not in fp:
                 payments_by_session[sid]["bancard"] += m
             elif "PIX" in fp:
                 payments_by_session[sid]["pix"] += m
@@ -2169,10 +2164,8 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
     for session_obj, count, register_nombre in rows:
         pays = payments_by_session.get(session_obj.id, {})
 
-        # Desglose de medios electrónicos certificados por el POS clasificados para Tesorería
-        m_debito = float(pays.get("debito", 0))
-        m_credito = float(pays.get("credito", 0))
-        m_bancard = float(pays.get("bancard", 0)) or m_debito
+        # Desglose por Procesador / Canal Operativo de Tesorería acordado
+        m_bancard = float(pays.get("bancard", 0))
         m_dinelco = float(pays.get("dinelco", 0))
         m_qr = float(pays.get("qr", 0))
         m_pix = float(pays.get("pix", 0))
@@ -2183,8 +2176,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
 
         # Compatibilidad con cierres donde la cajera digitó manualmente count.monto_tarjeta
         legacy_tarjeta = float(count.monto_tarjeta or 0)
-        if legacy_tarjeta > 0 and (m_debito + m_credito + m_bancard + m_dinelco) == 0:
-            m_debito = legacy_tarjeta
+        if legacy_tarjeta > 0 and (m_bancard + m_dinelco) == 0:
             m_bancard = legacy_tarjeta
 
         # Efectivo contado en gaveta
@@ -2193,7 +2185,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
         m_ef_usd = float(count.monto_efectivo_usd or 0)
 
         # Monto total declarado de la sesión: Efectivo físico contado en gaveta (PYG + divisas) + Medios electrónicos certificados por el POS
-        monto_electronico = m_debito + m_credito + m_dinelco + m_qr + m_pix + m_transf + m_extra_club + m_cheque + m_otro
+        monto_electronico = m_bancard + m_dinelco + m_qr + m_pix + m_transf + m_extra_club + m_cheque + m_otro
         efectivo_total_contado = float(count.monto_total or 0)
         monto_declarado_total = efectivo_total_contado + monto_electronico
 
@@ -2212,8 +2204,6 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "monto_efectivo": m_ef_pyg,
             "monto_efectivo_usd": m_ef_usd,
             "monto_efectivo_brl": m_ef_brl,
-            "monto_debito": m_debito,
-            "monto_credito": m_credito,
             "monto_bancard": m_bancard,
             "monto_dinelco": m_dinelco,
             "monto_qr": m_qr,
@@ -2223,7 +2213,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "monto_cheque": m_cheque,
             "monto_otro": m_otro,
             # Campos retrocompatibles
-            "monto_tarjeta": m_debito + m_credito + m_dinelco,
+            "monto_tarjeta": m_bancard + m_dinelco,
             "monto_total": monto_declarado_total,
             "diferencia": diferencia_gs,
             "diferencia_usd": float(count.diferencia_usd or 0),

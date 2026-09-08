@@ -73,13 +73,12 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     total_diferencia = sum(s.get("diferencia") or 0 for s in sessiones)
     con_revision = sum(1 for s in sessiones if s.get("requiere_revision") or (s.get("diferencia") or 0) != 0)
 
-    # Acumulados por moneda y canal operativo de tesorería
+    # Acumulados por moneda y canal operativo de tesorería acordado
     sum_fondo = sum(s.get("monto_apertura") or 0 for s in sessiones)
     sum_efectivo_pyg = sum(s.get("monto_efectivo") or 0 for s in sessiones)
     sum_efectivo_brl = sum(s.get("monto_efectivo_brl") or 0 for s in sessiones)
     sum_efectivo_usd = sum(s.get("monto_efectivo_usd") or 0 for s in sessiones)
-    sum_debito = sum(s.get("monto_debito") or 0 for s in sessiones)
-    sum_credito = sum(s.get("monto_credito") or 0 for s in sessiones)
+    sum_bancard = sum(s.get("monto_bancard") or 0 for s in sessiones)
     sum_dinelco = sum(s.get("monto_dinelco") or 0 for s in sessiones)
     sum_qr = sum(s.get("monto_qr") or 0 for s in sessiones)
     sum_pix = sum(s.get("monto_pix") or 0 for s in sessiones)
@@ -87,7 +86,7 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     sum_extra_club = sum(s.get("monto_extra_club") or 0 for s in sessiones)
     sum_cheque = sum(s.get("monto_cheque") or 0 for s in sessiones)
     sum_otro = sum(s.get("monto_otro") or 0 for s in sessiones)
-    sum_electronico_total = sum_debito + sum_credito + sum_dinelco + sum_qr + sum_pix + sum_transferencia + sum_extra_club + sum_cheque + sum_otro
+    sum_electronico_total = sum_bancard + sum_dinelco + sum_qr + sum_pix + sum_transferencia + sum_extra_club + sum_cheque + sum_otro
 
     # ─────────────────────────────────────────────────────────────────────────
     # 1. KPI CARDS PANORÁMICAS (Fondo claro para impresión, 54.6mm c/u = 273mm)
@@ -110,7 +109,7 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
                       f"<font size=5.8 color='{dif_color}'><b>{dictamen_global}</b></font>", styles["Normal"]),
             Paragraph("<font size=6 color='#64748B'><b>VENTAS NO EFECTIVO (POS/QR)</b></font><br/>"
                       f"<font size=10.5 color='#1E40AF'><b>{_fmt_gs(sum_electronico_total)}</b></font><br/>"
-                      "<font size=5.8 color='#94A3B8'>Débito + Crédito + QR + PIX + Club</font>", styles["Normal"]),
+                      "<font size=5.8 color='#94A3B8'>Bancard + Dinelco + QR + PIX + Club</font>", styles["Normal"]),
             Paragraph("<font size=6 color='#64748B'><b>AUDITORÍA DE TERMINALES</b></font><br/>"
                       f"<font size=10.5 color='#0F172A'><b>{len(sessiones)} Turnos</b></font><br/>"
                       f"<font size=5.8 color='{'#DC2626' if con_revision > 0 else '#059669'}'><b>{con_revision} con descuadre / {len(sessiones) - con_revision} conformes</b></font>", styles["Normal"]),
@@ -142,15 +141,15 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
                       f"<font size=6.5 color='#0F172A'><b>{_fmt_gs(sum_efectivo_pyg) if sum_efectivo_pyg > 0 else '—'}</b></font>", styles["Normal"]),
             Paragraph("<font size=5.8 color='#64748B'>Efec. BRL:</font> "
                       f"<font size=6.5 color='#0F172A'><b>{f'R$ {sum_efectivo_brl:,.2f}' if sum_efectivo_brl > 0 else '—'}</b></font>", styles["Normal"]),
-            Paragraph("<font size=5.8 color='#64748B'>Débito POS:</font> "
-                      f"<font size=6.5 color='#1E40AF'><b>{_fmt_gs(sum_debito) if sum_debito > 0 else '—'}</b></font>", styles["Normal"]),
-            Paragraph("<font size=5.8 color='#64748B'>Crédito (48h):</font> "
-                      f"<font size=6.5 color='#1E40AF'><b>{_fmt_gs(sum_credito) if sum_credito > 0 else '—'}</b></font>", styles["Normal"]),
+            Paragraph("<font size=5.8 color='#64748B'>Bancard POS:</font> "
+                      f"<font size=6.5 color='#1E40AF'><b>{_fmt_gs(sum_bancard) if sum_bancard > 0 else '—'}</b></font>", styles["Normal"]),
+            Paragraph("<font size=5.8 color='#64748B'>Dinelco POS:</font> "
+                      f"<font size=6.5 color='#1E40AF'><b>{_fmt_gs(sum_dinelco) if sum_dinelco > 0 else '—'}</b></font>", styles["Normal"]),
             Paragraph("<font size=5.8 color='#64748B'>Cobro QR:</font> "
                       f"<font size=6.5 color='#1E40AF'><b>{_fmt_gs(sum_qr) if sum_qr > 0 else '—'}</b></font>", styles["Normal"]),
-            Paragraph("<font size=5.8 color='#64748B'>PIX (48h):</font> "
+            Paragraph("<font size=5.8 color='#64748B'>PIX Plug:</font> "
                       f"<font size=6.5 color='#1E40AF'><b>{_fmt_gs(sum_pix) if sum_pix > 0 else '—'}</b></font>", styles["Normal"]),
-            Paragraph("<font size=5.8 color='#64748B'>Extra Club (CxC):</font> "
+            Paragraph("<font size=5.8 color='#64748B'>Extra Club:</font> "
                       f"<font size=6.5 color='#1E40AF'><b>{_fmt_gs(sum_extra_club) if sum_extra_club > 0 else '—'}</b></font>", styles["Normal"]),
         ]
     ]
@@ -169,7 +168,7 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     elements.append(Spacer(1, 4))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 3. GRILLA MATRICIAL PANORÁMICA COMPLETA (19 COLUMNAS = 273mm)
+    # 3. GRILLA MATRICIAL PANORÁMICA COMPLETA (18 COLUMNAS = 273mm)
     # ─────────────────────────────────────────────────────────────────────────
     head_left = styles.get("CellHead", styles["Normal"])
     head_right = styles.get("CellHeadRight", styles["MetaRight"])
@@ -187,26 +186,25 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
         Paragraph("<b>Efec. PYG</b>", head_right),
         Paragraph("<b>Reales (R$)</b>", head_right),
         Paragraph("<b>Dólares ($)</b>", head_right),
-        Paragraph("<b>Débito POS</b>", head_right),
-        Paragraph("<b>Crédito<br/>(48h)</b>", head_right),
-        Paragraph("<b>Dinelco<br/>POS</b>", head_right),
-        Paragraph("<b>Cobro<br/>QR</b>", head_right),
-        Paragraph("<b>PIX<br/>(48h)</b>", head_right),
-        Paragraph("<b>Transf.</b>", head_right),
-        Paragraph("<b>Extra<br/>Club</b>", head_right),
+        Paragraph("<b>Bancard POS</b>", head_right),
+        Paragraph("<b>Dinelco POS</b>", head_right),
+        Paragraph("<b>Cobro QR</b>", head_right),
+        Paragraph("<b>PIX Plug</b>", head_right),
+        Paragraph("<b>Transf. SIPAP</b>", head_right),
+        Paragraph("<b>Extra Club</b>", head_right),
         Paragraph("<b>Cheques</b>", head_right),
-        Paragraph("<b>Total<br/>Rendido</b>", head_right),
-        Paragraph("<b>Total<br/>Esperado</b>", head_right),
+        Paragraph("<b>Total Rend.</b>", head_right),
+        Paragraph("<b>Esperado</b>", head_right),
         Paragraph("<b>Diferencia</b>", head_right),
         Paragraph("<b>Dictamen</b>", head_center),
     ]
     table_rows = [header_row]
 
-    # Anchos milimétricos exactos: 11+29+9+13+16+11+10+15+14+13+13+12+11+16+13+18.5+18+15.5+15 = 273mm
+    # Anchos milimétricos exactos: 11+30+9+14+16+12+10+17+15+15+13+13+18+13+18+18+16+15 = 273mm
     col_widths = [
-        11 * mm, 29 * mm, 9 * mm, 13 * mm, 16 * mm, 11 * mm, 10 * mm,
-        15 * mm, 14 * mm, 13 * mm, 13 * mm, 12 * mm, 11 * mm, 16 * mm, 13 * mm,
-        18.5 * mm, 18 * mm, 15.5 * mm, 15 * mm,
+        11 * mm, 30 * mm, 9 * mm, 14 * mm, 16 * mm, 12 * mm, 10 * mm,
+        17 * mm, 15 * mm, 15 * mm, 13 * mm, 13 * mm, 18 * mm, 13 * mm,
+        18 * mm, 18 * mm, 16 * mm, 15 * mm,
     ]
 
     style_cmds = [
@@ -228,8 +226,7 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
         m_ef_pyg = s.get("monto_efectivo") or 0
         m_ef_brl = s.get("monto_efectivo_brl") or 0
         m_ef_usd = s.get("monto_efectivo_usd") or 0
-        m_debito = s.get("monto_debito") or 0
-        m_credito = s.get("monto_credito") or 0
+        m_bancard = s.get("monto_bancard") or 0
         m_dinelco = s.get("monto_dinelco") or 0
         m_qr = s.get("monto_qr") or 0
         m_pix = s.get("monto_pix") or 0
@@ -253,8 +250,7 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
         ef_pyg_cell = Paragraph(_fmt_val(m_ef_pyg), cell_num)
         ef_brl_cell = Paragraph(_fmt_val(m_ef_brl, is_divisa=True), cell_num)
         ef_usd_cell = Paragraph(_fmt_val(m_ef_usd, is_divisa=True), cell_num)
-        debito_cell = Paragraph(_fmt_val(m_debito), cell_num)
-        credito_cell = Paragraph(_fmt_val(m_credito), cell_num)
+        bancard_cell = Paragraph(_fmt_val(m_bancard), cell_num)
         dinelco_cell = Paragraph(_fmt_val(m_dinelco), cell_num)
         qr_cell = Paragraph(_fmt_val(m_qr), cell_num)
         pix_cell = Paragraph(_fmt_val(m_pix, is_divisa=(m_pix > 0 and s.get("pix_moneda") == "BRL")), cell_num)
@@ -269,7 +265,7 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
         table_rows.append([
             caja_cell, cajero_cell, hora_cell, fondo_cell,
             ef_pyg_cell, ef_brl_cell, ef_usd_cell,
-            debito_cell, credito_cell, dinelco_cell, qr_cell,
+            bancard_cell, dinelco_cell, qr_cell,
             pix_cell, transf_cell, club_cell, cheque_cell,
             cont_cell, esp_cell, dif_cell, dict_cell,
         ])
@@ -290,8 +286,7 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     tot_ef_pyg = Paragraph(f"<b>{_fmt_val(sum_efectivo_pyg)}</b>", head_right)
     tot_ef_brl = Paragraph(f"<b>{_fmt_val(sum_efectivo_brl, is_divisa=True)}</b>", head_right)
     tot_ef_usd = Paragraph(f"<b>{_fmt_val(sum_efectivo_usd, is_divisa=True)}</b>", head_right)
-    tot_debito = Paragraph(f"<b>{_fmt_val(sum_debito)}</b>", head_right)
-    tot_credito = Paragraph(f"<b>{_fmt_val(sum_credito)}</b>", head_right)
+    tot_bancard = Paragraph(f"<b>{_fmt_val(sum_bancard)}</b>", head_right)
     tot_dinelco = Paragraph(f"<b>{_fmt_val(sum_dinelco)}</b>", head_right)
     tot_qr = Paragraph(f"<b>{_fmt_val(sum_qr)}</b>", head_right)
     tot_pix = Paragraph(f"<b>{_fmt_val(sum_pix, is_divisa=True)}</b>", head_right)
@@ -301,13 +296,13 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
     tot_cont = Paragraph(f"<b>{_fmt_val(total_contado)}</b>", head_right)
     tot_esp = Paragraph(f"<b>{_fmt_val(total_esperado)}</b>", head_right)
     tot_dif = Paragraph(f"<b>{tot_dif_txt}</b>", head_right)
-    tot_dict = Paragraph("<b>TOTAL</b>", head_center)
+    tot_dict = Paragraph("<font size=6><b>TOTAL</b></font>", head_center)
 
     tot_row_idx = len(table_rows)
     table_rows.append([
         tot_label, "", "", tot_fondo,
         tot_ef_pyg, tot_ef_brl, tot_ef_usd,
-        tot_debito, tot_credito, tot_dinelco, tot_qr,
+        tot_bancard, tot_dinelco, tot_qr,
         tot_pix, tot_transf, tot_club, tot_cheque,
         tot_cont, tot_esp, tot_dif, tot_dict,
     ])
