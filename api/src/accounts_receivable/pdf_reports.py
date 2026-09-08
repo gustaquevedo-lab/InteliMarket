@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from reportlab.lib.units import mm
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER
-from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, HRFlowable, SimpleDocTemplate
+from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, HRFlowable, SimpleDocTemplate, PageBreak
 from reportlab.lib.colors import HexColor
 from reportlab.graphics.barcode import qr
 from reportlab.graphics.shapes import Drawing
@@ -704,4 +704,425 @@ def generate_recibo_a6_pdf(
 
     doc.build(elements)
     return buffer.getvalue()
+
+
+# ── EXTRACTOS MASIVOS POR FUNCIONARIO (CONVENIOS / EMPRESAS VINCULADAS) ─────────
+
+def generate_extractos_empresa_pdf(
+    company: dict,
+    empresa_nombre: str,
+    periodo: str,
+    funcionarios_data: list[dict],
+    generated_by: str = "",
+) -> bytes:
+    """Genera el cuadernillo masivo de extractos de compra a crédito para RRHH de la
+    empresa vinculada. Cada funcionario inicia en una PÁGINA NUEVA (PageBreak),
+    con el detalle de sus vales/facturas y el Talón Legal de Autorización de
+    Descuento de Nómina con espacio para firma y aclaración."""
+    buffer = io.BytesIO()
+    doc, styles = _base_doc(buffer, f"Extractos_{empresa_nombre}_{periodo}", company, generated_by)
+    elements = []
+
+    now_py = datetime.now(PY_TZ).strftime("%d/%m/%Y %H:%M")
+    logo = _logo_flowable(company, max_width=38 * mm, max_height=13 * mm)
+    razon_social = company.get("razon_social") or "GRUPO SANTA TERESA E.A.S."
+    nombre_fantasia = company.get("nombre_fantasia") or "Extra Supermercado Mayorista"
+    ruc_empresa = company.get("ruc") or "80150377-9"
+    direccion = company.get("direccion") or "Alejo Garcia esq. Carlos Antonio López"
+    ciudad = company.get("ciudad") or "Pedro Juan Caballero"
+
+    for idx, func in enumerate(funcionarios_data):
+        if idx > 0:
+            elements.append(PageBreak())
+
+        # 1. ENCABEZADO INSTITUCIONAL
+        empresa_text = (
+            f"<font size=10 color='#002B49'><b>{nombre_fantasia}</b></font><br/>"
+            f"<font size=7.5 color='#475569'>{razon_social} • RUC: <b>{ruc_empresa}</b></font><br/>"
+            f"<font size=7 color='#64748B'>{direccion} — {ciudad}</font>"
+        )
+        sub_text = (
+            f"<font size=7 color='#64748B'>CONVENIO CORPORATIVO</font><br/>"
+            f"<font size=9 color='#002B49'><b>EXTRACTO MENSUAL DE CRÉDITO</b></font><br/>"
+            f"<font size=7.5 color='#059669'><b>Período: {periodo}</b></font>"
+        )
+
+        header_table = Table(
+            [[
+                logo or Paragraph(f"<b>{nombre_fantasia}</b>", styles["Normal"]),
+                Paragraph(empresa_text, styles["Normal"]),
+                Paragraph(sub_text, ParagraphStyle("SubHdr", parent=styles["Normal"], alignment=TA_RIGHT)),
+            ]],
+            colWidths=[40 * mm, 85 * mm, 65 * mm],
+        )
+        header_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(header_table)
+        elements.append(_accent_bar())
+        elements.append(Spacer(1, 8))
+
+        # 2. CAJA DE DATOS DEL FUNCIONARIO Y EMPRESA EMPLEADORA
+        f_nom = func.get("customer_name") or "Funcionario"
+        f_ci = func.get("ci_numero") or func.get("customer_ruc") or "—"
+        f_tel = func.get("customer_telefono") or "—"
+        f_lim = _fmt_gs(func.get("limite_credito", 0))
+
+        box_data = [
+            [
+                Paragraph("<font size=7 color='#64748B'><b>EMPRESA EMPLEADORA:</b></font><br/>"
+                          f"<font size=8.5 color='#002B49'><b>{empresa_nombre}</b></font>", styles["Normal"]),
+                Paragraph("<font size=7 color='#64748B'><b>FUNCIONARIO / BENEFICIARIO:</b></font><br/>"
+                          f"<font size=8.5 color='#002B49'><b>{f_nom}</b></font>", styles["Normal"]),
+                Paragraph("<font size=7 color='#64748B'><b>C.I. N° / RUC:</b></font><br/>"
+                          f"<font size=8.5 color='#002B49'><b>{f_ci}</b></font>", styles["Normal"]),
+                Paragraph("<font size=7 color='#64748B'><b>LÍNEA AUTORIZADA:</b></font><br/>"
+                          f"<font size=8.5 color='#059669'><b>{f_lim}</b></font>", ParagraphStyle("FLim", parent=styles["Normal"], alignment=TA_RIGHT)),
+            ]
+        ]
+        box_table = Table(box_data, colWidths=[55 * mm, 65 * mm, 35 * mm, 35 * mm])
+        box_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+            ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(box_table)
+        elements.append(Spacer(1, 10))
+
+        # 3. TABLA DE FACTURAS Y VALES DEL PERÍODO
+        docs = func.get("documentos", [])
+        t_rows = [[
+            Paragraph("<font size=7.5 color='white'><b>FECHA</b></font>", styles["Normal"]),
+            Paragraph("<font size=7.5 color='white'><b>COMPROBANTE / TICKET</b></font>", styles["Normal"]),
+            Paragraph("<font size=7.5 color='white'><b>CONCEPTO / TIPO</b></font>", styles["Normal"]),
+            Paragraph("<font size=7.5 color='white'><b>IMPORTE ORIGINAL (₲)</b></font>", ParagraphStyle("TH1", parent=styles["Normal"], alignment=TA_RIGHT)),
+            Paragraph("<font size=7.5 color='white'><b>A DESCONTAR (₲)</b></font>", ParagraphStyle("TH2", parent=styles["Normal"], alignment=TA_RIGHT)),
+        ]]
+
+        total_desc = Decimal("0")
+        for d in docs:
+            f_em = d.get("fecha_emision")
+            f_em_str = f_em.strftime("%d/%m/%Y") if hasattr(f_em, "strftime") else str(f_em)[:10] if f_em else "—"
+            num_doc = d.get("numero_documento") or "S/N"
+            tipo_doc = str(d.get("tipo") or "Compra Crédito Extra").upper()
+            m_orig = Decimal(str(d.get("monto_original") or 0))
+            s_pend = Decimal(str(d.get("saldo_pendiente") or 0))
+            total_desc += s_pend
+
+            t_rows.append([
+                Paragraph(f"<font size=7 color='#475569'>{f_em_str}</font>", styles["Normal"]),
+                Paragraph(f"<font size=7 color='#0F172A'><b>{num_doc}</b></font>", styles["Normal"]),
+                Paragraph(f"<font size=7 color='#64748B'>{tipo_doc}</font>", styles["Normal"]),
+                Paragraph(f"<font size=7 color='#64748B'>{_fmt_gs(m_orig)}</font>", ParagraphStyle("TR1", parent=styles["Normal"], alignment=TA_RIGHT)),
+                Paragraph(f"<font size=7.5 color='#002B49'><b>{_fmt_gs(s_pend)}</b></font>", ParagraphStyle("TR2", parent=styles["Normal"], alignment=TA_RIGHT)),
+            ])
+
+        if not docs:
+            t_rows.append([
+                Paragraph("<font size=7 color='#64748B'><i>Sin consumos registrados en este corte</i></font>", styles["Normal"]),
+                Paragraph("", styles["Normal"]), Paragraph("", styles["Normal"]), Paragraph("", styles["Normal"]), Paragraph("₲ 0", styles["Normal"]),
+            ])
+
+        # Fila Total
+        t_rows.append([
+            Paragraph("<font size=8 color='#002B49'><b>TOTAL A DESCONTAR DEL SALARIO:</b></font>", styles["Normal"]),
+            Paragraph("", styles["Normal"]),
+            Paragraph(f"<font size=7 color='#64748B'>({len(docs)} comprobantes)</font>", styles["Normal"]),
+            Paragraph("", styles["Normal"]),
+            Paragraph(f"<font size=9.5 color='#002B49'><b>{_fmt_gs(total_desc)}</b></font>", ParagraphStyle("TRT", parent=styles["Normal"], alignment=TA_RIGHT)),
+        ])
+
+        t_docs = Table(t_rows, colWidths=[25 * mm, 50 * mm, 45 * mm, 35 * mm, 35 * mm])
+        t_docs.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, HexColor("#F8FAFC")]),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.5, HexColor("#E2E8F0")),
+            ("BACKGROUND", (0, -1), (-1, -1), HexColor("#E2E8F0")),
+            ("LINEABOVE", (0, -1), (-1, -1), 1, PRIMARY_COLOR),
+            ("SPAN", (0, -1), (1, -1)),
+        ]))
+        elements.append(t_docs)
+        elements.append(Spacer(1, 6))
+
+        # Total en letras
+        letras = _numero_a_letras(int(total_desc))
+        p_letras = Paragraph(
+            f"<font size=7 color='#64748B'><b>IMPORTE EN LETRAS:</b></font> "
+            f"<font size=7.5 color='#0F172A'><b>{letras} GUARANÍES</b></font>",
+            styles["Normal"]
+        )
+        elements.append(p_letras)
+        elements.append(Spacer(1, 14))
+
+        # 4. TALÓN FORMAL DE AUTORIZACIÓN DE DESCUENTO POR NÓMINA
+        talon_intro = (
+            f"<b>AUTORIZACIÓN DE DESCUENTO EN NÓMINA SALARIAL (CCT / LEY LABORAL N° 213/93)</b><br/>"
+            f"Yo, <b>{f_nom}</b>, con documento de identidad N° <b>{f_ci}</b>, en mi carácter de funcionario dependiente de la firma "
+            f"<b>{empresa_nombre}</b>, autorizo de manera libre, expresa e irrevocable a mi empleador a deducir de mis haberes y beneficios "
+            f"correspondientes al período <b>{periodo}</b> la suma de <b>₲ {_fmt_gs(total_desc)}</b> ({letras} GUARANÍES), "
+            f"en concepto de cancelación de compras a crédito realizadas por mi persona en <b>{nombre_fantasia}</b>, "
+            f"conforme a los vales y comprobantes detallados precedentemente."
+        )
+
+        talon_box = [
+            [Paragraph(f"<font size=7 color='#334155'>{talon_intro}</font>", styles["Normal"])],
+            [Spacer(1, 16)],
+            [
+                Table(
+                    [[
+                        Paragraph("<br/><br/>____________________________________________<br/>"
+                                  f"<font size=7 color='#475569'><b>Firma del Funcionario</b><br/>{f_nom} — C.I.: {f_ci}</font>", ParagraphStyle("TF1", parent=styles["Normal"], alignment=TA_CENTER)),
+                        Paragraph("<br/><br/>____________________________________________<br/>"
+                                  "<font size=7 color='#475569'><b>Recepción RRHH / Liquidación</b><br/>Firma y Sello de la Empresa</font>", ParagraphStyle("TF2", parent=styles["Normal"], alignment=TA_CENTER)),
+                    ]],
+                    colWidths=[90 * mm, 90 * mm],
+                )
+            ]
+        ]
+        t_talon = Table(talon_box, colWidths=[190 * mm])
+        t_talon.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
+            ("BOX", (0, 0), (-1, -1), 0.75, HexColor("#94A3B8")),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(t_talon)
+
+    doc.build(elements)
+    return buffer.getvalue()
+
+
+# ── RESUMEN CONSOLIDADO DE REMISIÓN A EMPRESA (ACTA DE CORTE Y ENTREGA) ─────────
+
+def generate_remision_consolidada_pdf(
+    company: dict,
+    remission: dict,
+    generated_by: str = "",
+) -> bytes:
+    """Genera el documento ejecutivo de Remisión Consolidada de Convenio Empresarial en A4.
+    Incluye cuadro resumen de KPIs corporativos, nómina detallada de empleados con montos
+    a retener, y el Acta Formal de Recepción y Conformidad con firma de RRHH, sello y fecha."""
+    buffer = io.BytesIO()
+    doc, styles = _base_doc(buffer, f"Remision_{remission.get('numero_remision')}", company, generated_by)
+    elements = []
+
+    logo = _logo_flowable(company, max_width=42 * mm, max_height=14 * mm)
+    razon_social = company.get("razon_social") or "GRUPO SANTA TERESA E.A.S."
+    nombre_fantasia = company.get("nombre_fantasia") or "Extra Supermercado Mayorista"
+    ruc_empresa = company.get("ruc") or "80150377-9"
+    direccion = company.get("direccion") or "Alejo Garcia esq. Carlos Antonio López"
+    ciudad = company.get("ciudad") or "Pedro Juan Caballero"
+
+    # 1. ENCABEZADO OFICIAL
+    empresa_text = (
+        f"<font size=10.5 color='#002B49'><b>{nombre_fantasia}</b></font><br/>"
+        f"<font size=8 color='#475569'>{razon_social} • RUC: <b>{ruc_empresa}</b></font><br/>"
+        f"<font size=7 color='#64748B'>{direccion} — {ciudad}</font>"
+    )
+    num_rem = remission.get("numero_remision") or "REM-S/N"
+    periodo = remission.get("periodo_mes") or "—"
+    f_rem = remission.get("fecha_remision")
+    f_rem_str = f_rem.strftime("%d/%m/%Y") if hasattr(f_rem, "strftime") else str(f_rem or "—")
+
+    sub_text = (
+        f"<font size=7.5 color='#64748B'>DOCUMENTO FISCAL INTERNO</font><br/>"
+        f"<font size=11 color='#002B49'><b>REMISIÓN CONSOLIDADA</b></font><br/>"
+        f"<font size=9 color='#059669'><b>N° {num_rem}</b></font><br/>"
+        f"<font size=7 color='#475569'>Emisión: {f_rem_str}</font>"
+    )
+
+    header_table = Table(
+        [[
+            logo or Paragraph(f"<b>{nombre_fantasia}</b>", styles["Normal"]),
+            Paragraph(empresa_text, styles["Normal"]),
+            Paragraph(sub_text, ParagraphStyle("SubHdr2", parent=styles["Normal"], alignment=TA_RIGHT)),
+        ]],
+        colWidths=[42 * mm, 83 * mm, 65 * mm],
+    )
+    header_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(header_table)
+    elements.append(_accent_bar())
+    elements.append(Spacer(1, 8))
+
+    # 2. CAJA DESTINATARIA (EMPRESA VINCULADA)
+    emp_nom = remission.get("empresa_vinculada_nombre") or "Empresa Vinculada"
+    emp_ruc = remission.get("empresa_vinculada_ruc") or "—"
+    estado_rem = remission.get("estado") or "REMITIDO"
+
+    dest_data = [
+        [
+            Paragraph("<font size=7 color='#64748B'><b>EMPRESA DESTINATARIA (CONVENIO):</b></font><br/>"
+                      f"<font size=9.5 color='#002B49'><b>{emp_nom}</b></font>", styles["Normal"]),
+            Paragraph("<font size=7 color='#64748B'><b>RUC DE LA EMPRESA:</b></font><br/>"
+                      f"<font size=9 color='#002B49'><b>{emp_ruc}</b></font>", styles["Normal"]),
+            Paragraph("<font size=7 color='#64748B'><b>PERÍODO DE CORTE:</b></font><br/>"
+                      f"<font size=9 color='#002B49'><b>{periodo}</b></font>", styles["Normal"]),
+            Paragraph("<font size=7 color='#64748B'><b>ESTADO:</b></font><br/>"
+                      f"<font size=9 color='#059669'><b>{estado_rem}</b></font>", ParagraphStyle("EstR", parent=styles["Normal"], alignment=TA_RIGHT)),
+        ]
+    ]
+    dest_table = Table(dest_data, colWidths=[65 * mm, 45 * mm, 40 * mm, 40 * mm])
+    dest_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(dest_table)
+    elements.append(Spacer(1, 10))
+
+    # 3. 4 KPI CARDS CORPORATIVAS
+    monto_total = Decimal(str(remission.get("monto_total") or 0))
+    saldo_pend = Decimal(str(remission.get("saldo_pendiente") or 0))
+    cant_func = remission.get("cantidad_funcionarios") or 0
+    cant_docs = remission.get("cantidad_documentos") or 0
+
+    kpi_val = ParagraphStyle("KpiV", fontName=FONT_BOLD, fontSize=13, textColor=PRIMARY_COLOR, leading=16, alignment=TA_CENTER)
+    kpi_sub = ParagraphStyle("KpiS", fontName=FONT_REGULAR, fontSize=7, textColor=GRAY_MEDIUM, leading=9, alignment=TA_CENTER)
+
+    kpis_table = Table(
+        [[
+            [Paragraph("MONTO TOTAL REMISIÓN", kpi_sub), Paragraph(_fmt_gs(monto_total), kpi_val)],
+            [Paragraph("SALDO A COBRAR", kpi_sub), Paragraph(_fmt_gs(saldo_pend), ParagraphStyle("KV2", parent=kpi_val, textColor=HexColor("#059669")))],
+            [Paragraph("TOTAL FUNCIONARIOS", kpi_sub), Paragraph(str(cant_func), kpi_val)],
+            [Paragraph("COMPROBANTES", kpi_sub), Paragraph(str(cant_docs), kpi_val)],
+        ]],
+        colWidths=[47.5 * mm, 47.5 * mm, 47.5 * mm, 47.5 * mm],
+    )
+    kpis_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+        ("LINEAFTER", (0, 0), (-2, 0), 0.5, HexColor("#CBD5E1")),
+    ]))
+    elements.append(kpis_table)
+    elements.append(Spacer(1, 10))
+
+    # 4. TABLA DETALLADA DE NÓMINA (FUNCIONARIOS Y MONTOS)
+    funcionarios = remission.get("funcionarios", [])
+    nom_rows = [[
+        Paragraph("<font size=7.5 color='white'><b>#</b></font>", styles["Normal"]),
+        Paragraph("<font size=7.5 color='white'><b>C.I. / RUC</b></font>", styles["Normal"]),
+        Paragraph("<font size=7.5 color='white'><b>APELLIDOS Y NOMBRES DEL FUNCIONARIO</b></font>", styles["Normal"]),
+        Paragraph("<font size=7.5 color='white'><b>VALES / FACTURAS</b></font>", ParagraphStyle("NTH1", parent=styles["Normal"], alignment=TA_CENTER)),
+        Paragraph("<font size=7.5 color='white'><b>IMPORTE A DESCONTAR (₲)</b></font>", ParagraphStyle("NTH2", parent=styles["Normal"], alignment=TA_RIGHT)),
+    ]]
+
+    tot_calc = Decimal("0")
+    for i, fn in enumerate(funcionarios, start=1):
+        ci = fn.get("ci_numero") or fn.get("customer_ruc") or "—"
+        nom = fn.get("customer_name") or "Funcionario"
+        c_docs = fn.get("cantidad_documentos") or len(fn.get("documentos", [])) or 1
+        m_fn = Decimal(str(fn.get("monto_total") or fn.get("saldo_total") or 0))
+        tot_calc += m_fn
+
+        nom_rows.append([
+            Paragraph(f"<font size=7 color='#64748B'>{i}</font>", styles["Normal"]),
+            Paragraph(f"<font size=7 color='#0F172A'><b>{ci}</b></font>", styles["Normal"]),
+            Paragraph(f"<font size=7 color='#0F172A'><b>{nom}</b></font>", styles["Normal"]),
+            Paragraph(f"<font size=7 color='#475569'>{c_docs} comprobante(s)</font>", ParagraphStyle("NCR", parent=styles["Normal"], alignment=TA_CENTER)),
+            Paragraph(f"<font size=7.5 color='#002B49'><b>{_fmt_gs(m_fn)}</b></font>", ParagraphStyle("NVR", parent=styles["Normal"], alignment=TA_RIGHT)),
+        ])
+
+    # Fila Total
+    nom_rows.append([
+        Paragraph("<font size=8 color='#002B49'><b>TOTAL CONSOLIDADO A LIQUIDAR:</b></font>", styles["Normal"]),
+        Paragraph("", styles["Normal"]),
+        Paragraph(f"<font size=7.5 color='#64748B'>{cant_func} funcionarios</font>", styles["Normal"]),
+        Paragraph(f"<font size=7 color='#64748B'>{cant_docs} docs</font>", ParagraphStyle("NTD", parent=styles["Normal"], alignment=TA_CENTER)),
+        Paragraph(f"<font size=9.5 color='#002B49'><b>{_fmt_gs(monto_total or tot_calc)}</b></font>", ParagraphStyle("NTT", parent=styles["Normal"], alignment=TA_RIGHT)),
+    ])
+
+    t_nom = Table(nom_rows, colWidths=[10 * mm, 30 * mm, 80 * mm, 35 * mm, 35 * mm])
+    t_nom.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY_COLOR),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, HexColor("#F8FAFC")]),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.5, HexColor("#E2E8F0")),
+        ("BACKGROUND", (0, -1), (-1, -1), HexColor("#E2E8F0")),
+        ("LINEABOVE", (0, -1), (-1, -1), 1, PRIMARY_COLOR),
+        ("SPAN", (0, -1), (1, -1)),
+    ]))
+    elements.append(t_nom)
+    elements.append(Spacer(1, 6))
+
+    # Total en letras
+    letras = _numero_a_letras(int(monto_total or tot_calc))
+    elements.append(Paragraph(
+        f"<font size=7 color='#64748B'><b>SON GUARANÍES:</b></font> "
+        f"<font size=7.5 color='#0F172A'><b>{letras} GUARANÍES</b></font>",
+        styles["Normal"]
+    ))
+    elements.append(Spacer(1, 14))
+
+    # 5. ACTA FORMAL DE RECEPCIÓN Y CONFORMIDAD LEGAL (RRHH / FINANZAS)
+    acta_txt = (
+        f"<b>ACTA DE RECEPCIÓN Y COMPROMISO DE PAGO CORPORATIVO</b><br/>"
+        f"Por medio de la presente, la firma <b>{emp_nom}</b> (RUC <b>{emp_ruc}</b>) acusa recibo formal del lote consolidado "
+        f"de extractos individuales y nómina de retención salarial bajo el N° de Remisión <b>{num_rem}</b>, "
+        f"correspondiente al período <b>{periodo}</b>, por un importe total de <b>₲ {_fmt_gs(monto_total or tot_calc)}</b>. "
+        f"La empresa empleadora asume la responsabilidad de procesar las deducciones en los salarios de los colaboradores "
+        f"conforme a las autorizaciones individuales firmadas, y efectuar la transferencia bancaria correspondiente a la cuenta "
+        f"de <b>{razon_social}</b> dentro del plazo acordado."
+    )
+
+    acta_box = [
+        [Paragraph(f"<font size=7 color='#334155'>{acta_txt}</font>", styles["Normal"])],
+        [Spacer(1, 18)],
+        [
+            Table(
+                [[
+                    Paragraph("<br/><br/>____________________________________________<br/>"
+                              f"<font size=7 color='#475569'><b>Por Extra Supermercado Mayorista</b><br/>Entregado por: {generated_by or 'Administración'}</font>", ParagraphStyle("AF1", parent=styles["Normal"], alignment=TA_CENTER)),
+                    Paragraph("<br/><br/>____________________________________________<br/>"
+                              f"<font size=7 color='#475569'><b>Por {emp_nom}</b><br/>Firma Responsable RRHH / Administración</font>", ParagraphStyle("AF2", parent=styles["Normal"], alignment=TA_CENTER)),
+                    Paragraph("<br/><br/>____________________________________________<br/>"
+                              "<font size=7 color='#475569'><b>Sello de la Empresa y Fecha</b><br/>Recepción y Conformidad</font>", ParagraphStyle("AF3", parent=styles["Normal"], alignment=TA_CENTER)),
+                ]],
+                colWidths=[63 * mm, 63 * mm, 64 * mm],
+            )
+        ]
+    ]
+    t_acta = Table(acta_box, colWidths=[190 * mm])
+    t_acta.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#F1F5F9")),
+        ("BOX", (0, 0), (-1, -1), 0.75, HexColor("#94A3B8")),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(t_acta)
+
+    doc.build(elements)
+    return buffer.getvalue()
+
 

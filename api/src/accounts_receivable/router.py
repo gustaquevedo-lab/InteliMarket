@@ -11,7 +11,12 @@ from api.src.db import get_db
 from api.src.accounts_receivable import service
 from api.src.accounts_receivable import export_service as ar_export_service
 from api.src.accounts_receivable import pdf_reports as ar_pdf_reports
-from api.src.accounts_receivable.schemas import ReceivablePaymentCreate, ReceivableGlobalPaymentCreate
+from api.src.accounts_receivable.schemas import (
+    ReceivablePaymentCreate,
+    ReceivableGlobalPaymentCreate,
+    CorporateRemissionCreate,
+    CorporateRemissionPayInput,
+)
 from api.src.integrated_finance import pdf_reports
 from api.src.auth.middleware import require_auth
 
@@ -357,4 +362,134 @@ async def verify_payment_receipt(
             for a in data.get("allocations", [])
         ],
     }
+
+
+# ── Convenios de Empresas Vinculadas (Extra Club) y Remisiones Corporativas ────
+
+@router.get("/companies/{company_id}/accounts-receivable/corporate-agreements/summary")
+async def corporate_agreements_summary(company_id: str, db: AsyncSession = Depends(get_db)):
+    """Resumen consolidado de todas las empresas vinculadas con funcionarios socios Extra Club."""
+    return await service.get_corporate_agreements_summary(db, company_id)
+
+
+@router.get("/companies/{company_id}/accounts-receivable/corporate-agreements/{empresa_nombre}/pending-docs")
+async def corporate_agreement_pending_docs(company_id: str, empresa_nombre: str, db: AsyncSession = Depends(get_db)):
+    """Documentos y funcionarios pendientes de corte mensual para una empresa vinculada."""
+    return await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre)
+
+
+@router.get("/companies/{company_id}/accounts-receivable/corporate-agreements/{empresa_nombre}/extractos.pdf")
+async def export_corporate_agreement_extractos_pdf(
+    company_id: str,
+    empresa_nombre: str,
+    periodo: str = Query(..., description="Período de corte, ej. 2026-09"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el cuadernillo masivo en PDF con todos los extractos individuales por funcionario
+    de la empresa vinculada, cada uno en una página separada y con talón de conformidad de descuento."""
+    data = await service.get_corporate_agreement_pending_docs(db, company_id, empresa_nombre)
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+
+    pdf_bytes = ar_pdf_reports.generate_extractos_empresa_pdf(
+        company=company,
+        empresa_nombre=empresa_nombre,
+        periodo=periodo,
+        funcionarios_data=data.get("funcionarios", []),
+        generated_by=generated_by,
+    )
+    safe_name = empresa_nombre.replace(" ", "_").lower()
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=extractos_{safe_name}_{periodo}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+@router.post("/companies/{company_id}/accounts-receivable/corporate-agreements/remit")
+async def create_corporate_remission_endpoint(
+    company_id: str,
+    body: CorporateRemissionCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Ejecuta el Corte y Remisión a la Empresa Vinculada:
+    Crea la remisión corporativa, actualiza las facturas a REMITIDO_EMPRESA, y rehabilita
+    inmediatamente la línea de crédito de cada funcionario."""
+    result = await service.create_corporate_remission(db, company_id, body, user.get("id"))
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.get("/companies/{company_id}/accounts-receivable/corporate-remissions")
+async def list_corporate_remissions(
+    company_id: str,
+    empresa_nombre: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista las remisiones corporativas emitidas a empresas vinculadas."""
+    return await service.get_corporate_remissions_list(db, company_id, empresa_nombre)
+
+
+@router.get("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}")
+async def get_corporate_remission_detail(
+    company_id: str,
+    remission_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Detalle de una remisión corporativa, con desglose de funcionarios y vales incluidos."""
+    rem = await service.get_corporate_remission_detail(db, remission_id)
+    if not rem:
+        raise HTTPException(status_code=404, detail="Remisión corporativa no encontrada")
+    return rem
+
+
+@router.get("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/pdf")
+async def export_corporate_remission_pdf(
+    company_id: str,
+    remission_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el PDF del Resumen Consolidado de Remisión a la Empresa Vinculada,
+    con tabla de nómina a retener y Acta de Entrega y Recepción para firma y sello de RRHH."""
+    rem = await service.get_corporate_remission_detail(db, remission_id)
+    if not rem:
+        raise HTTPException(status_code=404, detail="Remisión corporativa no encontrada")
+
+    company = await _get_company_info(db, company_id)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
+
+    pdf_bytes = ar_pdf_reports.generate_remision_consolidada_pdf(company, rem, generated_by)
+    safe_num = (rem.get("numero_remision") or remission_id[:8]).replace("/", "_")
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=remision_{safe_num}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+@router.post("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/pay")
+async def pay_corporate_remission_endpoint(
+    company_id: str,
+    remission_id: str,
+    body: CorporateRemissionPayInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Registra el pago efectuado por la empresa vinculada (parcial o total).
+    Impacta en la tesorería (Banco/Bóveda/Cheque) y salda las facturas sin tocar el crédito de los empleados."""
+    result = await service.pay_corporate_remission(db, company_id, remission_id, body, user.get("id"))
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
 

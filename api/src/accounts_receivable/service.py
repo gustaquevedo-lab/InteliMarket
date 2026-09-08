@@ -323,6 +323,143 @@ async def list_customer_pending_documents(db: AsyncSession, company_id: str, cus
     return [dict(row._mapping) for row in result.fetchall()]
 
 
+async def _record_treasury_ingress(
+    db: AsyncSession,
+    company_id: str,
+    payment_id: uuid.UUID,
+    customer_id: str,
+    customer_name: str,
+    customer_ruc: str,
+    monto: Decimal,
+    data,
+    registrado_por: str | None,
+    numero_recibo: str,
+) -> dict:
+    """Registra el impacto del cobro en el subsistema correspondiente de tesorería:
+    - Efectivo: genera entrada en VaultEntry (Bóveda Central) o vincula caja_session_id.
+    - Transferencia / PIX / QR: genera BankTransaction (tipo='credito') y actualiza bank_account.saldo_actual.
+    - Cheque: registra el cheque recibido en cartera (tabla cheques) con sus fechas y emisor."""
+    forma_pago = (getattr(data, "forma_pago", None) or "efectivo").lower()
+    bank_account_id = getattr(data, "bank_account_id", None)
+    caja_session_id = getattr(data, "caja_session_id", None)
+    destino_fondos = getattr(data, "destino_fondos", None) or ("banco" if forma_pago in ("transferencia", "pix", "qr") else "boveda")
+
+    vault_entry_id = None
+    cheque_id = None
+    bank_tx_id = None
+
+    if forma_pago == "efectivo":
+        if destino_fondos == "caja" and caja_session_id:
+            pass
+        else:
+            vault_entry_id = uuid.uuid4()
+            await db.execute(
+                text("""
+                    INSERT INTO vault_entries
+                        (id, company_id, origen, monto_pyg, estado, observaciones, registrado_por, created_at)
+                    VALUES
+                        (:id, :company_id, 'cobranza_ar', :monto, 'en_boveda', :obs, :user_id, NOW())
+                """),
+                {
+                    "id": vault_entry_id,
+                    "company_id": company_id,
+                    "monto": float(monto),
+                    "obs": f"Cobro AR Recibo #{numero_recibo} - Cliente: {customer_name}",
+                    "user_id": registrado_por,
+                },
+            )
+    elif forma_pago in ("transferencia", "pix", "qr"):
+        if bank_account_id:
+            bank_tx_id = uuid.uuid4()
+            await db.execute(
+                text("""
+                    INSERT INTO bank_transactions
+                        (id, company_id, bank_account_id, fecha, tipo, monto, moneda, descripcion, referencia, contraparte, conciliado, fecha_conciliacion, categoria, created_at)
+                    VALUES
+                        (:id, :company_id, :bank_account_id, :fecha, 'credito', :monto, :moneda, :descripcion, :referencia, :contraparte, true, NOW(), 'cobranzas', NOW())
+                """),
+                {
+                    "id": bank_tx_id,
+                    "company_id": company_id,
+                    "bank_account_id": str(bank_account_id),
+                    "fecha": getattr(data, "fecha", None) or date.today(),
+                    "monto": float(monto),
+                    "moneda": getattr(data, "moneda", "PYG") or "PYG",
+                    "descripcion": f"Cobro AR Recibo #{numero_recibo} - Cliente: {customer_name}",
+                    "referencia": getattr(data, "referencia", None),
+                    "contraparte": customer_name,
+                },
+            )
+            await db.execute(
+                text("""
+                    UPDATE bank_accounts
+                    SET saldo_actual = saldo_actual + :monto, updated_at = NOW()
+                    WHERE id = :bank_account_id
+                """),
+                {"monto": float(monto), "bank_account_id": str(bank_account_id)},
+            )
+    elif forma_pago == "cheque":
+        cheque_id = uuid.uuid4()
+        chq_f_emision = getattr(data, "cheque_fecha_emision", None) or getattr(data, "fecha", None) or date.today()
+        chq_f_cobro = getattr(data, "cheque_fecha_cobro", None) or chq_f_emision
+        diferido = bool(chq_f_cobro and chq_f_emision and chq_f_cobro > chq_f_emision)
+        await db.execute(
+            text("""
+                INSERT INTO cheques
+                    (id, company_id, numero, banco_emisor, beneficiario, librador_nombre, librador_documento,
+                     monto, moneda, fecha_emision, fecha_pago, diferido, estado, tipo_cheque, customer_id,
+                     receivable_payment_id, concepto, notas, created_by, created_at, updated_at)
+                VALUES
+                    (:id, :company_id, :numero, :banco, 'Extra Supermercado Mayorista', :librador, :ruc,
+                     :monto, 'PYG', :f_emision, :f_pago, :diferido, 'en_cartera', 'recibido', :cust_id,
+                     :payment_id, :concepto, :notas, :user_id, NOW(), NOW())
+            """),
+            {
+                "id": cheque_id,
+                "company_id": company_id,
+                "numero": getattr(data, "cheque_numero", None) or f"CHQ-{str(payment_id)[:8].upper()}",
+                "banco": getattr(data, "cheque_banco", None) or "N/A",
+                "librador": getattr(data, "cheque_librador", None) or customer_name,
+                "ruc": getattr(data, "cheque_ruc", None) or customer_ruc,
+                "monto": float(monto),
+                "f_emision": chq_f_emision,
+                "f_pago": chq_f_cobro,
+                "diferido": diferido,
+                "cust_id": customer_id,
+                "payment_id": payment_id,
+                "concepto": f"Cobro AR Recibo #{numero_recibo}",
+                "notas": getattr(data, "observaciones", None),
+                "user_id": registrado_por,
+            },
+        )
+
+    await db.execute(
+        text("""
+            UPDATE receivable_payments
+            SET bank_account_id = :bank_account_id,
+                cheque_id = :cheque_id,
+                caja_session_id = :caja_session_id,
+                vault_entry_id = :vault_entry_id,
+                destino_fondos = :destino_fondos
+            WHERE id = :payment_id
+        """),
+        {
+            "bank_account_id": str(bank_account_id) if bank_account_id else None,
+            "cheque_id": cheque_id,
+            "caja_session_id": str(caja_session_id) if caja_session_id else None,
+            "vault_entry_id": vault_entry_id,
+            "destino_fondos": destino_fondos,
+            "payment_id": payment_id,
+        },
+    )
+
+    return {
+        "vault_entry_id": str(vault_entry_id) if vault_entry_id else None,
+        "bank_tx_id": str(bank_tx_id) if bank_tx_id else None,
+        "cheque_id": str(cheque_id) if cheque_id else None,
+    }
+
+
 async def create_receivable_payment(db: AsyncSession, company_id: str, data, registrado_por: str | None) -> dict:
     """Registra un pago de un cliente y lo reparte entre los documentos que
     indique — a diferencia de apply_payment_to_receivable (atado 1 a 1 a una
@@ -352,7 +489,18 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
         if alloc.monto > Decimal(str(doc.saldo_pendiente)):
             return {"error": f"El monto asignado a {alloc.accounts_receivable_id} supera el saldo pendiente de ese documento"}
 
+    # Obtener datos del cliente
+    cust_res = await db.execute(
+        text("SELECT razon_social, nombre_fantasia, ruc FROM customers WHERE id = :cid"),
+        {"cid": str(data.customer_id)},
+    )
+    cust_row = cust_res.first()
+    customer_name = (cust_row.razon_social or cust_row.nombre_fantasia or "Cliente") if cust_row else "Cliente"
+    customer_ruc = (cust_row.ruc or "—") if cust_row else "—"
+
     payment_id = uuid.uuid4()
+    numero_recibo = f"REC-{str(payment_id)[:8].upper()}"
+
     await db.execute(
         text("""
             INSERT INTO receivable_payments
@@ -409,8 +557,29 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
             {"monto": float(row.saldo_utilizado), "customer_id": str(data.customer_id)},
         )
 
+    treasury_res = await _record_treasury_ingress(
+        db=db,
+        company_id=company_id,
+        payment_id=payment_id,
+        customer_id=str(data.customer_id),
+        customer_name=customer_name,
+        customer_ruc=customer_ruc,
+        monto=Decimal(str(data.monto_total)),
+        data=data,
+        registrado_por=registrado_por,
+        numero_recibo=numero_recibo,
+    )
+
     await db.flush()
-    return {"id": str(payment_id), "monto_total": float(data.monto_total), "allocations": aplicados}
+    return {
+        "id": str(payment_id),
+        "payment_id": str(payment_id),
+        "numero_recibo": numero_recibo,
+        "monto_total": float(data.monto_total),
+        "allocations": aplicados,
+        "treasury": treasury_res,
+    }
+
 
 
 async def list_payments_for_document(db: AsyncSession, accounts_receivable_id: str) -> list[dict]:
@@ -614,7 +783,17 @@ async def apply_global_payment(
             "error": f"El monto del pago (Gs. {int(monto_pago):,}) excede el total de saldo pendiente disponible (Gs. {int(total_deuda):,})."
         }
 
+    # Obtener datos del cliente para el rastro y el comprobante
+    cust_res = await db.execute(
+        text("SELECT razon_social, nombre_fantasia, ruc FROM customers WHERE id = :cid"),
+        {"cid": str(data.customer_id)},
+    )
+    cust_row = cust_res.first()
+    customer_name = (cust_row.razon_social or cust_row.nombre_fantasia or "Cliente") if cust_row else "Cliente"
+    customer_ruc = (cust_row.ruc or "—") if cust_row else "—"
+
     payment_id = uuid.uuid4()
+    numero_recibo = f"REC-{str(payment_id)[:8].upper()}"
     fecha_pago = data.fecha or date.today()
 
     await db.execute(
@@ -710,14 +889,28 @@ async def apply_global_payment(
             {"monto": float(row.saldo_utilizado), "customer_id": str(data.customer_id)},
         )
 
+    treasury_res = await _record_treasury_ingress(
+        db=db,
+        company_id=company_id,
+        payment_id=payment_id,
+        customer_id=str(data.customer_id),
+        customer_name=customer_name,
+        customer_ruc=customer_ruc,
+        monto=monto_pago,
+        data=data,
+        registrado_por=registrado_por,
+        numero_recibo=numero_recibo,
+    )
+
     await db.flush()
     return {
         "payment_id": str(payment_id),
         "id": str(payment_id),
-        "numero_recibo": f"REC-{str(payment_id)[:8].upper()}",
+        "numero_recibo": numero_recibo,
         "monto_total": float(monto_pago),
         "documentos_afectados": len(aplicados),
         "allocations": aplicados,
+        "treasury": treasury_res,
     }
 
 
@@ -886,4 +1079,415 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
     pay_dict["allocations"] = allocations
     pay_dict["numero_recibo"] = f"REC-{str(payment_id)[:8].upper()}"
     return pay_dict
+
+
+# ── CONVENIOS DE EMPRESAS VINCULADAS Y REMISIONES CORPORATIVAS ─────────────────
+
+async def get_corporate_agreements_summary(db: AsyncSession, company_id: str) -> list[dict]:
+    """Lista consolidada de empresas vinculadas con funcionarios socios Extra Club.
+    Muestra total de funcionarios, cuántos tienen deuda pendiente de corte,
+    monto total acumulado listo para corte y remisiones históricas."""
+    query = text("""
+        SELECT
+            TRIM(c.empresa_vinculada_nombre) as empresa_nombre,
+            MAX(COALESCE(c.empresa_vinculada_ruc, '')) as empresa_ruc,
+            COUNT(DISTINCT c.id) as total_funcionarios,
+            COUNT(DISTINCT CASE WHEN ar.saldo_pendiente > 0 AND ar.estado = 'pendiente' AND ar.corporate_remission_id IS NULL THEN c.id END) as funcionarios_con_deuda,
+            COALESCE(SUM(CASE WHEN ar.estado = 'pendiente' AND ar.corporate_remission_id IS NULL THEN ar.saldo_pendiente ELSE 0 END), 0) as deuda_pendiente_corte,
+            COALESCE(COUNT(DISTINCT ar.corporate_remission_id), 0) as total_remisiones
+        FROM customers c
+        LEFT JOIN accounts_receivable ar ON ar.customer_id = c.id AND ar.company_id = :company_id
+        WHERE c.company_id = :company_id
+          AND c.empresa_vinculada_nombre IS NOT NULL
+          AND TRIM(c.empresa_vinculada_nombre) <> ''
+        GROUP BY TRIM(c.empresa_vinculada_nombre)
+        ORDER BY deuda_pendiente_corte DESC, empresa_nombre ASC
+    """)
+    result = await db.execute(query, {"company_id": company_id})
+    rows = []
+    for r in result.fetchall():
+        d = dict(r._mapping)
+        d["deuda_pendiente_corte"] = float(d["deuda_pendiente_corte"])
+        rows.append(d)
+    return rows
+
+
+async def get_corporate_agreement_pending_docs(db: AsyncSession, company_id: str, empresa_nombre: str) -> dict:
+    """Trae los funcionarios de una empresa vinculada y sus facturas pendientes
+    que aún no fueron incluidas en ninguna remisión de corte mensual."""
+    query = text("""
+        SELECT
+            ar.id, ar.customer_id, ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
+            ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
+            COALESCE(c.razon_social, c.nombre_fantasia, 'Funcionario') as customer_name,
+            c.ruc as customer_ruc, c.ci_numero, c.telefono as customer_telefono,
+            c.empresa_vinculada_nombre, c.empresa_vinculada_ruc,
+            COALESCE(ca.limite_credito, c.limite_credito, 0) as limite_credito,
+            COALESCE(ca.saldo_utilizado, c.credito_usado, 0) as credito_usado
+        FROM accounts_receivable ar
+        JOIN customers c ON c.id = ar.customer_id
+        LEFT JOIN credit_accounts ca ON ca.customer_id = c.id AND ca.company_id = ar.company_id
+        WHERE ar.company_id = :company_id
+          AND TRIM(c.empresa_vinculada_nombre) ILIKE :empresa_nombre
+          AND ar.estado = 'pendiente'
+          AND ar.corporate_remission_id IS NULL
+        ORDER BY COALESCE(c.razon_social, 'Funcionario') ASC, ar.fecha_vencimiento ASC NULLS LAST, ar.fecha_emision ASC
+    """)
+    result = await db.execute(query, {"company_id": company_id, "empresa_nombre": f"%{empresa_nombre.strip()}%"})
+    rows = result.fetchall()
+
+    funcionarios_dict = {}
+    total_deuda = Decimal("0")
+    total_documentos = len(rows)
+
+    for r in rows:
+        cid = str(r.customer_id)
+        saldo = Decimal(str(r.saldo_pendiente or 0))
+        orig = Decimal(str(r.monto_original or 0))
+        total_deuda += saldo
+
+        if cid not in funcionarios_dict:
+            funcionarios_dict[cid] = {
+                "customer_id": cid,
+                "customer_name": r.customer_name,
+                "customer_ruc": r.customer_ruc or "—",
+                "ci_numero": r.ci_numero or r.customer_ruc or "—",
+                "customer_telefono": r.customer_telefono or "—",
+                "empresa_vinculada_nombre": r.empresa_vinculada_nombre,
+                "empresa_vinculada_ruc": r.empresa_vinculada_ruc,
+                "limite_credito": float(r.limite_credito or 0),
+                "credito_usado": float(r.credito_usado or 0),
+                "saldo_total": 0.0,
+                "documentos": [],
+            }
+
+        fn = funcionarios_dict[cid]
+        fn["saldo_total"] += float(saldo)
+        fn["documentos"].append({
+            "id": str(r.id),
+            "numero_documento": r.numero_documento or "S/N",
+            "fecha_emision": r.fecha_emision,
+            "fecha_vencimiento": r.fecha_vencimiento,
+            "monto_original": float(orig),
+            "saldo_pendiente": float(saldo),
+            "tipo": r.tipo,
+        })
+
+    funcionarios_list = sorted(funcionarios_dict.values(), key=lambda f: f["saldo_total"], reverse=True)
+    return {
+        "empresa_vinculada_nombre": empresa_nombre,
+        "total_deuda": float(total_deuda),
+        "total_documentos": total_documentos,
+        "total_funcionarios": len(funcionarios_list),
+        "funcionarios": funcionarios_list,
+    }
+
+
+async def create_corporate_remission(db: AsyncSession, company_id: str, data, user_id: str | None) -> dict:
+    """Ejecuta el Corte y Remisión a la Empresa Vinculada:
+    1. Agrupa los comprobantes no remitidos.
+    2. Crea el registro consolidado ar_corporate_remissions.
+    3. Pasa los comprobantes a 'REMITIDO_EMPRESA' vinculándolos a la remisión.
+    4. REHABILITA INMEDIATAMENTE la línea de crédito a los funcionarios descontando su credito_usado
+       (la deuda pasó a ser responsabilidad de la empresa empleadora)."""
+    empresa_nombre = data.empresa_vinculada_nombre.strip()
+    periodo_mes = data.periodo_mes.strip()
+    fecha_corte = data.fecha_corte or date.today()
+    fecha_remision = date.today()
+
+    if data.accounts_receivable_ids:
+        doc_ids = [str(i) for i in data.accounts_receivable_ids]
+        q_docs = text("""
+            SELECT ar.id, ar.customer_id, ar.saldo_pendiente, c.empresa_vinculada_ruc
+            FROM accounts_receivable ar
+            JOIN customers c ON c.id = ar.customer_id
+            WHERE ar.id = ANY(:ids) AND ar.company_id = :company_id AND ar.estado = 'pendiente' AND ar.corporate_remission_id IS NULL
+        """)
+        r_docs = await db.execute(q_docs, {"ids": doc_ids, "company_id": company_id})
+    else:
+        q_docs = text("""
+            SELECT ar.id, ar.customer_id, ar.saldo_pendiente, c.empresa_vinculada_ruc
+            FROM accounts_receivable ar
+            JOIN customers c ON c.id = ar.customer_id
+            WHERE ar.company_id = :company_id AND TRIM(c.empresa_vinculada_nombre) ILIKE :empresa
+              AND ar.estado = 'pendiente' AND ar.corporate_remission_id IS NULL
+        """)
+        r_docs = await db.execute(q_docs, {"company_id": company_id, "empresa": f"%{empresa_nombre}%"})
+
+    docs = r_docs.fetchall()
+    if not docs:
+        return {"error": f"No se encontraron comprobantes pendientes de corte para la empresa {empresa_nombre}"}
+
+    empresa_ruc = docs[0].empresa_vinculada_ruc if docs else None
+    total_monto = sum(Decimal(str(d.saldo_pendiente)) for d in docs)
+    affected_doc_ids = [str(d.id) for d in docs]
+
+    funcionarios_montos = {}
+    for d in docs:
+        cid = str(d.customer_id)
+        funcionarios_montos[cid] = funcionarios_montos.get(cid, Decimal("0")) + Decimal(str(d.saldo_pendiente))
+
+    cnt_res = await db.execute(
+        text("SELECT COUNT(*) FROM ar_corporate_remissions WHERE company_id = :cid AND periodo_mes = :periodo"),
+        {"cid": company_id, "periodo": periodo_mes},
+    )
+    cnt = (cnt_res.scalar() or 0) + 1
+    numero_remision = f"REM-{periodo_mes.replace('-', '')}-{cnt:03d}"
+
+    remission_id = uuid.uuid4()
+    await db.execute(
+        text("""
+            INSERT INTO ar_corporate_remissions
+                (id, company_id, empresa_vinculada_nombre, empresa_vinculada_ruc, numero_remision, periodo_mes,
+                 fecha_corte, fecha_remision, monto_total, saldo_pendiente, cantidad_funcionarios, cantidad_documentos,
+                 estado, notas, created_by, created_at, updated_at)
+            VALUES
+                (:id, :company_id, :empresa_nombre, :empresa_ruc, :numero_remision, :periodo_mes,
+                 :fecha_corte, :fecha_remision, :monto_total, :saldo_pendiente, :cant_func, :cant_docs,
+                 'REMITIDO', :notas, :user_id, NOW(), NOW())
+        """),
+        {
+            "id": remission_id,
+            "company_id": company_id,
+            "empresa_nombre": empresa_nombre,
+            "empresa_ruc": empresa_ruc,
+            "numero_remision": numero_remision,
+            "periodo_mes": periodo_mes,
+            "fecha_corte": fecha_corte,
+            "fecha_remision": fecha_remision,
+            "monto_total": float(total_monto),
+            "saldo_pendiente": float(total_monto),
+            "cant_func": len(funcionarios_montos),
+            "cant_docs": len(docs),
+            "notas": getattr(data, "notas", None),
+            "user_id": user_id,
+        },
+    )
+
+    await db.execute(
+        text("""
+            UPDATE accounts_receivable
+            SET estado = 'REMITIDO_EMPRESA',
+                corporate_remission_id = :rem_id,
+                remitido_empresa_at = NOW()
+            WHERE id = ANY(:ids)
+        """),
+        {"rem_id": remission_id, "ids": affected_doc_ids},
+    )
+
+    # REHABILITAR AUTOMÁTICAMENTE LA LÍNEA DE CRÉDITO DEL FUNCIONARIO
+    for cid, monto_remitido in funcionarios_montos.items():
+        await db.execute(
+            text("""
+                UPDATE credit_accounts
+                SET saldo_utilizado = GREATEST(0, saldo_utilizado - :monto),
+                    saldo_disponible = LEAST(limite_credito, saldo_disponible + :monto)
+                WHERE company_id = :company_id AND customer_id = :customer_id
+            """),
+            {"monto": float(monto_remitido), "company_id": company_id, "customer_id": cid},
+        )
+        await db.execute(
+            text("""
+                UPDATE customers
+                SET credito_usado = GREATEST(0, credito_usado - :monto)
+                WHERE id = :customer_id
+            """),
+            {"monto": float(monto_remitido), "customer_id": cid},
+        )
+
+    await db.flush()
+    return {
+        "remission_id": str(remission_id),
+        "id": str(remission_id),
+        "numero_remision": numero_remision,
+        "empresa_vinculada_nombre": empresa_nombre,
+        "periodo_mes": periodo_mes,
+        "monto_total": float(total_monto),
+        "cantidad_funcionarios": len(funcionarios_montos),
+        "cantidad_documentos": len(docs),
+        "estado": "REMITIDO",
+    }
+
+
+async def get_corporate_remissions_list(db: AsyncSession, company_id: str, empresa_nombre: str | None = None) -> list[dict]:
+    q = """
+        SELECT
+            id, company_id, empresa_vinculada_nombre, empresa_vinculada_ruc, numero_remision,
+            periodo_mes, fecha_corte, fecha_remision, monto_total, saldo_pendiente,
+            cantidad_funcionarios, cantidad_documentos, estado, recibido_por, fecha_recepcion,
+            notas, created_at
+        FROM ar_corporate_remissions
+        WHERE company_id = :company_id
+    """
+    params = {"company_id": company_id}
+    if empresa_nombre:
+        q += " AND empresa_vinculada_nombre ILIKE :empresa"
+        params["empresa"] = f"%{empresa_nombre.strip()}%"
+    q += " ORDER BY created_at DESC"
+
+    res = await db.execute(text(q), params)
+    rows = []
+    for r in res.fetchall():
+        d = dict(r._mapping)
+        d["monto_total"] = float(d["monto_total"])
+        d["saldo_pendiente"] = float(d["saldo_pendiente"])
+        rows.append(d)
+    return rows
+
+
+async def get_corporate_remission_detail(db: AsyncSession, remission_id: str) -> dict | None:
+    r_res = await db.execute(
+        text("SELECT * FROM ar_corporate_remissions WHERE id = :id"),
+        {"id": remission_id},
+    )
+    r_row = r_res.fetchone()
+    if not r_row:
+        return None
+
+    rem_dict = dict(r_row._mapping)
+    rem_dict["monto_total"] = float(rem_dict["monto_total"])
+    rem_dict["saldo_pendiente"] = float(rem_dict["saldo_pendiente"])
+
+    docs_res = await db.execute(
+        text("""
+            SELECT
+                ar.id, ar.customer_id, ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
+                ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
+                COALESCE(c.razon_social, c.nombre_fantasia, 'Funcionario') as customer_name,
+                c.ruc as customer_ruc, c.ci_numero
+            FROM accounts_receivable ar
+            JOIN customers c ON c.id = ar.customer_id
+            WHERE ar.corporate_remission_id = :rem_id
+            ORDER BY COALESCE(c.razon_social, 'Funcionario') ASC, ar.fecha_vencimiento ASC
+        """),
+        {"rem_id": remission_id},
+    )
+    docs = docs_res.fetchall()
+
+    funcionarios_dict = {}
+    for d in docs:
+        cid = str(d.customer_id)
+        if cid not in funcionarios_dict:
+            funcionarios_dict[cid] = {
+                "customer_id": cid,
+                "customer_name": d.customer_name,
+                "ci_numero": d.ci_numero or d.customer_ruc or "—",
+                "customer_ruc": d.customer_ruc or "—",
+                "saldo_total": 0.0,
+                "cantidad_documentos": 0,
+                "documentos": [],
+            }
+        fn = funcionarios_dict[cid]
+        s = float(d.saldo_pendiente or d.monto_original or 0)
+        fn["saldo_total"] += s
+        fn["cantidad_documentos"] += 1
+        fn["documentos"].append({
+            "id": str(d.id),
+            "numero_documento": d.numero_documento or "S/N",
+            "fecha_emision": d.fecha_emision,
+            "fecha_vencimiento": d.fecha_vencimiento,
+            "monto_original": float(d.monto_original or 0),
+            "saldo_pendiente": float(d.saldo_pendiente or 0),
+            "tipo": d.tipo,
+        })
+
+    rem_dict["funcionarios"] = list(funcionarios_dict.values())
+    return rem_dict
+
+
+async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_id: str, data, user_id: str | None) -> dict:
+    r_res = await db.execute(
+        text("SELECT * FROM ar_corporate_remissions WHERE id = :id AND company_id = :cid"),
+        {"id": remission_id, "cid": company_id},
+    )
+    rem = r_res.fetchone()
+    if not rem:
+        return {"error": "Remisión corporativa no encontrada"}
+
+    saldo_actual = Decimal(str(rem.saldo_pendiente))
+    if saldo_actual <= Decimal("0"):
+        return {"error": "La remisión ya se encuentra totalmente saldada"}
+
+    monto_pago = Decimal(str(data.monto))
+    if monto_pago > saldo_actual:
+        return {"error": f"El monto del pago (Gs. {int(monto_pago):,}) supera el saldo adeudado por la empresa (Gs. {int(saldo_actual):,})"}
+
+    empresa_nombre = rem.empresa_vinculada_nombre
+    numero_recibo = f"REC-CORP-{rem.numero_remision}"
+    forma_pago = (data.forma_pago or "transferencia").lower()
+
+    if forma_pago in ("transferencia", "pix", "qr") and getattr(data, "bank_account_id", None):
+        bank_tx_id = uuid.uuid4()
+        await db.execute(
+            text("""
+                INSERT INTO bank_transactions
+                    (id, company_id, bank_account_id, fecha, tipo, monto, moneda, descripcion, referencia, contraparte, conciliado, fecha_conciliacion, categoria, created_at)
+                VALUES
+                    (:id, :company_id, :bank_account_id, :fecha, 'credito', :monto, 'PYG', :descripcion, :referencia, :contraparte, true, NOW(), 'cobranzas_corporativas', NOW())
+            """),
+            {
+                "id": bank_tx_id,
+                "company_id": company_id,
+                "bank_account_id": str(data.bank_account_id),
+                "fecha": getattr(data, "fecha_pago", None) or date.today(),
+                "monto": float(monto_pago),
+                "descripcion": f"Cobro Remisión {rem.numero_remision} - {empresa_nombre}",
+                "referencia": getattr(data, "referencia", None),
+                "contraparte": empresa_nombre,
+            },
+        )
+        await db.execute(
+            text("UPDATE bank_accounts SET saldo_actual = saldo_actual + :monto, updated_at = NOW() WHERE id = :id"),
+            {"monto": float(monto_pago), "id": str(data.bank_account_id)},
+        )
+    elif forma_pago == "efectivo":
+        await db.execute(
+            text("""
+                INSERT INTO vault_entries
+                    (id, company_id, origen, monto_pyg, estado, observaciones, registrado_por, created_at)
+                VALUES
+                    (gen_random_uuid(), :company_id, 'cobranza_ar', :monto, 'en_boveda', :obs, :user_id, NOW())
+            """),
+            {
+                "company_id": company_id,
+                "monto": float(monto_pago),
+                "obs": f"Cobro Remisión {rem.numero_remision} - {empresa_nombre}",
+                "user_id": user_id,
+            },
+        )
+
+    nuevo_saldo = saldo_actual - monto_pago
+    nuevo_estado = "PAGADO" if nuevo_saldo <= Decimal("0") else "PAGADO_PARCIAL"
+
+    await db.execute(
+        text("""
+            UPDATE ar_corporate_remissions
+            SET saldo_pendiente = :saldo,
+                estado = :estado,
+                fecha_recepcion = COALESCE(:fecha_pago, CURRENT_DATE),
+                updated_at = NOW()
+            WHERE id = :id
+        """),
+        {"saldo": float(nuevo_saldo), "estado": nuevo_estado, "fecha_pago": getattr(data, "fecha_pago", None), "id": remission_id},
+    )
+
+    if nuevo_estado == "PAGADO":
+        await db.execute(
+            text("""
+                UPDATE accounts_receivable
+                SET estado = 'pagado', saldo_pendiente = 0, ultimo_pago = NOW()
+                WHERE corporate_remission_id = :rem_id
+            """),
+            {"rem_id": remission_id},
+        )
+
+    await db.flush()
+    return {
+        "remission_id": str(remission_id),
+        "numero_remision": rem.numero_remision,
+        "monto_pagado": float(monto_pago),
+        "saldo_pendiente": float(nuevo_saldo),
+        "estado": nuevo_estado,
+    }
+
 

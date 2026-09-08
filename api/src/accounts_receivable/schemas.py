@@ -65,6 +65,15 @@ class ReceivablePaymentCreate(BaseModel):
     referencia: Optional[str] = None
     fecha: Optional[date] = None
     observaciones: Optional[str] = None
+    bank_account_id: Optional[UUID] = None
+    destino_fondos: Optional[str] = "boveda"
+    caja_session_id: Optional[UUID] = None
+    cheque_numero: Optional[str] = None
+    cheque_banco: Optional[str] = None
+    cheque_librador: Optional[str] = None
+    cheque_ruc: Optional[str] = None
+    cheque_fecha_emision: Optional[date] = None
+    cheque_fecha_cobro: Optional[date] = None
     allocations: list[ReceivableAllocationInput] = Field(min_length=1)
 
 
@@ -76,9 +85,37 @@ class ReceivableGlobalPaymentCreate(BaseModel):
     referencia: Optional[str] = None
     fecha: Optional[date] = None
     observaciones: Optional[str] = None
+    bank_account_id: Optional[UUID] = None
+    destino_fondos: Optional[str] = "boveda"
+    caja_session_id: Optional[UUID] = None
+    cheque_numero: Optional[str] = None
+    cheque_banco: Optional[str] = None
+    cheque_librador: Optional[str] = None
+    cheque_ruc: Optional[str] = None
+    cheque_fecha_emision: Optional[date] = None
+    cheque_fecha_cobro: Optional[date] = None
     # Si viene None o vacío, se aplica en cascada FIFO a todas las facturas pendientes
     # Si viene con IDs, se aplica en cascada FIFO sólo a las facturas seleccionadas
     accounts_receivable_ids: Optional[list[UUID]] = None
+
+
+class CorporateRemissionCreate(BaseModel):
+    empresa_vinculada_nombre: str
+    periodo_mes: str
+    fecha_corte: Optional[date] = None
+    accounts_receivable_ids: Optional[list[UUID]] = None
+    notas: Optional[str] = None
+
+
+class CorporateRemissionPayInput(BaseModel):
+    monto: Decimal = Field(gt=0)
+    forma_pago: str = "transferencia"
+    bank_account_id: Optional[UUID] = None
+    destino_fondos: Optional[str] = "banco"
+    referencia: Optional[str] = None
+    fecha_pago: Optional[date] = None
+    notas: Optional[str] = None
+
 
 
 class ReceivablePaymentResponse(BaseModel):
