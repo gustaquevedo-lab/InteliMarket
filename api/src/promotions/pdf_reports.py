@@ -314,4 +314,5 @@ def generate_promotion_official_report_pdf(
     ]))
     elements.append(KeepTogether([t_firmas]))
 
-    return _build(doc, elements)
+    _build(doc, elements)
+    return buffer.getvalue()
