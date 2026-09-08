@@ -6295,7 +6295,12 @@ export default function POSPage() {
             // 'left' aqui es intencional: la impresora ya esta en modo ALIGN_CENTER;
             // si ademas se agregan espacios manuales de centrado (escposCenter) el
             // texto queda desplazado hacia la derecha en el papel.
-            if (isClubMember) {
+            // El recuadro de ahorro se decide por si HUBO ahorro real en la
+            // venta (promocion o precio mayorista), no por el medio de pago
+            // usado -- antes se gateaba con isClubMember (pago con Extra Club)
+            // y una venta pagada en efectivo con descuento nunca lo mostraba.
+            const huboAhorro = ahorroPromoPyg + ahorroMayoristaPyg > 0
+            if (huboAhorro) {
               t += ESCPOS_BOLD_ON + escposStripAccents(tpl.titulo_ahorro_con_descuento || 'TU EXTRA AHORRO HOY:') + ESCPOS_BOLD_OFF + '\n'
               // Monto real junto a cada etiqueta configurada (antes solo se
               // imprimia el texto de la etiqueta, sin el numero calculado).
