@@ -762,7 +762,7 @@ def generate_extractos_empresa_pdf(
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
         elements.append(header_table)
-        elements.append(_accent_bar())
+        elements.append(_accent_bar(f"CONVENIO CORPORATIVO: {empresa_nombre.upper()}"))
         elements.append(Spacer(1, 8))
 
         # 2. CAJA DE DATOS DEL FUNCIONARIO Y EMPRESA EMPLEADORA
@@ -960,7 +960,7 @@ def generate_remision_consolidada_pdf(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     elements.append(header_table)
-    elements.append(_accent_bar())
+    elements.append(_accent_bar(f"ACTA DE REMISIÓN CONSOLIDADA — LOTE {remission.get('numero_remision')}"))
     elements.append(Spacer(1, 8))
 
     # 2. CAJA DESTINATARIA (EMPRESA VINCULADA)
