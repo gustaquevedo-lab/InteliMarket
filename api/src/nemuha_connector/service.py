@@ -269,6 +269,29 @@ async def reconcile_unresolved_products(db: AsyncSession, company_id: str, since
     return reconciliados
 
 
+async def _get_or_create_orphan_legacy_product(db: AsyncSession, company_id: str) -> UUID:
+    c_uuid = UUID(company_id) if isinstance(company_id, str) else company_id
+    res = await db.execute(
+        select(Product.id).where(Product.company_id == c_uuid, Product.sku == "LEGACY-DESCATALOGADO")
+    )
+    existing = res.scalar_one_or_none()
+    if existing:
+        return existing
+
+    orphan = Product(
+        company_id=c_uuid,
+        sku="LEGACY-DESCATALOGADO",
+        nombre="[DESCATALOGADO] Ítems Históricos Legacy",
+        descripcion="Placeholder para ítems de órdenes históricas de Ñemuha cuyos productos fueron eliminados de est_produto",
+        unidad_medida="UN",
+        tipo="producto",
+        activo=False,
+    )
+    db.add(orphan)
+    await db.flush()
+    return orphan.id
+
+
 async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, codigo_barra: str | None, iva_tasa: Decimal) -> UUID:
     existing = await _get_mapped_target(db, company_id, "est_produto", id_produto)
     if existing:
@@ -280,15 +303,21 @@ async def _resolve_producto(db: AsyncSession, company_id: str, id_produto: int, 
     # quedaba con precio_venta=0 para siempre (11.4% del catalogo activo,
     # verificado 2026-08-25 -- ver MOLTO DURAZNO ENLATADO, ID_PRODUTO 126020).
     rows = await _fetch("SELECT ID_PRODUTO, DS_PRODUTO, BO_ATIVO, UNIDADE_MEDIDA, QTD_MINIMA_EM_ESTOQUE, VL_PRECO_VENDA_VAREJO, ID_FORNECEDOR FROM est_produto WHERE ID_PRODUTO = %s", (id_produto,))
-    nombre = rows[0]["DS_PRODUTO"] if rows else f"Producto legacy #{id_produto}"
-    unidad_medida = UNIDAD_MEDIDA_MAP.get(rows[0]["UNIDADE_MEDIDA"], "UN") if rows else "UN"
-    stock_minimo = int(rows[0]["QTD_MINIMA_EM_ESTOQUE"] or 0) if rows else 0
-    precio_venta = Decimal(str(rows[0]["VL_PRECO_VENDA_VAREJO"] or 0)) if rows else Decimal(0)
-    # Si no existe en est_produto del legacy, es un huérfano histórico y no debe estar activo
-    es_activo = bool(rows and rows[0].get("DS_PRODUTO") and rows[0].get("BO_ATIVO", 1) != 0)
+    if not rows or not rows[0].get("DS_PRODUTO"):
+        # El producto fue borrado físicamente del catálogo maestro de Ñemuha en el pasado.
+        # No crear un producto nuevo en el catálogo: mapear al placeholder inactivo para mantener integridad histórica.
+        orphan_id = await _get_or_create_orphan_legacy_product(db, company_id)
+        await _save_map(db, company_id, "est_produto", id_produto, "products", orphan_id)
+        return orphan_id
+
+    nombre = rows[0]["DS_PRODUTO"]
+    unidad_medida = UNIDAD_MEDIDA_MAP.get(rows[0]["UNIDADE_MEDIDA"], "UN")
+    stock_minimo = int(rows[0]["QTD_MINIMA_EM_ESTOQUE"] or 0)
+    precio_venta = Decimal(str(rows[0]["VL_PRECO_VENDA_VAREJO"] or 0))
+    es_activo = bool(rows[0].get("BO_ATIVO", 1) != 0)
 
     supplier_id = None
-    if rows and rows[0].get("ID_FORNECEDOR"):
+    if rows[0].get("ID_FORNECEDOR"):
         try:
             supplier_id = await _resolve_pessoa(db, company_id, rows[0]["ID_FORNECEDOR"], "supplier")
         except Exception:
