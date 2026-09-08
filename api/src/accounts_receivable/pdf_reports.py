@@ -484,7 +484,7 @@ def generate_deuda_detallada_pdf(
 def generate_recibo_a6_pdf(
     company: dict,
     receipt_data: dict,
-    verification_base_url: str = "https://sistema.extramayorista.com",
+    verification_base_url: str = "https://intelimarket.superextra.com.py",
 ) -> bytes:
     """Genera el Recibo de Cobranza Oficial en formato A6 HORIZONTAL (148mm x 105mm).
     Diseñado para encajar en 1 sola página exacta con logo institucional, datos fiscales,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, Query
+import os
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -270,6 +271,7 @@ async def apply_global_payment_endpoint(
 async def export_payment_receipt_pdf(
     company_id: str,
     payment_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
@@ -280,7 +282,16 @@ async def export_payment_receipt_pdf(
         raise HTTPException(status_code=404, detail="Recibo de pago no encontrado")
 
     company = await _get_company_info(db, company_id)
-    pdf_bytes = ar_pdf_reports.generate_recibo_a6_pdf(company, receipt_data)
+
+    # Determinar URL base pública para el QR (prioriza dominio oficial intelimarket.superextra.com.py)
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+    if forwarded_host and "superextra.com.py" in forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host}"
+    else:
+        base_url = os.getenv("PUBLIC_APP_URL", "https://intelimarket.superextra.com.py")
+
+    pdf_bytes = ar_pdf_reports.generate_recibo_a6_pdf(company, receipt_data, verification_base_url=base_url)
 
     return StreamingResponse(
         iter([pdf_bytes]),
