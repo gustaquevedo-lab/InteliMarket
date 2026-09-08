@@ -24,16 +24,24 @@ const API_BASE = import.meta.env.VITE_API_URL || "/api"
 async function downloadPdf(endpoint: string, filename: string) {
   const token = localStorage.getItem("access_token")
   const res = await fetch(`${API_BASE}${endpoint}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-  if (!res.ok) throw new Error("No se pudo generar el PDF")
+  if (!res.ok) {
+    let errorDetail = "No se pudo generar el PDF"
+    try {
+      const errJson = await res.json()
+      if (errJson?.detail) errorDetail = errJson.detail
+    } catch {}
+    throw new Error(errorDetail)
+  }
   const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
+  const fileBlob = new Blob([blob], { type: "application/pdf" })
+  const url = URL.createObjectURL(fileBlob)
   const a = document.createElement("a")
   a.href = url
   a.download = filename
   document.body.appendChild(a)
   a.click()
   a.remove()
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), 10000)
 }
 
 interface SessionSummary {
@@ -392,8 +400,8 @@ export default function CajaPage() {
         `acta_arqueo_consolidado_${desde}_${hasta}.pdf`
       )
       setShowExportArqueoModal(false)
-    } catch {
-      toast.error("Error", "No se pudo generar el Acta de Arqueo Consolidada")
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudo generar el Acta de Arqueo Consolidada")
     } finally {
       setExportingArqueo(false)
     }
