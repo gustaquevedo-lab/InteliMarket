@@ -211,6 +211,31 @@ async def get_product_by_barcode(db: AsyncSession, company_id: str, barcode: str
         if alt_prod:
             return alt_prod
 
+    # 4. Resolución de etiquetas de balanza pesable (EAN-13 balanza con prefijo 2/20)
+    from api.src.products.scale_parser import parse_scale_barcode
+    scale_match = parse_scale_barcode(clean_bc)
+    if scale_match:
+        scale_conds = []
+        if scale_match.base_barcode:
+            scale_conds.append(Product.codigo_barra == scale_match.base_barcode)
+        if scale_match.plu is not None:
+            scale_conds.append(Product.plu_balanza == scale_match.plu)
+            scale_conds.append(Product.codigo_barra == f"2000{scale_match.plu:03d}")
+
+        if scale_conds:
+            scale_res = await db.execute(
+                select(Product)
+                .options(selectinload(Product.categoria))
+                .where(
+                    Product.company_id == c_uuid,
+                    or_(*scale_conds),
+                )
+                .order_by(Product.activo.desc())
+            )
+            scale_prod = scale_res.scalars().first()
+            if scale_prod:
+                return scale_prod
+
     return None
 
 
@@ -282,20 +307,27 @@ async def list_products(
             query = query.where(and_(*token_conds))
         elif len(tokens) == 1:
             t = tokens[0]
-            query = query.where(
-                or_(
-                    Product.nombre.ilike(f"%{t}%"),
-                    Product.sku.ilike(f"%{t}%"),
-                    Product.codigo_barra.ilike(f"%{t}%"),
-                    Product.id.in_(
-                        select(ProductPackBarcode.product_id).where(
-                            ProductPackBarcode.company_id == c_uuid,
-                            ProductPackBarcode.activo == True,
-                            ProductPackBarcode.codigo_barra.ilike(f"%{t}%"),
-                        )
-                    ),
-                )
-            )
+            single_conds = [
+                Product.nombre.ilike(f"%{t}%"),
+                Product.sku.ilike(f"%{t}%"),
+                Product.codigo_barra.ilike(f"%{t}%"),
+                Product.id.in_(
+                    select(ProductPackBarcode.product_id).where(
+                        ProductPackBarcode.company_id == c_uuid,
+                        ProductPackBarcode.activo == True,
+                        ProductPackBarcode.codigo_barra.ilike(f"%{t}%"),
+                    )
+                ),
+            ]
+            from api.src.products.scale_parser import parse_scale_barcode
+            scale_match = parse_scale_barcode(t)
+            if scale_match:
+                if scale_match.base_barcode:
+                    single_conds.append(Product.codigo_barra == scale_match.base_barcode)
+                if scale_match.plu is not None:
+                    single_conds.append(Product.plu_balanza == scale_match.plu)
+                    single_conds.append(Product.codigo_barra == f"2000{scale_match.plu:03d}")
+            query = query.where(or_(*single_conds))
 
     # Filtrar productos con nombres válidos primero y activos con máxima prioridad
     query = query.order_by(Product.activo.desc(), Product.nombre.asc()).limit(limit).offset(offset)

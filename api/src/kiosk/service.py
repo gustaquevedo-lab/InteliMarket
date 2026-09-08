@@ -58,6 +58,31 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
                 pack_escaneado_match = pack_match
 
     if not product:
+        # Fallback 2: Resolución de etiquetas de balanza de panadería / carnicería (EAN-13 balanza)
+        from api.src.products.scale_parser import parse_scale_barcode
+        scale_match = parse_scale_barcode(code)
+        if scale_match:
+            scale_conds = []
+            if scale_match.base_barcode:
+                scale_conds.append(Product.codigo_barra == scale_match.base_barcode)
+            if scale_match.plu is not None:
+                scale_conds.append(Product.plu_balanza == scale_match.plu)
+                scale_conds.append(Product.codigo_barra == f"2000{scale_match.plu:03d}")
+
+            if scale_conds:
+                scale_res = await db.execute(
+                    select(Product)
+                    .options(selectinload(Product.categoria))
+                    .where(
+                        Product.company_id == cid,
+                        Product.activo == True,
+                        or_(*scale_conds),
+                    )
+                    .limit(1)
+                )
+                product = scale_res.scalar_one_or_none()
+
+    if not product:
         return None
 
     tiers_result = await db.execute(

@@ -2295,9 +2295,21 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
         nombre_prod = str(r.get("DS_PRODUTO") or f"Producto {sku}").strip()
         tipo_venta_val = "peso" if um == "KG" else "unidad"
 
-        # Detectar productos de balanza (formato 2000xxx) solo si la unidad es KG
+        # Si el nombre del producto o el código 2000xxx indica pesable, asegurar KG
+        nombre_upper = nombre_prod.upper()
+        tokens_nombre = set(nombre_upper.split())
+        nombre_indica_kg = bool(tokens_nombre.intersection({"KG", "KG.", "KILO", "KILOS", "KILOGRAMO", "KILOGRAMOS"})) or nombre_upper.endswith(" KG") or "/KG" in nombre_upper
+        if (nombre_indica_kg or (codigo_barra_legacy and codigo_barra_legacy.startswith("2000") and len(codigo_barra_legacy) == 7 and codigo_barra_legacy[4:].isdigit())) and um == "UN":
+            # Si el legacy no tiene cargada la unidad pero el artículo es pesable por balanza
+            if nombre_indica_kg:
+                um = "KG"
+                tipo_venta_val = "peso"
+
+        # Detectar productos de balanza (formato 2000xxx)
         if codigo_barra_legacy and codigo_barra_legacy.startswith("2000") and len(codigo_barra_legacy) == 7 and codigo_barra_legacy[4:].isdigit():
-            if um == "KG":
+            if um == "KG" or nombre_indica_kg:
+                um = "KG"
+                tipo_venta_val = "peso"
                 plu_val = int(codigo_barra_legacy[4:])
             else:
                 plu_val = None
@@ -2305,6 +2317,13 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
         if sku in sku_to_prod:
             prod = sku_to_prod[sku]
             changed = False
+
+            # Si en InteliMarket ya está configurado como KG o pesable, respetar esa configuración
+            if prod.unidad_medida == "KG" or prod.tipo_venta == "peso":
+                um = "KG"
+                tipo_venta_val = "peso"
+                if not plu_val and codigo_barra_legacy and codigo_barra_legacy.startswith("2000") and len(codigo_barra_legacy) == 7 and codigo_barra_legacy[4:].isdigit():
+                    plu_val = int(codigo_barra_legacy[4:])
 
             # 1. Sincronizar descripción / nombre si cambió en el ERP legacy
             if nombre_prod and prod.nombre != nombre_prod:
@@ -2324,8 +2343,8 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
                 prod.tipo_venta = tipo_venta_val
                 changed = True
 
-            # 3. Si el producto es UN pero aún tenía plu_balanza asignado previamente
-            if prod.unidad_medida == "UN" and prod.plu_balanza is not None:
+            # 3. Si el producto es UN pero aún tenía plu_balanza asignado previamente (solo si no es pesable)
+            if prod.unidad_medida == "UN" and not nombre_indica_kg and prod.plu_balanza is not None:
                 prod.plu_balanza = None
                 changed = True
 
@@ -2340,7 +2359,7 @@ async def sync_catalog_prices_and_scales(db: AsyncSession, company_id: str, sinc
                     prod.codigo_barra = codigo_barra_legacy
                     if um == "KG" and plu_val:
                         prod.plu_balanza = plu_val
-                    elif um == "UN":
+                    elif um == "UN" and not nombre_indica_kg:
                         prod.plu_balanza = None
                     changed = True
 

@@ -647,14 +647,24 @@ export default function ProductsPage() {
   const handleEditClick = (p: Product) => {
     setEditingProduct(p)
     setCostoUnlocked(false)
-    const isPesable = p.tipo_venta === "peso" || ["KG", "Kg", "kg"].includes(p.unidad_medida || "")
+    const nombreUpper = (p.nombre || "").toUpperCase()
+    const bc = (p.codigo_barra || "").trim()
+    const esNombreKg = nombreUpper.endsWith(" KG") || nombreUpper.includes(" KG ") || nombreUpper.includes("/KG")
+    const esPatronBalanza = bc.startsWith("2000") && bc.length === 7 && /^\d+$/.test(bc)
+    const isPesable = p.tipo_venta === "peso" || ["KG", "Kg", "kg"].includes(p.unidad_medida || "") || (esPatronBalanza && esNombreKg)
+
+    let pluCalculado = (p as any).plu_balanza ? Number((p as any).plu_balanza) : null
+    if (!pluCalculado && esPatronBalanza && (isPesable || esNombreKg)) {
+      pluCalculado = parseInt(bc.slice(4), 10) || null
+    }
+
     setForm({
       sku: p.sku || "",
       nombre: p.nombre || "",
       codigo_barra: p.codigo_barra || "",
       categoria_id: p.categoria_id || "",
       tipo: p.tipo || "producto",
-      unidad_medida: p.unidad_medida || (isPesable ? "KG" : "UN"),
+      unidad_medida: isPesable ? "KG" : (p.unidad_medida || "UN"),
       iva_tasa: Number(p.iva_tasa) !== undefined ? Number(p.iva_tasa) : 10,
       stock_minimo: Number(p.stock_minimo) || 5,
       stock_maximo: Number(p.stock_maximo) || 0,
@@ -662,7 +672,7 @@ export default function ProductsPage() {
       costo_promedio: Number(p.costo_promedio) || 0,
       precio_venta: Number(p.precio_venta) || 0,
       plu_codigo: (p as any).plu_codigo || "",
-      plu_balanza: (p as any).plu_balanza ? Number((p as any).plu_balanza) : null,
+      plu_balanza: pluCalculado,
       es_perecedero: !!(p as any).es_perecedero || !!(p as any).tiene_vencimiento,
       vida_util_dias: (p as any).vida_util_dias || 0,
       tipo_venta: isPesable ? "peso" : (p.tipo_venta || "unidad"),
@@ -2515,12 +2525,26 @@ export default function ProductsPage() {
                 </label>
                 <select
                   value={form.unidad_medida}
-                  disabled={form.tipo_venta === "peso"}
-                  onChange={(e) => setForm({ ...form, unidad_medida: e.target.value })}
-                  className="input-field w-full text-xs disabled:opacity-60 disabled:cursor-not-allowed"
+                  onChange={(e) => {
+                    const newUm = e.target.value
+                    const isKg = newUm === "KG"
+                    setForm((prev) => {
+                      let autoPlu = prev.plu_balanza
+                      if (isKg && !autoPlu && prev.codigo_barra && prev.codigo_barra.startsWith("2000") && prev.codigo_barra.length === 7 && /^\d+$/.test(prev.codigo_barra)) {
+                        autoPlu = parseInt(prev.codigo_barra.slice(4), 10) || null
+                      }
+                      return {
+                        ...prev,
+                        unidad_medida: newUm,
+                        tipo_venta: isKg ? "peso" : (prev.tipo_venta === "peso" ? "unidad" : prev.tipo_venta),
+                        plu_balanza: isKg ? (autoPlu ?? prev.plu_balanza) : prev.plu_balanza,
+                      }
+                    })
+                  }}
+                  className="input-field w-full text-xs font-bold"
                 >
                   <option value="UN">Unidad (UN)</option>
-                  <option value="KG">Kilogramo (KG)</option>
+                  <option value="KG">Kilogramo (KG) - Balanza / Pesable</option>
                   <option value="LT">Litro (LT)</option>
                   <option value="PQ">Paquete (PQ)</option>
                   <option value="CJ">Caja (CJ)</option>
@@ -2531,18 +2555,31 @@ export default function ProductsPage() {
           </div>
 
           {/* SECCIÓN 2: BALANZA Y PRODUCTOS PESABLES (SUPERMERCADO) */}
-          <div className="bg-amber-500/5 dark:bg-amber-950/20 rounded-2xl p-4 border border-amber-200/80 dark:border-amber-800/60 space-y-3">
+          <div className={`rounded-2xl p-4 border transition-colors space-y-3 ${
+            form.tipo_venta === "peso"
+              ? "bg-amber-500/10 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700 shadow-sm"
+              : "bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800"
+          }`}>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/15 dark:bg-amber-500/25 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                  form.tipo_venta === "peso"
+                    ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                    : "bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                }`}>
                   <Scale className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white">
-                    Venta Pesable & Balanza (Fiambrería, Verdulería, Carnicería)
+                  <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Venta Pesable & Balanza (Fiambrería, Verdulería, Carnicería, Panadería)</span>
+                    {form.tipo_venta === "peso" && (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500 text-white animate-pulse">
+                        Pesable Activo
+                      </span>
+                    )}
                   </div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Venta por peso en balanzas etiquetadoras (Toledo / Systel / DIGI) y cajas POS
+                    Venta fraccionada por peso en balanzas etiquetadoras (Balmak Edge / Toledo) y lectores POS
                   </div>
                 </div>
               </div>
@@ -2553,11 +2590,18 @@ export default function ProductsPage() {
                   checked={form.tipo_venta === "peso"}
                   onChange={(e) => {
                     const isPeso = e.target.checked
-                    setForm((prev) => ({
-                      ...prev,
-                      tipo_venta: isPeso ? "peso" : "unidad",
-                      unidad_medida: isPeso ? "KG" : (prev.unidad_medida === "KG" ? "UN" : prev.unidad_medida),
-                    }))
+                    setForm((prev) => {
+                      let autoPlu = prev.plu_balanza
+                      if (isPeso && !autoPlu && prev.codigo_barra && prev.codigo_barra.startsWith("2000") && prev.codigo_barra.length === 7 && /^\d+$/.test(prev.codigo_barra)) {
+                        autoPlu = parseInt(prev.codigo_barra.slice(4), 10) || null
+                      }
+                      return {
+                        ...prev,
+                        tipo_venta: isPeso ? "peso" : "unidad",
+                        unidad_medida: isPeso ? "KG" : (prev.unidad_medida === "KG" ? "UN" : prev.unidad_medida),
+                        plu_balanza: isPeso ? (autoPlu ?? prev.plu_balanza) : prev.plu_balanza,
+                      }
+                    })
                   }}
                   className="sr-only peer"
                 />
