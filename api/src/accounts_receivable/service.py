@@ -1159,6 +1159,7 @@ async def get_corporate_agreement_pending_docs(db: AsyncSession, company_id: str
             funcionarios_dict[cid] = {
                 "customer_id": cid,
                 "customer_name": r.customer_name,
+                "customer_nombre": r.customer_name,
                 "customer_ruc": r.customer_ruc or "—",
                 "ci_numero": r.ci_numero or r.customer_ruc or "—",
                 "customer_telefono": r.customer_telefono or "—",
@@ -1167,11 +1168,13 @@ async def get_corporate_agreement_pending_docs(db: AsyncSession, company_id: str
                 "limite_credito": float(r.limite_credito or 0),
                 "credito_usado": float(r.credito_usado or 0),
                 "saldo_total": 0.0,
+                "total_saldo": 0.0,
                 "documentos": [],
             }
 
         fn = funcionarios_dict[cid]
         fn["saldo_total"] += float(saldo)
+        fn["total_saldo"] += float(saldo)
         fn["documentos"].append({
             "id": str(r.id),
             "numero_documento": r.numero_documento or "S/N",
@@ -1187,7 +1190,9 @@ async def get_corporate_agreement_pending_docs(db: AsyncSession, company_id: str
         "empresa_vinculada_nombre": empresa_nombre,
         "total_deuda": float(total_deuda),
         "total_documentos": total_documentos,
+        "cantidad_documentos": total_documentos,
         "total_funcionarios": len(funcionarios_list),
+        "cantidad_funcionarios": len(funcionarios_list),
         "funcionarios": funcionarios_list,
     }
 

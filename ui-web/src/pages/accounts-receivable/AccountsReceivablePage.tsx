@@ -317,13 +317,22 @@ export default function AccountsReceivablePage() {
   }
 
   const handleSelectEmpresa = async (empresaNombre: string) => {
+    if (selectedEmpresa === empresaNombre) {
+      setSelectedEmpresa("")
+      setEmpresaPending(null)
+      return
+    }
     setSelectedEmpresa(empresaNombre)
     setEmpresaPendingLoading(true)
     try {
       const data = await api.accountsReceivable.corporateAgreementPendingDocs(empresaNombre)
       setEmpresaPending(data)
-    } catch {
-      toast.error("Error", "No se pudieron cargar los documentos pendientes de la empresa")
+      setTimeout(() => {
+        const el = document.getElementById("nomina-drilldown-panel")
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
+      }, 150)
+    } catch (e: any) {
+      toast.error("Error", e.message || "No se pudieron cargar los documentos pendientes de la empresa")
     } finally {
       setEmpresaPendingLoading(false)
     }
@@ -1428,13 +1437,18 @@ export default function AccountsReceivablePage() {
                               <td className="p-3.5 text-right space-x-2">
                                 <button
                                   onClick={() => handleSelectEmpresa(a.empresa_vinculada_nombre)}
-                                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition ${
+                                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition inline-flex items-center gap-1.5 ${
                                     isSelected
-                                      ? "bg-indigo-600 text-white"
+                                      ? "bg-indigo-600 text-white shadow-sm"
                                       : "btn-outline text-indigo-600 dark:text-indigo-400"
                                   }`}
                                 >
-                                  {isSelected ? "Viendo Nómina" : "Ver Nómina"}
+                                  {empresaPendingLoading && isSelected ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Users className="w-3.5 h-3.5" />
+                                  )}
+                                  <span>{isSelected ? "Ocultar Nómina" : "Ver Nómina"}</span>
                                 </button>
                                 <button
                                   onClick={() => api.accountsReceivable.downloadExtractosEmpresaPdf(a.empresa_vinculada_nombre, remitPeriodo)}
@@ -1467,7 +1481,7 @@ export default function AccountsReceivablePage() {
 
               {/* Panel Drilldown: Nómina y Vales de la Empresa Seleccionada */}
               {selectedEmpresa && (
-                <div className="card p-5 border-2 border-indigo-200 dark:border-indigo-900/60 bg-white dark:bg-slate-900 space-y-4">
+                <div id="nomina-drilldown-panel" className="card p-5 border-2 border-indigo-200 dark:border-indigo-900/60 bg-white dark:bg-slate-900 space-y-4 shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100 dark:border-gray-800">
                     <div>
                       <div className="flex items-center gap-2">
@@ -1498,6 +1512,13 @@ export default function AccountsReceivablePage() {
                         <Send className="w-4 h-4" />
                         <span>Generar Corte y Remitir</span>
                       </button>
+                      <button
+                        onClick={() => { setSelectedEmpresa(""); setEmpresaPending(null) }}
+                        className="p-2 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                        title="Cerrar panel de nómina"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
 
@@ -1510,15 +1531,21 @@ export default function AccountsReceivablePage() {
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                           <span className="text-[10px] font-bold text-gray-400 uppercase">Total Funcionarios</span>
-                          <p className="text-lg font-black font-mono text-gray-900 dark:text-white">{empresaPending.cantidad_funcionarios}</p>
+                          <p className="text-lg font-black font-mono text-gray-900 dark:text-white">
+                            {empresaPending.total_funcionarios ?? empresaPending.cantidad_funcionarios ?? empresaPending.funcionarios?.length ?? 0}
+                          </p>
                         </div>
                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                           <span className="text-[10px] font-bold text-gray-400 uppercase">Vales / Facturas</span>
-                          <p className="text-lg font-black font-mono text-gray-900 dark:text-white">{empresaPending.cantidad_documentos}</p>
+                          <p className="text-lg font-black font-mono text-gray-900 dark:text-white">
+                            {empresaPending.total_documentos ?? empresaPending.cantidad_documentos ?? 0}
+                          </p>
                         </div>
                         <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                           <span className="text-[10px] font-bold text-gray-400 uppercase">Total a Retener</span>
-                          <p className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(empresaPending.total_deuda)}</p>
+                          <p className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                            {formatPYG(empresaPending.total_deuda ?? 0)}
+                          </p>
                         </div>
                       </div>
 
@@ -1526,30 +1553,41 @@ export default function AccountsReceivablePage() {
                         {empresaPending.funcionarios.map((f: any, i: number) => (
                           <div key={i} className="p-3.5 hover:bg-gray-50 dark:hover:bg-slate-800/40 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                             <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-extrabold text-gray-900 dark:text-white">{f.customer_nombre || "Funcionario"}</span>
-                                {f.customer_ruc && (
-                                  <span className="font-mono text-gray-400 text-[11px]">CI/RUC: {f.customer_ruc}</span>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-extrabold text-gray-900 dark:text-white">
+                                  {f.customer_name || f.customer_nombre || "Funcionario"}
+                                </span>
+                                {(f.customer_ruc || f.ci_numero) && (
+                                  <span className="font-mono text-gray-400 text-[11px]">
+                                    CI/RUC: {f.customer_ruc || f.ci_numero}
+                                  </span>
+                                )}
+                                {f.limite_credito > 0 && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold border border-blue-200 dark:border-blue-900">
+                                    Línea: {formatPYG(f.limite_credito)}
+                                  </span>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                 {f.documentos?.map((d: any, di: number) => (
-                                  <span key={di} className="px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-800 font-mono text-[10px] text-gray-700 dark:text-gray-300">
-                                    {d.numero_documento}: {formatPYG(d.saldo_pendiente)}
+                                  <span key={di} className="px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-800 font-mono text-[10px] text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-slate-700">
+                                    📄 {d.numero_documento}: {formatPYG(d.saldo_pendiente)}
                                   </span>
                                 ))}
                               </div>
                             </div>
-                            <div className="flex items-center gap-3 self-end sm:self-auto">
+                            <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
                               <span className="text-gray-400 text-[11px]">{f.documentos?.length || 0} compras</span>
-                              <span className="font-mono font-black text-sm text-gray-900 dark:text-white">{formatPYG(f.total_saldo)}</span>
+                              <span className="font-mono font-black text-sm text-gray-900 dark:text-white">
+                                {formatPYG(f.saldo_total ?? f.total_saldo ?? 0)}
+                              </span>
                               <button
                                 onClick={() => openPaymentModal(f.customer_id, {
-                                  razon_social: f.customer_nombre,
+                                  razon_social: f.customer_name || f.customer_nombre,
                                   ruc: f.customer_ruc,
                                   empresa_vinculada: selectedEmpresa,
                                 })}
-                                className="btn-outline py-1 px-2.5 text-xs text-emerald-600 dark:text-emerald-400 border-emerald-300"
+                                className="btn-outline py-1 px-2.5 text-xs text-emerald-600 dark:text-emerald-400 border-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950 font-bold"
                                 title="Registrar cobro individual anticipado"
                               >
                                 Cobro Anticipado
@@ -2596,8 +2634,8 @@ export default function AccountsReceivablePage() {
                 <div className="text-base font-black text-indigo-400">{selectedEmpresa}</div>
                 {empresaPending && (
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800 text-[11px]">
-                    <div>Funcionarios: <strong className="text-white">{empresaPending.cantidad_funcionarios}</strong></div>
-                    <div>Total Deuda: <strong className="text-emerald-400">{formatPYG(empresaPending.total_deuda)}</strong></div>
+                    <div>Funcionarios: <strong className="text-white">{empresaPending.total_funcionarios ?? empresaPending.cantidad_funcionarios ?? empresaPending.funcionarios?.length ?? 0}</strong></div>
+                    <div>Total Deuda: <strong className="text-emerald-400">{formatPYG(empresaPending.total_deuda ?? 0)}</strong></div>
                   </div>
                 )}
               </div>
