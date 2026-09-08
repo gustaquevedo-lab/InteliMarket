@@ -53,10 +53,10 @@ find "$DEST_DIR" -name 'intelimarket_*.dump' -mtime "+${RETENTION_DAYS}" -delete
 
 log "==> Sincronizando con minisforum-ia (aislado, key restringida)..."
 attempt=1
-# --exclude protege las carpetas de WAL y copias fisicas: este rsync usa
+# --exclude protege las carpetas de WAL, copias fisicas y uploads: este rsync usa
 # --delete contra la RAIZ del destino, asi que sin esto borraria wal/ y
 # basebackup/ todas las noches (verificado con --dry-run antes de activarlo).
-until rsync -az --delete --exclude='wal/' --exclude='basebackup/' \
+until rsync -az --delete --exclude='wal/' --exclude='basebackup/' --exclude='uploads/' \
     -e "ssh -i ${REMOTE_KEY} -o BatchMode=yes -o ConnectTimeout=15" \
     "$DEST_DIR/" "${REMOTE_HOST}:${REMOTE_DIR}"; do
     if [ "$attempt" -ge "$MAX_RETRIES" ]; then
