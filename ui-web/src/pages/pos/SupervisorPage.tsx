@@ -887,15 +887,20 @@ export default function SupervisorPage() {
       wakeLockRef.current = null
     }
   }, [keepScreenOn, acquireLock])
-
-  // ── CANAL EN TIEMPO REAL (SSE) CON RECONEXIÓN INMEDIATA (<50ms) ───────────
+  // ── CANAL EN TIEMPO REAL (SSE) CON RECONEXIÓN ESTABLE ────────────────────
   const eventSourceRef = useRef<EventSource | null>(null)
   const reconnectTimeoutRef = useRef<any>(null)
+  const isSseConnectedRef = useRef(false)
+
+  const syncAllNowRef = useRef(syncAllNow)
+  syncAllNowRef.current = syncAllNow
+
+  const acquireLockRef = useRef(acquireLock)
+  acquireLockRef.current = acquireLock
 
   const connectSse = useCallback(() => {
     if (!isAuthorized || !onDuty) return
 
-    // Destruir socket zombi previo si existiera
     if (eventSourceRef.current) {
       try { eventSourceRef.current.close() } catch {}
       eventSourceRef.current = null
@@ -908,6 +913,7 @@ export default function SupervisorPage() {
       eventSourceRef.current = es
 
       es.onopen = () => {
+        isSseConnectedRef.current = true
         setIsSseConnected(true)
         setSyncError(null)
       }
@@ -926,8 +932,7 @@ export default function SupervisorPage() {
             evtType === "credit_approval_requested" ||
             evtType === "credit_approval_resolved"
           ) {
-            // Refresco instantáneo concurrente
-            syncAllNow({ silent: true })
+            syncAllNowRef.current({ silent: true })
 
             if (evtType === "supervisor_request_new") {
               setAlarmMuted(false)
@@ -949,46 +954,45 @@ export default function SupervisorPage() {
               systemNotify("Retiro Drop Cash", `${payload.cajero_nombre || "Cajera"} solicitó retiro de caja.`)
             }
           }
-        } catch {
-          // Keepalive
-        }
+        } catch {}
       }
 
       es.onerror = () => {
+        isSseConnectedRef.current = false
         setIsSseConnected(false)
         if (eventSourceRef.current) {
           try { eventSourceRef.current.close() } catch {}
           eventSourceRef.current = null
         }
-        // Reconexión rápida a los 1200ms
         clearTimeout(reconnectTimeoutRef.current)
-        reconnectTimeoutRef.current = setTimeout(connectSse, 1200)
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectSse()
+        }, 3000)
       }
     } catch {
+      isSseConnectedRef.current = false
       setIsSseConnected(false)
     }
-  }, [isAuthorized, onDuty, syncAllNow, emitSound])
+  }, [isAuthorized, onDuty, emitSound])
+
+  const connectSseRef = useRef(connectSse)
+  connectSseRef.current = connectSse
 
   // ── BLINDAJE ANTE PANTALLA APAGADA Y RETORNO DE REPOSO (WAKE / RESUME) ────
   useEffect(() => {
     if (!isAuthorized || !onDuty) return
 
     // Carga inicial y conexión SSE
-    syncAllNow()
-    connectSse()
+    syncAllNowRef.current()
+    connectSseRef.current()
 
     const handleWakeAndResume = () => {
       if (document.visibilityState === "visible") {
-        // 1. Reanudar AudioContext si el móvil lo durmió
         unlockAudioContext().then((ok) => { if (ok) setAudioReady(true) })
-        // 2. Reactivar pantalla siempre activa
-        acquireLock()
-        // 3. Reconectar SSE de inmediato (elimina socket zombi half-open)
-        connectSse()
-        // 4. Sincronizar datos al instante
-        syncAllNow()
-        // 5. Segundo chequeo a los 750ms para compensar demora del chip WiFi/4G
-        setTimeout(() => syncAllNow({ silent: true }), 750)
+        acquireLockRef.current()
+        connectSseRef.current()
+        syncAllNowRef.current()
+        setTimeout(() => syncAllNowRef.current({ silent: true }), 800)
       }
     }
 
@@ -997,10 +1001,10 @@ export default function SupervisorPage() {
     window.addEventListener("online", handleWakeAndResume)
     window.addEventListener("pageshow", handleWakeAndResume)
 
-    // Polling adaptativo continuo (cada 3.5s si SSE activo, cada 1.5s si está reconectando)
+    // Polling adaptativo continuo
     const pollInterval = setInterval(() => {
-      syncAllNow({ silent: true })
-    }, isSseConnected ? 3500 : 1500)
+      syncAllNowRef.current({ silent: true })
+    }, 4000)
 
     return () => {
       document.removeEventListener("visibilitychange", handleWakeAndResume)
@@ -1018,7 +1022,21 @@ export default function SupervisorPage() {
         wakeLockRef.current = null
       }
     }
-  }, [isAuthorized, onDuty, syncAllNow, connectSse, acquireLock, isSseConnected])
+  }, [isAuthorized, onDuty])
+
+  // ── LOOP INSISTENTE DE ALARMA PEDIDOSYA (HOOK INCONDICIONAL ANTES DE EARLY RETURNS) ─
+  const totalPendientesCount = authRequests.length + vaultApprovals.length + retiros.length + creditApprovals.length
+
+  useEffect(() => {
+    if (!soundEnabled || alarmMuted || !isAuthorized || !onDuty) return
+    if (totalPendientesCount === 0) return
+
+    const loopTimer = setInterval(() => {
+      playPedidosYaAlarm()
+    }, 12000)
+
+    return () => clearInterval(loopTimer)
+  }, [soundEnabled, alarmMuted, isAuthorized, onDuty, totalPendientesCount])
 
   // ── DATOS SECUNDARIOS (EQUIPO) ──────────────────────────────────
   const fetchVaultAndTeam = useCallback(async () => {
@@ -1499,19 +1517,6 @@ try {
 
   const totalPendientes = pendingItems.length + retiros.length + creditApprovals.length
   const firstName = (user.nombre || "").split(" ")[0]
-
-  // ── LOOP INSISTENTE DE ALARMA PEDIDOSYA MIENTRAS HAYA PEDIDOS PENDIENTES ─
-  useEffect(() => {
-    if (!soundEnabled || alarmMuted || !isAuthorized || !onDuty) return
-    if (totalPendientes === 0) return
-
-    // Suena la alarma cada 12 segundos si hay pedidos esperando y no se silenciaron
-    const loopTimer = setInterval(() => {
-      playPedidosYaAlarm()
-    }, 12000)
-
-    return () => clearInterval(loopTimer)
-  }, [soundEnabled, alarmMuted, isAuthorized, onDuty, totalPendientes])
 
   const tabs: { key: Tab; label: string; icon: typeof Home; badge?: number }[] = [
     { key: "inicio", label: "Autorizar", icon: ShieldAlert, badge: totalPendientes },
