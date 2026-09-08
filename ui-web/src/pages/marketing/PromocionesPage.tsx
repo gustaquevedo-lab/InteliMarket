@@ -167,6 +167,8 @@ export default function PromocionesPage() {
     })
   }, [sellableSuppliers, tabSupplierSearchText])
 
+  const [volumeMode, setVolumeMode] = useState<"total" | "per_item">("total")
+
   // Evaluación de Impacto Financiero en tiempo real (Pura y Reactiva)
   const financialSimulation = useMemo(() => {
     const items = Array.from(selectedBatchProducts.values())
@@ -174,6 +176,10 @@ export default function PromocionesPage() {
       return {
         totalItems: 0,
         unidadesTotales: 0,
+        qPorItem: 0,
+        totalVentaRegular: 0,
+        totalVentaPromo: 0,
+        totalCosto: 0,
         totalDescuentoCedido: 0,
         totalNC: 0,
         totalAporteTienda: 0,
@@ -184,8 +190,9 @@ export default function PromocionesPage() {
       }
     }
 
-    const unidadesTotales = simulatedVolume > 0 ? simulatedVolume : 100
-    const qPorItem = unidadesTotales / items.length
+    const baseVol = Math.max(1, Number(simulatedVolume) || 100)
+    const unidadesTotales = volumeMode === "per_item" ? baseVol * items.length : baseVol
+    const qPorItem = items.length > 0 ? unidadesTotales / items.length : 0
 
     let totalDescuentoCedido = 0
     let totalVentaRegular = 0
@@ -242,6 +249,10 @@ export default function PromocionesPage() {
     return {
       totalItems: items.length,
       unidadesTotales,
+      qPorItem,
+      totalVentaRegular,
+      totalVentaPromo,
+      totalCosto,
       totalDescuentoCedido,
       totalNC,
       totalAporteTienda,
@@ -250,7 +261,7 @@ export default function PromocionesPage() {
       margenPct,
       itemsBajoCosto
     }
-  }, [selectedBatchProducts, simulatedVolume, newFinanciamiento, newOrigen, newPorcentajeNcCosto, newPctAporteProveedor, newPctAporteTienda])
+  }, [selectedBatchProducts, simulatedVolume, volumeMode, newFinanciamiento, newOrigen, newPorcentajeNcCosto, newPctAporteProveedor, newPctAporteTienda])
 
   // Formulario Nota de Crédito
   const [ncNumero, setNcNumero] = useState("")
@@ -489,8 +500,35 @@ export default function PromocionesPage() {
       })
       return next
     })
-    toast.success("Precios Actualizados", `Se recalculó la regla para ${selectedBatchProducts.size} productos seleccionados`)
   }
+
+  // Sincronización Reactiva en Tiempo Real:
+  // Al modificar tipo de oferta, % OFF, precio fijo, terminación psicológica, etc.,
+  // se recalculan instantáneamente los precios de todos los productos seleccionados y el simulador.
+  useEffect(() => {
+    if (selectedBatchProducts.size === 0) return
+    setSelectedBatchProducts(prev => {
+      let changed = false
+      const next = new Map()
+      prev.forEach((item, id) => {
+        const newPromoPrice = calcularPrecioPromocional(
+          newTipo,
+          item.precio_regular,
+          item.costo,
+          newBulkValorPct,
+          newBulkMontoFijo,
+          newBulkPrecioFijo,
+          newBaseCalculoPct,
+          newTerminacionPsicologica
+        )
+        if (newPromoPrice !== item.precio_promocional) {
+          changed = true
+        }
+        next.set(id, { ...item, precio_promocional: newPromoPrice })
+      })
+      return changed ? next : prev
+    })
+  }, [newTipo, newBulkValorPct, newBulkMontoFijo, newBulkPrecioFijo, newSegundaUnidadPct, newBaseCalculoPct, newTerminacionPsicologica])
 
   // Toggle Día de Semana
   const toggleDiaSemana = (diaId: number) => {
@@ -2051,7 +2089,7 @@ export default function PromocionesPage() {
                 </div>
 
                 {/* ── COLUMNA DERECHA (7/12): SELECCIÓN DE PRODUCTOS, PRECIOS Y SIMULADOR ── */}
-                <div className="lg:col-span-7 h-full flex flex-col min-h-0 space-y-3">
+                <div className="lg:col-span-7 h-full flex flex-col min-h-0 overflow-y-auto pr-1.5 space-y-3">
                   
                   {/* PANEL SUPERIOR: FILTROS Y BÚSQUEDA DE PRODUCTOS */}
                   <div className="p-3 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700/80 space-y-2 shrink-0">
@@ -2218,14 +2256,14 @@ export default function PromocionesPage() {
                   </div>
 
                   {/* LISTA DE CATÁLOGO DISPONIBLE CON CHECKBOXES */}
-                  <div className="flex-1 min-h-[140px] max-h-[220px] overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-inner text-xs">
+                  <div className="min-h-[120px] max-h-[190px] overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-inner text-xs shrink-0">
                     {loadingCatalog ? (
-                      <div className="p-8 text-center text-gray-400">
-                        <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-emerald-500" />
+                      <div className="p-6 text-center text-gray-400">
+                        <Loader2 className="w-5 h-5 animate-spin mx-auto mb-1 text-emerald-500" />
                         <span>Cargando productos del catálogo...</span>
                       </div>
                     ) : (modalCatalogResults || []).length === 0 ? (
-                      <div className="p-8 text-center text-gray-400">
+                      <div className="p-6 text-center text-gray-400">
                         <span>No se encontraron productos con los filtros actuales</span>
                       </div>
                     ) : (
@@ -2284,7 +2322,7 @@ export default function PromocionesPage() {
                       )}
                     </div>
 
-                    <div className="h-32 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 text-xs shadow-inner">
+                    <div className="h-28 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800 bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 text-xs shadow-inner">
                       {selectedBatchProducts.size === 0 ? (
                         <div className="h-full flex items-center justify-center text-gray-400 text-xs italic">
                           Ningún producto seleccionado todavía. Hacé clic en los productos del catálogo arriba.
@@ -2331,76 +2369,126 @@ export default function PromocionesPage() {
                     </div>
                   </div>
 
-                  {/* ── SIMULADOR DE IMPACTO FINANCIERO & TRADE SPEND ── */}
-                  <div className="p-3 bg-slate-900 text-white dark:bg-slate-950 rounded-2xl border border-slate-800 shadow-md space-y-2 shrink-0">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                      <div className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-emerald-400">
-                        <TrendingUp className="w-3.5 h-3.5" />
-                        <span>Simulador Financiero & Margen</span>
+                  {/* ── SIMULADOR DE IMPACTO FINANCIERO & TRADE SPEND (SIEMPRE VISIBLE) ── */}
+                  <div className="p-3.5 bg-slate-900 text-white dark:bg-slate-950 rounded-2xl border border-slate-800 shadow-xl space-y-2.5 shrink-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                          <TrendingUp className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400 block">
+                            Simulador Financiero & Trade Spend
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {selectedBatchProducts.size > 0
+                              ? `Proyección para ${financialSimulation.unidadesTotales} unidades totales (≈ ${Math.round(financialSimulation.qPorItem)} un./producto)`
+                              : "Seleccione productos arriba para simular rentabilidad"}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-slate-400 font-bold">Volumen Estimado:</span>
-                        <input
-                          type="number"
-                          min="1"
-                          value={simulatedVolume}
-                          onChange={e => setSimulatedVolume(Math.max(1, Number(e.target.value) || 1))}
-                          className="w-16 px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-xs font-mono font-bold text-center text-white focus:outline-none"
-                        />
-                        <span className="text-[10px] text-slate-400 font-mono">un.</span>
+
+                      <div className="flex items-center gap-2">
+                        {/* Toggle Total vs Por Producto */}
+                        <div className="flex items-center bg-slate-800 p-0.5 rounded-lg text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setVolumeMode("total")}
+                            className={`px-2 py-0.5 rounded ${volumeMode === "total" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
+                            title="Distribuir el volumen total entre los productos de la promoción"
+                          >
+                            Total Promo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVolumeMode("per_item")}
+                            className={`px-2 py-0.5 rounded ${volumeMode === "per_item" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
+                            title="Calcular este volumen para cada uno de los productos"
+                          >
+                            Por Ítem
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="1"
+                            value={simulatedVolume}
+                            onChange={e => setSimulatedVolume(Math.max(1, Number(e.target.value) || 1))}
+                            className="w-16 px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-xs font-mono font-bold text-center text-white focus:outline-none focus:border-emerald-500"
+                          />
+                          <span className="text-[10px] text-slate-400 font-mono">un.</span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 text-xs">
-                      <div className="p-2 bg-slate-800/80 rounded-xl border border-slate-700/60">
-                        <div className="text-[9px] font-bold text-slate-400 uppercase">Ahorro al Cliente:</div>
-                        <div className="text-sm font-mono font-black text-amber-400 mt-0.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                      {/* Tarjeta 1: Ahorro Total al Cliente */}
+                      <div className="p-2.5 bg-slate-800/90 rounded-xl border border-slate-700/70 space-y-1">
+                        <div className="text-[9px] font-bold text-slate-400 uppercase flex items-center justify-between">
+                          <span>Ahorro al Cliente:</span>
+                          <span className="text-amber-400">-{((financialSimulation?.totalDescuentoCedido || 0) > 0 && (financialSimulation?.totalVentaRegular || 0) > 0) ? Math.round((financialSimulation.totalDescuentoCedido / financialSimulation.totalVentaRegular) * 100) : 0}%</span>
+                        </div>
+                        <div className="text-base font-mono font-black text-amber-400">
                           {formatPYG(financialSimulation?.totalDescuentoCedido || 0)}
                         </div>
                         <div className="text-[9px] text-slate-400 truncate">
-                          {financialSimulation?.totalItems || 0} items en oferta
+                          Descuento en caja ({financialSimulation?.totalItems || 0} productos)
                         </div>
                       </div>
 
+                      {/* Tarjeta 2: Aporte Proveedor / NC Scan-Back vs Tienda */}
                       {(newFinanciamiento === "proveedor_sell_out" || newFinanciamiento === "co_financiado" || newOrigen === "accion_proveedor" || newOrigen === "corto_vencimiento") ? (
-                        <div className="p-2 bg-blue-950/60 rounded-xl border border-blue-800/60">
-                          <div className="text-[9px] font-bold text-blue-300 uppercase truncate">
-                            NC Scan-Back (AR):
+                        <div className="p-2.5 bg-blue-950/70 rounded-xl border border-blue-800/70 space-y-1">
+                          <div className="text-[9px] font-bold text-blue-300 uppercase flex items-center gap-1">
+                            <Receipt className="w-3 h-3 text-blue-400" />
+                            <span>NC Proveedor (AR):</span>
                           </div>
-                          <div className="text-sm font-mono font-black text-blue-300 mt-0.5">
+                          <div className="text-base font-mono font-black text-blue-300">
                             {formatPYG(financialSimulation?.totalNC || 0)}
                           </div>
                           <div className="text-[9px] text-blue-200/70 truncate">
-                            {newFinanciamiento === "co_financiado" ? `Aporte Prov. ${newPctAporteProveedor}%` : "100% Proveedor"}
+                            {newFinanciamiento === "co_financiado"
+                              ? `Aporte Prov. ${newPctAporteProveedor || 30}% (Tienda: ${newPctAporteTienda || 20}%)`
+                              : "100% Recuperable vía NC Scan-Back"}
                           </div>
                         </div>
                       ) : (
-                        <div className="p-2 bg-slate-800/80 rounded-xl border border-slate-700/60">
-                          <div className="text-[9px] font-bold text-slate-400 uppercase truncate">Aporte Tienda:</div>
-                          <div className="text-sm font-mono font-black text-slate-300 mt-0.5">
+                        <div className="p-2.5 bg-slate-800/90 rounded-xl border border-slate-700/70 space-y-1">
+                          <div className="text-[9px] font-bold text-slate-400 uppercase">Aporte de Tienda:</div>
+                          <div className="text-base font-mono font-black text-slate-300">
                             {formatPYG(financialSimulation?.totalDescuentoCedido || 0)}
                           </div>
-                          <div className="text-[9px] text-slate-400 truncate">100% Asumido Tienda</div>
+                          <div className="text-[9px] text-slate-400 truncate">100% Gasto comercial de tienda</div>
                         </div>
                       )}
 
+                      {/* Tarjeta 3: Margen Bruto de Tienda */}
                       {(financialSimulation?.itemsBajoCosto || 0) > 0 && newFinanciamiento === "propio_supermercado" ? (
-                        <div className="p-2 bg-red-950/70 rounded-xl border border-red-800/60">
-                          <div className="text-[9px] font-bold text-red-300 uppercase truncate">Pérdida Proyectada:</div>
-                          <div className="text-sm font-mono font-black text-red-400 mt-0.5">
+                        <div className="p-2.5 bg-red-950/80 rounded-xl border border-red-800/70 space-y-1">
+                          <div className="text-[9px] font-bold text-red-300 uppercase flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3 text-red-400" />
+                            <span>Pérdida Neta Proyectada:</span>
+                          </div>
+                          <div className="text-base font-mono font-black text-red-400">
                             -{formatPYG(financialSimulation?.totalPerdidaRealBajoCosto || 0)}
                           </div>
                           <div className="text-[9px] text-red-200/80 truncate">
-                            {financialSimulation?.itemsBajoCosto} items bajo costo
+                            {financialSimulation?.itemsBajoCosto} item(s) bajo costo unitario
                           </div>
                         </div>
                       ) : (
-                        <div className="p-2 bg-emerald-950/60 rounded-xl border border-emerald-800/60">
-                          <div className="text-[9px] font-bold text-emerald-300 uppercase truncate">Margen Tienda:</div>
-                          <div className="text-sm font-mono font-black text-emerald-400 mt-0.5">
+                        <div className="p-2.5 bg-emerald-950/70 rounded-xl border border-emerald-800/70 space-y-1">
+                          <div className="text-[9px] font-bold text-emerald-300 uppercase flex items-center gap-1">
+                            <TrendingUp className="w-3 h-3 text-emerald-400" />
+                            <span>Margen Bruto Tienda:</span>
+                          </div>
+                          <div className="text-base font-mono font-black text-emerald-400">
                             {formatPYG(financialSimulation?.margenBrutoTienda || 0)} ({(Number(financialSimulation?.margenPct) || 0).toFixed(1)}%)
                           </div>
-                          <div className="text-[9px] text-emerald-200/70 truncate">Ganancia proyectada</div>
+                          <div className="text-[9px] text-emerald-200/70 truncate">
+                            {selectedBatchProducts.size > 0 ? "Ganancia proyectada tras oferta" : "Margen estimado"}
+                          </div>
                         </div>
                       )}
                     </div>
